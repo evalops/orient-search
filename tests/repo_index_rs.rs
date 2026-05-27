@@ -73,9 +73,14 @@ def test_issue_token_round_trip():
 #[test]
 fn read_file_range_rejects_paths_outside_repo() {
     let repo = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
     write(
         &repo.path().join("src/auth.rs"),
         "pub fn issue_token() {}\n",
+    );
+    write(
+        &outside.path().join("outside.rs"),
+        "pub fn outside_repo() {}\n",
     );
 
     let range = read_file_range(repo.path(), "src/auth.rs", 1, 10).unwrap();
@@ -86,4 +91,35 @@ fn read_file_range_rejects_paths_outside_repo() {
         .unwrap_err()
         .to_string();
     assert!(error.contains("repo-relative"));
+
+    let absolute_error = read_file_range(
+        repo.path(),
+        outside.path().join("outside.rs").to_str().unwrap(),
+        1,
+        1,
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(absolute_error.contains("repo-relative"));
+}
+
+#[cfg(unix)]
+#[test]
+fn read_file_range_rejects_symlink_escape() {
+    let repo = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    write(
+        &outside.path().join("outside.rs"),
+        "pub fn outside_repo() {}\n",
+    );
+    std::os::unix::fs::symlink(
+        outside.path().join("outside.rs"),
+        repo.path().join("linked.rs"),
+    )
+    .unwrap();
+
+    let error = read_file_range(repo.path(), "linked.rs", 1, 1)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("inside repository"));
 }

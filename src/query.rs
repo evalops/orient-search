@@ -172,4 +172,59 @@ mod tests {
         assert_eq!(parsed.filters.exclude_path, vec!["docs"]);
         assert_eq!(parsed.filters.test, Some(false));
     }
+
+    #[test]
+    fn parses_aliases_booleans_escapes_and_negatives() {
+        let parsed = parse_query(
+            r#"file:'auth service.rs' language:Rust extension:.RS repo:orient tests -ext:md -repo:old "quoted \"token\"""#,
+        );
+
+        assert_eq!(parsed.terms, vec![r#"quoted "token""#]);
+        assert_eq!(parsed.filters.file.as_deref(), Some("auth service.rs"));
+        assert_eq!(parsed.filters.language.as_deref(), Some("rust"));
+        assert_eq!(parsed.filters.extension.as_deref(), Some("rs"));
+        assert_eq!(parsed.filters.repo.as_deref(), Some("orient"));
+        assert_eq!(parsed.filters.test, Some(true));
+        assert_eq!(parsed.filters.exclude_extension, vec!["md"]);
+        assert_eq!(parsed.filters.exclude_repo, vec!["old"]);
+    }
+
+    #[test]
+    fn parser_tolerates_adversarial_inputs_without_panics() {
+        let cases = [
+            "",
+            "-",
+            "::::",
+            "path:",
+            "-path:",
+            "\"unterminated quote",
+            "'unterminated single",
+            r#"path:"src/auth space" -file:'generated.rs' token"#,
+            r#"symbol:SessionManager\ test:true test:false"#,
+            "repo:old -repo:new -test random words",
+            "emoji:😀 \"multi word\" ext:.tsx",
+            "a\tb\nc\r\n-path:target",
+        ];
+
+        for input in cases {
+            let parsed = parse_query(input);
+            assert!(!parsed.terms.iter().any(|term| term.trim().is_empty()));
+        }
+    }
+
+    #[test]
+    fn merge_filters_keeps_base_and_extends_negatives() {
+        let base = SearchFilters {
+            path: Some("src/".to_string()),
+            exclude_path: vec!["target".to_string()],
+            ..SearchFilters::default()
+        };
+        let parsed = parse_query(r#"lang:rust -path:fixtures token auth"#);
+        let merged = merge_filters(base, parsed.filters);
+
+        assert_eq!(merged.path.as_deref(), Some("src/"));
+        assert_eq!(merged.language.as_deref(), Some("rust"));
+        assert_eq!(merged.exclude_path, vec!["target", "fixtures"]);
+        assert!(merged.require_all);
+    }
 }

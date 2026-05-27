@@ -47,7 +47,7 @@ Implemented now:
 
 Measured on this machine:
 
-- Wide tree fallback: `/Users/jonathanhaas/Documents/Projects`, common top-10 literal/token queries at `18-43ms` p95 after warmup across the sampled runs.
+- Wide tree fallback: `/Users/jonathanhaas/Documents/Projects`, common top-10 literal/token queries at `20-32ms` p95 after warmup across the sampled runs.
 - Local repo fallback: query `indexed search symbol filters`, top 10 at about `8ms` p95 after warmup.
 - Hot-path fallback has a `250ms` wall-clock timeout plus match caps; if the timeout fires it returns partial results instead of blocking the agent.
 - Local repo index build: about `0.25s`.
@@ -78,7 +78,7 @@ Engineering definition:
 - Multi-repo shard directories store a manifest plus one versioned index per repo, and can refresh those indexes incrementally.
 - Persistent indexed files include line-offset tables for snippet retrieval.
 - Incremental refresh exists.
-- Tests cover fallback search, indexed search, shard search/read tools, incremental refresh, filters, ranking explanations, duplicate suppression, JSON-lines server calls, corrupt index errors, path safety, snippet modes, and a guarded `rg` differential check.
+- Tests cover fallback search, indexed search, shard search/read tools, incremental refresh, filters, query parser stress cases, ranking explanations, duplicate suppression, JSON-lines server calls, corrupt index errors, path safety including symlink escapes, snippet modes, and a guarded `rg` differential check.
 - Every release claim is backed by `cargo fmt --check`, `cargo test`, `cargo build --release`, and `orient bench-search` or equivalent timed searches, with saved baselines available for local or CI regression checks.
 
 ## Architecture Direction

@@ -206,7 +206,8 @@ fn server_handles_shard_index_search_and_read_requests() {
         "tool": "search_shards",
         "arguments": {
             "index_dir": parent.path().join(".orient-shards"),
-            "query": "repo:billing invoice total",
+            "query": "invoice total",
+            "repo": "billing",
             "limit": 5,
             "require_all": true,
             "explain": true

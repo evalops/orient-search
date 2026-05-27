@@ -103,7 +103,7 @@ pub fn tool_manifest() -> Value {
             "name": "indexed_search_code",
             "description": "Search a persistent single-repo index and return ranked snippets.",
             "required": ["index", "query"],
-            "optional": SEARCH_OPTIONAL_ARGS
+            "optional": SEARCH_INDEX_OPTIONAL_ARGS
         },
         {
             "name": "read_index_range",
@@ -127,7 +127,7 @@ pub fn tool_manifest() -> Value {
             "name": "search_shards",
             "description": "Search a local multi-repo shard directory and return repo-prefixed ranked snippets.",
             "required": ["index_dir", "query"],
-            "optional": SEARCH_OPTIONAL_ARGS
+            "optional": SEARCH_INDEX_OPTIONAL_ARGS
         },
         {
             "name": "read_shard_range",
@@ -189,7 +189,7 @@ fn dispatch_result(request: &ToolRequest) -> Result<Value> {
                 repo,
                 &query,
                 limit,
-                &search_filters(&request.arguments),
+                &search_filters(&request.arguments, false),
             )?)?)
         }
         "indexed_search_code" => {
@@ -200,7 +200,7 @@ fn dispatch_result(request: &ToolRequest) -> Result<Value> {
             Ok(serde_json::to_value(index.search_filtered(
                 &query,
                 limit,
-                &search_filters(&request.arguments),
+                &search_filters(&request.arguments, true),
             )?)?)
         }
         "read_index_range" => {
@@ -230,7 +230,7 @@ fn dispatch_result(request: &ToolRequest) -> Result<Value> {
                 index_dir,
                 &query,
                 limit,
-                &search_filters(&request.arguments),
+                &search_filters(&request.arguments, true),
             )?)?)
         }
         "read_shard_range" => {
@@ -304,6 +304,21 @@ const SEARCH_OPTIONAL_ARGS: &[&str] = &[
     "require_all",
 ];
 
+const SEARCH_INDEX_OPTIONAL_ARGS: &[&str] = &[
+    "limit",
+    "path",
+    "language",
+    "extension",
+    "symbol",
+    "file",
+    "repo",
+    "repo_filter",
+    "test",
+    "snippet",
+    "explain",
+    "require_all",
+];
+
 fn string_arg(arguments: &Value, name: &str) -> Result<String> {
     arguments
         .get(name)
@@ -346,14 +361,24 @@ fn optional_string_arg(arguments: &Value, name: &str) -> Option<String> {
         .map(String::from)
 }
 
-fn search_filters(arguments: &Value) -> SearchFilters {
+fn optional_string_arg_any(arguments: &Value, names: &[&str]) -> Option<String> {
+    names
+        .iter()
+        .find_map(|name| optional_string_arg(arguments, name))
+}
+
+fn search_filters(arguments: &Value, allow_repo_alias: bool) -> SearchFilters {
     SearchFilters {
         path: optional_string_arg(arguments, "path"),
         language: optional_string_arg(arguments, "language"),
         extension: optional_string_arg(arguments, "extension"),
         symbol: optional_string_arg(arguments, "symbol"),
         file: optional_string_arg(arguments, "file"),
-        repo: optional_string_arg(arguments, "repo_filter"),
+        repo: if allow_repo_alias {
+            optional_string_arg_any(arguments, &["repo", "repo_filter"])
+        } else {
+            optional_string_arg(arguments, "repo_filter")
+        },
         test: arguments.get("test").and_then(Value::as_bool),
         snippet: optional_string_arg(arguments, "snippet")
             .as_deref()
