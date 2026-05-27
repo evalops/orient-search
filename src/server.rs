@@ -135,6 +135,13 @@ impl IndexCacheEntry {
             .map(|state| matches!(*state, IndexCacheState::Ready(_)))
             .unwrap_or(false)
     }
+
+    fn ready_index(&self) -> Option<Arc<FastIndex>> {
+        self.state.lock().ok().and_then(|state| match &*state {
+            IndexCacheState::Ready(index) => Some(Arc::clone(index)),
+            IndexCacheState::Loading | IndexCacheState::Failed(_) => None,
+        })
+    }
 }
 
 impl ToolRuntime {
@@ -194,6 +201,7 @@ impl ToolRuntime {
         json!({
             "cached_indexes": self.cached_index_count(),
             "cached_index_paths": self.cached_index_paths(),
+            "cached_index_details": self.cached_index_details(),
             "cached_shard_manifests": self.cached_shard_manifest_count(),
             "cached_shard_manifest_paths": self.cached_shard_manifest_paths(),
             "cached_shard_manifest_details": self.cached_shard_manifest_details()
@@ -1121,6 +1129,39 @@ impl ToolRuntime {
             .unwrap_or_default();
         paths.sort();
         paths
+    }
+
+    fn cached_index_details(&self) -> Vec<Value> {
+        let mut details = self
+            .indexes
+            .lock()
+            .map(|indexes| {
+                indexes
+                    .iter()
+                    .filter_map(|(path, entry)| {
+                        entry.ready_index().map(|index| {
+                            let stats = index.stats();
+                            json!({
+                                "index": path.to_string_lossy(),
+                                "root": stats.root.to_string_lossy(),
+                                "version": stats.version,
+                                "files": stats.files,
+                                "terms": stats.terms,
+                                "path_terms": stats.path_terms,
+                                "trigrams": stats.trigrams,
+                                "symbols": stats.symbols
+                            })
+                        })
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        details.sort_by(|left, right| {
+            left.get("index")
+                .and_then(Value::as_str)
+                .cmp(&right.get("index").and_then(Value::as_str))
+        });
+        details
     }
 
     fn cached_shard_manifest(&self, index_dir: &Path) -> Result<Arc<ShardManifest>> {

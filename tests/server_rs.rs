@@ -767,6 +767,24 @@ fn runtime_warms_index_by_tool_request() {
             .iter()
             .any(|path| path.as_str().unwrap().ends_with(".orient/index"))
     );
+    assert_eq!(
+        result["cached_index_details"][0]["files"],
+        serde_json::json!(2)
+    );
+    assert_eq!(
+        result["cached_index_details"][0]["root"],
+        serde_json::json!(repo.path().canonicalize().unwrap().to_string_lossy())
+    );
+    assert_eq!(
+        result["cached_index_details"][0]["symbols"],
+        serde_json::json!(2)
+    );
+    assert!(
+        result["cached_index_details"][0]["index"]
+            .as_str()
+            .unwrap()
+            .ends_with(".orient/index")
+    );
 }
 
 #[test]

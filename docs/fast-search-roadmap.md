@@ -61,7 +61,7 @@ Implemented now:
 - Command hints are manifest-aware, include command kind/source provenance, and parse common `package.json` scripts while respecting package-manager lockfiles.
 - Shard manifests record aliases for nested repo-looking child directories, so broad dated worktree shards can still answer stable filters like `repo:maestro` and scope results to the matching child path.
 - Shard manifests record bounded git metadata for each shard, including origin, branch, clone/worktree kind, and common git dir when available. Shard repo filters and shard maps can use this topology, so agents can target an active branch or origin without knowing the exact checkout path.
-- `daemon_status`, `warm_shards`, and `serve-tcp --index-dir` expose compact warmed-shard details, so parallel local agents can confirm they are sharing the intended repo/branch shard set without session analytics.
+- `daemon_status`, `warm_index`, `warm_shards`, and `serve-tcp --index-dir` expose compact warmed-index and warmed-shard details, so parallel local agents can confirm they are sharing the intended repo/branch shard set without session analytics.
 - Alias-scoped shard search, symbol lookup, and repo maps emit stable alias-prefixed paths, so search hits like `maestro/src/foo.rs` can be opened without knowing the enclosing worktree shard name.
 - Shard related-file and related-symbol tools accept alias-prefixed search-hit paths and keep returned context inside the same alias scope.
 - Batch read tools open several repo, index, or shard result paths in one request, reducing JSON-lines round trips after a multi-result search; CLI batch reads also accept repeatable `--range path:start:lines` specs for search hits with different line windows.
