@@ -3,7 +3,7 @@ use clap::{Args, Parser, Subcommand};
 use orient::discover::{
     DiscoverOptions, DiscoverySelectionSummary, discover_repos, discovery_selection_summary,
 };
-use orient::fast_index::FastIndex;
+use orient::fast_index::{FastIndex, RefreshStats};
 use orient::repo_index::{
     RepoIndexer, SearchFilters, SnippetMode, attach_result_context, read_file_range,
     search_repo_fast_filtered,
@@ -55,6 +55,12 @@ enum Commands {
         output: PathBuf,
     },
     RefreshIndex {
+        #[arg(long, default_value = ".")]
+        repo: PathBuf,
+        #[arg(long)]
+        index: PathBuf,
+    },
+    EnsureIndex {
         #[arg(long, default_value = ".")]
         repo: PathBuf,
         #[arg(long)]
@@ -505,17 +511,10 @@ fn main() -> Result<()> {
             index.save(&output)?;
             println!("{}", serde_json::to_string(&index.stats())?);
         }
-        Commands::RefreshIndex { repo, index } => {
-            let previous = if index.exists() {
-                Some(FastIndex::load(&index)?)
-            } else {
-                None
-            };
-            let outcome = FastIndex::refresh(repo, previous.as_ref())?;
-            outcome.index.save(&index)?;
+        Commands::RefreshIndex { repo, index } | Commands::EnsureIndex { repo, index } => {
             println!(
                 "{}",
-                serde_json::to_string(&outcome.index.refresh_stats(&outcome))?
+                serde_json::to_string(&refresh_or_build_index(repo, index)?)?
             );
         }
         Commands::IndexShards {
@@ -1068,6 +1067,17 @@ fn shard_repos_from_args_required(
 
 fn normalize_family_limit(value: Option<usize>) -> Option<usize> {
     value.filter(|limit| *limit > 0)
+}
+
+fn refresh_or_build_index(repo: PathBuf, index: PathBuf) -> Result<RefreshStats> {
+    let previous = if index.exists() {
+        Some(FastIndex::load(&index)?)
+    } else {
+        None
+    };
+    let outcome = FastIndex::refresh(repo, previous.as_ref())?;
+    outcome.index.save(&index)?;
+    Ok(outcome.index.refresh_stats(&outcome))
 }
 
 #[derive(Debug, Clone)]

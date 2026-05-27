@@ -949,17 +949,18 @@ fn cli_builds_and_searches_persistent_index() {
     );
     let index_path = repo.path().join(".orient/index");
 
-    let mut index = Command::cargo_bin("orient").unwrap();
-    index
+    let mut ensure_index = Command::cargo_bin("orient").unwrap();
+    ensure_index
         .args([
-            "index",
+            "ensure-index",
             "--repo",
             repo.path().to_str().unwrap(),
-            "--output",
+            "--index",
             index_path.to_str().unwrap(),
         ])
         .assert()
         .success()
+        .stdout(predicate::str::contains("\"refreshed_files\""))
         .stdout(predicate::str::contains("\"terms\""));
 
     let mut search = Command::cargo_bin("orient").unwrap();
