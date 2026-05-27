@@ -22,7 +22,7 @@ The GitHub sweep covered 722 code-search, agent-context, semantic-search, and re
 
 Agents already search. The win is not convincing them to search; it is making search cheap, low-latency, and structured enough that they stop doing dozens of exploratory `rg`, `find`, `ls`, and `cat` calls.
 
-The Ceramic-level insight for our data is: if orientation calls are a major share of tool use, then making orientation cheaper and more reliable directly increases useful work per session. Search is the first lever because it happens before almost every successful edit.
+The Ceramic-level insight for this product is: agents already search, so the leverage is making local code search cheap enough that it becomes the default first action before scattered `rg`, `find`, `ls`, and `cat` exploration.
 
 ## Current Baseline
 
@@ -30,16 +30,18 @@ Implemented now:
 
 - `orient search`: fast `rg`-backed candidate collection with Rust-side scoring/snippets.
 - `orient index`: persistent Rust token/path posting index.
+- `orient refresh-index`: incremental refresh that reuses unchanged file metadata/terms and refreshes changed files.
 - `orient indexed-search`: indexed query path.
 - JSON-lines tools: `search_code` and `indexed_search_code`.
 - Result de-duping for repeated worktree copies where practical.
 
 Measured on this machine:
 
-- Wide tree fallback: `/Users/jonathanhaas/Documents/Projects`, query `session token auth`, top 10 in about `0.25s`.
-- Local repo fallback: query `session metrics jsonl tool calls`, top 10 in about `0.24s`.
+- Wide tree fallback: `/Users/jonathanhaas/Documents/Projects`, common top-10 literal/token queries in about `19-30ms` mean after warmup.
+- Local repo fallback: query `indexed search symbol filters`, top 10 in about `11ms` mean after warmup.
 - Local repo index build: about `0.25s`.
-- Local repo indexed search: below `/usr/bin/time`'s `0.01s` display precision.
+- Local repo refresh after build: reuses unchanged files and rebuilds postings from per-file term lists.
+- Local repo indexed search: query `indexed search symbol filters`, top 10 in about `3ms` mean after warmup.
 
 ## Exit Conditions
 
@@ -61,7 +63,7 @@ Engineering definition:
 
 - Persistent index has a versioned on-disk format.
 - Incremental refresh exists.
-- Tests cover fallback search, indexed search, filters, ranking, duplicate suppression, JSON-lines server calls, and JSONL metrics parsing.
+- Tests cover fallback search, indexed search, incremental refresh, filters, ranking, duplicate suppression, and JSON-lines server calls.
 - Every release claim is backed by `cargo fmt --check`, `cargo test`, `cargo build --release`, and timed searches.
 
 ## Architecture Direction
@@ -69,9 +71,9 @@ Engineering definition:
 Near term:
 
 - Keep `rg` as the brutally fast no-index baseline.
-- Add path/language filters to both fallback and indexed search.
+- Add more query filters and aliases after the current path/language/extension/require-all surface.
 - Add a repeated-query benchmark command so p50/p95 are visible without external scripts.
-- Add duplicate suppression based on normalized path suffixes and snippet signatures.
+- Tighten duplicate suppression based on normalized path suffixes and snippet signatures.
 
 Zoekt-inspired indexed mode:
 

@@ -10,8 +10,17 @@ use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::LazyLock;
 
 const MAX_FILE_BYTES: u64 = 512_000;
+static CAMEL_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"([a-z0-9])([A-Z])").unwrap());
+static TOKEN_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[A-Za-z][A-Za-z0-9_]*").unwrap());
+static SYMBOL_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\b(?:pub\s+)?(?:async\s+)?(?:fn|function|class|interface|struct|enum|const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)").unwrap()
+});
+static PYTHON_SYMBOL_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^\s*(class|def|async\s+def)\s+([A-Za-z_][A-Za-z0-9_]*)").unwrap()
+});
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Symbol {
@@ -33,6 +42,8 @@ pub struct SearchResult {
 pub struct SearchFilters {
     pub path: Option<String>,
     pub language: Option<String>,
+    pub extension: Option<String>,
+    pub require_all: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -205,10 +216,11 @@ fn search_repo_ripgrep(
     }
 
     let _ = child.wait();
-    Ok(Some(finalize_results(
-        scored.into_values().collect::<Vec<_>>(),
-        limit,
-    )))
+    let mut results = scored.into_values().collect::<Vec<_>>();
+    if filters.require_all {
+        results.retain(|result| result_matches_all_tokens(result, query_tokens));
+    }
+    Ok(Some(finalize_results(results, limit)))
 }
 
 fn search_repo_streaming(
@@ -249,6 +261,9 @@ fn search_repo_streaming(
         }
     }
 
+    if filters.require_all {
+        results.retain(|result| result_matches_all_tokens(result, query_tokens));
+    }
     Ok(finalize_results(results, limit))
 }
 
@@ -615,15 +630,14 @@ pub(crate) fn language_for(path: &Path) -> Option<String> {
     Some(language.to_string())
 }
 
-fn extract_symbols(path: &str, text: &str, language: &str) -> Vec<Symbol> {
+pub(crate) fn extract_symbols(path: &str, text: &str, language: &str) -> Vec<Symbol> {
     if language == "python" {
         return extract_python_symbols(path, text);
     }
-    let re = Regex::new(r"\b(?:pub\s+)?(?:async\s+)?(?:fn|function|class|interface|struct|enum|const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)").unwrap();
     text.lines()
         .enumerate()
         .filter_map(|(index, line)| {
-            let capture = re.captures(line)?;
+            let capture = SYMBOL_RE.captures(line)?;
             let kind = if line.contains("class ") {
                 "class"
             } else if line.contains("struct ") {
@@ -644,11 +658,10 @@ fn extract_symbols(path: &str, text: &str, language: &str) -> Vec<Symbol> {
 }
 
 fn extract_python_symbols(path: &str, text: &str) -> Vec<Symbol> {
-    let re = Regex::new(r"^\s*(class|def|async\s+def)\s+([A-Za-z_][A-Za-z0-9_]*)").unwrap();
     text.lines()
         .enumerate()
         .filter_map(|(index, line)| {
-            let capture = re.captures(line)?;
+            let capture = PYTHON_SYMBOL_RE.captures(line)?;
             let raw_kind = capture.get(1)?.as_str();
             Some(Symbol {
                 name: capture.get(2)?.as_str().to_string(),
@@ -717,16 +730,15 @@ fn score_text_file(path: &str, text: &str, query_tokens: &[String]) -> Option<Se
 }
 
 pub(crate) fn tokenize(text: &str) -> Vec<String> {
-    let camel = Regex::new(r"([a-z0-9])([A-Z])").unwrap();
-    let split = camel.replace_all(text, "$1 $2").replace('_', " ");
-    let re = Regex::new(r"[A-Za-z][A-Za-z0-9_]*").unwrap();
-    re.find_iter(&split)
+    let split = CAMEL_RE.replace_all(text, "$1 $2").replace('_', " ");
+    TOKEN_RE
+        .find_iter(&split)
         .map(|m| m.as_str().to_lowercase())
         .filter(|token| token.len() > 1)
         .collect()
 }
 
-fn normalize_token(text: &str) -> String {
+pub(crate) fn normalize_token(text: &str) -> String {
     tokenize(text).join("")
 }
 
@@ -737,10 +749,13 @@ pub(crate) fn best_snippet(text: &str, query_tokens: &[String]) -> String {
         if query_tokens.iter().any(|token| lowered.contains(token)) {
             let start = idx.saturating_sub(1);
             let end = (idx + 3).min(lines.len());
-            return lines[start..end].join("\n").chars().take(700).collect();
+            return format_numbered_lines(&lines, start, end)
+                .chars()
+                .take(700)
+                .collect();
         }
     }
-    lines.into_iter().take(6).collect::<Vec<_>>().join("\n")
+    format_numbered_lines(&lines, 0, lines.len().min(6))
 }
 
 fn is_test_path(path: &str) -> bool {
@@ -790,7 +805,36 @@ pub(crate) fn matches_filters(path: &str, filters: &SearchFilters) -> bool {
             return false;
         }
     }
+    if let Some(extension_filter) = &filters.extension {
+        let wanted = extension_filter
+            .trim()
+            .trim_start_matches('.')
+            .to_lowercase();
+        let Some(extension) = Path::new(path)
+            .extension()
+            .map(|value| value.to_string_lossy().to_lowercase())
+        else {
+            return false;
+        };
+        if extension != wanted {
+            return false;
+        }
+    }
     true
+}
+
+pub(crate) fn result_matches_all_tokens(result: &SearchResult, query_tokens: &[String]) -> bool {
+    let haystack = format!("{}\n{}\n{}", result.path, result.reason, result.snippet).to_lowercase();
+    query_tokens.iter().all(|token| haystack.contains(token))
+}
+
+fn format_numbered_lines(lines: &[&str], start: usize, end: usize) -> String {
+    lines[start..end]
+        .iter()
+        .enumerate()
+        .map(|(offset, line)| format!("{}: {}", start + offset + 1, line))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn result_signature(result: &SearchResult) -> String {

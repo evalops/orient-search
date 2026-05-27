@@ -3,13 +3,12 @@ use clap::{Parser, Subcommand};
 use orient::fast_index::FastIndex;
 use orient::repo_index::{RepoIndexer, SearchFilters, search_repo_fast_filtered};
 use orient::server::serve_jsonl;
-use orient::session_metrics::{ScanOptions, scan_jsonl_roots};
 use std::io;
 use std::path::PathBuf;
 
 #[derive(Debug, Parser)]
 #[command(name = "orient")]
-#[command(about = "Local repo and session orientation layer for coding agents")]
+#[command(about = "Fast local code search for coding agents")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -22,6 +21,12 @@ enum Commands {
         repo: PathBuf,
         #[arg(long)]
         output: PathBuf,
+    },
+    RefreshIndex {
+        #[arg(long, default_value = ".")]
+        repo: PathBuf,
+        #[arg(long)]
+        index: PathBuf,
     },
     Brief {
         #[arg(long, default_value = ".")]
@@ -37,6 +42,10 @@ enum Commands {
         path: Option<String>,
         #[arg(long)]
         language: Option<String>,
+        #[arg(long)]
+        extension: Option<String>,
+        #[arg(long)]
+        require_all: bool,
     },
     IndexedSearch {
         #[arg(long)]
@@ -48,6 +57,10 @@ enum Commands {
         path: Option<String>,
         #[arg(long)]
         language: Option<String>,
+        #[arg(long)]
+        extension: Option<String>,
+        #[arg(long)]
+        require_all: bool,
     },
     Symbol {
         #[arg(long, default_value = ".")]
@@ -63,14 +76,6 @@ enum Commands {
         #[arg(long, default_value_t = 10)]
         limit: usize,
     },
-    Metrics {
-        #[arg(long = "root", required = true)]
-        roots: Vec<PathBuf>,
-        #[arg(long)]
-        max_files: Option<usize>,
-        #[arg(long)]
-        max_file_mb: Option<u64>,
-    },
     ServeJsonl,
 }
 
@@ -82,6 +87,19 @@ fn main() -> Result<()> {
             index.save(&output)?;
             println!("{}", serde_json::to_string(&index.stats())?);
         }
+        Commands::RefreshIndex { repo, index } => {
+            let previous = if index.exists() {
+                Some(FastIndex::load(&index)?)
+            } else {
+                None
+            };
+            let outcome = FastIndex::refresh(repo, previous.as_ref())?;
+            outcome.index.save(&index)?;
+            println!(
+                "{}",
+                serde_json::to_string(&outcome.index.refresh_stats(&outcome))?
+            );
+        }
         Commands::Brief { repo } => {
             let index = RepoIndexer::new(repo).build()?;
             println!("{}", serde_json::to_string(&index.repo_brief())?);
@@ -92,6 +110,8 @@ fn main() -> Result<()> {
             limit,
             path,
             language,
+            extension,
+            require_all,
         } => {
             println!(
                 "{}",
@@ -99,7 +119,12 @@ fn main() -> Result<()> {
                     repo,
                     &query,
                     limit,
-                    &SearchFilters { path, language },
+                    &SearchFilters {
+                        path,
+                        language,
+                        extension,
+                        require_all,
+                    },
                 )?)?
             );
         }
@@ -109,6 +134,8 @@ fn main() -> Result<()> {
             limit,
             path,
             language,
+            extension,
+            require_all,
         } => {
             let index = FastIndex::load(index)?;
             println!(
@@ -116,7 +143,12 @@ fn main() -> Result<()> {
                 serde_json::to_string(&index.search_filtered(
                     &query,
                     limit,
-                    &SearchFilters { path, language },
+                    &SearchFilters {
+                        path,
+                        language,
+                        extension,
+                        require_all,
+                    },
                 )?)?
             );
         }
@@ -133,18 +165,6 @@ fn main() -> Result<()> {
                 "{}",
                 serde_json::to_string(&index.related_files(&path, limit))?
             );
-        }
-        Commands::Metrics {
-            roots,
-            max_files,
-            max_file_mb,
-        } => {
-            let metrics = scan_jsonl_roots(ScanOptions {
-                roots,
-                max_files,
-                max_file_bytes: max_file_mb.map(|mb| mb * 1024 * 1024),
-            })?;
-            println!("{}", serde_json::to_string(&metrics)?);
         }
         Commands::ServeJsonl => {
             let stdin = io::stdin();

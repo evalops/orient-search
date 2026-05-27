@@ -57,6 +57,9 @@ fn cli_searches_symbols_and_related_files() {
             "src/",
             "--language",
             "rust",
+            "--extension",
+            "rs",
+            "--require-all",
         ])
         .assert()
         .success()
@@ -78,7 +81,7 @@ fn cli_searches_symbols_and_related_files() {
 #[test]
 fn cli_builds_and_searches_persistent_index() {
     let repo = sample_repo();
-    let index_path = repo.path().join(".orient/index.json");
+    let index_path = repo.path().join(".orient/index");
 
     let mut index = Command::cargo_bin("orient").unwrap();
     index
@@ -104,28 +107,51 @@ fn cli_builds_and_searches_persistent_index() {
             "src/",
             "--language",
             "rust",
+            "--extension",
+            "rs",
+            "--require-all",
         ])
         .assert()
         .success()
         .stdout(predicate::str::contains("src/auth.rs"))
         .stdout(predicate::str::contains("indexed match"));
-}
 
-#[test]
-fn cli_reports_jsonl_metrics() {
-    let temp = tempfile::tempdir().unwrap();
     write(
-        &temp.path().join(".codex/sample.jsonl"),
+        &repo.path().join("src/auth.rs"),
         r#"
-{"type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"rg auth src\"}","call_id":"c1"}}
-{"type":"response_item","payload":{"type":"function_call_output","call_id":"c1","output":"Process exited with code 0\nOutput:\nsrc/auth.py"}}
+pub struct SessionManager;
+
+impl SessionManager {
+    pub fn rotate_secret() -> String {
+        "secret".to_string()
+    }
+}
 "#,
     );
 
-    let mut cmd = Command::cargo_bin("orient").unwrap();
-    cmd.args(["metrics", "--root", temp.path().to_str().unwrap()])
+    let mut refresh = Command::cargo_bin("orient").unwrap();
+    refresh
+        .args([
+            "refresh-index",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--index",
+            index_path.to_str().unwrap(),
+        ])
         .assert()
         .success()
-        .stdout(predicate::str::contains("\"total_calls\":1"))
-        .stdout(predicate::str::contains("search_discovery"));
+        .stdout(predicate::str::contains("\"refreshed_files\""));
+
+    let mut refreshed_search = Command::cargo_bin("orient").unwrap();
+    refreshed_search
+        .args([
+            "indexed-search",
+            "--index",
+            index_path.to_str().unwrap(),
+            "rotate secret",
+            "--require-all",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("src/auth.rs"));
 }

@@ -1,6 +1,5 @@
 use crate::fast_index::FastIndex;
 use crate::repo_index::{RepoIndexer, SearchFilters, search_repo_fast_filtered};
-use crate::session_metrics::{ScanOptions, scan_jsonl_roots};
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -102,39 +101,12 @@ fn dispatch_result(request: &ToolRequest) -> Result<Value> {
             let index = RepoIndexer::new(repo).build()?;
             Ok(serde_json::to_value(index.related_files(&path, limit))?)
         }
-        "metrics" => {
-            let roots = request
-                .arguments
-                .get("roots")
-                .and_then(Value::as_array)
-                .map(|values| {
-                    values
-                        .iter()
-                        .filter_map(Value::as_str)
-                        .map(PathBuf::from)
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_else(|| {
-                    vec![
-                        path_arg(&request.arguments, "root").unwrap_or_else(|_| PathBuf::from(".")),
-                    ]
-                });
-            let max_files = usize_arg(&request.arguments, "max_files");
-            let max_file_bytes =
-                usize_arg(&request.arguments, "max_file_mb").map(|mb| mb as u64 * 1024 * 1024);
-            Ok(serde_json::to_value(scan_jsonl_roots(ScanOptions {
-                roots,
-                max_files,
-                max_file_bytes,
-            })?)?)
-        }
         "list_tools" => Ok(json!([
             "repo_brief",
             "search_code",
             "indexed_search_code",
             "find_symbol",
-            "related_files",
-            "metrics"
+            "related_files"
         ])),
         other => Err(anyhow!("unknown tool: {other}")),
     }
@@ -170,5 +142,10 @@ fn search_filters(arguments: &Value) -> SearchFilters {
     SearchFilters {
         path: optional_string_arg(arguments, "path"),
         language: optional_string_arg(arguments, "language"),
+        extension: optional_string_arg(arguments, "extension"),
+        require_all: arguments
+            .get("require_all")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
     }
 }

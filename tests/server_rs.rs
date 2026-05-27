@@ -34,7 +34,9 @@ fn server_handles_json_lines_tool_request() {
         "arguments": {
             "repo": repo.path(),
             "query": "issue token",
-            "limit": 3
+            "limit": 3,
+            "extension": "rs",
+            "require_all": true
         }
     });
     writeln!(child.stdin.as_mut().unwrap(), "{request}").unwrap();
@@ -58,7 +60,7 @@ fn server_handles_indexed_search_request() {
         &repo.path().join("Cargo.toml"),
         "[package]\nname='sample'\nversion='0.1.0'\nedition='2024'\n",
     );
-    let index_path = repo.path().join(".orient/index.json");
+    let index_path = repo.path().join(".orient/index");
 
     let binary = assert_cmd::cargo::cargo_bin("orient");
     let status = Command::new(&binary)
@@ -87,7 +89,9 @@ fn server_handles_indexed_search_request() {
         "arguments": {
             "index": index_path,
             "query": "issue token",
-            "limit": 3
+            "limit": 3,
+            "language": "rust",
+            "require_all": true
         }
     });
     writeln!(child.stdin.as_mut().unwrap(), "{request}").unwrap();
