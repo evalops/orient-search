@@ -69,8 +69,11 @@ fn cli_outputs_tool_manifest() {
         .stdout(predicate::str::contains("warm_index"))
         .stdout(predicate::str::contains("warm_shards"))
         .stdout(predicate::str::contains("read_ranges"))
+        .stdout(predicate::str::contains("search_batch"))
         .stdout(predicate::str::contains("read_index_ranges"))
+        .stdout(predicate::str::contains("indexed_search_batch"))
         .stdout(predicate::str::contains("read_shard_ranges"))
+        .stdout(predicate::str::contains("search_shards_batch"))
         .stdout(predicate::str::contains("read_shard_range"))
         .stdout(predicate::str::contains("related_shard_files"))
         .stdout(predicate::str::contains("related_shard_symbols"))
@@ -940,6 +943,94 @@ fn cli_search_surfaces_accept_structured_filters() {
         .assert()
         .success()
         .stdout(predicate::str::contains("\"result_count\":1"));
+}
+
+#[test]
+fn cli_batches_searches_across_fallback_indexed_and_shards() {
+    let repo = sample_repo();
+    write(
+        &repo.path().join("src/billing.rs"),
+        "pub fn invoice_total() {}\n",
+    );
+
+    let mut fallback = Command::cargo_bin("orient").unwrap();
+    fallback
+        .args([
+            "search-batch",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "SessionManager",
+            "invoice total",
+            "--limit",
+            "2",
+            "--require-all",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"query\":\"SessionManager\""))
+        .stdout(predicate::str::contains("src/auth.rs"))
+        .stdout(predicate::str::contains("\"query\":\"invoice total\""))
+        .stdout(predicate::str::contains("src/billing.rs"));
+
+    let index_path = repo.path().join(".orient/index");
+    let mut index = Command::cargo_bin("orient").unwrap();
+    index
+        .args([
+            "index",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--output",
+            index_path.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let mut indexed = Command::cargo_bin("orient").unwrap();
+    indexed
+        .args([
+            "indexed-search-batch",
+            "--index",
+            index_path.to_str().unwrap(),
+            "SessionManager",
+            "invoice total",
+            "--limit",
+            "2",
+            "--require-all",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("src/auth.rs"))
+        .stdout(predicate::str::contains("src/billing.rs"));
+
+    let shard_dir = tempfile::tempdir().unwrap();
+    let mut build_shards = Command::cargo_bin("orient").unwrap();
+    build_shards
+        .args([
+            "index-shards",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--output-dir",
+            shard_dir.path().to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let mut shards = Command::cargo_bin("orient").unwrap();
+    shards
+        .args([
+            "search-shards-batch",
+            "--index-dir",
+            shard_dir.path().to_str().unwrap(),
+            "SessionManager",
+            "invoice total",
+            "--limit",
+            "2",
+            "--require-all",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("src/auth.rs"))
+        .stdout(predicate::str::contains("src/billing.rs"));
 }
 
 #[test]

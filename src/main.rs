@@ -5,7 +5,7 @@ use orient::discover::{
 };
 use orient::fast_index::{FastIndex, RefreshStats};
 use orient::repo_index::{
-    RepoIndexer, SearchFilters, SnippetMode, attach_result_context, read_file_range,
+    RepoIndexer, SearchFilters, SearchResult, SnippetMode, attach_result_context, read_file_range,
     search_repo_fast_filtered,
 };
 use orient::server::{ToolRuntime, serve_jsonl, serve_tcp, tool_manifest};
@@ -115,6 +115,22 @@ enum Commands {
         #[arg(long)]
         index_dir: PathBuf,
         query: String,
+        #[arg(long, default_value_t = 10)]
+        limit: usize,
+        #[arg(long = "repo")]
+        repo: Option<String>,
+        #[command(flatten)]
+        filters: CommonSearchArgs,
+        #[arg(long, default_value_t = 0)]
+        context_lines: usize,
+        #[arg(long)]
+        refresh_if_stale: bool,
+    },
+    SearchShardsBatch {
+        #[arg(long)]
+        index_dir: PathBuf,
+        #[arg(required = true)]
+        queries: Vec<String>,
         #[arg(long, default_value_t = 10)]
         limit: usize,
         #[arg(long = "repo")]
@@ -236,10 +252,40 @@ enum Commands {
         #[arg(long, default_value_t = 0)]
         context_lines: usize,
     },
+    SearchBatch {
+        #[arg(long, default_value = ".")]
+        repo: PathBuf,
+        #[arg(required = true)]
+        queries: Vec<String>,
+        #[arg(long, default_value_t = 10)]
+        limit: usize,
+        #[arg(long = "repo-filter")]
+        repo_filter: Option<String>,
+        #[command(flatten)]
+        filters: CommonSearchArgs,
+        #[arg(long, default_value_t = 0)]
+        context_lines: usize,
+    },
     IndexedSearch {
         #[arg(long)]
         index: PathBuf,
         query: String,
+        #[arg(long, default_value_t = 10)]
+        limit: usize,
+        #[arg(long = "repo-filter")]
+        repo_filter: Option<String>,
+        #[command(flatten)]
+        filters: CommonSearchArgs,
+        #[arg(long, default_value_t = 0)]
+        context_lines: usize,
+        #[arg(long)]
+        refresh_if_stale: bool,
+    },
+    IndexedSearchBatch {
+        #[arg(long)]
+        index: PathBuf,
+        #[arg(required = true)]
+        queries: Vec<String>,
         #[arg(long, default_value_t = 10)]
         limit: usize,
         #[arg(long = "repo-filter")]
@@ -506,6 +552,12 @@ struct QueryBench {
     samples_ms: Vec<f64>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct SearchBatchResult {
+    query: String,
+    results: Vec<SearchResult>,
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
@@ -618,6 +670,29 @@ fn main() -> Result<()> {
                 read_shard_range(&index_dir, path, start, lines)
             })?;
             println!("{}", serde_json::to_string(&results)?);
+        }
+        Commands::SearchShardsBatch {
+            index_dir,
+            queries,
+            limit,
+            repo,
+            filters,
+            context_lines,
+            refresh_if_stale,
+        } => {
+            if refresh_if_stale && shard_status(&index_dir)?.stale {
+                refresh_shards(&index_dir)?;
+            }
+            let filters = search_filters_from_args(&filters, repo)?;
+            let mut batch = Vec::new();
+            for query in queries {
+                let mut results = search_shards(&index_dir, &query, limit, &filters)?;
+                attach_result_context(&mut results, context_lines, |path, start, lines| {
+                    read_shard_range(&index_dir, path, start, lines)
+                })?;
+                batch.push(SearchBatchResult { query, results });
+            }
+            println!("{}", serde_json::to_string(&batch)?);
         }
         Commands::ShardPlan {
             index_dir,
@@ -785,6 +860,25 @@ fn main() -> Result<()> {
             })?;
             println!("{}", serde_json::to_string(&results)?);
         }
+        Commands::SearchBatch {
+            repo,
+            queries,
+            limit,
+            repo_filter,
+            filters,
+            context_lines,
+        } => {
+            let filters = search_filters_from_args(&filters, repo_filter)?;
+            let mut batch = Vec::new();
+            for query in queries {
+                let mut results = search_repo_fast_filtered(&repo, &query, limit, &filters)?;
+                attach_result_context(&mut results, context_lines, |path, start, lines| {
+                    read_file_range(&repo, path, start, lines)
+                })?;
+                batch.push(SearchBatchResult { query, results });
+            }
+            println!("{}", serde_json::to_string(&batch)?);
+        }
         Commands::IndexedSearch {
             index,
             query,
@@ -801,6 +895,27 @@ fn main() -> Result<()> {
                 index.read_range(path, start, lines)
             })?;
             println!("{}", serde_json::to_string(&results)?);
+        }
+        Commands::IndexedSearchBatch {
+            index,
+            queries,
+            limit,
+            repo_filter,
+            filters,
+            context_lines,
+            refresh_if_stale,
+        } => {
+            let index = load_index_for_search(index, refresh_if_stale)?;
+            let filters = search_filters_from_args(&filters, repo_filter)?;
+            let mut batch = Vec::new();
+            for query in queries {
+                let mut results = index.search_filtered(&query, limit, &filters)?;
+                attach_result_context(&mut results, context_lines, |path, start, lines| {
+                    index.read_range(path, start, lines)
+                })?;
+                batch.push(SearchBatchResult { query, results });
+            }
+            println!("{}", serde_json::to_string(&batch)?);
         }
         Commands::ReadIndexRange {
             index,
