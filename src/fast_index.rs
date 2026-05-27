@@ -22,6 +22,8 @@ use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const INDEX_VERSION: u32 = 9;
+const INDEX_MAGIC: &[u8] = b"ORIENTIDX\0";
+const INDEX_HEADER_LEN: usize = INDEX_MAGIC.len() + std::mem::size_of::<u32>();
 const MAX_FILE_BYTES: u64 = 512_000;
 const MAX_TERM_LINES_PER_TERM: usize = 64;
 const MAX_INDEX_CANDIDATES_TO_SCORE: usize = 8_192;
@@ -278,7 +280,16 @@ impl FastIndex {
     pub fn load(path: impl AsRef<Path>) -> Result<Self> {
         let bytes = fs::read(path.as_ref())
             .with_context(|| format!("read index {}", path.as_ref().display()))?;
-        let index = bincode::deserialize::<Self>(&bytes)
+        let (payload, header_version) = index_payload(&bytes)
+            .with_context(|| format!("parse index header {}", path.as_ref().display()))?;
+        if let Some(version) = header_version {
+            anyhow::ensure!(
+                version == INDEX_VERSION,
+                "unsupported index version {}",
+                version
+            );
+        }
+        let index = bincode::deserialize::<Self>(payload)
             .with_context(|| format!("parse index {}", path.as_ref().display()))?;
         anyhow::ensure!(
             index.version == INDEX_VERSION,
@@ -292,7 +303,12 @@ impl FastIndex {
         if let Some(parent) = path.as_ref().parent() {
             fs::create_dir_all(parent)?;
         }
-        fs::write(path.as_ref(), bincode::serialize(self)?)
+        let payload = bincode::serialize(self)?;
+        let mut bytes = Vec::with_capacity(INDEX_HEADER_LEN + payload.len());
+        bytes.extend_from_slice(INDEX_MAGIC);
+        bytes.extend_from_slice(&INDEX_VERSION.to_le_bytes());
+        bytes.extend_from_slice(&payload);
+        fs::write(path.as_ref(), bytes)
             .with_context(|| format!("write index {}", path.as_ref().display()))
     }
 
@@ -1500,6 +1516,20 @@ fn normalize_index_relative_path(path: &str) -> Result<String> {
     let normalized = parts.join("/");
     anyhow::ensure!(!normalized.is_empty(), "path must be index-relative");
     Ok(normalized)
+}
+
+fn index_payload(bytes: &[u8]) -> Result<(&[u8], Option<u32>)> {
+    if !bytes.starts_with(INDEX_MAGIC) {
+        return Ok((bytes, None));
+    }
+    anyhow::ensure!(bytes.len() >= INDEX_HEADER_LEN, "index header is truncated");
+    let version_offset = INDEX_MAGIC.len();
+    let version = u32::from_le_bytes(
+        bytes[version_offset..version_offset + std::mem::size_of::<u32>()]
+            .try_into()
+            .expect("header version length is fixed"),
+    );
+    Ok((&bytes[INDEX_HEADER_LEN..], Some(version)))
 }
 
 fn rank_signal(kind: &str, value: &str, score: f64) -> RankSignal {

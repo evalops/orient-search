@@ -176,6 +176,52 @@ fn indexed_search_and_read_range_use_persisted_snapshot_text() {
 }
 
 #[test]
+fn saved_indexes_have_versioned_header_and_legacy_indexes_still_load() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/auth.rs"),
+        "pub struct SessionManager;\npub fn issue_token() {}\n",
+    );
+    let index = FastIndex::build(repo.path()).unwrap();
+
+    let index_path = repo.path().join(".orient/header.index");
+    index.save(&index_path).unwrap();
+    let bytes = fs::read(&index_path).unwrap();
+    assert!(bytes.starts_with(b"ORIENTIDX\0"));
+    let version = u32::from_le_bytes(bytes[10..14].try_into().unwrap());
+    assert_eq!(version, index.version);
+    let loaded = FastIndex::load(&index_path).unwrap();
+    assert_eq!(loaded.version, index.version);
+    assert_eq!(
+        loaded.search("SessionManager", 10).unwrap()[0].path,
+        "src/auth.rs"
+    );
+
+    let legacy_path = repo.path().join(".orient/legacy.index");
+    fs::write(&legacy_path, bincode::serialize(&index).unwrap()).unwrap();
+    let legacy = FastIndex::load(&legacy_path).unwrap();
+    assert_eq!(legacy.version, index.version);
+    assert_eq!(
+        legacy.search("issue token", 10).unwrap()[0].path,
+        "src/auth.rs"
+    );
+}
+
+#[test]
+fn loading_header_with_unsupported_version_returns_clear_error() {
+    let repo = tempfile::tempdir().unwrap();
+    let path = repo.path().join("future.index");
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(b"ORIENTIDX\0");
+    bytes.extend_from_slice(&u32::MAX.to_le_bytes());
+    bytes.extend_from_slice(b"payload");
+    fs::write(&path, bytes).unwrap();
+
+    let error = FastIndex::load(&path).unwrap_err().to_string();
+    assert!(error.contains("unsupported index version"), "{error}");
+}
+
+#[test]
 fn search_result_limits_are_capped() {
     let repo = tempfile::tempdir().unwrap();
     for index in 0..MAX_SEARCH_RESULTS + 25 {
