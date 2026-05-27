@@ -8,6 +8,8 @@ Rust-native fast local code search for coding agents. It gives Codex, Claude, Am
 - Searches code with a fast `rg`-backed hot path plus an experimental persistent Rust index.
 - Boosts exact symbol definitions in both fallback and indexed search.
 - Finds symbols and related test/source files.
+- Reads bounded line ranges after search hits, with line-numbered output.
+- Builds repo maps with entrypoints, tests, top symbols, commands, and important files.
 - Infers known commands from repo manifests.
 - Exposes a Rust CLI and JSON-lines tool server suitable for MCP-style wrapping.
 
@@ -19,6 +21,7 @@ cargo test
 
 # Brief a repo.
 cargo run -- brief --repo /path/to/repo
+cargo run -- repo-map --repo /path/to/repo --symbols 50 --tests 50
 
 # Search code.
 cargo run -- search --repo /path/to/repo "session token auth"
@@ -39,11 +42,15 @@ cargo run -- symbol --repo /path/to/repo SessionManager
 # Find related tests/files.
 cargo run -- related --repo /path/to/repo src/auth.py
 
+# Read a bounded, line-numbered file range.
+cargo run -- read-range --repo /path/to/repo src/auth.py --start 40 --lines 80
+
 # Measure p50/p95/max search latency with the same code paths agents use.
 cargo run --release -- bench-search \
   --repo /Users/jonathanhaas/Documents/Projects \
   --runs 10 \
   --warmup 3 \
+  --fail-p95-ms 300 \
   "session token auth" \
   "browser session implementation" \
   "postgres migration user"
@@ -67,6 +74,8 @@ Supported tools:
 
 - `list_tools`
 - `repo_brief`
+- `repo_map`
+- `read_range`
 - `search_code`
 - `indexed_search_code`
 - `find_symbol`
@@ -93,6 +102,7 @@ Multiple positive terms use AND behavior by default, so `session token auth` mea
 The build is useful when it can:
 
 - Answer repo brief/search/symbol/related-file questions through Rust CLI and JSON-lines server.
+- Let an agent search, inspect a repo map, and read bounded file ranges without shelling out to `cat`/`sed`.
 - Return wide-tree search results in hundreds of milliseconds, not seconds.
 - Bound the hot path with a wall-clock timeout and match caps so pathological trees cannot hang searches.
 - Provide a persistent indexed search mode that can evolve toward Zoekt-style shards/postings.
@@ -124,6 +134,7 @@ Benchmark methodology:
 - Warm up each query before collecting samples.
 - Report `p95_ms` and `max_ms` from repeated searches, not one-off timings.
 - Benchmark the fallback path without `--index`; benchmark the persistent indexed path with `--index /tmp/orient-self.index`.
+- Use `--fail-p95-ms <milliseconds>` in CI or local regression checks when you want slow queries to fail the command.
 
 See [docs/fast-search-roadmap.md](docs/fast-search-roadmap.md) for the Zoekt/Sourcegraph/Amp-inspired roadmap.
 
@@ -131,5 +142,6 @@ See [docs/fast-search-roadmap.md](docs/fast-search-roadmap.md) for the Zoekt/Sou
 
 - `src/fast_index.rs`: experimental persistent token index and indexed search.
 - `src/repo_index.rs`: repo indexing, symbol extraction, code search, related-file lookup.
+- `src/query.rs`: inline query-language parsing and filter merging.
 - `src/server.rs`: JSON-lines tool dispatch.
 - `src/main.rs`: CLI.

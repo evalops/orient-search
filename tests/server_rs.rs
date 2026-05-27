@@ -103,3 +103,61 @@ fn server_handles_indexed_search_request() {
     assert!(stdout.contains("\"id\":2"));
     assert!(stdout.contains("src/auth.rs"));
 }
+
+#[test]
+fn server_handles_repo_map_and_read_range_requests() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/auth.rs"),
+        "pub struct SessionManager;\nimpl SessionManager {\n    pub fn issue_token() {}\n}\n",
+    );
+    write(
+        &repo.path().join("tests/auth_test.rs"),
+        "#[test]\nfn issues_tokens() {}\n",
+    );
+    write(
+        &repo.path().join("Cargo.toml"),
+        "[package]\nname='sample'\nversion='0.1.0'\nedition='2024'\n",
+    );
+
+    let binary = assert_cmd::cargo::cargo_bin("orient");
+    let mut child = Command::new(binary)
+        .arg("serve-jsonl")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+
+    let map_request = serde_json::json!({
+        "id": "map",
+        "tool": "repo_map",
+        "arguments": {
+            "repo": repo.path(),
+            "symbols": 5,
+            "tests": 5
+        }
+    });
+    let range_request = serde_json::json!({
+        "id": "range",
+        "tool": "read_range",
+        "arguments": {
+            "repo": repo.path(),
+            "path": "src/auth.rs",
+            "start": 2,
+            "lines": 2
+        }
+    });
+    writeln!(child.stdin.as_mut().unwrap(), "{map_request}").unwrap();
+    writeln!(child.stdin.as_mut().unwrap(), "{range_request}").unwrap();
+    drop(child.stdin.take());
+
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("\"id\":\"map\""));
+    assert!(stdout.contains("SessionManager"));
+    assert!(stdout.contains("tests/auth_test.rs"));
+    assert!(stdout.contains("\"id\":\"range\""));
+    assert!(stdout.contains("\"start_line\":2"));
+    assert!(stdout.contains("issue_token"));
+}

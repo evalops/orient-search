@@ -1,7 +1,7 @@
-use anyhow::Result;
+use anyhow::{Result, bail};
 use clap::{Parser, Subcommand};
 use orient::fast_index::FastIndex;
-use orient::repo_index::{RepoIndexer, SearchFilters, search_repo_fast_filtered};
+use orient::repo_index::{RepoIndexer, SearchFilters, read_file_range, search_repo_fast_filtered};
 use orient::server::serve_jsonl;
 use serde::Serialize;
 use std::io;
@@ -33,6 +33,23 @@ enum Commands {
     Brief {
         #[arg(long, default_value = ".")]
         repo: PathBuf,
+    },
+    RepoMap {
+        #[arg(long, default_value = ".")]
+        repo: PathBuf,
+        #[arg(long, default_value_t = 50)]
+        symbols: usize,
+        #[arg(long, default_value_t = 50)]
+        tests: usize,
+    },
+    ReadRange {
+        #[arg(long, default_value = ".")]
+        repo: PathBuf,
+        path: String,
+        #[arg(long, default_value_t = 1)]
+        start: usize,
+        #[arg(long, default_value_t = 80)]
+        lines: usize,
     },
     Search {
         #[arg(long, default_value = ".")]
@@ -97,6 +114,8 @@ enum Commands {
         extension: Option<String>,
         #[arg(long)]
         require_all: bool,
+        #[arg(long)]
+        fail_p95_ms: Option<f64>,
         #[arg(required = true)]
         queries: Vec<String>,
     },
@@ -147,6 +166,28 @@ fn main() -> Result<()> {
         Commands::Brief { repo } => {
             let index = RepoIndexer::new(repo).build()?;
             println!("{}", serde_json::to_string(&index.repo_brief())?);
+        }
+        Commands::RepoMap {
+            repo,
+            symbols,
+            tests,
+        } => {
+            let index = RepoIndexer::new(repo).build()?;
+            println!(
+                "{}",
+                serde_json::to_string(&index.repo_map(symbols, tests))?
+            );
+        }
+        Commands::ReadRange {
+            repo,
+            path,
+            start,
+            lines,
+        } => {
+            println!(
+                "{}",
+                serde_json::to_string(&read_file_range(repo, &path, start, lines)?)?
+            );
         }
         Commands::Search {
             repo,
@@ -222,6 +263,7 @@ fn main() -> Result<()> {
             language,
             extension,
             require_all,
+            fail_p95_ms,
             queries,
         } => {
             let filters = SearchFilters {
@@ -241,6 +283,21 @@ fn main() -> Result<()> {
                 queries,
             })?;
             println!("{}", serde_json::to_string(&report)?);
+            if let Some(threshold) = fail_p95_ms {
+                if let Some(slowest) = report
+                    .queries
+                    .iter()
+                    .filter(|query| query.p95_ms > threshold)
+                    .max_by(|left, right| left.p95_ms.total_cmp(&right.p95_ms))
+                {
+                    bail!(
+                        "p95 {:.3}ms for query {:?} exceeded threshold {:.3}ms",
+                        slowest.p95_ms,
+                        slowest.query,
+                        threshold
+                    );
+                }
+            }
         }
         Commands::ServeJsonl => {
             let stdin = io::stdin();

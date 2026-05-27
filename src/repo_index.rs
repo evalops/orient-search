@@ -77,6 +77,23 @@ pub struct RepoBrief {
     pub important_files: Vec<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RepoMap {
+    pub brief: RepoBrief,
+    pub entrypoints: Vec<String>,
+    pub test_files: Vec<String>,
+    pub top_symbols: Vec<Symbol>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FileRange {
+    pub path: String,
+    pub start_line: usize,
+    pub end_line: usize,
+    pub total_lines: usize,
+    pub text: String,
+}
+
 #[derive(Debug, Clone)]
 struct IndexedFile {
     path: String,
@@ -642,6 +659,42 @@ impl RepoIndex {
         }
     }
 
+    pub fn repo_map(&self, symbol_limit: usize, test_limit: usize) -> RepoMap {
+        let mut entrypoints = self
+            .files
+            .keys()
+            .filter(|path| is_entrypoint_path(path))
+            .cloned()
+            .collect::<Vec<_>>();
+        entrypoints.sort();
+
+        let mut test_files = self
+            .files
+            .keys()
+            .filter(|path| is_test_path(&path.to_ascii_lowercase()))
+            .cloned()
+            .collect::<Vec<_>>();
+        test_files.sort();
+        test_files.truncate(test_limit);
+
+        let mut top_symbols = self.symbols.clone();
+        top_symbols.sort_by(|a, b| {
+            symbol_kind_rank(&a.kind)
+                .cmp(&symbol_kind_rank(&b.kind))
+                .then_with(|| a.path.cmp(&b.path))
+                .then_with(|| a.line.cmp(&b.line))
+                .then_with(|| a.name.cmp(&b.name))
+        });
+        top_symbols.truncate(symbol_limit);
+
+        RepoMap {
+            brief: self.repo_brief(),
+            entrypoints,
+            test_files,
+            top_symbols,
+        }
+    }
+
     fn known_commands(&self) -> Vec<String> {
         let mut commands = Vec::new();
         if self.files.contains_key("pyproject.toml") {
@@ -659,6 +712,59 @@ impl RepoIndex {
         }
         commands
     }
+}
+
+pub fn read_file_range(
+    root: impl AsRef<Path>,
+    path: &str,
+    start_line: usize,
+    line_count: usize,
+) -> Result<FileRange> {
+    let root = root.as_ref().canonicalize()?;
+    let requested = Path::new(path);
+    anyhow::ensure!(
+        requested.is_relative()
+            && !requested
+                .components()
+                .any(|component| matches!(component, std::path::Component::ParentDir)),
+        "path must be repo-relative"
+    );
+    let absolute = root.join(requested).canonicalize()?;
+    anyhow::ensure!(
+        absolute.starts_with(&root),
+        "path must stay inside repository"
+    );
+    anyhow::ensure!(absolute.is_file(), "path is not a file");
+    let metadata = absolute.metadata()?;
+    anyhow::ensure!(
+        metadata.len() <= MAX_FILE_BYTES,
+        "file exceeds max readable size"
+    );
+    let text = fs::read_to_string(&absolute)?;
+    anyhow::ensure!(!text.contains('\0'), "file appears to be binary");
+
+    let lines = text.lines().collect::<Vec<_>>();
+    let total_lines = lines.len();
+    let start = start_line.max(1).min(total_lines.max(1));
+    let count = line_count.max(1);
+    let end = (start + count - 1).min(total_lines);
+    let range_text = if total_lines == 0 {
+        String::new()
+    } else {
+        format_numbered_lines(&lines, start - 1, end)
+    };
+    let rel = absolute
+        .strip_prefix(&root)?
+        .to_string_lossy()
+        .replace('\\', "/");
+
+    Ok(FileRange {
+        path: rel,
+        start_line: start,
+        end_line: end,
+        total_lines,
+        text: range_text,
+    })
 }
 
 pub(crate) fn is_ignored(path: &Path) -> bool {
@@ -901,6 +1007,35 @@ fn is_test_path(path: &str) -> bool {
         || path.ends_with("_test.py")
         || path.ends_with(".test.ts")
         || path.ends_with(".test.tsx")
+}
+
+fn is_entrypoint_path(path: &str) -> bool {
+    matches!(
+        path,
+        "src/main.rs"
+            | "src/lib.rs"
+            | "main.py"
+            | "app.py"
+            | "server.py"
+            | "index.js"
+            | "index.ts"
+            | "src/index.js"
+            | "src/index.ts"
+            | "cmd/main.go"
+            | "main.go"
+            | "Package.swift"
+            | "Cargo.toml"
+            | "package.json"
+            | "pyproject.toml"
+    ) || path.starts_with("cmd/")
+}
+
+fn symbol_kind_rank(kind: &str) -> usize {
+    match kind {
+        "class" | "struct" | "enum" | "interface" => 0,
+        "function" => 1,
+        _ => 2,
+    }
 }
 
 pub(crate) fn round4(value: f64) -> f64 {

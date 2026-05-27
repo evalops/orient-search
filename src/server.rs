@@ -1,5 +1,5 @@
 use crate::fast_index::FastIndex;
-use crate::repo_index::{RepoIndexer, SearchFilters, search_repo_fast_filtered};
+use crate::repo_index::{RepoIndexer, SearchFilters, read_file_range, search_repo_fast_filtered};
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -65,6 +65,24 @@ fn dispatch_result(request: &ToolRequest) -> Result<Value> {
             let index = RepoIndexer::new(repo).build()?;
             Ok(serde_json::to_value(index.repo_brief())?)
         }
+        "repo_map" => {
+            let repo = path_arg(&request.arguments, "repo")?;
+            let symbol_limit = usize_arg(&request.arguments, "symbols").unwrap_or(50);
+            let test_limit = usize_arg(&request.arguments, "tests").unwrap_or(50);
+            let index = RepoIndexer::new(repo).build()?;
+            Ok(serde_json::to_value(
+                index.repo_map(symbol_limit, test_limit),
+            )?)
+        }
+        "read_range" => {
+            let repo = path_arg(&request.arguments, "repo")?;
+            let path = string_arg(&request.arguments, "path")?;
+            let start = usize_arg(&request.arguments, "start").unwrap_or(1);
+            let lines = usize_arg(&request.arguments, "lines").unwrap_or(80);
+            Ok(serde_json::to_value(read_file_range(
+                repo, &path, start, lines,
+            )?)?)
+        }
         "search_code" => {
             let repo = path_arg(&request.arguments, "repo")?;
             let query = string_arg(&request.arguments, "query")?;
@@ -103,6 +121,8 @@ fn dispatch_result(request: &ToolRequest) -> Result<Value> {
         }
         "list_tools" => Ok(json!([
             "repo_brief",
+            "repo_map",
+            "read_range",
             "search_code",
             "indexed_search_code",
             "find_symbol",

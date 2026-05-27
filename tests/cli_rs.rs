@@ -43,6 +43,50 @@ fn cli_outputs_repo_brief_as_json() {
 }
 
 #[test]
+fn cli_outputs_repo_map_and_reads_ranges() {
+    let repo = sample_repo();
+    write(
+        &repo.path().join("tests/auth_test.rs"),
+        "use sample::SessionManager;\n#[test]\nfn issues_tokens() {}\n",
+    );
+
+    let mut repo_map = Command::cargo_bin("orient").unwrap();
+    repo_map
+        .args([
+            "repo-map",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--symbols",
+            "5",
+            "--tests",
+            "5",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"entrypoints\""))
+        .stdout(predicate::str::contains("src/auth.rs"))
+        .stdout(predicate::str::contains("tests/auth_test.rs"))
+        .stdout(predicate::str::contains("SessionManager"));
+
+    let mut read_range = Command::cargo_bin("orient").unwrap();
+    read_range
+        .args([
+            "read-range",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "src/auth.rs",
+            "--start",
+            "3",
+            "--lines",
+            "3",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"start_line\":3"))
+        .stdout(predicate::str::contains("issue_token"));
+}
+
+#[test]
 fn cli_searches_symbols_and_related_files() {
     let repo = sample_repo();
 
@@ -170,6 +214,8 @@ fn cli_reports_search_benchmarks() {
             "2",
             "--warmup",
             "1",
+            "--fail-p95-ms",
+            "1000",
             "issue token",
         ])
         .assert()
@@ -202,10 +248,34 @@ fn cli_reports_search_benchmarks() {
             "2",
             "--warmup",
             "1",
+            "--fail-p95-ms",
+            "1000",
             "issue token",
         ])
         .assert()
         .success()
         .stdout(predicate::str::contains("\"mode\":\"indexed\""))
         .stdout(predicate::str::contains("\"p95_ms\""));
+}
+
+#[test]
+fn cli_benchmark_can_fail_on_p95_threshold() {
+    let repo = sample_repo();
+
+    let mut cmd = Command::cargo_bin("orient").unwrap();
+    cmd.args([
+        "bench-search",
+        "--repo",
+        repo.path().to_str().unwrap(),
+        "--runs",
+        "1",
+        "--warmup",
+        "0",
+        "--fail-p95-ms",
+        "0",
+        "issue token",
+    ])
+    .assert()
+    .failure()
+    .stderr(predicate::str::contains("exceeded threshold"));
 }

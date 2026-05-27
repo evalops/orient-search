@@ -33,8 +33,9 @@ Implemented now:
 - `orient index`: persistent Rust token/path posting index.
 - `orient refresh-index`: incremental refresh that reuses unchanged file metadata/terms and refreshes changed files.
 - `orient indexed-search`: indexed query path.
-- `orient bench-search`: built-in p50/p95/max latency reporting for fallback and indexed search.
-- JSON-lines tools: `search_code` and `indexed_search_code`.
+- `orient bench-search`: built-in p50/p95/max latency reporting for fallback and indexed search, with `--fail-p95-ms` for regression gates.
+- JSON-lines tools: `search_code`, `indexed_search_code`, `repo_map`, and `read_range`.
+- CLI tools: `repo-map` and `read-range`, so agents can inspect entrypoints/tests/top symbols and open bounded file context after a search hit.
 - Result de-duping for repeated worktree copies where practical.
 - Exact symbol definition boosting in both fallback and indexed search.
 
