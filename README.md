@@ -218,6 +218,7 @@ Supported tools:
 `daemon_status` reports local warm-cache counts for the current daemon process, including cached index paths, cached shard-manifest directories, and compact cached shard details such as repo names, roots, aliases, index file names, and git metadata. It does not inspect Codex/Claude sessions or emit telemetry.
 Use `warm_index` or `warm_shards`, or pass `--index` / `--index-dir` to `serve-tcp`, to load persistent indexes before the first agent query.
 Use `ensure_shards` when several local agents share the same workspaces: it builds the shard directory on first run, refreshes it on later runs, and warms the daemon cache in one request.
+After warming, shard search, shard query plans, shard range reads, shard repo maps, and shard related-context tools reuse cached manifests and index objects.
 Use `discover_repos`, or `index_shards` with `discover_root`, when a local machine has many duplicated worktrees and nested repo collections.
 For indexed or shard JSON search arguments, use `repo` or `repo_filter` to restrict by repository name. Shard search also records aliases for immediate child directories that look like repos, so a shard rooted at a dated worktree can still answer filters like `repo:maestro` or `repo:platform`. Shard repo filters also match recorded git origin, branch, common git dir, and clone/worktree kind when available. Alias-scoped shard search, symbol lookup, repo maps, and related-context tools return alias-prefixed paths such as `maestro/src/app.rs`, and `read-shard-range` accepts those paths directly. For `search_code`, `repo` is the repository root path, so use `repo_filter` for name filtering.
 JSON search tools also accept structured negative filters: `exclude_file`, `exclude_path`, `exclude_language`, `exclude_extension`, `exclude_symbol`, and `exclude_repo`. Each may be a string or an array of strings, so wrappers can pass excludes without rewriting the query string.
@@ -307,12 +308,12 @@ Product impact criteria for follow-up adoption:
 
 Current search baseline:
 
-- `orient bench-search --repo . --index /tmp/orient-self.index "indexed search symbol filters"`: `1.574ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "session token auth"`: `32.297ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "browser session implementation"`: `36.588ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "postgres migration user"`: `53.593ms` p95 after warmup.
+- `orient bench-search --repo . --index /tmp/orient-self.index "indexed search symbol filters"`: `1.159ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "session token auth"`: `37.671ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "browser session implementation"`: `68.093ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "postgres migration user"`: `80.368ms` p95 after warmup.
 - `orient bench-shards --index-dir /tmp/orient-self-shards "repo:agent-jsonl-explorer indexed search symbol filters"`: `3.428ms` p95 after warmup.
-- `orient bench-shards --index-dir /tmp/orient-self-shards --cached "repo:agent-jsonl-explorer indexed search symbol filters"`: `1.606ms` p95 after warmup.
+- `orient bench-shards --index-dir /tmp/orient-self-shards --cached "repo:agent-jsonl-explorer indexed search symbol filters"`: `1.209ms` p95 after warmup.
 - The `rg` hot path has a `250ms` wall-clock timeout plus a bounded match cap; timed-out searches return partial results rather than hanging.
 - `orient index --repo . --output /tmp/orient-self.index`: versioned binary index with file metadata, content token postings, path token postings, trigram postings, line offsets, token-to-line tables, bounded source snapshots, and symbol boosts.
 - `orient discover-repos --root /Users/jonathanhaas/Documents/Projects --max-depth 2 --limit 500`: found 369 git or manifest-backed repo roots after scanning 2,889 directories, while skipping dependency/build directories and prioritizing visible canonical repos ahead of dated split, temp, and worktree folders when limits are small.

@@ -6,9 +6,9 @@ use crate::repo_index::{
     finalize_results, normalize_token, read_file_range, search_repo_fast_filtered,
 };
 use crate::shards::{
-    ShardEntry, ShardManifest, ShardRepoMap, ShardSearchScope, build_shards, ensure_shards,
-    filter_repo_map_by_prefix, filters_for_shard_scope, load_manifest, refresh_shards,
-    resolve_shard_read_path, shard_query_plans, shard_search_scopes,
+    ShardEntry, ShardManifest, ShardQueryPlan, ShardRepoMap, ShardSearchScope, build_shards,
+    ensure_shards, filter_repo_map_by_prefix, filters_for_shard_scope, load_manifest,
+    refresh_shards, resolve_shard_read_path, shard_search_scopes,
 };
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
@@ -775,7 +775,7 @@ impl ToolRuntime {
             "shard_query_plan" => {
                 let index_dir = path_arg(&request.arguments, "index_dir")?;
                 let query = string_arg(&request.arguments, "query")?;
-                Ok(serde_json::to_value(shard_query_plans(
+                Ok(serde_json::to_value(self.shard_query_plans_cached(
                     &index_dir,
                     &query,
                     &search_filters(&request.arguments, true)?,
@@ -1216,6 +1216,43 @@ impl ToolRuntime {
             Ok::<(), anyhow::Error>(())
         })?;
         Ok(results)
+    }
+
+    fn shard_query_plans_cached(
+        &self,
+        index_dir: &std::path::Path,
+        query: &str,
+        filters: &SearchFilters,
+    ) -> Result<Vec<ShardQueryPlan>> {
+        let manifest = self.cached_shard_manifest(index_dir)?;
+        let parsed = parse_query(query);
+        let filters = merge_filters(filters.clone(), parsed.filters);
+        let shard_query = query_text(&parsed.terms, &filters);
+        let mut plans = Vec::new();
+        for shard in &manifest.shards {
+            let scopes = shard_search_scopes(shard, &filters);
+            if scopes.is_empty() {
+                continue;
+            }
+            let index = self.cached_index(index_dir.join(&shard.index))?;
+            for scope in scopes {
+                let scoped_filters =
+                    filters_for_shard_scope(&filters, scope.path_prefix.as_deref());
+                plans.push(ShardQueryPlan {
+                    aliases: shard
+                        .aliases
+                        .iter()
+                        .map(|alias| alias.name.clone())
+                        .collect(),
+                    git: shard.git.clone(),
+                    name: scope.output_prefix,
+                    root: shard.root.clone(),
+                    plan: index.query_plan(&shard_query, &scoped_filters)?,
+                });
+            }
+        }
+        plans.sort_by(|left, right| left.name.cmp(&right.name));
+        Ok(plans)
     }
 
     fn search_shard_job_batch_cached(

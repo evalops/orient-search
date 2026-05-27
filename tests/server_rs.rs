@@ -841,6 +841,21 @@ fn runtime_reuses_cached_shard_index_after_initial_load() {
         "{:?}",
         related_symbols.result
     );
+
+    let plan = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("plan"),
+        tool: "shard_query_plan".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": shard_dir.path(),
+            "query": "invoice missingterm",
+            "require_all": true
+        }),
+    });
+    assert!(plan.error.is_none(), "{:?}", plan.error);
+    let plan_result = serde_json::to_string(&plan.result).unwrap();
+    assert!(plan_result.contains("\"missing_terms\""), "{plan_result}");
+    assert!(plan_result.contains("missingterm"), "{plan_result}");
+    assert!(plan_result.contains("drop_missing_terms"), "{plan_result}");
 }
 
 #[test]
