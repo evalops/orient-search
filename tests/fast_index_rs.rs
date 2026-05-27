@@ -237,6 +237,49 @@ fn indexed_search_uses_trigram_postings_for_substring_queries() {
 }
 
 #[test]
+fn indexed_search_uses_path_postings_for_path_only_matches() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/auth_gateway.rs"),
+        "pub fn issue_token() {}\n",
+    );
+    write(&repo.path().join("src/billing.rs"), "pub fn auth() {}\n");
+
+    let index = FastIndex::build(repo.path()).unwrap();
+    let stats = index.stats();
+    assert!(stats.path_terms > 0);
+    let auth = index
+        .files
+        .iter()
+        .find(|file| file.path == "src/auth_gateway.rs")
+        .unwrap();
+    assert!(auth.path_terms.iter().any(|term| term.term == "gateway"));
+
+    let results = index.search("gateway", 10).unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].path, "src/auth_gateway.rs");
+
+    let explained = index
+        .search_filtered(
+            "gateway",
+            10,
+            &SearchFilters {
+                explain: true,
+                ..SearchFilters::default()
+            },
+        )
+        .unwrap();
+    assert!(
+        explained[0]
+            .explanation
+            .as_ref()
+            .unwrap()
+            .iter()
+            .any(|signal| signal.kind == "path_term")
+    );
+}
+
+#[test]
 fn indexed_trigram_planner_unions_single_literal_and_substring_candidates() {
     let repo = tempfile::tempdir().unwrap();
     write(

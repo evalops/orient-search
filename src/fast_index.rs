@@ -14,7 +14,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const INDEX_VERSION: u32 = 5;
+const INDEX_VERSION: u32 = 6;
 const MAX_FILE_BYTES: u64 = 512_000;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -23,6 +23,7 @@ pub struct FastIndex {
     pub root: PathBuf,
     pub files: Vec<IndexedPath>,
     pub postings: HashMap<String, Vec<Posting>>,
+    pub path_postings: HashMap<String, Vec<Posting>>,
     pub trigram_postings: HashMap<String, Vec<Posting>>,
 }
 
@@ -34,6 +35,7 @@ pub struct IndexedPath {
     pub modified_secs: u64,
     pub modified_nanos: u32,
     pub terms: Vec<TermCount>,
+    pub path_terms: Vec<TermCount>,
     pub trigrams: Vec<TermCount>,
     pub symbols: Vec<IndexedSymbol>,
     pub line_offsets: Vec<u32>,
@@ -66,6 +68,7 @@ pub struct IndexStats {
     pub root: PathBuf,
     pub files: usize,
     pub terms: usize,
+    pub path_terms: usize,
     pub trigrams: usize,
     pub symbols: usize,
 }
@@ -76,6 +79,7 @@ pub struct RefreshStats {
     pub root: PathBuf,
     pub files: usize,
     pub terms: usize,
+    pub path_terms: usize,
     pub trigrams: usize,
     pub symbols: usize,
     pub reused_files: usize,
@@ -166,12 +170,14 @@ impl FastIndex {
             .filter(|path| !seen.contains(*path))
             .count();
         let postings = rebuild_postings(&files, |file| &file.terms);
+        let path_postings = rebuild_postings(&files, |file| &file.path_terms);
         let trigram_postings = rebuild_postings(&files, |file| &file.trigrams);
         Ok(Self {
             version: INDEX_VERSION,
             root,
             files,
             postings,
+            path_postings,
             trigram_postings,
         })
         .map(|index| RefreshOutcome {
@@ -209,6 +215,7 @@ impl FastIndex {
             root: self.root.clone(),
             files: self.files.len(),
             terms: self.postings.len(),
+            path_terms: self.path_postings.len(),
             trigrams: self.trigram_postings.len(),
             symbols: self.files.iter().map(|file| file.symbols.len()).sum(),
         }
@@ -220,6 +227,7 @@ impl FastIndex {
             root: self.root.clone(),
             files: self.files.len(),
             terms: self.postings.len(),
+            path_terms: self.path_postings.len(),
             trigrams: self.trigram_postings.len(),
             symbols: self.files.iter().map(|file| file.symbols.len()).sum(),
             reused_files: outcome.reused_files,
@@ -257,6 +265,14 @@ impl FastIndex {
             .iter()
             .filter_map(|token| self.postings.get(token).map(|postings| (token, postings)))
             .collect::<Vec<_>>();
+        let mut path_postings = query_tokens
+            .iter()
+            .filter_map(|token| {
+                self.path_postings
+                    .get(token)
+                    .map(|postings| (token, postings))
+            })
+            .collect::<Vec<_>>();
         let use_trigrams = !query_trigrams.is_empty()
             && (token_postings.len() < query_tokens.len()
                 || (query_tokens.len() == 1 && query_tokens[0].len() >= 5));
@@ -272,15 +288,25 @@ impl FastIndex {
         } else {
             Vec::new()
         };
-        if token_postings.is_empty() && trigram_postings.is_empty() {
+        if token_postings.is_empty() && path_postings.is_empty() && trigram_postings.is_empty() {
             return Ok(Vec::new());
         }
         token_postings.sort_by_key(|(_, postings)| postings.len());
+        path_postings.sort_by_key(|(_, postings)| postings.len());
         trigram_postings.sort_by_key(|(_, postings)| postings.len());
+        let content_tokens = token_postings
+            .iter()
+            .map(|(token, _)| (*token).as_str())
+            .collect::<HashSet<_>>();
+        let path_plan_postings = path_postings
+            .iter()
+            .filter(|(token, _)| !content_tokens.contains(token.as_str()))
+            .collect::<Vec<_>>();
 
         let mut planned_postings = token_postings
             .iter()
             .map(|(_, postings)| *postings)
+            .chain(path_plan_postings.iter().map(|(_, postings)| *postings))
             .chain(
                 trigram_postings
                     .iter()
@@ -289,11 +315,14 @@ impl FastIndex {
             )
             .collect::<Vec<_>>();
         planned_postings.sort_by_key(|postings| postings.len());
-        let candidate_ids = if use_trigrams && !token_postings.is_empty() && query_tokens.len() == 1
+        let candidate_ids = if use_trigrams
+            && (!token_postings.is_empty() || !path_postings.is_empty())
+            && query_tokens.len() == 1
         {
             let token_only = token_postings
                 .iter()
                 .map(|(_, postings)| *postings)
+                .chain(path_plan_postings.iter().map(|(_, postings)| *postings))
                 .collect::<Vec<_>>();
             let trigram_only = trigram_postings
                 .iter()
@@ -309,6 +338,18 @@ impl FastIndex {
         };
 
         let posting_maps = token_postings
+            .iter()
+            .map(|(token, postings)| {
+                (
+                    (*token).clone(),
+                    postings
+                        .iter()
+                        .map(|posting| (posting.file_id, posting.count))
+                        .collect::<HashMap<_, _>>(),
+                )
+            })
+            .collect::<Vec<_>>();
+        let path_maps = path_postings
             .iter()
             .map(|(token, postings)| {
                 (
@@ -345,6 +386,7 @@ impl FastIndex {
                     file_id,
                     &query_tokens,
                     &posting_maps,
+                    &path_maps,
                     &trigram_maps,
                     filters.snippet,
                     filters.explain,
@@ -365,6 +407,7 @@ impl FastIndex {
         file_id: u32,
         query_tokens: &[String],
         posting_maps: &[(String, HashMap<u32, u16>)],
+        path_maps: &[(String, HashMap<u32, u16>)],
         trigram_maps: &[(String, HashMap<u32, u16>)],
         snippet_mode: SnippetMode,
         explain: bool,
@@ -391,6 +434,17 @@ impl FastIndex {
             if token_score > 0.0 {
                 score += token_score;
                 reasons.push(token.clone());
+            }
+        }
+        for (token, postings) in path_maps {
+            let count = postings.get(&file_id).copied().unwrap_or_default();
+            if count > 0 {
+                let amount = 8.0 + (count as f64).ln();
+                score += amount;
+                signals.push(rank_signal("path_term", token, amount));
+                if !reasons.contains(token) {
+                    reasons.push(token.clone());
+                }
             }
         }
         let mut trigram_score = 0.0;
@@ -465,7 +519,7 @@ fn index_file(
         return None;
     }
     let line_offsets = line_offsets(&text);
-    let mut terms = token_counts(&format!("{rel}\n{text}"))
+    let mut terms = token_counts(&text)
         .into_iter()
         .map(|(term, count)| TermCount {
             term,
@@ -473,6 +527,14 @@ fn index_file(
         })
         .collect::<Vec<_>>();
     terms.sort_by(|a, b| a.term.cmp(&b.term));
+    let mut path_terms = token_counts(rel)
+        .into_iter()
+        .map(|(term, count)| TermCount {
+            term,
+            count: count.min(u16::MAX as usize) as u16,
+        })
+        .collect::<Vec<_>>();
+    path_terms.sort_by(|a, b| a.term.cmp(&b.term));
     let mut trigrams = trigram_counts(&format!("{rel}\n{text}"))
         .into_iter()
         .map(|(term, count)| TermCount {
@@ -499,6 +561,7 @@ fn index_file(
         modified_secs,
         modified_nanos,
         terms,
+        path_terms,
         trigrams,
         symbols,
         line_offsets,
