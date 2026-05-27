@@ -6,8 +6,9 @@ use crate::repo_index::{
     finalize_results, normalize_token, read_file_range, search_repo_fast_filtered,
 };
 use crate::shards::{
-    ShardRepoMap, build_shards, ensure_shards, filter_repo_map_by_prefix, filters_for_shard_scope,
-    load_manifest, refresh_shards, resolve_shard_path, shard_search_scopes,
+    ShardEntry, ShardRepoMap, ShardSearchScope, build_shards, ensure_shards,
+    filter_repo_map_by_prefix, filters_for_shard_scope, load_manifest, refresh_shards,
+    resolve_shard_path, shard_search_scopes,
 };
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
@@ -103,6 +104,11 @@ enum IndexCacheState {
     Loading,
     Ready(Arc<FastIndex>),
     Failed(String),
+}
+
+struct ShardSearchJob {
+    shard: ShardEntry,
+    scopes: Vec<ShardSearchScope>,
 }
 
 impl IndexCacheEntry {
@@ -983,32 +989,91 @@ impl ToolRuntime {
         let parsed = parse_query(query);
         let filters = merge_filters(filters.clone(), parsed.filters);
         let shard_query = query_text(&parsed.terms, &filters);
+        let jobs = manifest
+            .shards
+            .into_iter()
+            .filter_map(|shard| {
+                let scopes = shard_search_scopes(&shard, &filters);
+                (!scopes.is_empty()).then_some(ShardSearchJob { shard, scopes })
+            })
+            .collect::<Vec<_>>();
+        let results =
+            self.search_shard_jobs_cached(index_dir, &shard_query, limit, &filters, jobs)?;
+        let mut results = finalize_results(results, limit);
+        attach_result_context(&mut results, context_lines, |path, start, lines| {
+            self.read_shard_range_cached(index_dir, path, start, lines)
+        })?;
+        Ok(results)
+    }
+
+    fn search_shard_jobs_cached(
+        &self,
+        index_dir: &std::path::Path,
+        query: &str,
+        limit: usize,
+        filters: &SearchFilters,
+        jobs: Vec<ShardSearchJob>,
+    ) -> Result<Vec<SearchResult>> {
+        if jobs.is_empty() || limit == 0 {
+            return Ok(Vec::new());
+        }
+
+        let workers = std::thread::available_parallelism()
+            .map(|count| count.get())
+            .unwrap_or(1)
+            .min(jobs.len());
+        if workers <= 1 {
+            return self.search_shard_job_batch_cached(index_dir, query, limit, filters, &jobs);
+        }
+
+        let chunk_size = jobs.len().div_ceil(workers);
         let mut results = Vec::new();
-        for shard in manifest.shards {
-            let scopes = shard_search_scopes(&shard, &filters);
-            if scopes.is_empty() {
-                continue;
+        thread::scope(|scope| {
+            let handles = jobs
+                .chunks(chunk_size)
+                .map(|chunk| {
+                    scope.spawn(move || {
+                        self.search_shard_job_batch_cached(index_dir, query, limit, filters, chunk)
+                    })
+                })
+                .collect::<Vec<_>>();
+
+            for handle in handles {
+                let batch = handle
+                    .join()
+                    .map_err(|_| anyhow!("shard search worker panicked"))??;
+                results.extend(batch);
             }
-            let index = self.cached_index(index_dir.join(&shard.index))?;
-            for scope in scopes {
-                let scoped_filters =
-                    filters_for_shard_scope(&filters, scope.path_prefix.as_deref());
-                for mut result in index.search_filtered(&shard_query, limit, &scoped_filters)? {
+            Ok::<(), anyhow::Error>(())
+        })?;
+        Ok(results)
+    }
+
+    fn search_shard_job_batch_cached(
+        &self,
+        index_dir: &std::path::Path,
+        query: &str,
+        limit: usize,
+        filters: &SearchFilters,
+        jobs: &[ShardSearchJob],
+    ) -> Result<Vec<SearchResult>> {
+        let mut results = Vec::new();
+        for job in jobs {
+            let index = self.cached_index(index_dir.join(&job.shard.index))?;
+            for scope in &job.scopes {
+                let scoped_filters = filters_for_shard_scope(filters, scope.path_prefix.as_deref());
+                for mut result in index.search_filtered(query, limit, &scoped_filters)? {
                     if let Some(prefix) = &scope.path_prefix {
                         if !result.path.starts_with(prefix) {
                             continue;
                         }
                     }
-                    result.path = scoped_output_path(&scope, &result.path);
+                    result.path = scoped_output_path(scope, &result.path);
                     result.reason = format!("shard:{}; {}", scope.output_prefix, result.reason);
                     results.push(result);
                 }
             }
         }
-        let mut results = finalize_results(results, limit);
-        attach_result_context(&mut results, context_lines, |path, start, lines| {
-            self.read_shard_range_cached(index_dir, path, start, lines)
-        })?;
         Ok(results)
     }
 

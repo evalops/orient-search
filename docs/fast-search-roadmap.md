@@ -37,7 +37,7 @@ Implemented now:
 - `orient index-shards`, `orient ensure-shards`, `orient refresh-shards`, `orient search-shards`, `orient read-shard-range`, and `orient read-shard-ranges`: local multi-repo shard manifest with one versioned index file per repo, optional discovery from workspace roots, one-step build-or-refresh bootstrap, incremental shard refresh, and bounded range reads from prefixed shard paths.
 - `orient bench-search`: built-in p50/p95/max latency reporting for fallback and indexed search, with `--fail-p95-ms`, `--write-baseline`, and `--baseline` for regression gates.
 - JSON-lines tools: `tool_manifest`, `daemon_status`, `warm_index`, `warm_shards`, `discover_repos`, `search_code`, `indexed_search_code`, `indexed_repo_map`, `read_index_range`, `read_index_ranges`, `find_index_symbol`, `shard_repo_map`, `find_shard_symbol`, `related_index_files`, `related_index_symbols`, `related_shard_files`, `related_shard_symbols`, `index_shards`, `ensure_shards`, `refresh_shards`, `search_shards`, `read_shard_range`, `read_shard_ranges`, `repo_map`, `read_range`, `read_ranges`, and `related_symbols`.
-- Local TCP daemon/client mode for sharing one warm JSON-lines runtime across many local agents working in the same repeated worktree layout, with startup prewarming via `--index` and `--index-dir`, cached shard range/related-context followups, single-flight cold index loads, and no global search lock around cached index requests.
+- Local TCP daemon/client mode for sharing one warm JSON-lines runtime across many local agents working in the same repeated worktree layout, with startup prewarming via `--index` and `--index-dir`, cached shard range/related-context followups, single-flight cold index loads, bounded parallel fanout for broad cached shard searches, and no global search lock around cached index requests.
 - `ensure_shards` JSON-lines bootstrap for shared daemons: build missing shard directories, refresh existing shard directories, clear stale cache entries, and warm every shard index before agent traffic arrives.
 - CLI tools: `repo-map`, `index-map`, `shard-map`, `read-range`, `read-ranges`, `read-index-range`, `read-index-ranges`, `read-shard-ranges`, `index-symbol`, `shard-symbol`, `related-index`, `related-index-symbols`, `related-shard`, `related-shard-symbols`, and `related-symbols`, so agents can inspect entrypoints/tests/top symbols, open bounded file context, and jump to nearby definitions after a search hit.
 - `orient tool-manifest`: emits descriptions, compatibility required/optional argument names, typed argument metadata, defaults, enums, and JSON-schema-like input schemas for JSON-lines wrappers.
@@ -67,12 +67,12 @@ Implemented now:
 
 Measured on this machine:
 
-- Wide tree fallback: `/Users/jonathanhaas/Documents/Projects`, common top-10 literal/token queries at `28-59ms` p95 after warmup across the sampled runs.
+- Wide tree fallback: `/Users/jonathanhaas/Documents/Projects`, common top-10 literal/token queries at `23-55ms` p95 after warmup across the sampled runs.
 - Local repo fallback: query `indexed search symbol filters`, top 10 at about `12.5ms` p95 after warmup.
 - Hot-path fallback has a `250ms` wall-clock timeout plus match caps; if the timeout fires it returns partial results instead of blocking the agent.
 - Local repo index build: about `0.25s`.
 - Local repo refresh after build: reuses unchanged files, reuses same-content renames by retargeting path-derived postings, and rebuilds postings from per-file term lists.
-- Local repo indexed search: query `indexed search symbol filters`, top 10 at about `1.62ms` p95 after warmup.
+- Local repo indexed search: query `indexed search symbol filters`, top 10 at about `1.11ms` p95 after warmup.
 
 ## Exit Conditions
 
