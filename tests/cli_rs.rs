@@ -125,6 +125,22 @@ fn cli_searches_symbols_and_related_files() {
         .assert()
         .success()
         .stdout(predicate::str::contains("\"kind\":\"struct\""));
+
+    let mut related_symbols = Command::cargo_bin("orient").unwrap();
+    related_symbols
+        .args([
+            "related-symbols",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--path",
+            "src/auth.rs",
+            "--query",
+            "SessionManager",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("SessionManager"))
+        .stdout(predicate::str::contains("same file"));
 }
 
 #[test]

@@ -7,7 +7,7 @@ Rust-native fast local code search for coding agents. It gives Codex, Claude, Am
 - Indexes a local repo and returns compact search answers.
 - Searches code with a fast `rg`-backed hot path plus an experimental persistent Rust index.
 - Boosts exact symbol definitions in both fallback and indexed search.
-- Finds symbols and related test/source files.
+- Finds symbols plus related test/source files and nearby definitions.
 - Reads bounded line ranges after search hits, with line-numbered output.
 - Builds repo maps with entrypoints, tests, top symbols, commands, and important files.
 - Infers known commands from repo manifests.
@@ -44,6 +44,7 @@ cargo run -- symbol --repo /path/to/repo SessionManager
 
 # Find related tests/files.
 cargo run -- related --repo /path/to/repo src/auth.py
+cargo run -- related-symbols --repo /path/to/repo --path src/auth.py --query "session token"
 
 # Read a bounded, line-numbered file range.
 cargo run -- read-range --repo /path/to/repo src/auth.py --start 40 --lines 80
@@ -83,6 +84,7 @@ Supported tools:
 - `indexed_search_code`
 - `find_symbol`
 - `related_files`
+- `related_symbols`
 
 ## Query Language
 
@@ -142,14 +144,14 @@ Product impact criteria for follow-up adoption:
 
 Current search baseline:
 
-- `orient bench-search --repo . "indexed search symbol filters"`: `14.700ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "session token auth"`: `17.294ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "browser session implementation"`: `22.004ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "postgres migration user"`: `30.600ms` p95 after warmup.
+- `orient bench-search --repo . "indexed search symbol filters"`: `8.408ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "session token auth"`: `17.222ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "browser session implementation"`: `29.931ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "postgres migration user"`: `31.778ms` p95 after warmup.
 - The `rg` hot path has a `250ms` wall-clock timeout plus a bounded match cap; timed-out searches return partial results rather than hanging.
 - `orient index --repo . --output /tmp/orient-self.index`: versioned binary index with file metadata, terms, and symbol boosts.
 - `orient refresh-index --repo . --index /tmp/orient-self.index`: reuses unchanged files and refreshes changed/deleted files.
-- `orient bench-search --repo . --index /tmp/orient-self.index "indexed search symbol filters"`: `0.163ms` p95 after warmup.
+- `orient bench-search --repo . --index /tmp/orient-self.index "indexed search symbol filters"`: `0.525ms` p95 after warmup.
 
 Benchmark methodology:
 

@@ -121,6 +121,18 @@ fn dispatch_result(request: &ToolRequest) -> Result<Value> {
             let index = RepoIndexer::new(repo).build()?;
             Ok(serde_json::to_value(index.related_files(&path, limit))?)
         }
+        "related_symbols" => {
+            let repo = path_arg(&request.arguments, "repo")?;
+            let path = optional_string_arg(&request.arguments, "path");
+            let query = optional_string_arg(&request.arguments, "query");
+            let limit = usize_arg(&request.arguments, "limit").unwrap_or(10);
+            let index = RepoIndexer::new(repo).build()?;
+            Ok(serde_json::to_value(index.related_symbols(
+                path.as_deref(),
+                query.as_deref(),
+                limit,
+            ))?)
+        }
         "list_tools" => Ok(json!([
             "repo_brief",
             "repo_map",
@@ -128,7 +140,8 @@ fn dispatch_result(request: &ToolRequest) -> Result<Value> {
             "search_code",
             "indexed_search_code",
             "find_symbol",
-            "related_files"
+            "related_files",
+            "related_symbols"
         ])),
         other => Err(anyhow!("unknown tool: {other}")),
     }

@@ -105,6 +105,16 @@ enum Commands {
         #[arg(long, default_value_t = 10)]
         limit: usize,
     },
+    RelatedSymbols {
+        #[arg(long, default_value = ".")]
+        repo: PathBuf,
+        #[arg(long)]
+        path: Option<String>,
+        #[arg(long)]
+        query: Option<String>,
+        #[arg(long, default_value_t = 10)]
+        limit: usize,
+    },
     BenchSearch {
         #[arg(long, default_value = ".")]
         repo: PathBuf,
@@ -275,6 +285,22 @@ fn main() -> Result<()> {
             println!(
                 "{}",
                 serde_json::to_string(&index.related_files(&path, limit))?
+            );
+        }
+        Commands::RelatedSymbols {
+            repo,
+            path,
+            query,
+            limit,
+        } => {
+            let index = RepoIndexer::new(repo).build()?;
+            println!(
+                "{}",
+                serde_json::to_string(&index.related_symbols(
+                    path.as_deref(),
+                    query.as_deref(),
+                    limit,
+                ))?
             );
         }
         Commands::BenchSearch {

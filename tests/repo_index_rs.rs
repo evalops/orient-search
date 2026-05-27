@@ -55,6 +55,16 @@ def test_issue_token_round_trip():
         .collect();
     assert!(related.contains(&"tests/test_auth.py".to_string()));
 
+    let related_symbols = index.related_symbols(Some("src/auth.py"), Some("session token"), 10);
+    assert_eq!(related_symbols[0].symbol.name, "SessionManager");
+    assert_eq!(related_symbols[0].symbol.path, "src/auth.py");
+    assert!(related_symbols[0].reason.contains("same file"));
+    assert!(
+        related_symbols
+            .iter()
+            .any(|item| item.symbol.name == "verify_token")
+    );
+
     let brief = index.repo_brief();
     assert_eq!(brief.language_counts.get("python"), Some(&2));
     assert!(brief.known_commands.contains(&"pytest".to_string()));

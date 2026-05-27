@@ -34,8 +34,8 @@ Implemented now:
 - `orient refresh-index`: incremental refresh that reuses unchanged file metadata/terms and refreshes changed files.
 - `orient indexed-search`: indexed query path.
 - `orient bench-search`: built-in p50/p95/max latency reporting for fallback and indexed search, with `--fail-p95-ms` for regression gates.
-- JSON-lines tools: `search_code`, `indexed_search_code`, `repo_map`, and `read_range`.
-- CLI tools: `repo-map` and `read-range`, so agents can inspect entrypoints/tests/top symbols and open bounded file context after a search hit.
+- JSON-lines tools: `search_code`, `indexed_search_code`, `repo_map`, `read_range`, and `related_symbols`.
+- CLI tools: `repo-map`, `read-range`, and `related-symbols`, so agents can inspect entrypoints/tests/top symbols, open bounded file context, and jump to nearby definitions after a search hit.
 - Search snippet modes: `short`, `medium`, `block`, and `symbol`.
 - Optional structured ranking explanations with path/content/term-frequency/symbol signals.
 - Indexed files persist line-offset tables for bounded snippet rendering.
@@ -44,8 +44,8 @@ Implemented now:
 
 Measured on this machine:
 
-- Wide tree fallback: `/Users/jonathanhaas/Documents/Projects`, common top-10 literal/token queries at `17-31ms` p95 after warmup across the sampled runs.
-- Local repo fallback: query `indexed search symbol filters`, top 10 at about `14ms` p95 after warmup.
+- Wide tree fallback: `/Users/jonathanhaas/Documents/Projects`, common top-10 literal/token queries at `17-32ms` p95 after warmup across the sampled runs.
+- Local repo fallback: query `indexed search symbol filters`, top 10 at about `9ms` p95 after warmup.
 - Hot-path fallback has a `250ms` wall-clock timeout plus match caps; if the timeout fires it returns partial results instead of blocking the agent.
 - Local repo index build: about `0.25s`.
 - Local repo refresh after build: reuses unchanged files and rebuilds postings from per-file term lists.

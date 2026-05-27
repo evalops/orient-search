@@ -150,8 +150,19 @@ fn server_handles_repo_map_and_read_range_requests() {
             "lines": 2
         }
     });
+    let symbols_request = serde_json::json!({
+        "id": "symbols",
+        "tool": "related_symbols",
+        "arguments": {
+            "repo": repo.path(),
+            "path": "src/auth.rs",
+            "query": "SessionManager",
+            "limit": 5
+        }
+    });
     writeln!(child.stdin.as_mut().unwrap(), "{map_request}").unwrap();
     writeln!(child.stdin.as_mut().unwrap(), "{range_request}").unwrap();
+    writeln!(child.stdin.as_mut().unwrap(), "{symbols_request}").unwrap();
     drop(child.stdin.take());
 
     let output = child.wait_with_output().unwrap();
@@ -163,4 +174,6 @@ fn server_handles_repo_map_and_read_range_requests() {
     assert!(stdout.contains("\"id\":\"range\""));
     assert!(stdout.contains("\"start_line\":2"));
     assert!(stdout.contains("issue_token"));
+    assert!(stdout.contains("\"id\":\"symbols\""));
+    assert!(stdout.contains("same file"));
 }

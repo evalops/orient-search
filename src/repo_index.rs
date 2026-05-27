@@ -139,6 +139,13 @@ pub struct RelatedFile {
     pub score: f64,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RelatedSymbol {
+    pub symbol: Symbol,
+    pub reason: String,
+    pub score: f64,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RepoBrief {
     pub root_name: String,
@@ -743,6 +750,102 @@ impl RepoIndex {
                 .partial_cmp(&a.score)
                 .unwrap_or(Ordering::Equal)
                 .then_with(|| a.path.cmp(&b.path))
+        });
+        related.truncate(limit);
+        related
+    }
+
+    pub fn related_symbols(
+        &self,
+        path: Option<&str>,
+        query: Option<&str>,
+        limit: usize,
+    ) -> Vec<RelatedSymbol> {
+        let normalized_path = path.map(|value| value.trim_start_matches('/').to_string());
+        let query_tokens = query
+            .map(tokenize)
+            .unwrap_or_default()
+            .into_iter()
+            .collect::<HashSet<_>>();
+        let query_symbol = query.map(normalize_token).unwrap_or_default();
+        let path_stem = normalized_path
+            .as_deref()
+            .and_then(|path| Path::new(path).file_stem())
+            .map(|value| value.to_string_lossy().to_ascii_lowercase())
+            .unwrap_or_default();
+        let path_dir = normalized_path
+            .as_deref()
+            .and_then(|path| Path::new(path).parent())
+            .map(|value| value.to_string_lossy().to_string())
+            .unwrap_or_default();
+        let mut related = Vec::new();
+
+        for symbol in &self.symbols {
+            let mut score = 0.0;
+            let mut reasons = Vec::new();
+            if let Some(path) = &normalized_path {
+                if &symbol.path == path {
+                    score += 20.0;
+                    reasons.push("same file".to_string());
+                }
+                if !path_dir.is_empty()
+                    && Path::new(&symbol.path)
+                        .parent()
+                        .map(|value| value.to_string_lossy() == path_dir)
+                        .unwrap_or(false)
+                {
+                    score += 4.0;
+                    reasons.push("same directory".to_string());
+                }
+                let symbol_path_lower = symbol.path.to_ascii_lowercase();
+                if !path_stem.is_empty()
+                    && (symbol.name.to_ascii_lowercase().contains(&path_stem)
+                        || symbol_path_lower.contains(&path_stem))
+                {
+                    score += 3.0;
+                    reasons.push(format!("shares stem {path_stem}"));
+                }
+            }
+
+            if !query_tokens.is_empty() {
+                let symbol_tokens = tokenize(&symbol.name)
+                    .into_iter()
+                    .chain(tokenize(&symbol.path))
+                    .collect::<HashSet<_>>();
+                let overlap = query_tokens
+                    .iter()
+                    .filter(|token| symbol_tokens.contains(*token))
+                    .count();
+                if overlap > 0 {
+                    score += 5.0 * overlap as f64;
+                    reasons.push(format!("query overlap {overlap}"));
+                }
+                if !query_symbol.is_empty() && normalize_token(&symbol.name) == query_symbol {
+                    score += 15.0;
+                    reasons.push("exact query symbol".to_string());
+                }
+            }
+
+            if score > 0.0 {
+                score += match symbol.kind.as_str() {
+                    "class" | "struct" | "enum" | "interface" => 2.0,
+                    _ => 0.0,
+                };
+                related.push(RelatedSymbol {
+                    symbol: symbol.clone(),
+                    reason: reasons.join("; "),
+                    score: round4(score),
+                });
+            }
+        }
+
+        related.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(Ordering::Equal)
+                .then_with(|| a.symbol.path.cmp(&b.symbol.path))
+                .then_with(|| a.symbol.line.cmp(&b.symbol.line))
+                .then_with(|| a.symbol.name.cmp(&b.symbol.name))
         });
         related.truncate(limit);
         related
