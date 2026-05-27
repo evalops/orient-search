@@ -49,8 +49,8 @@ Implemented now:
 - Filter-only discovery queries like `file:Cargo.toml` or `lang:rust test:true` work across fallback, indexed, shard, CLI, and JSON-lines search surfaces; indexed explain output reports them as `filter_scan`.
 - JSON-lines search tools accept structured `exclude_*` filters as strings or arrays, so wrappers can express negative filters without query-string rewriting.
 - Optional structured ranking explanations with path/content/term-frequency/symbol signals.
-- Indexed explain mode includes query-plan metadata: planner strategy, normalized tokens, exact phrases, trigrams, rarest planned posting lists, missing postings, candidate counts through planning, file-filtering, phrase/scoring, and final-match stages, plus structured zero-hit repair hints; `index-plan` / `indexed_query_plan` and `shard-plan` / `shard_query_plan` expose the same diagnostics for zero-result searches.
-- Indexed search plans candidates from the rarest content/path token postings, falling back to rare trigram postings for substring queries.
+- Indexed explain mode includes query-plan metadata: planner strategy, normalized tokens, exact phrases, trigrams, rarest planned posting lists, broad-query candidate caps, missing postings, candidate counts through planning, file-filtering, phrase/scoring, and final-match stages, plus structured zero-hit repair hints; `index-plan` / `indexed_query_plan` and `shard-plan` / `shard_query_plan` expose the same diagnostics for zero-result searches.
+- Indexed search plans candidates from the rarest content/path token postings, falling back to rare trigram postings for substring queries, and caps broad candidate scoring after a cheap rank-aware prefilter.
 - Indexed files persist line-offset and token-to-line tables for bounded snippet rendering and exact match-line metadata.
 - Result de-duping and grouping for repeated worktree copies using normalized path suffixes and snippet signatures, with compact duplicate metadata on the kept result.
 - Exact symbol definition boosting in both fallback and indexed search.

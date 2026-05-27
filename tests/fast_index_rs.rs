@@ -827,6 +827,40 @@ fn indexed_search_uses_path_postings_for_path_only_matches() {
 }
 
 #[test]
+fn indexed_search_caps_broad_candidates_after_rank_aware_prefilter() {
+    let repo = tempfile::tempdir().unwrap();
+    for index in 0..1100 {
+        write(
+            &repo.path().join(format!("src/file_{index:04}.rs")),
+            &format!("pub fn helper_{index:04}() {{ let _ = \"commonneedle\"; }}\n"),
+        );
+    }
+    write(
+        &repo.path().join("src/zzzz_commonneedle_target.rs"),
+        "pub fn helper_target() { let _ = \"commonneedle\"; }\n",
+    );
+
+    let index = FastIndex::build(repo.path()).unwrap();
+    let results = index
+        .search_filtered(
+            "commonneedle",
+            1,
+            &SearchFilters {
+                explain: true,
+                ..SearchFilters::default()
+            },
+        )
+        .unwrap();
+
+    assert_eq!(results[0].path, "src/zzzz_commonneedle_target.rs");
+    let plan = results[0].query_plan.as_ref().unwrap();
+    assert_eq!(plan.candidate_cap, 1024);
+    assert!(plan.candidate_cap_hit);
+    assert!(plan.candidate_count > plan.candidate_cap);
+    assert!(plan.scored_candidate_count <= plan.candidate_cap);
+}
+
+#[test]
 fn indexed_trigram_planner_unions_single_literal_and_substring_candidates() {
     let repo = tempfile::tempdir().unwrap();
     write(

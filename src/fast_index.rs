@@ -24,6 +24,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 const INDEX_VERSION: u32 = 9;
 const MAX_FILE_BYTES: u64 = 512_000;
 const MAX_TERM_LINES_PER_TERM: usize = 64;
+const MAX_INDEX_CANDIDATES_TO_SCORE: usize = 8_192;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FastIndex {
@@ -885,6 +886,16 @@ impl FastIndex {
                 )
             })
             .collect::<Vec<_>>();
+        let candidate_cap = indexed_candidate_cap(limit);
+        let (candidate_ids, candidate_cap_hit) = cap_candidate_ids(
+            candidate_ids,
+            candidate_cap,
+            &self.files,
+            &query_tokens,
+            &posting_maps,
+            &path_maps,
+            &trigram_maps,
+        );
         let filtered_candidate_ids = candidate_ids
             .into_iter()
             .filter(|file_id| {
@@ -931,6 +942,8 @@ impl FastIndex {
                 use_trigrams,
                 filters.require_all,
                 candidate_count,
+                candidate_cap,
+                candidate_cap_hit,
                 filtered_candidate_count,
                 scored_candidate_count,
                 final_match_count,
@@ -957,6 +970,8 @@ impl FastIndex {
                 missing_terms: Vec::new(),
                 missing_trigrams: Vec::new(),
                 candidate_count: 0,
+                candidate_cap: MAX_INDEX_CANDIDATES_TO_SCORE,
+                candidate_cap_hit: false,
                 filtered_candidate_count: 0,
                 scored_candidate_count: 0,
                 final_match_count: 0,
@@ -990,6 +1005,8 @@ impl FastIndex {
                     missing_terms: Vec::new(),
                     missing_trigrams: Vec::new(),
                     candidate_count,
+                    candidate_cap: MAX_INDEX_CANDIDATES_TO_SCORE,
+                    candidate_cap_hit: false,
                     filtered_candidate_count: candidate_count,
                     scored_candidate_count: candidate_count,
                     final_match_count: candidate_count,
@@ -1006,6 +1023,8 @@ impl FastIndex {
                 missing_terms: Vec::new(),
                 missing_trigrams: Vec::new(),
                 candidate_count: 0,
+                candidate_cap: MAX_INDEX_CANDIDATES_TO_SCORE,
+                candidate_cap_hit: false,
                 filtered_candidate_count: 0,
                 scored_candidate_count: 0,
                 final_match_count: 0,
@@ -1132,6 +1151,16 @@ impl FastIndex {
                 )
             })
             .collect::<Vec<_>>();
+        let candidate_cap = MAX_INDEX_CANDIDATES_TO_SCORE;
+        let (candidate_ids, candidate_cap_hit) = cap_candidate_ids(
+            candidate_ids,
+            candidate_cap,
+            &self.files,
+            &query_tokens,
+            &posting_maps,
+            &path_maps,
+            &trigram_maps,
+        );
         let filtered_candidate_ids = candidate_ids
             .into_iter()
             .filter(|file_id| {
@@ -1176,6 +1205,8 @@ impl FastIndex {
             use_trigrams,
             filters.require_all,
             candidate_count,
+            candidate_cap,
+            candidate_cap_hit,
             filtered_candidate_count,
             scored_candidate_count,
             final_match_count,
@@ -1209,6 +1240,8 @@ impl FastIndex {
                 missing_terms: Vec::new(),
                 missing_trigrams: Vec::new(),
                 candidate_count,
+                candidate_cap: MAX_INDEX_CANDIDATES_TO_SCORE,
+                candidate_cap_hit: false,
                 filtered_candidate_count: candidate_count,
                 scored_candidate_count: candidate_count,
                 final_match_count: candidate_count,
@@ -1357,6 +1390,8 @@ fn indexed_query_plan(
     use_trigrams: bool,
     require_all: bool,
     candidate_count: usize,
+    candidate_cap: usize,
+    candidate_cap_hit: bool,
     filtered_candidate_count: usize,
     scored_candidate_count: usize,
     final_match_count: usize,
@@ -1400,6 +1435,8 @@ fn indexed_query_plan(
         missing_terms: missing_terms.to_vec(),
         missing_trigrams: missing_trigrams.to_vec(),
         candidate_count,
+        candidate_cap,
+        candidate_cap_hit,
         filtered_candidate_count,
         scored_candidate_count,
         final_match_count,
@@ -1875,6 +1912,102 @@ fn rebuild_postings(
         }
     }
     postings
+}
+
+fn indexed_candidate_cap(limit: usize) -> usize {
+    (limit.max(1) * 512).clamp(1_024, MAX_INDEX_CANDIDATES_TO_SCORE)
+}
+
+fn cap_candidate_ids(
+    candidate_ids: HashSet<u32>,
+    candidate_cap: usize,
+    files: &[IndexedPath],
+    query_tokens: &[String],
+    posting_maps: &[(String, HashMap<u32, u16>)],
+    path_maps: &[(String, HashMap<u32, u16>)],
+    trigram_maps: &[(String, HashMap<u32, u16>)],
+) -> (Vec<u32>, bool) {
+    let cap_hit = candidate_ids.len() > candidate_cap;
+    let mut ids = candidate_ids.into_iter().collect::<Vec<_>>();
+    if cap_hit {
+        ids.sort_by(|left, right| {
+            candidate_rank_score(
+                *right,
+                files,
+                query_tokens,
+                posting_maps,
+                path_maps,
+                trigram_maps,
+            )
+            .partial_cmp(&candidate_rank_score(
+                *left,
+                files,
+                query_tokens,
+                posting_maps,
+                path_maps,
+                trigram_maps,
+            ))
+            .unwrap_or(Ordering::Equal)
+            .then_with(|| candidate_path(files, *left).cmp(candidate_path(files, *right)))
+            .then_with(|| left.cmp(right))
+        });
+        ids.truncate(candidate_cap);
+    }
+    (ids, cap_hit)
+}
+
+fn candidate_rank_score(
+    file_id: u32,
+    files: &[IndexedPath],
+    query_tokens: &[String],
+    posting_maps: &[(String, HashMap<u32, u16>)],
+    path_maps: &[(String, HashMap<u32, u16>)],
+    trigram_maps: &[(String, HashMap<u32, u16>)],
+) -> f64 {
+    let Some(file) = files.get(file_id as usize) else {
+        return 0.0;
+    };
+    let path_lower = file.path.to_ascii_lowercase();
+    let query_name = query_tokens.join("");
+    let mut score = 0.0;
+    for (token, postings) in posting_maps {
+        if let Some(count) = postings.get(&file_id).copied() {
+            score += 1.0 + (count as f64).ln();
+        }
+        if path_lower.contains(token) {
+            score += 8.0;
+        }
+    }
+    for (_, postings) in path_maps {
+        if let Some(count) = postings.get(&file_id).copied() {
+            score += 8.0 + (count as f64).ln();
+        }
+    }
+    for (_, postings) in trigram_maps {
+        if let Some(count) = postings.get(&file_id).copied() {
+            score += 0.2 + (count as f64).ln() * 0.05;
+        }
+    }
+    for symbol in &file.symbols {
+        if symbol.normalized == query_name || query_tokens.contains(&symbol.normalized) {
+            score += 25.0;
+        } else {
+            score += 4.0
+                * symbol
+                    .tokens
+                    .iter()
+                    .filter(|token| query_tokens.contains(token))
+                    .count() as f64;
+        }
+    }
+    score
+}
+
+fn candidate_path(files: &[IndexedPath], file_id: u32) -> &str {
+    files
+        .get(file_id as usize)
+        .map(|file| file.path.as_str())
+        .unwrap_or("")
 }
 
 fn intersect_planned_postings(planned: &[&Vec<Posting>], require_all: bool) -> HashSet<u32> {

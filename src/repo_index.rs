@@ -82,6 +82,10 @@ pub struct QueryPlan {
     pub missing_trigrams: Vec<String>,
     pub candidate_count: usize,
     #[serde(default)]
+    pub candidate_cap: usize,
+    #[serde(default)]
+    pub candidate_cap_hit: bool,
+    #[serde(default)]
     pub filtered_candidate_count: usize,
     #[serde(default)]
     pub scored_candidate_count: usize,
