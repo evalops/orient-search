@@ -41,6 +41,7 @@ cargo run -- indexed-search --index /tmp/orient.index "session token auth" \
   --require-all \
   --snippet symbol \
   --context-lines 80
+cargo run -- index-plan --index /tmp/orient.index "session token missing_term"
 cargo run -- index-map --index /tmp/orient.index --symbols 50 --tests 50
 cargo run -- read-index-range --index /tmp/orient.index src/auth.rs --start 40 --lines 80
 
@@ -175,6 +176,7 @@ Supported tools:
 - `read_ranges`
 - `search_code`
 - `indexed_search_code`
+- `indexed_query_plan`
 - `read_index_range`
 - `read_index_ranges`
 - `index_shards`
@@ -260,7 +262,7 @@ Search commands and JSON-lines tools accept `--explain` or JSON `"explain":true`
 - `symbol_exact` or `symbol_overlap`: symbol matching contributed to score.
 - `line_phrase`, `content_phrase`, or `path_phrase`: an exact quoted phrase contributed to score.
 
-Indexed searches also include a `query_plan` object in explain mode. It reports the planner strategy, normalized query tokens, exact phrases, trigrams, the rarest planned posting lists with posting counts, whether AND semantics are required, and the final candidate count before scoring. This is meant to help agent wrappers debug broad or empty queries without guessing how the index searched.
+Indexed searches also include a `query_plan` object in explain mode. It reports the planner strategy, normalized query tokens, exact phrases, trigrams, the rarest planned posting lists with posting counts, missing terms/trigrams, whether AND semantics are required, and the final candidate count before scoring. `orient index-plan` and the `indexed_query_plan` JSON-lines tool return the same plan even when search returns zero hits, so wrappers can distinguish missing postings from overly tight filters.
 
 When repeated worktrees or manifest copies produce equivalent hits, the top result can include a compact `duplicate_group` with a normalized `canonical_path`, a suppressed duplicate count, and up to eight hidden duplicate paths. This keeps result lists short while still showing agents when a match exists in multiple local copies.
 
@@ -287,10 +289,10 @@ Product impact criteria for follow-up adoption:
 
 Current search baseline:
 
-- `orient bench-search --repo . --index /tmp/orient-self.index "indexed search symbol filters"`: `0.826ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "session token auth"`: `17.865ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "browser session implementation"`: `16.720ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "postgres migration user"`: `28.028ms` p95 after warmup.
+- `orient bench-search --repo . --index /tmp/orient-self.index "indexed search symbol filters"`: `0.833ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "session token auth"`: `28.466ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "browser session implementation"`: `19.312ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "postgres migration user"`: `26.873ms` p95 after warmup.
 - The `rg` hot path has a `250ms` wall-clock timeout plus a bounded match cap; timed-out searches return partial results rather than hanging.
 - `orient index --repo . --output /tmp/orient-self.index`: versioned binary index with file metadata, content token postings, path token postings, trigram postings, line offsets, token-to-line tables, bounded source snapshots, and symbol boosts.
 - `orient discover-repos --root /Users/jonathanhaas/Documents/Projects --max-depth 2 --limit 500`: found 369 git or manifest-backed repo roots after scanning 2,889 directories, while skipping dependency/build directories and prioritizing visible canonical repos ahead of dated split, temp, and worktree folders when limits are small.

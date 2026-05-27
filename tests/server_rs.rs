@@ -124,6 +124,7 @@ fn server_reports_tool_manifest_for_agent_wrappers() {
     assert!(stdout.contains("read_index_ranges"));
     assert!(stdout.contains("read_shard_ranges"));
     assert!(stdout.contains("read_index_range"));
+    assert!(stdout.contains("indexed_query_plan"));
     assert!(stdout.contains("indexed_repo_map"));
     assert!(stdout.contains("find_index_symbol"));
     assert!(stdout.contains("related_index_files"));
@@ -1664,6 +1665,14 @@ fn server_handles_indexed_search_request() {
             "limit": 5
         }
     });
+    let plan_request = serde_json::json!({
+        "id": "indexed-query-plan",
+        "tool": "indexed_query_plan",
+        "arguments": {
+            "index": index_path,
+            "query": "SessionManager definitely_missing"
+        }
+    });
     writeln!(child.stdin.as_mut().unwrap(), "{request}").unwrap();
     writeln!(child.stdin.as_mut().unwrap(), "{read_request}").unwrap();
     writeln!(child.stdin.as_mut().unwrap(), "{read_ranges_request}").unwrap();
@@ -1671,6 +1680,7 @@ fn server_handles_indexed_search_request() {
     writeln!(child.stdin.as_mut().unwrap(), "{map_request}").unwrap();
     writeln!(child.stdin.as_mut().unwrap(), "{related_request}").unwrap();
     writeln!(child.stdin.as_mut().unwrap(), "{related_symbols_request}").unwrap();
+    writeln!(child.stdin.as_mut().unwrap(), "{plan_request}").unwrap();
     drop(child.stdin.take());
 
     let output = child.wait_with_output().unwrap();
@@ -1697,6 +1707,10 @@ fn server_handles_indexed_search_request() {
     assert!(stdout.contains("tests/auth_test.rs"));
     assert!(stdout.contains("\"id\":\"related-index-symbols\""));
     assert!(stdout.contains("SessionManager"));
+    assert!(stdout.contains("\"id\":\"indexed-query-plan\""));
+    assert!(stdout.contains("\"missing_terms\""));
+    assert!(stdout.contains("definitely"));
+    assert!(stdout.contains("missing"));
 }
 
 #[test]

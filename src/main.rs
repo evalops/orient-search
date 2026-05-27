@@ -151,6 +151,15 @@ enum Commands {
         #[arg(long, default_value_t = 50)]
         tests: usize,
     },
+    IndexPlan {
+        #[arg(long)]
+        index: PathBuf,
+        query: String,
+        #[arg(long = "repo-filter")]
+        repo_filter: Option<String>,
+        #[command(flatten)]
+        filters: CommonSearchArgs,
+    },
     ReadRange {
         #[arg(long, default_value = ".")]
         repo: PathBuf,
@@ -581,6 +590,20 @@ fn main() -> Result<()> {
             println!(
                 "{}",
                 serde_json::to_string(&index.repo_map(symbols, tests))?
+            );
+        }
+        Commands::IndexPlan {
+            index,
+            query,
+            repo_filter,
+            filters,
+        } => {
+            let index = FastIndex::load(index)?;
+            println!(
+                "{}",
+                serde_json::to_string(
+                    &index.query_plan(&query, &search_filters_from_args(&filters, repo_filter)?,)?
+                )?
             );
         }
         Commands::ReadRange {

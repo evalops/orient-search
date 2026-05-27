@@ -276,6 +276,12 @@ pub fn tool_manifest() -> Value {
             SEARCH_INDEX_OPTIONAL_ARGS,
         ),
         tool_entry(
+            "indexed_query_plan",
+            "Return the indexed query plan, including missing postings, even when search has no hits.",
+            &["index", "query"],
+            PLAN_INDEX_OPTIONAL_ARGS,
+        ),
+        tool_entry(
             "read_index_range",
             "Read a bounded line range from a persistent index result path.",
             &["index", "path"],
@@ -683,6 +689,15 @@ impl ToolRuntime {
                 })?;
                 Ok(serde_json::to_value(results)?)
             }
+            "indexed_query_plan" => {
+                let index_path = path_arg(&request.arguments, "index")?;
+                let query = string_arg(&request.arguments, "query")?;
+                let index = self.cached_index(index_path)?;
+                Ok(serde_json::to_value(index.query_plan(
+                    &query,
+                    &search_filters(&request.arguments, true)?,
+                )?)?)
+            }
             "read_index_range" => {
                 let index_path = path_arg(&request.arguments, "index")?;
                 let path = string_arg(&request.arguments, "path")?;
@@ -892,6 +907,7 @@ impl ToolRuntime {
                 "read_ranges",
                 "search_code",
                 "indexed_search_code",
+                "indexed_query_plan",
                 "read_index_range",
                 "read_index_ranges",
                 "index_shards",
@@ -1474,6 +1490,24 @@ const SEARCH_INDEX_OPTIONAL_ARGS: &[&str] = &[
     "explain",
     "require_all",
     "context_lines",
+    "exclude_file",
+    "exclude_path",
+    "exclude_language",
+    "exclude_extension",
+    "exclude_symbol",
+    "exclude_repo",
+];
+
+const PLAN_INDEX_OPTIONAL_ARGS: &[&str] = &[
+    "path",
+    "language",
+    "extension",
+    "symbol",
+    "file",
+    "repo",
+    "repo_filter",
+    "test",
+    "require_all",
     "exclude_file",
     "exclude_path",
     "exclude_language",

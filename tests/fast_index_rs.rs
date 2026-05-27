@@ -246,6 +246,54 @@ fn indexed_repo_map_returns_orientation_from_persisted_metadata() {
 }
 
 #[test]
+fn indexed_query_plan_reports_missing_terms_without_results() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/auth.rs"),
+        "pub struct SessionManager;\npub fn issue_token() {}\n",
+    );
+    write(
+        &repo.path().join("tests/auth_test.rs"),
+        "use sample::SessionManager;\n#[test]\nfn issue_token_round_trip() {}\n",
+    );
+
+    let index = FastIndex::build(repo.path()).unwrap();
+    let plan = index
+        .query_plan(
+            "SessionManager definitely_missing",
+            &SearchFilters::default(),
+        )
+        .unwrap();
+
+    assert_eq!(plan.strategy, "posting_intersection");
+    assert!(plan.require_all);
+    assert_eq!(
+        plan.query_tokens,
+        vec!["session", "manager", "definitely", "missing"]
+    );
+    assert_eq!(plan.missing_terms, vec!["definitely", "missing"]);
+    assert_eq!(plan.candidate_count, 0);
+    assert!(
+        plan.planned_postings
+            .iter()
+            .any(|posting| posting.kind == "content" && posting.value == "session")
+    );
+
+    let filter_plan = index
+        .query_plan(
+            "lang:rust test:true",
+            &SearchFilters {
+                explain: true,
+                ..SearchFilters::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(filter_plan.strategy, "filter_scan");
+    assert_eq!(filter_plan.candidate_count, 1);
+    assert!(filter_plan.missing_terms.is_empty());
+}
+
+#[test]
 fn indexed_related_context_uses_persisted_metadata() {
     let repo = tempfile::tempdir().unwrap();
     write(

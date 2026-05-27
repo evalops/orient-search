@@ -76,6 +76,10 @@ pub struct QueryPlan {
     pub query_phrases: Vec<String>,
     pub query_trigrams: Vec<String>,
     pub planned_postings: Vec<QueryPlanPosting>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub missing_terms: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub missing_trigrams: Vec<String>,
     pub candidate_count: usize,
 }
 

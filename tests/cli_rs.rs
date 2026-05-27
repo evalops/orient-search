@@ -577,6 +577,21 @@ fn cli_search_surfaces_accept_structured_filters() {
         .stdout(predicate::str::contains("tests/auth_test.rs"))
         .stdout(predicate::str::contains("filter_scan"));
 
+    let mut index_plan = Command::cargo_bin("orient").unwrap();
+    index_plan
+        .args([
+            "index-plan",
+            "--index",
+            index_path.to_str().unwrap(),
+            "SessionManager definitely_missing",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"missing_terms\""))
+        .stdout(predicate::str::contains("definitely"))
+        .stdout(predicate::str::contains("missing"))
+        .stdout(predicate::str::contains("\"candidate_count\":0"));
+
     let shard_dir = tempfile::tempdir().unwrap();
     let mut build_shards = Command::cargo_bin("orient").unwrap();
     build_shards
