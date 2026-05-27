@@ -9,6 +9,7 @@ Run either a one-shot stdio server or a shared TCP daemon:
 ```bash
 target/release/orient serve-jsonl
 target/release/orient serve-tcp --addr 127.0.0.1:8796 --index-dir /tmp/orient-shards
+target/release/orient serve-tcp --addr 127.0.0.1:8796 --ensure-shards-dir /tmp/orient-shards --repo /path/to/repo-a --repo /path/to/repo-b
 target/release/orient client-jsonl --addr 127.0.0.1:8796
 ```
 

@@ -1832,6 +1832,76 @@ fn tcp_daemon_starts_with_warmed_index() {
 }
 
 #[test]
+fn tcp_daemon_can_ensure_and_warm_shards_on_startup() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/auth.rs"),
+        "pub struct SessionManager;\npub fn issue_token() {}\n",
+    );
+    write(
+        &repo.path().join("Cargo.toml"),
+        "[package]\nname='sample'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    let shard_dir = tempfile::tempdir().unwrap();
+
+    let binary = assert_cmd::cargo::cargo_bin("orient");
+    let mut child = Command::new(binary)
+        .args([
+            "serve-tcp",
+            "--addr",
+            "127.0.0.1:0",
+            "--ensure-shards-dir",
+            shard_dir.path().to_str().unwrap(),
+            "--repo",
+            repo.path().to_str().unwrap(),
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let stdout = child.stdout.take().unwrap();
+    let mut startup_reader = BufReader::new(stdout);
+    let mut startup = String::new();
+    startup_reader.read_line(&mut startup).unwrap();
+    let startup_json: serde_json::Value = serde_json::from_str(&startup).unwrap();
+    let addr = startup_json["addr"].as_str().unwrap().to_string();
+
+    assert_eq!(startup_json["ensured_shards"][0]["action"], "build");
+    assert_eq!(
+        startup_json["ensured_shards"][0]["shards"],
+        serde_json::json!(1)
+    );
+    assert_eq!(
+        startup_json["daemon_status"]["cached_shard_manifests"],
+        serde_json::json!(1)
+    );
+    assert_eq!(
+        startup_json["daemon_status"]["cached_indexes"],
+        serde_json::json!(1)
+    );
+
+    let response = tcp_tool_request(
+        &addr,
+        serde_json::json!({
+            "id": "search",
+            "tool": "search_shards",
+            "arguments": {
+                "index_dir": shard_dir.path(),
+                "query": "issue token",
+                "limit": 3,
+                "require_all": true
+            }
+        }),
+    );
+
+    child.kill().unwrap();
+    let _ = child.wait();
+
+    assert!(response.contains("\"id\":\"search\""));
+    assert!(response.contains("auth.rs"), "{response}");
+}
+
+#[test]
 fn tcp_daemon_serves_parallel_cached_index_requests() {
     let repo = tempfile::tempdir().unwrap();
     write(

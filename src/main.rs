@@ -383,6 +383,20 @@ enum Commands {
         indexes: Vec<PathBuf>,
         #[arg(long = "index-dir")]
         index_dirs: Vec<PathBuf>,
+        #[arg(long = "ensure-shards-dir")]
+        ensure_shard_dirs: Vec<PathBuf>,
+        #[arg(long = "repo")]
+        repos: Vec<PathBuf>,
+        #[arg(long = "discover-root")]
+        discover_roots: Vec<PathBuf>,
+        #[arg(long, default_value_t = 4)]
+        max_depth: usize,
+        #[arg(long, default_value_t = 500)]
+        discover_limit: usize,
+        #[arg(long)]
+        family_limit: Option<usize>,
+        #[arg(long)]
+        nested_manifests: bool,
     },
     ClientJsonl {
         #[arg(long, default_value = "127.0.0.1:8796")]
@@ -957,6 +971,13 @@ fn main() -> Result<()> {
             addr,
             indexes,
             index_dirs,
+            ensure_shard_dirs,
+            repos,
+            discover_roots,
+            max_depth,
+            discover_limit,
+            family_limit,
+            nested_manifests,
         } => {
             let listener = TcpListener::bind(&addr)?;
             let runtime = ToolRuntime::default();
@@ -966,11 +987,29 @@ fn main() -> Result<()> {
             for index_dir in index_dirs {
                 runtime.warm_shards(index_dir)?;
             }
+            let mut ensured_shards = Vec::new();
+            if !ensure_shard_dirs.is_empty() {
+                let selection = shard_repos_from_args(
+                    repos,
+                    discover_roots,
+                    max_depth,
+                    discover_limit,
+                    normalize_family_limit(family_limit),
+                    nested_manifests,
+                )?;
+                for index_dir in ensure_shard_dirs {
+                    let stats = ensure_shards(&selection.repos, &index_dir)?;
+                    runtime.warm_shards(index_dir)?;
+                    ensured_shards
+                        .push(shard_bootstrap_output(stats, selection.discovery.clone())?);
+                }
+            }
             println!(
                 "{}",
                 serde_json::to_string(&serde_json::json!({
                     "addr": listener.local_addr()?.to_string(),
                     "cached_indexes": runtime.cached_index_count(),
+                    "ensured_shards": ensured_shards,
                     "daemon_status": runtime.daemon_status()
                 }))?
             );
