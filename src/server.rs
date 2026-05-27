@@ -142,6 +142,12 @@ pub fn tool_manifest() -> Value {
             "optional": ["limit"]
         },
         {
+            "name": "find_index_symbol",
+            "description": "Find symbol definitions directly from a persistent index.",
+            "required": ["index", "name"],
+            "optional": ["limit"]
+        },
+        {
             "name": "related_files",
             "description": "Find nearby source/test files related to a repository-relative path.",
             "required": ["repo", "path"],
@@ -261,6 +267,13 @@ fn dispatch_result(request: &ToolRequest) -> Result<Value> {
             let index = RepoIndexer::new(repo).build()?;
             Ok(serde_json::to_value(index.find_symbol(&name, limit))?)
         }
+        "find_index_symbol" => {
+            let index_path = path_arg(&request.arguments, "index")?;
+            let name = string_arg(&request.arguments, "name")?;
+            let limit = usize_arg(&request.arguments, "limit").unwrap_or(10);
+            let index = FastIndex::load(index_path)?;
+            Ok(serde_json::to_value(index.find_symbol(&name, limit))?)
+        }
         "related_files" => {
             let repo = path_arg(&request.arguments, "repo")?;
             let path = string_arg(&request.arguments, "path")?;
@@ -316,6 +329,7 @@ fn dispatch_result(request: &ToolRequest) -> Result<Value> {
             "search_shards",
             "read_shard_range",
             "find_symbol",
+            "find_index_symbol",
             "related_files",
             "related_index_files",
             "related_symbols",

@@ -42,6 +42,7 @@ fn server_reports_tool_manifest_for_agent_wrappers() {
     assert!(stdout.contains("\"required\":[\"repo\",\"query\"]"));
     assert!(stdout.contains("\"optional\""));
     assert!(stdout.contains("read_index_range"));
+    assert!(stdout.contains("find_index_symbol"));
     assert!(stdout.contains("related_index_files"));
     assert!(stdout.contains("related_index_symbols"));
     assert!(stdout.contains("read_shard_range"));
@@ -154,6 +155,15 @@ fn server_handles_indexed_search_request() {
             "lines": 2
         }
     });
+    let symbol_request = serde_json::json!({
+        "id": "find-index-symbol",
+        "tool": "find_index_symbol",
+        "arguments": {
+            "index": index_path,
+            "name": "SessionManager",
+            "limit": 5
+        }
+    });
     let related_request = serde_json::json!({
         "id": "related-index-files",
         "tool": "related_index_files",
@@ -175,6 +185,7 @@ fn server_handles_indexed_search_request() {
     });
     writeln!(child.stdin.as_mut().unwrap(), "{request}").unwrap();
     writeln!(child.stdin.as_mut().unwrap(), "{read_request}").unwrap();
+    writeln!(child.stdin.as_mut().unwrap(), "{symbol_request}").unwrap();
     writeln!(child.stdin.as_mut().unwrap(), "{related_request}").unwrap();
     writeln!(child.stdin.as_mut().unwrap(), "{related_symbols_request}").unwrap();
     drop(child.stdin.take());
@@ -187,6 +198,8 @@ fn server_handles_indexed_search_request() {
     assert!(stdout.contains("\"id\":\"read-index-range\""));
     assert!(stdout.contains("\"path\":\"src/auth.rs\""));
     assert!(stdout.contains("issue_token"));
+    assert!(stdout.contains("\"id\":\"find-index-symbol\""));
+    assert!(stdout.contains("\"kind\":\"struct\""));
     assert!(stdout.contains("\"id\":\"related-index-files\""));
     assert!(stdout.contains("tests/auth_test.rs"));
     assert!(stdout.contains("\"id\":\"related-index-symbols\""));

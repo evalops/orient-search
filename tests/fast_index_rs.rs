@@ -79,6 +79,32 @@ fn indexed_search_supports_filters_require_all_and_symbol_boosting() {
 }
 
 #[test]
+fn indexed_symbol_lookup_returns_definition_paths() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/auth.rs"),
+        "pub struct SessionManager;\npub fn issue_token() {}\n",
+    );
+    write(
+        &repo.path().join("src/session.rs"),
+        "pub fn session_manager_helper() {}\n",
+    );
+
+    let index = FastIndex::build(repo.path()).unwrap();
+    let symbols = index.find_symbol("SessionManager", 10);
+
+    assert_eq!(symbols[0].name, "SessionManager");
+    assert_eq!(symbols[0].kind, "struct");
+    assert_eq!(symbols[0].path, "src/auth.rs");
+    assert_eq!(symbols[0].line, 1);
+
+    let normalized = index.find_symbol("issue token", 10);
+    assert_eq!(normalized[0].name, "issue_token");
+    assert!(index.find_symbol("", 10).is_empty());
+    assert!(index.find_symbol("SessionManager", 0).is_empty());
+}
+
+#[test]
 fn fallback_search_boosts_exact_symbols() {
     let repo = tempfile::tempdir().unwrap();
     write(

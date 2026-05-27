@@ -217,6 +217,19 @@ fn cli_builds_and_searches_persistent_index() {
         .stdout(predicate::str::contains("\"path\":\"src/auth.rs\""))
         .stdout(predicate::str::contains("issue_token"));
 
+    let mut index_symbol = Command::cargo_bin("orient").unwrap();
+    index_symbol
+        .args([
+            "index-symbol",
+            "--index",
+            index_path.to_str().unwrap(),
+            "SessionManager",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"path\":\"src/auth.rs\""))
+        .stdout(predicate::str::contains("\"kind\":\"struct\""));
+
     let mut related_index = Command::cargo_bin("orient").unwrap();
     related_index
         .args([

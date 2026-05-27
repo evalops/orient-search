@@ -149,6 +149,13 @@ enum Commands {
         #[arg(long, default_value_t = 10)]
         limit: usize,
     },
+    IndexSymbol {
+        #[arg(long)]
+        index: PathBuf,
+        name: String,
+        #[arg(long, default_value_t = 10)]
+        limit: usize,
+    },
     Related {
         #[arg(long, default_value = ".")]
         repo: PathBuf,
@@ -414,6 +421,13 @@ fn main() -> Result<()> {
         }
         Commands::Symbol { repo, name, limit } => {
             let index = RepoIndexer::new(repo).build()?;
+            println!(
+                "{}",
+                serde_json::to_string(&index.find_symbol(&name, limit))?
+            );
+        }
+        Commands::IndexSymbol { index, name, limit } => {
+            let index = FastIndex::load(index)?;
             println!(
                 "{}",
                 serde_json::to_string(&index.find_symbol(&name, limit))?

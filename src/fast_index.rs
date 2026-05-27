@@ -2,9 +2,10 @@
 
 use crate::query::{merge_filters, parse_query, query_text};
 use crate::repo_index::{
-    RankSignal, SearchFilters, SearchResult, SnippetMode, best_snippet_for_path, extract_symbols,
-    finalize_results, is_ignored, language_for, matches_filters, normalize_token, repo_matches,
-    result_matches_all_tokens, result_matches_symbol_filters, round4, token_counts, tokenize,
+    RankSignal, SearchFilters, SearchResult, SnippetMode, Symbol, best_snippet_for_path,
+    extract_symbols, finalize_results, is_ignored, language_for, matches_filters, normalize_token,
+    repo_matches, result_matches_all_tokens, result_matches_symbol_filters, round4, token_counts,
+    tokenize,
 };
 use anyhow::{Context, Result};
 use ignore::WalkBuilder;
@@ -238,6 +239,52 @@ impl FastIndex {
 
     pub fn search(&self, query: &str, limit: usize) -> Result<Vec<SearchResult>> {
         self.search_filtered(query, limit, &SearchFilters::default())
+    }
+
+    pub fn find_symbol(&self, name: &str, limit: usize) -> Vec<Symbol> {
+        let needle = normalize_token(name);
+        if needle.is_empty() || limit == 0 {
+            return Vec::new();
+        }
+
+        let mut scored = Vec::new();
+
+        for file in &self.files {
+            for symbol in &file.symbols {
+                let score = if symbol.name == name {
+                    100
+                } else if symbol.normalized == needle {
+                    90
+                } else if symbol.normalized.contains(&needle) {
+                    60
+                } else {
+                    0
+                };
+                if score > 0 {
+                    scored.push((
+                        score,
+                        Symbol {
+                            name: symbol.name.clone(),
+                            kind: symbol.kind.clone(),
+                            path: file.path.clone(),
+                            line: symbol.line,
+                        },
+                    ));
+                }
+            }
+        }
+
+        scored.sort_by(|a, b| {
+            b.0.cmp(&a.0)
+                .then_with(|| a.1.path.cmp(&b.1.path))
+                .then_with(|| a.1.line.cmp(&b.1.line))
+                .then_with(|| a.1.name.cmp(&b.1.name))
+        });
+        scored
+            .into_iter()
+            .take(limit)
+            .map(|(_, symbol)| symbol)
+            .collect()
     }
 
     pub fn search_filtered(
