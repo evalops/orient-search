@@ -39,6 +39,13 @@ cargo run -- indexed-search --index /tmp/orient.index "session token auth" \
   --require-all \
   --snippet symbol
 
+# Build and search a local multi-repo shard directory.
+cargo run -- index-shards \
+  --repo /path/to/repo-a \
+  --repo /path/to/repo-b \
+  --output-dir /tmp/orient-shards
+cargo run -- search-shards --index-dir /tmp/orient-shards "session token auth"
+
 # Find a symbol.
 cargo run -- symbol --repo /path/to/repo SessionManager
 
@@ -144,14 +151,15 @@ Product impact criteria for follow-up adoption:
 
 Current search baseline:
 
-- `orient bench-search --repo . "indexed search symbol filters"`: `10.053ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "session token auth"`: `16.640ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "browser session implementation"`: `25.193ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "postgres migration user"`: `36.082ms` p95 after warmup.
+- `orient bench-search --repo . "indexed search symbol filters"`: `7.117ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "session token auth"`: `18.038ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "browser session implementation"`: `18.523ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "postgres migration user"`: `39.572ms` p95 after warmup.
 - The `rg` hot path has a `250ms` wall-clock timeout plus a bounded match cap; timed-out searches return partial results rather than hanging.
 - `orient index --repo . --output /tmp/orient-self.index`: versioned binary index with file metadata, content token postings, path token postings, trigram postings, line offsets, and symbol boosts.
+- `orient index-shards --repo repo-a --repo repo-b --output-dir /tmp/orient-shards`: writes per-repo index shards plus a manifest for local multi-repo search.
 - `orient refresh-index --repo . --index /tmp/orient-self.index`: reuses unchanged files and refreshes changed/deleted files.
-- `orient bench-search --repo . --index /tmp/orient-self.index "indexed search symbol filters"`: `0.628ms` p95 after warmup.
+- `orient bench-search --repo . --index /tmp/orient-self.index "indexed search symbol filters"`: `0.117ms` p95 after warmup.
 
 Benchmark methodology:
 
@@ -166,6 +174,7 @@ See [docs/fast-search-roadmap.md](docs/fast-search-roadmap.md) for the Zoekt/Sou
 ## Architecture
 
 - `src/fast_index.rs`: experimental persistent content/path token plus trigram index and indexed search.
+- `src/shards.rs`: local multi-repo shard manifests and merged shard search.
 - `src/repo_index.rs`: repo indexing, symbol extraction, snippet rendering, code search, related-file lookup.
 - `src/query.rs`: inline query-language parsing and filter merging.
 - `src/server.rs`: JSON-lines tool dispatch.

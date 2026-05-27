@@ -5,6 +5,7 @@ use orient::repo_index::{
     RepoIndexer, SearchFilters, SnippetMode, read_file_range, search_repo_fast_filtered,
 };
 use orient::server::serve_jsonl;
+use orient::shards::{build_shards, search_shards};
 use serde::Serialize;
 use std::io;
 use std::path::PathBuf;
@@ -31,6 +32,31 @@ enum Commands {
         repo: PathBuf,
         #[arg(long)]
         index: PathBuf,
+    },
+    IndexShards {
+        #[arg(long = "repo", required = true)]
+        repos: Vec<PathBuf>,
+        #[arg(long)]
+        output_dir: PathBuf,
+    },
+    SearchShards {
+        #[arg(long)]
+        index_dir: PathBuf,
+        query: String,
+        #[arg(long, default_value_t = 10)]
+        limit: usize,
+        #[arg(long)]
+        path: Option<String>,
+        #[arg(long)]
+        language: Option<String>,
+        #[arg(long)]
+        extension: Option<String>,
+        #[arg(long)]
+        require_all: bool,
+        #[arg(long, default_value = "medium")]
+        snippet: String,
+        #[arg(long)]
+        explain: bool,
     },
     Brief {
         #[arg(long, default_value = ".")]
@@ -185,6 +211,42 @@ fn main() -> Result<()> {
             println!(
                 "{}",
                 serde_json::to_string(&outcome.index.refresh_stats(&outcome))?
+            );
+        }
+        Commands::IndexShards { repos, output_dir } => {
+            println!(
+                "{}",
+                serde_json::to_string(&build_shards(&repos, output_dir)?)?
+            );
+        }
+        Commands::SearchShards {
+            index_dir,
+            query,
+            limit,
+            path,
+            language,
+            extension,
+            require_all,
+            snippet,
+            explain,
+        } => {
+            let snippet = snippet_mode_arg(&snippet)?;
+            println!(
+                "{}",
+                serde_json::to_string(&search_shards(
+                    index_dir,
+                    &query,
+                    limit,
+                    &SearchFilters {
+                        path,
+                        language,
+                        extension,
+                        require_all,
+                        snippet,
+                        explain,
+                        ..SearchFilters::default()
+                    },
+                )?)?
             );
         }
         Commands::Brief { repo } => {

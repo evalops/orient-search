@@ -224,6 +224,53 @@ impl SessionManager {
 }
 
 #[test]
+fn cli_builds_and_searches_shard_directory() {
+    let auth_repo = sample_repo();
+    let billing_repo = tempfile::tempdir().unwrap();
+    write(
+        &billing_repo.path().join("src/billing.rs"),
+        "pub fn invoice_total() -> usize { 42 }\n",
+    );
+    write(
+        &billing_repo.path().join("Cargo.toml"),
+        "[package]\nname='billing'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    let shard_dir = tempfile::tempdir().unwrap();
+
+    let mut build = Command::cargo_bin("orient").unwrap();
+    build
+        .args([
+            "index-shards",
+            "--repo",
+            auth_repo.path().to_str().unwrap(),
+            "--repo",
+            billing_repo.path().to_str().unwrap(),
+            "--output-dir",
+            shard_dir.path().to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"shards\":2"))
+        .stdout(predicate::str::contains("\"path_terms\""));
+    assert!(shard_dir.path().join("manifest.json").exists());
+
+    let mut search = Command::cargo_bin("orient").unwrap();
+    search
+        .args([
+            "search-shards",
+            "--index-dir",
+            shard_dir.path().to_str().unwrap(),
+            "invoice total",
+            "--require-all",
+            "--explain",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("billing.rs"))
+        .stdout(predicate::str::contains("shard:"));
+}
+
+#[test]
 fn cli_reports_search_benchmarks() {
     let repo = sample_repo();
 
