@@ -1,7 +1,9 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use orient::repo_index::RepoIndexer;
+use orient::server::serve_jsonl;
 use orient::session_metrics::{scan_jsonl_roots, ScanOptions};
+use std::io;
 use std::path::PathBuf;
 
 #[derive(Debug, Parser)]
@@ -47,6 +49,7 @@ enum Commands {
         #[arg(long)]
         max_file_mb: Option<u64>,
     },
+    ServeJsonl,
 }
 
 fn main() -> Result<()> {
@@ -79,6 +82,11 @@ fn main() -> Result<()> {
                 max_file_bytes: max_file_mb.map(|mb| mb * 1024 * 1024),
             })?;
             println!("{}", serde_json::to_string(&metrics)?);
+        }
+        Commands::ServeJsonl => {
+            let stdin = io::stdin();
+            let stdout = io::stdout();
+            serve_jsonl(stdin.lock(), stdout.lock())?;
         }
     }
     Ok(())

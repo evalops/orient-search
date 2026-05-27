@@ -421,7 +421,7 @@ fn token_counts(text: &str) -> HashMap<String, usize> {
 
 fn tokenize(text: &str) -> Vec<String> {
     let camel = Regex::new(r"([a-z0-9])([A-Z])").unwrap();
-    let split = camel.replace_all(text, "$1 $2");
+    let split = camel.replace_all(text, "$1 $2").replace('_', " ");
     let re = Regex::new(r"[A-Za-z][A-Za-z0-9_]*").unwrap();
     re.find_iter(&split)
         .map(|m| m.as_str().to_lowercase())
