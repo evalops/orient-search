@@ -209,6 +209,56 @@ fn indexed_search_supports_line_offsets_and_snippet_modes() {
 }
 
 #[test]
+fn indexed_search_uses_trigram_postings_for_substring_queries() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/auth.rs"),
+        "pub struct SessionManager;\npub fn issue_token() {}\n",
+    );
+    write(
+        &repo.path().join("src/billing.rs"),
+        "pub fn invoice_total() {}\n",
+    );
+
+    let index = FastIndex::build(repo.path()).unwrap();
+    let stats = index.stats();
+    assert!(stats.trigrams > 0);
+    let auth = index
+        .files
+        .iter()
+        .find(|file| file.path == "src/auth.rs")
+        .unwrap();
+    assert!(auth.trigrams.iter().any(|term| term.term == "ess"));
+
+    let results = index.search("essionman", 10).unwrap();
+    assert_eq!(results[0].path, "src/auth.rs");
+    assert!(results[0].reason.contains("trigrams"));
+    assert!(!results.iter().any(|result| result.path == "src/billing.rs"));
+}
+
+#[test]
+fn indexed_trigram_planner_unions_single_literal_and_substring_candidates() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/auth.rs"),
+        "pub struct SessionManager;\n",
+    );
+    write(
+        &repo.path().join("tests/fixture.rs"),
+        "const QUERY: &str = \"essionman\";\n",
+    );
+
+    let index = FastIndex::build(repo.path()).unwrap();
+    let results = index.search("essionman", 10).unwrap();
+    assert!(results.iter().any(|result| result.path == "src/auth.rs"));
+    assert!(
+        results
+            .iter()
+            .any(|result| result.path == "tests/fixture.rs")
+    );
+}
+
+#[test]
 fn search_explain_mode_returns_structured_rank_signals() {
     let repo = tempfile::tempdir().unwrap();
     write(

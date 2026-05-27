@@ -144,14 +144,14 @@ Product impact criteria for follow-up adoption:
 
 Current search baseline:
 
-- `orient bench-search --repo . "indexed search symbol filters"`: `8.408ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "session token auth"`: `17.222ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "browser session implementation"`: `29.931ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "postgres migration user"`: `31.778ms` p95 after warmup.
+- `orient bench-search --repo . "indexed search symbol filters"`: `10.004ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "session token auth"`: `17.145ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "browser session implementation"`: `25.292ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "postgres migration user"`: `40.001ms` p95 after warmup.
 - The `rg` hot path has a `250ms` wall-clock timeout plus a bounded match cap; timed-out searches return partial results rather than hanging.
-- `orient index --repo . --output /tmp/orient-self.index`: versioned binary index with file metadata, terms, and symbol boosts.
+- `orient index --repo . --output /tmp/orient-self.index`: versioned binary index with file metadata, token postings, trigram postings, line offsets, and symbol boosts.
 - `orient refresh-index --repo . --index /tmp/orient-self.index`: reuses unchanged files and refreshes changed/deleted files.
-- `orient bench-search --repo . --index /tmp/orient-self.index "indexed search symbol filters"`: `0.525ms` p95 after warmup.
+- `orient bench-search --repo . --index /tmp/orient-self.index "indexed search symbol filters"`: `0.568ms` p95 after warmup.
 
 Benchmark methodology:
 
@@ -165,7 +165,7 @@ See [docs/fast-search-roadmap.md](docs/fast-search-roadmap.md) for the Zoekt/Sou
 
 ## Architecture
 
-- `src/fast_index.rs`: experimental persistent token index and indexed search.
+- `src/fast_index.rs`: experimental persistent token/trigram index and indexed search.
 - `src/repo_index.rs`: repo indexing, symbol extraction, snippet rendering, code search, related-file lookup.
 - `src/query.rs`: inline query-language parsing and filter merging.
 - `src/server.rs`: JSON-lines tool dispatch.
