@@ -47,5 +47,5 @@ Useful filters: `repo:platform`, `path:src/auth`, `file:auth.rs`, `lang:rust`, `
 
 ## Docs
 
+- [Agent protocol](docs/agent-protocol.md)
 - [Fast search roadmap](docs/fast-search-roadmap.md)
-- [Research notes](docs/research)
