@@ -33,7 +33,7 @@ Implemented now:
 - `orient index`: persistent Rust content-token, path-token, and trigram posting index.
 - `orient refresh-index`: incremental refresh that reuses unchanged file metadata/terms, detects same-content renames, and refreshes changed files.
 - `orient indexed-search`: indexed query path.
-- `orient discover-repos`: bounded local repo discovery for broad workspaces and repeated worktree layouts.
+- `orient discover-repos`: bounded local repo discovery for broad workspaces and repeated worktree layouts, with git checkout boundaries by default and an explicit nested-manifest opt-in.
 - `orient index-shards`, `orient ensure-shards`, `orient refresh-shards`, `orient search-shards`, `orient read-shard-range`, and `orient read-shard-ranges`: local multi-repo shard manifest with one versioned index file per repo, optional discovery from workspace roots, one-step build-or-refresh bootstrap, incremental shard refresh, git topology metadata, and bounded range reads from prefixed shard paths.
 - `orient bench-search` and `orient bench-shards`: built-in p50/p95/max latency reporting for fallback, indexed, direct shard, and warm cached shard search, with `--fail-p95-ms`, `--write-baseline`, and `--baseline` for regression gates.
 - JSON-lines tools: `tool_manifest`, `daemon_status`, `warm_index`, `warm_shards`, `discover_repos`, `search_code`, `indexed_search_code`, `indexed_query_plan`, `indexed_repo_map`, `read_index_range`, `read_index_ranges`, `find_index_symbol`, `shard_repo_map`, `find_shard_symbol`, `related_index_files`, `related_index_symbols`, `related_shard_files`, `related_shard_symbols`, `index_shards`, `ensure_shards`, `refresh_shards`, `search_shards`, `shard_query_plan`, `read_shard_range`, `read_shard_ranges`, `repo_map`, `read_range`, `read_ranges`, and `related_symbols`.
@@ -56,7 +56,7 @@ Implemented now:
 - Exact symbol definition boosting in both fallback and indexed search.
 - Direct symbol lookup and related-context lookup from persistent indexes, so agent wrappers can jump to definitions and nearby tests/files without rebuilding a repo index.
 - Direct symbol lookup across local shard directories, returning repo-prefixed paths that can be passed to `read-shard-range`.
-- Bounded workspace discovery finds git or manifest-backed repo roots while skipping dependency/build directories, so agents can build shard directories from layouts like `Documents/Projects`, `~/repos`, and `.codex-worktrees` without manual repo lists. It prioritizes visible canonical repos before dated split, temp, and worktree folders when limits are small, and `index-shards` accepts repeated discovery roots so one daemon can warm the canonical repos and active worktrees together.
+- Bounded workspace discovery finds git or manifest-backed repo roots while skipping dependency/build directories, so agents can build shard directories from layouts like `Documents/Projects`, `~/repos`, and `.codex-worktrees` without manual repo lists. It prioritizes visible canonical repos before dated split, temp, and worktree folders when limits are small, treats git checkouts as traversal boundaries by default, and accepts `nested_manifests` / `--nested-manifests` when an agent really wants package-level subprojects as separate shard candidates. `index-shards` accepts repeated discovery roots so one daemon can warm the canonical repos and active worktrees together.
 - Repo-map orientation from live repos, persistent indexes, and shard directories, so agents can inspect entrypoints, manifests, tests, symbols, compact related-file/symbol hints, important files, and structured command hints without rebuilding a separate live repo index.
 - Command hints are manifest-aware, include command kind/source provenance, and parse common `package.json` scripts while respecting package-manager lockfiles.
 - Shard manifests record aliases for nested repo-looking child directories, so broad dated worktree shards can still answer stable filters like `repo:maestro` and scope results to the matching child path.
@@ -77,6 +77,7 @@ Measured on this machine:
 - Local repo refresh after build: reuses unchanged files, reuses same-content renames by retargeting path-derived postings, and rebuilds postings from per-file term lists.
 - Local repo indexed search: query `indexed search symbol filters`, top 10 at about `0.96ms` p95 after warmup.
 - Local single-shard search: query `repo:agent-jsonl-explorer indexed search symbol filters`, top 10 at about `3.43ms` p95 after warmup, or about `1.01ms` p95 through the warm cached runtime path.
+- Real local layout discovery: `/Users/jonathanhaas/Documents/Projects` now resolves to 409 git or manifest-backed repo roots at `max-depth 4` after scanning 508 directories, with the hottest repeated families being `maestro-internal` at 82 checkouts, `deploy` at 67, `platform` at 45, `browser-use-rs` at 30, and `maestro` at 23. `/Users/jonathanhaas/repos` resolves to 72 repo roots after scanning 106 directories. Before git-boundary discovery, the same broad tree could hit a 2,000-candidate cap by walking every nested package manifest.
 
 ## Exit Conditions
 

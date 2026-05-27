@@ -11,7 +11,7 @@ Rust-native fast local code search for coding agents. It gives Codex, Claude, Am
 - Reads bounded line ranges after search hits, with line-numbered output.
 - Builds repo maps with entrypoints, manifests, tests, top symbols, related files/symbols, command hints, and important files.
 - Infers known commands and structured command hints from repo manifests, package-manager lockfiles, and common `package.json` scripts.
-- Discovers local repo roots under broad workspaces for fast shard setup.
+- Discovers local repo roots under broad workspaces for fast shard setup, treating git checkouts as boundaries by default so monorepo packages do not explode into separate shards unless requested.
 - Exposes a Rust CLI and JSON-lines tool server suitable for MCP-style wrapping.
 
 ## Rust Quickstart
@@ -53,6 +53,11 @@ cargo run -- discover-repos \
   --limit 500 \
   --git-metadata \
   --tracked-files
+cargo run -- discover-repos \
+  --root /Users/jonathanhaas/Documents/Projects \
+  --max-depth 4 \
+  --limit 500 \
+  --nested-manifests
 cargo run -- index-shards \
   --discover-root /Users/jonathanhaas/Documents/Projects \
   --discover-root /Users/jonathanhaas/repos \
@@ -222,7 +227,7 @@ After warming, shard search, shard query plans, shard range reads, shard repo ma
 Use `discover_repos`, or `index_shards` with `discover_root`, when a local machine has many duplicated worktrees and nested repo collections.
 For indexed or shard JSON search arguments, use `repo` or `repo_filter` to restrict by repository name. Shard search also records aliases for immediate child directories that look like repos, so a shard rooted at a dated worktree can still answer filters like `repo:maestro` or `repo:platform`. Shard repo filters also match recorded git origin, branch, common git dir, and clone/worktree kind when available. Alias-scoped shard search, symbol lookup, repo maps, and related-context tools return alias-prefixed paths such as `maestro/src/app.rs`, and `read-shard-range` accepts those paths directly. For `search_code`, `repo` is the repository root path, so use `repo_filter` for name filtering.
 JSON search tools also accept structured negative filters: `exclude_file`, `exclude_path`, `exclude_language`, `exclude_extension`, `exclude_symbol`, and `exclude_repo`. Each may be a string or an array of strings, so wrappers can pass excludes without rewriting the query string.
-`discover_repos` accepts `git_metadata:true` and `tracked_files:true` when wrappers need topology rather than just paths. With metadata enabled, each repo includes its origin, branch, clone/worktree kind, common git directory, and optional tracked-file count. The report also includes `families`, grouped by origin or common git dir, so agents can see hot repeated worktree families before building shared shards. Git metadata probes are individually bounded; a slow or unhealthy checkout may omit metadata rather than hanging discovery.
+`discover_repos` accepts `git_metadata:true` and `tracked_files:true` when wrappers need topology rather than just paths. With metadata enabled, each repo includes its origin, branch, clone/worktree kind, common git directory, and optional tracked-file count. The report also includes `families`, grouped by origin or common git dir, so agents can see hot repeated worktree families before building shared shards. Git metadata probes are individually bounded; a slow or unhealthy checkout may omit metadata rather than hanging discovery. Discovery treats git checkouts as boundaries by default; pass `nested_manifests:true` or `--nested-manifests` only when package-level manifest directories inside an existing git checkout should become separate shard candidates.
 
 ## Local Multi-Agent Layout
 
@@ -316,8 +321,8 @@ Current search baseline:
 - `orient bench-shards --index-dir /tmp/orient-self-shards --cached "repo:agent-jsonl-explorer indexed search symbol filters"`: `1.008ms` p95 after warmup.
 - The `rg` hot path has a `250ms` wall-clock timeout plus a bounded match cap; timed-out searches return partial results rather than hanging.
 - `orient index --repo . --output /tmp/orient-self.index`: versioned binary index with file metadata, content token postings, path token postings, trigram postings, line offsets, token-to-line tables, bounded source snapshots, and symbol boosts.
-- `orient discover-repos --root /Users/jonathanhaas/Documents/Projects --max-depth 2 --limit 500`: found 369 git or manifest-backed repo roots after scanning 2,889 directories, while skipping dependency/build directories and prioritizing visible canonical repos ahead of dated split, temp, and worktree folders when limits are small.
-- `orient discover-repos --root /Users/jonathanhaas/Documents/Projects --max-depth 2 --limit 120 --git-metadata --tracked-files`: found 120 repos, 31 repo families, and surfaced hot repeated checkout families including `maestro-internal`, `browser-use-rs`, `deploy`, `platform`, and `maestro`; slow tracked-file probes can be omitted per family because git metadata probes are bounded.
+- `orient discover-repos --root /Users/jonathanhaas/Documents/Projects --max-depth 4 --limit 2000 --git-metadata`: found 409 git or manifest-backed repo roots after scanning 508 directories, without descending through every package manifest inside discovered git checkouts. The top repeated families were `maestro-internal` with 82 checkouts, `deploy` with 67, `platform` with 45, `browser-use-rs` with 30, and `maestro` with 23.
+- `orient discover-repos --root /Users/jonathanhaas/repos --max-depth 4 --limit 1000 --git-metadata`: found 72 repo roots after scanning 106 directories; the top repeated families were `maestro-internal`, `platform`, and `deploy`.
 - `orient index-shards --repo repo-a --repo repo-b --output-dir /tmp/orient-shards`: writes per-repo index shards plus a manifest for local multi-repo search, including stable aliases for nested repo directories.
 - `orient index-shards --discover-root /Users/jonathanhaas/Documents/Projects --discover-root /Users/jonathanhaas/repos --output-dir /tmp/orient-shards`: discovers repos from several local workspace roots and writes shard indexes in one step.
 - `orient ensure-shards --discover-root /Users/jonathanhaas/Documents/Projects --discover-root /Users/jonathanhaas/repos --output-dir /tmp/orient-shards`: builds missing shard directories or refreshes existing ones, which is the easiest bootstrap for a shared local daemon.

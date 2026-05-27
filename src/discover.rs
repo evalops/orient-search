@@ -18,6 +18,7 @@ pub struct DiscoverOptions {
     pub limit: usize,
     pub git_metadata: bool,
     pub tracked_files: bool,
+    pub nested_manifests: bool,
 }
 
 impl Default for DiscoverOptions {
@@ -27,6 +28,7 @@ impl Default for DiscoverOptions {
             limit: 500,
             git_metadata: false,
             tracked_files: false,
+            nested_manifests: false,
         }
     }
 }
@@ -101,6 +103,9 @@ pub fn discover_repos(root: impl AsRef<Path>, options: &DiscoverOptions) -> Resu
         dirs_scanned += 1;
 
         let candidate = inspect_candidate_repo(&dir, &root, depth, options)?;
+        let stop_at_git_repo = candidate
+            .as_ref()
+            .is_some_and(|repo| repo.git && !options.nested_manifests);
         if let Some(repo) = candidate {
             let repo_key = canonical_or_self(&repo.path);
             if seen_repos.insert(repo_key) {
@@ -109,6 +114,10 @@ pub fn discover_repos(root: impl AsRef<Path>, options: &DiscoverOptions) -> Resu
                     break;
                 }
             }
+        }
+
+        if stop_at_git_repo {
+            continue;
         }
 
         if depth >= max_depth {

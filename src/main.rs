@@ -39,6 +39,8 @@ enum Commands {
         git_metadata: bool,
         #[arg(long)]
         tracked_files: bool,
+        #[arg(long)]
+        nested_manifests: bool,
     },
     Index {
         #[arg(long, default_value = ".")]
@@ -62,6 +64,8 @@ enum Commands {
         #[arg(long, default_value_t = 500)]
         discover_limit: usize,
         #[arg(long)]
+        nested_manifests: bool,
+        #[arg(long)]
         output_dir: PathBuf,
     },
     RefreshShards {
@@ -77,6 +81,8 @@ enum Commands {
         max_depth: usize,
         #[arg(long, default_value_t = 500)]
         discover_limit: usize,
+        #[arg(long)]
+        nested_manifests: bool,
         #[arg(long)]
         output_dir: PathBuf,
     },
@@ -463,6 +469,7 @@ fn main() -> Result<()> {
             limit,
             git_metadata,
             tracked_files,
+            nested_manifests,
         } => {
             println!(
                 "{}",
@@ -473,6 +480,7 @@ fn main() -> Result<()> {
                         limit,
                         git_metadata,
                         tracked_files,
+                        nested_manifests,
                     },
                 )?)?
             );
@@ -500,10 +508,16 @@ fn main() -> Result<()> {
             discover_roots,
             max_depth,
             discover_limit,
+            nested_manifests,
             output_dir,
         } => {
-            let repos =
-                shard_repos_from_args_required(repos, discover_roots, max_depth, discover_limit)?;
+            let repos = shard_repos_from_args_required(
+                repos,
+                discover_roots,
+                max_depth,
+                discover_limit,
+                nested_manifests,
+            )?;
             println!(
                 "{}",
                 serde_json::to_string(&build_shards(&repos, output_dir)?)?
@@ -517,9 +531,16 @@ fn main() -> Result<()> {
             discover_roots,
             max_depth,
             discover_limit,
+            nested_manifests,
             output_dir,
         } => {
-            let repos = shard_repos_from_args(repos, discover_roots, max_depth, discover_limit)?;
+            let repos = shard_repos_from_args(
+                repos,
+                discover_roots,
+                max_depth,
+                discover_limit,
+                nested_manifests,
+            )?;
             println!(
                 "{}",
                 serde_json::to_string(&ensure_shards(&repos, output_dir)?)?
@@ -961,6 +982,7 @@ fn shard_repos_from_args(
     discover_roots: Vec<PathBuf>,
     max_depth: usize,
     discover_limit: usize,
+    nested_manifests: bool,
 ) -> Result<Vec<PathBuf>> {
     for root in discover_roots {
         let discovered = discover_repos(
@@ -968,6 +990,7 @@ fn shard_repos_from_args(
             &DiscoverOptions {
                 max_depth,
                 limit: discover_limit,
+                nested_manifests,
                 ..DiscoverOptions::default()
             },
         )?;
@@ -983,8 +1006,15 @@ fn shard_repos_from_args_required(
     discover_roots: Vec<PathBuf>,
     max_depth: usize,
     discover_limit: usize,
+    nested_manifests: bool,
 ) -> Result<Vec<PathBuf>> {
-    let repos = shard_repos_from_args(repos, discover_roots, max_depth, discover_limit)?;
+    let repos = shard_repos_from_args(
+        repos,
+        discover_roots,
+        max_depth,
+        discover_limit,
+        nested_manifests,
+    )?;
     if repos.is_empty() {
         bail!("provide at least one --repo or --discover-root");
     }

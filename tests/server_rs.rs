@@ -73,6 +73,10 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         false
     );
     assert_eq!(
+        discover["input_schema"]["properties"]["nested_manifests"]["default"],
+        false
+    );
+    assert_eq!(
         read_ranges["input_schema"]["properties"]["ranges"]["items"]["properties"]["lines"]["default"],
         80
     );
@@ -250,6 +254,52 @@ fn runtime_discovers_repos_by_tool_request() {
     assert!(result.contains("\"name\":\"auth\""), "{result}");
     assert!(result.contains("\"name\":\"billing\""), "{result}");
     assert!(!result.contains("node_modules"), "{result}");
+}
+
+#[test]
+fn runtime_discovery_suppresses_nested_manifest_projects_under_git_roots() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("workspace/platform");
+    write(
+        &repo.join("package.json"),
+        "{\"scripts\":{\"test\":\"vitest\"}}\n",
+    );
+    write(
+        &repo.join("packages/ui/package.json"),
+        "{\"scripts\":{\"test\":\"vitest\"}}\n",
+    );
+    git(&repo, &["init", "-b", "main"]);
+
+    let runtime = ToolRuntime::default();
+    let default = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("discover"),
+        tool: "discover_repos".to_string(),
+        arguments: serde_json::json!({
+            "root": root.path(),
+            "max_depth": 4,
+            "limit": 20
+        }),
+    });
+    assert!(default.error.is_none(), "{:?}", default.error);
+    let result = serde_json::to_string(&default.result).unwrap();
+    assert!(result.contains("\"repos_found\":1"), "{result}");
+    assert!(result.contains("\"name\":\"platform\""), "{result}");
+    assert!(!result.contains("\"name\":\"ui\""), "{result}");
+
+    let nested = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("discover"),
+        tool: "discover_repos".to_string(),
+        arguments: serde_json::json!({
+            "root": root.path(),
+            "max_depth": 4,
+            "limit": 20,
+            "nested_manifests": true
+        }),
+    });
+    assert!(nested.error.is_none(), "{:?}", nested.error);
+    let result = serde_json::to_string(&nested.result).unwrap();
+    assert!(result.contains("\"repos_found\":2"), "{result}");
+    assert!(result.contains("\"name\":\"ui\""), "{result}");
 }
 
 #[test]

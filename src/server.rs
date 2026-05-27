@@ -241,7 +241,13 @@ pub fn tool_manifest() -> Value {
             "discover_repos",
             "Discover local repo roots under a broad workspace for shard setup.",
             &["root"],
-            &["max_depth", "limit", "git_metadata", "tracked_files"],
+            &[
+                "max_depth",
+                "limit",
+                "git_metadata",
+                "tracked_files",
+                "nested_manifests",
+            ],
         ),
         tool_entry(
             "repo_brief",
@@ -491,7 +497,8 @@ fn argument_schema(tool_name: &str, name: &str) -> Value {
             schema.insert("type".to_string(), json!("array"));
             schema.insert("items".to_string(), json!({"type": "string"}));
         }
-        "test" | "explain" | "require_all" | "git_metadata" | "tracked_files" => {
+        "test" | "explain" | "require_all" | "git_metadata" | "tracked_files"
+        | "nested_manifests" => {
             schema.insert("type".to_string(), json!("boolean"));
         }
         "limit" | "max_depth" | "discover_limit" | "symbols" | "start" | "lines" | "tests"
@@ -520,7 +527,8 @@ fn argument_type(name: &str) -> &'static str {
     match name {
         "limit" | "max_depth" | "discover_limit" | "symbols" | "start" | "lines" | "tests"
         | "context_lines" => "integer",
-        "test" | "explain" | "require_all" | "git_metadata" | "tracked_files" => "boolean",
+        "test" | "explain" | "require_all" | "git_metadata" | "tracked_files"
+        | "nested_manifests" => "boolean",
         "exclude_file" | "exclude_path" | "exclude_language" | "exclude_extension"
         | "exclude_symbol" | "exclude_repo" => "string|string[]",
         "ranges" => "range[]",
@@ -542,7 +550,9 @@ fn argument_default(tool_name: &str, name: &str) -> Option<Value> {
         (_, "lines") => Some(json!(80)),
         (_, "snippet") => Some(json!("medium")),
         (_, "context_lines") => Some(json!(0)),
-        (_, "explain" | "require_all" | "git_metadata" | "tracked_files") => Some(json!(false)),
+        (_, "explain" | "require_all" | "git_metadata" | "tracked_files" | "nested_manifests") => {
+            Some(json!(false))
+        }
         _ => None,
     }
 }
@@ -591,6 +601,9 @@ fn argument_description(name: &str) -> &'static str {
         "tracked_files" => {
             "Include git tracked-file counts in discovery metadata and repo-family groups."
         }
+        "nested_manifests" => {
+            "Also discover manifest-only projects nested inside a discovered git checkout."
+        }
         "symbols" => "Maximum top symbols to include in repo maps.",
         "tests" => "Maximum test files to include in repo maps.",
         "start" => "One-based start line for range reads.",
@@ -617,6 +630,11 @@ impl ToolRuntime {
                     .get("tracked_files")
                     .and_then(Value::as_bool)
                     .unwrap_or(false);
+                let nested_manifests = request
+                    .arguments
+                    .get("nested_manifests")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
                 Ok(serde_json::to_value(discover_repos(
                     root,
                     &DiscoverOptions {
@@ -624,6 +642,7 @@ impl ToolRuntime {
                         limit,
                         git_metadata,
                         tracked_files,
+                        nested_manifests,
                     },
                 )?)?)
             }
@@ -1587,6 +1606,7 @@ const SHARD_BUILD_OPTIONAL_ARGS: &[&str] = &[
     "max_depth",
     "discover_limit",
     "limit",
+    "nested_manifests",
 ];
 
 fn string_arg(arguments: &Value, name: &str) -> Result<String> {
@@ -1655,6 +1675,10 @@ fn shard_repos_from_arguments(arguments: &Value) -> Result<Vec<PathBuf>> {
         let limit = usize_arg(arguments, "discover_limit")
             .or_else(|| usize_arg(arguments, "limit"))
             .unwrap_or(500);
+        let nested_manifests = arguments
+            .get("nested_manifests")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         for root in discover_roots {
             repos.extend(
                 discover_repos(
@@ -1662,6 +1686,7 @@ fn shard_repos_from_arguments(arguments: &Value) -> Result<Vec<PathBuf>> {
                     &DiscoverOptions {
                         max_depth,
                         limit,
+                        nested_manifests,
                         ..DiscoverOptions::default()
                     },
                 )?

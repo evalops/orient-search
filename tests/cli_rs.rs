@@ -232,6 +232,56 @@ fn cli_discovery_can_group_git_worktree_families() {
 }
 
 #[test]
+fn cli_discovery_treats_git_roots_as_manifest_boundaries_by_default() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("workspace/platform");
+    write(
+        &repo.join("package.json"),
+        "{\"scripts\":{\"test\":\"vitest\"}}\n",
+    );
+    write(
+        &repo.join("packages/ui/package.json"),
+        "{\"scripts\":{\"test\":\"vitest\"}}\n",
+    );
+    git(&repo, &["init", "-b", "main"]);
+
+    let mut default = Command::cargo_bin("orient").unwrap();
+    default
+        .args([
+            "discover-repos",
+            "--root",
+            root.path().to_str().unwrap(),
+            "--max-depth",
+            "4",
+            "--limit",
+            "20",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"repos_found\":1"))
+        .stdout(predicate::str::contains("\"name\":\"platform\""))
+        .stdout(predicate::str::contains("\"name\":\"ui\"").not());
+
+    let mut nested = Command::cargo_bin("orient").unwrap();
+    nested
+        .args([
+            "discover-repos",
+            "--root",
+            root.path().to_str().unwrap(),
+            "--max-depth",
+            "4",
+            "--limit",
+            "20",
+            "--nested-manifests",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"repos_found\":2"))
+        .stdout(predicate::str::contains("\"name\":\"platform\""))
+        .stdout(predicate::str::contains("\"name\":\"ui\""));
+}
+
+#[test]
 fn cli_indexes_shards_from_discovered_root() {
     let root = tempfile::tempdir().unwrap();
     write(
