@@ -1,3 +1,4 @@
+pub mod discover;
 pub mod fast_index;
 pub mod query;
 pub mod repo_index;

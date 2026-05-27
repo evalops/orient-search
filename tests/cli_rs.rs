@@ -49,6 +49,7 @@ fn cli_outputs_tool_manifest() {
     cmd.arg("tool-manifest")
         .assert()
         .success()
+        .stdout(predicate::str::contains("\"name\":\"discover_repos\""))
         .stdout(predicate::str::contains("\"name\":\"search_code\""))
         .stdout(predicate::str::contains(
             "\"required\":[\"repo\",\"query\"]",
@@ -57,6 +58,101 @@ fn cli_outputs_tool_manifest() {
         .stdout(predicate::str::contains("warm_index"))
         .stdout(predicate::str::contains("warm_shards"))
         .stdout(predicate::str::contains("read_shard_range"));
+}
+
+#[test]
+fn cli_discovers_repos_for_shard_setup() {
+    let root = tempfile::tempdir().unwrap();
+    write(
+        &root.path().join("workspace/billing/Cargo.toml"),
+        "[package]\nname='billing'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    write(
+        &root.path().join("workspace/auth/package.json"),
+        "{\"scripts\":{\"test\":\"vitest\"}}\n",
+    );
+    write(
+        &root.path().join("workspace/git-only/.git"),
+        "gitdir: real\n",
+    );
+    write(
+        &root
+            .path()
+            .join("workspace/node_modules/ignored/Cargo.toml"),
+        "[package]\nname='ignored'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    write(
+        &root.path().join("workspace/deep/too/far/Cargo.toml"),
+        "[package]\nname='too-far'\nversion='0.1.0'\nedition='2024'\n",
+    );
+
+    let mut cmd = Command::cargo_bin("orient").unwrap();
+    cmd.args([
+        "discover-repos",
+        "--root",
+        root.path().to_str().unwrap(),
+        "--max-depth",
+        "2",
+        "--limit",
+        "10",
+    ])
+    .assert()
+    .success()
+    .stdout(predicate::str::contains("\"repos_found\":3"))
+    .stdout(predicate::str::contains("\"name\":\"auth\""))
+    .stdout(predicate::str::contains("\"name\":\"billing\""))
+    .stdout(predicate::str::contains("\"name\":\"git-only\""))
+    .stdout(predicate::str::contains("node_modules").not())
+    .stdout(predicate::str::contains("too-far").not());
+}
+
+#[test]
+fn cli_indexes_shards_from_discovered_root() {
+    let root = tempfile::tempdir().unwrap();
+    write(
+        &root.path().join("workspace/billing/src/lib.rs"),
+        "pub fn invoice_total() -> usize { 42 }\n",
+    );
+    write(
+        &root.path().join("workspace/billing/Cargo.toml"),
+        "[package]\nname='billing'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    write(
+        &root.path().join("workspace/auth/src/lib.rs"),
+        "pub fn issue_token() -> &'static str { \"token\" }\n",
+    );
+    write(
+        &root.path().join("workspace/auth/Cargo.toml"),
+        "[package]\nname='auth'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    let shard_dir = tempfile::tempdir().unwrap();
+
+    let mut index = Command::cargo_bin("orient").unwrap();
+    index
+        .args([
+            "index-shards",
+            "--discover-root",
+            root.path().to_str().unwrap(),
+            "--max-depth",
+            "2",
+            "--output-dir",
+            shard_dir.path().to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"shards\":2"));
+
+    let mut search = Command::cargo_bin("orient").unwrap();
+    search
+        .args([
+            "search-shards",
+            "--index-dir",
+            shard_dir.path().to_str().unwrap(),
+            "invoice_total",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("billing/src/lib.rs"));
 }
 
 #[test]

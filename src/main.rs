@@ -1,5 +1,6 @@
 use anyhow::{Result, bail};
 use clap::{Parser, Subcommand};
+use orient::discover::{DiscoverOptions, discover_repos};
 use orient::fast_index::FastIndex;
 use orient::repo_index::{
     RepoIndexer, SearchFilters, SnippetMode, read_file_range, search_repo_fast_filtered,
@@ -26,6 +27,14 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Commands {
+    DiscoverRepos {
+        #[arg(long, default_value = ".")]
+        root: PathBuf,
+        #[arg(long, default_value_t = 4)]
+        max_depth: usize,
+        #[arg(long, default_value_t = 500)]
+        limit: usize,
+    },
     Index {
         #[arg(long, default_value = ".")]
         repo: PathBuf,
@@ -39,8 +48,14 @@ enum Commands {
         index: PathBuf,
     },
     IndexShards {
-        #[arg(long = "repo", required = true)]
+        #[arg(long = "repo")]
         repos: Vec<PathBuf>,
+        #[arg(long)]
+        discover_root: Option<PathBuf>,
+        #[arg(long, default_value_t = 4)]
+        max_depth: usize,
+        #[arg(long, default_value_t = 500)]
+        discover_limit: usize,
         #[arg(long)]
         output_dir: PathBuf,
     },
@@ -294,6 +309,19 @@ struct QueryBench {
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
+        Commands::DiscoverRepos {
+            root,
+            max_depth,
+            limit,
+        } => {
+            println!(
+                "{}",
+                serde_json::to_string(&discover_repos(
+                    root,
+                    &DiscoverOptions { max_depth, limit },
+                )?)?
+            );
+        }
         Commands::Index { repo, output } => {
             let index = FastIndex::build(repo)?;
             index.save(&output)?;
@@ -312,7 +340,14 @@ fn main() -> Result<()> {
                 serde_json::to_string(&outcome.index.refresh_stats(&outcome))?
             );
         }
-        Commands::IndexShards { repos, output_dir } => {
+        Commands::IndexShards {
+            repos,
+            discover_root,
+            max_depth,
+            discover_limit,
+            output_dir,
+        } => {
+            let repos = shard_repos_from_args(repos, discover_root, max_depth, discover_limit)?;
             println!(
                 "{}",
                 serde_json::to_string(&build_shards(&repos, output_dir)?)?
@@ -695,6 +730,30 @@ fn client_jsonl(addr: &str) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn shard_repos_from_args(
+    mut repos: Vec<PathBuf>,
+    discover_root: Option<PathBuf>,
+    max_depth: usize,
+    discover_limit: usize,
+) -> Result<Vec<PathBuf>> {
+    if let Some(root) = discover_root {
+        let discovered = discover_repos(
+            root,
+            &DiscoverOptions {
+                max_depth,
+                limit: discover_limit,
+            },
+        )?;
+        repos.extend(discovered.repos.into_iter().map(|repo| repo.path));
+    }
+    repos.sort();
+    repos.dedup();
+    if repos.is_empty() {
+        bail!("provide at least one --repo or --discover-root");
+    }
+    Ok(repos)
 }
 
 struct BenchConfig {

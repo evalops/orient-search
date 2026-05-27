@@ -11,6 +11,7 @@ Rust-native fast local code search for coding agents. It gives Codex, Claude, Am
 - Reads bounded line ranges after search hits, with line-numbered output.
 - Builds repo maps with entrypoints, manifests, tests, top symbols, commands, and important files.
 - Infers known commands from repo manifests.
+- Discovers local repo roots under broad workspaces for fast shard setup.
 - Exposes a Rust CLI and JSON-lines tool server suitable for MCP-style wrapping.
 
 ## Rust Quickstart
@@ -42,6 +43,12 @@ cargo run -- index-map --index /tmp/orient.index --symbols 50 --tests 50
 cargo run -- read-index-range --index /tmp/orient.index src/auth.rs --start 40 --lines 80
 
 # Build and search a local multi-repo shard directory.
+cargo run -- discover-repos --root /Users/jonathanhaas/Documents/Projects --max-depth 4 --limit 200
+cargo run -- index-shards \
+  --discover-root /Users/jonathanhaas/Documents/Projects \
+  --max-depth 4 \
+  --discover-limit 200 \
+  --output-dir /tmp/orient-shards
 cargo run -- index-shards \
   --repo /path/to/repo-a \
   --repo /path/to/repo-b \
@@ -113,10 +120,17 @@ Example request:
 {"id":1,"tool":"search_code","arguments":{"repo":"/path/to/repo","query":"issue token","limit":5,"extension":"rs","require_all":true,"snippet":"block","explain":true}}
 ```
 
+Discover and index shard roots:
+
+```json
+{"id":2,"tool":"discover_repos","arguments":{"root":"/Users/jonathanhaas/Documents/Projects","max_depth":4,"limit":200}}
+{"id":3,"tool":"index_shards","arguments":{"discover_root":"/Users/jonathanhaas/Documents/Projects","max_depth":4,"discover_limit":200,"output_dir":"/tmp/orient-shards"}}
+```
+
 Shard request:
 
 ```json
-{"id":2,"tool":"search_shards","arguments":{"index_dir":"/tmp/orient-shards","query":"repo:billing invoice total","limit":5,"require_all":true,"explain":true}}
+{"id":4,"tool":"search_shards","arguments":{"index_dir":"/tmp/orient-shards","query":"repo:billing invoice total","limit":5,"require_all":true,"explain":true}}
 ```
 
 Supported tools:
@@ -126,6 +140,7 @@ Supported tools:
 - `daemon_status`
 - `warm_index`
 - `warm_shards`
+- `discover_repos`
 - `repo_brief`
 - `repo_map`
 - `indexed_repo_map`
@@ -149,6 +164,7 @@ Supported tools:
 `tool_manifest` returns the same tool list with descriptions plus required and optional argument names, so a wrapper can bootstrap the JSON-lines surface without scraping this README.
 `daemon_status` reports local warm-cache counts for the current daemon process; it does not inspect Codex/Claude sessions or emit telemetry.
 Use `warm_index` or `warm_shards`, or pass `--index` / `--index-dir` to `serve-tcp`, to load persistent indexes before the first agent query.
+Use `discover_repos`, or `index_shards` with `discover_root`, when a local machine has many duplicated worktrees and nested repo collections.
 For indexed or shard JSON search arguments, use `repo` or `repo_filter` to restrict by repository name. Shard search also records aliases for immediate child directories that look like repos, so a shard rooted at a dated worktree can still answer filters like `repo:maestro` or `repo:platform`; `read-shard-range` accepts those alias-prefixed paths too. For `search_code`, `repo` is the repository root path, so use `repo_filter` for name filtering.
 
 ## Query Language
@@ -211,18 +227,20 @@ Product impact criteria for follow-up adoption:
 
 Current search baseline:
 
-- `orient bench-search --repo . "indexed search symbol filters"`: `12.508ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "session token auth"`: `21.346ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "browser session implementation"`: `20.731ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "postgres migration user"`: `35.127ms` p95 after warmup.
+- `orient bench-search --repo . "indexed search symbol filters"`: `9.296ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "session token auth"`: `18.732ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "browser session implementation"`: `22.085ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "postgres migration user"`: `34.628ms` p95 after warmup.
 - The `rg` hot path has a `250ms` wall-clock timeout plus a bounded match cap; timed-out searches return partial results rather than hanging.
 - `orient index --repo . --output /tmp/orient-self.index`: versioned binary index with file metadata, content token postings, path token postings, trigram postings, line offsets, and symbol boosts.
+- `orient discover-repos --root /Users/jonathanhaas/Documents/Projects --max-depth 4 --limit 200`: finds git or manifest-backed repo roots while skipping dependency/build directories.
 - `orient index-shards --repo repo-a --repo repo-b --output-dir /tmp/orient-shards`: writes per-repo index shards plus a manifest for local multi-repo search, including stable aliases for nested repo directories.
+- `orient index-shards --discover-root /Users/jonathanhaas/Documents/Projects --output-dir /tmp/orient-shards`: discovers repos and writes shard indexes in one step.
 - `orient refresh-shards --index-dir /tmp/orient-shards`: refreshes each shard incrementally, reusing unchanged file metadata and postings per repo, and refreshes nested repo aliases.
 - `orient refresh-index --repo . --index /tmp/orient-self.index`: reuses unchanged files and refreshes changed/deleted files.
 - `orient index-map --index /tmp/orient-self.index`: returns repo-map orientation directly from the persistent index without rebuilding a live repo scan.
 - `orient shard-map --index-dir /tmp/orient-shards`: returns repo-prefixed repo maps for local multi-repo shard directories.
-- `orient bench-search --repo . --index /tmp/orient-self.index "indexed search symbol filters"`: `0.200ms` p95 after warmup.
+- `orient bench-search --repo . --index /tmp/orient-self.index "indexed search symbol filters"`: `0.186ms` p95 after warmup.
 
 Benchmark methodology:
 

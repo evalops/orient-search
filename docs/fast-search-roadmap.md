@@ -33,9 +33,10 @@ Implemented now:
 - `orient index`: persistent Rust content-token, path-token, and trigram posting index.
 - `orient refresh-index`: incremental refresh that reuses unchanged file metadata/terms and refreshes changed files.
 - `orient indexed-search`: indexed query path.
-- `orient index-shards`, `orient refresh-shards`, `orient search-shards`, and `orient read-shard-range`: local multi-repo shard manifest with one versioned index file per repo, incremental shard refresh, and bounded range reads from prefixed shard paths.
+- `orient discover-repos`: bounded local repo discovery for broad workspaces and repeated worktree layouts.
+- `orient index-shards`, `orient refresh-shards`, `orient search-shards`, and `orient read-shard-range`: local multi-repo shard manifest with one versioned index file per repo, optional discovery from a workspace root, incremental shard refresh, and bounded range reads from prefixed shard paths.
 - `orient bench-search`: built-in p50/p95/max latency reporting for fallback and indexed search, with `--fail-p95-ms`, `--write-baseline`, and `--baseline` for regression gates.
-- JSON-lines tools: `tool_manifest`, `daemon_status`, `warm_index`, `warm_shards`, `search_code`, `indexed_search_code`, `indexed_repo_map`, `read_index_range`, `find_index_symbol`, `shard_repo_map`, `find_shard_symbol`, `related_index_files`, `related_index_symbols`, `index_shards`, `refresh_shards`, `search_shards`, `read_shard_range`, `repo_map`, `read_range`, and `related_symbols`.
+- JSON-lines tools: `tool_manifest`, `daemon_status`, `warm_index`, `warm_shards`, `discover_repos`, `search_code`, `indexed_search_code`, `indexed_repo_map`, `read_index_range`, `find_index_symbol`, `shard_repo_map`, `find_shard_symbol`, `related_index_files`, `related_index_symbols`, `index_shards`, `refresh_shards`, `search_shards`, `read_shard_range`, `repo_map`, `read_range`, and `related_symbols`.
 - Local TCP daemon/client mode for sharing one warm JSON-lines runtime across many local agents working in the same repeated worktree layout, with startup prewarming via `--index` and `--index-dir`.
 - CLI tools: `repo-map`, `index-map`, `shard-map`, `read-range`, `read-index-range`, `index-symbol`, `shard-symbol`, `related-index`, `related-index-symbols`, and `related-symbols`, so agents can inspect entrypoints/tests/top symbols, open bounded file context, and jump to nearby definitions after a search hit.
 - `orient tool-manifest`: emits descriptions plus required/optional argument metadata for JSON-lines wrappers.
@@ -48,6 +49,7 @@ Implemented now:
 - Exact symbol definition boosting in both fallback and indexed search.
 - Direct symbol lookup from persistent indexes, so agent wrappers can jump to definitions without rebuilding a repo index.
 - Direct symbol lookup across local shard directories, returning repo-prefixed paths that can be passed to `read-shard-range`.
+- Bounded workspace discovery finds git or manifest-backed repo roots while skipping dependency/build directories, so agents can build shard directories from layouts like `Documents/Projects`, `~/repos`, and `.codex-worktrees` without manual repo lists.
 - Repo-map orientation from persistent indexes and shard directories, so agents can inspect entrypoints, manifests, tests, symbols, important files, and command hints without rebuilding a separate live repo index.
 - Shard manifests record aliases for nested repo-looking child directories, so broad dated worktree shards can still answer stable filters like `repo:maestro` and scope results to the matching child path.
 - Shard refresh recomputes nested repo aliases, so newly added child repos become filterable after `refresh-shards`.

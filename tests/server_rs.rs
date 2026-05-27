@@ -56,6 +56,90 @@ fn server_reports_tool_manifest_for_agent_wrappers() {
     assert!(stdout.contains("daemon_status"));
     assert!(stdout.contains("warm_index"));
     assert!(stdout.contains("warm_shards"));
+    assert!(stdout.contains("discover_repos"));
+}
+
+#[test]
+fn runtime_discovers_repos_by_tool_request() {
+    let root = tempfile::tempdir().unwrap();
+    write(
+        &root.path().join("workspace/billing/Cargo.toml"),
+        "[package]\nname='billing'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    write(
+        &root.path().join("workspace/auth/package.json"),
+        "{\"scripts\":{\"test\":\"vitest\"}}\n",
+    );
+    write(
+        &root
+            .path()
+            .join("workspace/node_modules/ignored/Cargo.toml"),
+        "[package]\nname='ignored'\nversion='0.1.0'\nedition='2024'\n",
+    );
+
+    let mut runtime = ToolRuntime::default();
+    let response = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("discover"),
+        tool: "discover_repos".to_string(),
+        arguments: serde_json::json!({
+            "root": root.path(),
+            "max_depth": 2,
+            "limit": 10
+        }),
+    });
+    assert!(response.error.is_none(), "{:?}", response.error);
+    let result = serde_json::to_string(&response.result).unwrap();
+    assert!(result.contains("\"repos_found\":2"), "{result}");
+    assert!(result.contains("\"name\":\"auth\""), "{result}");
+    assert!(result.contains("\"name\":\"billing\""), "{result}");
+    assert!(!result.contains("node_modules"), "{result}");
+}
+
+#[test]
+fn runtime_indexes_shards_from_discovered_root() {
+    let root = tempfile::tempdir().unwrap();
+    write(
+        &root.path().join("workspace/billing/src/lib.rs"),
+        "pub fn invoice_total() -> usize { 42 }\n",
+    );
+    write(
+        &root.path().join("workspace/billing/Cargo.toml"),
+        "[package]\nname='billing'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    write(
+        &root.path().join("workspace/auth/src/lib.rs"),
+        "pub fn issue_token() -> &'static str { \"token\" }\n",
+    );
+    write(
+        &root.path().join("workspace/auth/Cargo.toml"),
+        "[package]\nname='auth'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    let shard_dir = tempfile::tempdir().unwrap();
+
+    let mut runtime = ToolRuntime::default();
+    let build = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("index"),
+        tool: "index_shards".to_string(),
+        arguments: serde_json::json!({
+            "discover_root": root.path(),
+            "max_depth": 2,
+            "output_dir": shard_dir.path()
+        }),
+    });
+    assert!(build.error.is_none(), "{:?}", build.error);
+    assert_eq!(build.result.unwrap()["shards"], serde_json::json!(2));
+
+    let search = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("search"),
+        tool: "search_shards".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": shard_dir.path(),
+            "query": "invoice_total"
+        }),
+    });
+    assert!(search.error.is_none(), "{:?}", search.error);
+    let result = serde_json::to_string(&search.result).unwrap();
+    assert!(result.contains("billing/src/lib.rs"), "{result}");
 }
 
 #[test]

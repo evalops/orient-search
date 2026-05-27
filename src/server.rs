@@ -1,3 +1,4 @@
+use crate::discover::{DiscoverOptions, discover_repos};
 use crate::fast_index::FastIndex;
 use crate::query::{merge_filters, parse_query, query_text};
 use crate::repo_index::{
@@ -182,6 +183,12 @@ pub fn tool_manifest() -> Value {
             "optional": []
         },
         {
+            "name": "discover_repos",
+            "description": "Discover local repo roots under a broad workspace for shard setup.",
+            "required": ["root"],
+            "optional": ["max_depth", "limit"]
+        },
+        {
             "name": "repo_brief",
             "description": "Summarize a local repository with language counts, important files, and known commands.",
             "required": ["repo"],
@@ -225,9 +232,9 @@ pub fn tool_manifest() -> Value {
         },
         {
             "name": "index_shards",
-            "description": "Build a local multi-repo shard directory.",
-            "required": ["repos", "output_dir"],
-            "optional": []
+            "description": "Build a local multi-repo shard directory from explicit repos or a discovered workspace root.",
+            "required": ["output_dir"],
+            "optional": ["repos", "discover_root", "root", "max_depth", "discover_limit", "limit"]
         },
         {
             "name": "refresh_shards",
@@ -301,6 +308,15 @@ pub fn tool_manifest() -> Value {
 impl ToolRuntime {
     fn dispatch_result(&mut self, request: &ToolRequest) -> Result<Value> {
         match request.tool.as_str() {
+            "discover_repos" => {
+                let root = path_arg(&request.arguments, "root")?;
+                let max_depth = usize_arg(&request.arguments, "max_depth").unwrap_or(4);
+                let limit = usize_arg(&request.arguments, "limit").unwrap_or(500);
+                Ok(serde_json::to_value(discover_repos(
+                    root,
+                    &DiscoverOptions { max_depth, limit },
+                )?)?)
+            }
             "repo_brief" => {
                 let repo = path_arg(&request.arguments, "repo")?;
                 let index = RepoIndexer::new(repo).build()?;
@@ -369,7 +385,7 @@ impl ToolRuntime {
                 )?)?)
             }
             "index_shards" => {
-                let repos = path_array_arg(&request.arguments, "repos")?;
+                let repos = shard_repos_from_arguments(&request.arguments)?;
                 let output_dir = path_arg(&request.arguments, "output_dir")?;
                 let stats = build_shards(&repos, output_dir)?;
                 self.indexes.clear();
@@ -504,6 +520,7 @@ impl ToolRuntime {
                 "daemon_status",
                 "warm_index",
                 "warm_shards",
+                "discover_repos",
                 "repo_brief",
                 "repo_map",
                 "indexed_repo_map",
@@ -749,11 +766,13 @@ fn path_arg(arguments: &Value, name: &str) -> Result<PathBuf> {
     Ok(PathBuf::from(string_arg(arguments, name)?))
 }
 
-fn path_array_arg(arguments: &Value, name: &str) -> Result<Vec<PathBuf>> {
-    let values = arguments
-        .get(name)
-        .and_then(Value::as_array)
-        .ok_or_else(|| anyhow!("missing path array argument: {name}"))?;
+fn optional_path_array_arg(arguments: &Value, name: &str) -> Result<Vec<PathBuf>> {
+    let Some(value) = arguments.get(name) else {
+        return Ok(Vec::new());
+    };
+    let values = value
+        .as_array()
+        .ok_or_else(|| anyhow!("path array argument {name} must be an array"))?;
     values
         .iter()
         .map(|value| {
@@ -763,6 +782,29 @@ fn path_array_arg(arguments: &Value, name: &str) -> Result<Vec<PathBuf>> {
                 .ok_or_else(|| anyhow!("path array argument {name} must contain only strings"))
         })
         .collect()
+}
+
+fn shard_repos_from_arguments(arguments: &Value) -> Result<Vec<PathBuf>> {
+    let mut repos = optional_path_array_arg(arguments, "repos")?;
+    let discover_root = optional_string_arg_any(arguments, &["discover_root", "root"]);
+    if let Some(root) = discover_root {
+        let max_depth = usize_arg(arguments, "max_depth").unwrap_or(4);
+        let limit = usize_arg(arguments, "discover_limit")
+            .or_else(|| usize_arg(arguments, "limit"))
+            .unwrap_or(500);
+        repos.extend(
+            discover_repos(root, &DiscoverOptions { max_depth, limit })?
+                .repos
+                .into_iter()
+                .map(|repo| repo.path),
+        );
+    }
+    repos.sort();
+    repos.dedup();
+    if repos.is_empty() {
+        return Err(anyhow!("provide repos or discover_root"));
+    }
+    Ok(repos)
 }
 
 fn usize_arg(arguments: &Value, name: &str) -> Option<usize> {
