@@ -108,6 +108,22 @@ pub struct RefreshStats {
     pub deleted_files: usize,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IndexFreshness {
+    pub version: u32,
+    pub root: PathBuf,
+    pub root_exists: bool,
+    pub stale: bool,
+    pub indexed_files: usize,
+    pub checked_files: usize,
+    pub changed_files: usize,
+    pub deleted_files: usize,
+    pub added_files: usize,
+    pub changed_paths: Vec<String>,
+    pub deleted_paths: Vec<String>,
+    pub added_paths: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct RefreshOutcome {
     pub index: FastIndex,
@@ -306,6 +322,98 @@ impl FastIndex {
             refreshed_files: outcome.refreshed_files,
             deleted_files: outcome.deleted_files,
         }
+    }
+
+    pub fn freshness(&self) -> Result<IndexFreshness> {
+        if !self.root.exists() {
+            let mut deleted_paths = self
+                .files
+                .iter()
+                .map(|file| file.path.clone())
+                .collect::<Vec<_>>();
+            deleted_paths.sort();
+            return Ok(IndexFreshness {
+                version: self.version,
+                root: self.root.clone(),
+                root_exists: false,
+                stale: !deleted_paths.is_empty(),
+                indexed_files: self.files.len(),
+                checked_files: 0,
+                changed_files: 0,
+                deleted_files: deleted_paths.len(),
+                added_files: 0,
+                changed_paths: Vec::new(),
+                deleted_paths,
+                added_paths: Vec::new(),
+            });
+        }
+
+        let indexed = self
+            .files
+            .iter()
+            .map(|file| (file.path.clone(), file))
+            .collect::<HashMap<_, _>>();
+        let mut current_paths = HashSet::new();
+        let mut changed_paths = Vec::new();
+        let mut added_paths = Vec::new();
+        let mut checked_files = 0usize;
+
+        for entry in WalkBuilder::new(&self.root)
+            .hidden(false)
+            .filter_entry(|entry| !is_ignored(entry.path()))
+            .build()
+        {
+            let entry = entry?;
+            let path = entry.path();
+            let Some(metadata) = regular_file_metadata(path) else {
+                continue;
+            };
+            if metadata.len() > MAX_FILE_BYTES {
+                continue;
+            }
+            let Some(language) = language_for(path) else {
+                continue;
+            };
+            let rel = path
+                .strip_prefix(&self.root)?
+                .to_string_lossy()
+                .replace('\\', "/");
+            checked_files += 1;
+            current_paths.insert(rel.clone());
+            match indexed.get(&rel) {
+                Some(previous)
+                    if previous.size == metadata.len()
+                        && previous.language == language
+                        && modified_matches(previous, metadata.modified().ok()) => {}
+                Some(_) => changed_paths.push(rel),
+                None => added_paths.push(rel),
+            }
+        }
+
+        let mut deleted_paths = indexed
+            .keys()
+            .filter(|path| !current_paths.contains(*path))
+            .cloned()
+            .collect::<Vec<_>>();
+        changed_paths.sort();
+        deleted_paths.sort();
+        added_paths.sort();
+        Ok(IndexFreshness {
+            version: self.version,
+            root: self.root.clone(),
+            root_exists: true,
+            stale: !(changed_paths.is_empty()
+                && deleted_paths.is_empty()
+                && added_paths.is_empty()),
+            indexed_files: self.files.len(),
+            checked_files,
+            changed_files: changed_paths.len(),
+            deleted_files: deleted_paths.len(),
+            added_files: added_paths.len(),
+            changed_paths,
+            deleted_paths,
+            added_paths,
+        })
     }
 
     pub fn search(&self, query: &str, limit: usize) -> Result<Vec<SearchResult>> {
@@ -2098,4 +2206,9 @@ fn modified_parts(modified: Option<SystemTime>) -> (u64, u32) {
         .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
         .unwrap_or_default();
     (duration.as_secs(), duration.subsec_nanos())
+}
+
+fn modified_matches(file: &IndexedPath, modified: Option<SystemTime>) -> bool {
+    let (secs, nanos) = modified_parts(modified);
+    file.modified_secs == secs && file.modified_nanos == nanos
 }

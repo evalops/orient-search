@@ -1,7 +1,7 @@
 //! Multi-repo shard manifests for local indexed search.
 
 use crate::discover::{RepoGitMetadata, git_metadata_for_repo};
-use crate::fast_index::{FastIndex, IndexStats};
+use crate::fast_index::{FastIndex, IndexFreshness, IndexStats};
 use crate::query::{merge_filters, parse_query, query_text};
 use crate::repo_index::{
     CommandHint, FileRange, QueryPlan, RelatedFile, RelatedSymbol, RepoMap, SearchFilters,
@@ -106,6 +106,28 @@ pub struct ShardQueryPlan {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub git: Option<RepoGitMetadata>,
     pub plan: QueryPlan,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShardFreshness {
+    pub version: u32,
+    pub index_dir: PathBuf,
+    pub shard_count: usize,
+    pub stale: bool,
+    pub stale_shards: usize,
+    pub changed_files: usize,
+    pub deleted_files: usize,
+    pub added_files: usize,
+    pub shards: Vec<ShardIndexFreshness>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShardIndexFreshness {
+    pub name: String,
+    pub root: PathBuf,
+    pub aliases: Vec<String>,
+    pub index: String,
+    pub status: IndexFreshness,
 }
 
 pub fn build_shards(repos: &[PathBuf], output_dir: impl AsRef<Path>) -> Result<ShardBuildStats> {
@@ -263,6 +285,51 @@ pub fn refresh_shards(index_dir: impl AsRef<Path>) -> Result<ShardRefreshStats> 
     total.shards = manifest.shards.len();
     save_manifest(index_dir, &manifest)?;
     Ok(total)
+}
+
+pub fn shard_status(index_dir: impl AsRef<Path>) -> Result<ShardFreshness> {
+    let index_dir = index_dir.as_ref();
+    let manifest = load_manifest(index_dir)?;
+    let mut shards = Vec::new();
+    let mut stale_shards = 0usize;
+    let mut changed_files = 0usize;
+    let mut deleted_files = 0usize;
+    let mut added_files = 0usize;
+
+    for shard in &manifest.shards {
+        let index = FastIndex::load(index_dir.join(&shard.index))
+            .with_context(|| format!("load shard {}", shard.index))?;
+        let status = index.freshness()?;
+        if status.stale {
+            stale_shards += 1;
+        }
+        changed_files += status.changed_files;
+        deleted_files += status.deleted_files;
+        added_files += status.added_files;
+        shards.push(ShardIndexFreshness {
+            name: shard.name.clone(),
+            root: shard.root.clone(),
+            aliases: shard
+                .aliases
+                .iter()
+                .map(|alias| alias.name.clone())
+                .collect(),
+            index: shard.index.clone(),
+            status,
+        });
+    }
+
+    Ok(ShardFreshness {
+        version: SHARD_MANIFEST_VERSION,
+        index_dir: index_dir.to_path_buf(),
+        shard_count: manifest.shards.len(),
+        stale: stale_shards > 0,
+        stale_shards,
+        changed_files,
+        deleted_files,
+        added_files,
+        shards,
+    })
 }
 
 fn ensure_action(removed: usize, added: usize) -> String {

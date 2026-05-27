@@ -53,6 +53,14 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         .iter()
         .find(|tool| tool["name"] == "ensure_index")
         .unwrap();
+    let index_status = tools
+        .iter()
+        .find(|tool| tool["name"] == "index_status")
+        .unwrap();
+    let shard_status = tools
+        .iter()
+        .find(|tool| tool["name"] == "shard_status")
+        .unwrap();
     let read_ranges = tools
         .iter()
         .find(|tool| tool["name"] == "read_ranges")
@@ -96,6 +104,8 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         ensure_index["required"],
         serde_json::json!(["repo", "index"])
     );
+    assert_eq!(index_status["required"], serde_json::json!(["index"]));
+    assert_eq!(shard_status["required"], serde_json::json!(["index_dir"]));
     assert_eq!(
         read_ranges["input_schema"]["properties"]["ranges"]["items"]["properties"]["lines"]["default"],
         80
@@ -148,6 +158,7 @@ fn server_reports_tool_manifest_for_agent_wrappers() {
     assert!(stdout.contains("read_index_ranges"));
     assert!(stdout.contains("read_shard_ranges"));
     assert!(stdout.contains("read_index_range"));
+    assert!(stdout.contains("index_status"));
     assert!(stdout.contains("indexed_query_plan"));
     assert!(stdout.contains("indexed_repo_map"));
     assert!(stdout.contains("shard_query_plan"));
@@ -163,6 +174,7 @@ fn server_reports_tool_manifest_for_agent_wrappers() {
     assert!(stdout.contains("warm_index"));
     assert!(stdout.contains("warm_shards"));
     assert!(stdout.contains("ensure_shards"));
+    assert!(stdout.contains("shard_status"));
     assert!(stdout.contains("discover_repos"));
 }
 
@@ -731,6 +743,23 @@ fn runtime_ensures_shards_builds_refreshes_and_warms() {
     assert!(search.error.is_none(), "{:?}", search.error);
     let result = serde_json::to_string(&search.result).unwrap();
     assert!(result.contains("billing/src/lib.rs"), "{result}");
+
+    write(
+        &root.path().join("platform/src/after_status.rs"),
+        "pub fn after_status_session() {}\n",
+    );
+    let status = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("shard-status"),
+        tool: "shard_status".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": root.path().join(".orient-shards")
+        }),
+    });
+    assert!(status.error.is_none(), "{:?}", status.error);
+    let status = status.result.unwrap();
+    assert_eq!(status["stale"], serde_json::json!(true));
+    assert_eq!(status["stale_shards"], serde_json::json!(1));
+    assert_eq!(status["added_files"], serde_json::json!(1));
 }
 
 #[test]
@@ -997,6 +1026,55 @@ fn runtime_ensure_index_builds_missing_index_and_warms_cache() {
     assert!(search.error.is_none(), "{:?}", search.error);
     let result = serde_json::to_string(&search.result).unwrap();
     assert!(result.contains("issue_token"), "{result}");
+}
+
+#[test]
+fn runtime_reports_index_status_for_cached_indexes() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/auth.rs"),
+        "pub struct SessionManager;\npub fn issue_token() {}\n",
+    );
+    let index_path = repo.path().join(".orient/index");
+    FastIndex::build(repo.path())
+        .unwrap()
+        .save(&index_path)
+        .unwrap();
+    let runtime = ToolRuntime::default();
+
+    let clean = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("status"),
+        tool: "index_status".to_string(),
+        arguments: serde_json::json!({ "index": index_path }),
+    });
+    assert!(clean.error.is_none(), "{:?}", clean.error);
+    assert_eq!(
+        clean.result.as_ref().unwrap()["stale"],
+        serde_json::json!(false)
+    );
+
+    write(
+        &repo.path().join("src/auth.rs"),
+        "pub struct SessionManager;\npub fn issue_token() {}\npub fn rotate_secret_now() {}\n",
+    );
+    write(
+        &repo.path().join("src/new_session.rs"),
+        "pub fn new_session() {}\n",
+    );
+
+    let stale = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("status"),
+        tool: "index_status".to_string(),
+        arguments: serde_json::json!({ "index": index_path }),
+    });
+    assert!(stale.error.is_none(), "{:?}", stale.error);
+    let result = stale.result.unwrap();
+    assert_eq!(result["stale"], serde_json::json!(true));
+    assert_eq!(result["changed_paths"], serde_json::json!(["src/auth.rs"]));
+    assert_eq!(
+        result["added_paths"],
+        serde_json::json!(["src/new_session.rs"])
+    );
 }
 
 #[test]

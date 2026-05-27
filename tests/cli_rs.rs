@@ -943,6 +943,91 @@ fn cli_search_surfaces_accept_structured_filters() {
 }
 
 #[test]
+fn cli_reports_index_and_shard_freshness() {
+    let repo = sample_repo();
+    write(
+        &repo.path().join("src/billing.rs"),
+        "pub fn invoice_total() {}\n",
+    );
+    let index_path = repo.path().join(".orient/index");
+
+    let mut index = Command::cargo_bin("orient").unwrap();
+    index
+        .args([
+            "index",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--output",
+            index_path.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let mut clean = Command::cargo_bin("orient").unwrap();
+    clean
+        .args(["index-status", "--index", index_path.to_str().unwrap()])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"stale\":false"));
+
+    write(
+        &repo.path().join("src/auth.rs"),
+        "pub struct SessionManager;\npub fn issue_token() {}\npub fn rotate_secret_now() {}\n",
+    );
+    fs::remove_file(repo.path().join("src/billing.rs")).unwrap();
+    write(
+        &repo.path().join("src/new_session.rs"),
+        "pub fn new_session() {}\n",
+    );
+
+    let mut stale = Command::cargo_bin("orient").unwrap();
+    stale
+        .args(["index-status", "--index", index_path.to_str().unwrap()])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"stale\":true"))
+        .stdout(predicate::str::contains(
+            "\"changed_paths\":[\"src/auth.rs\"]",
+        ))
+        .stdout(predicate::str::contains(
+            "\"deleted_paths\":[\"src/billing.rs\"]",
+        ))
+        .stdout(predicate::str::contains(
+            "\"added_paths\":[\"src/new_session.rs\"]",
+        ));
+
+    let shard_dir = tempfile::tempdir().unwrap();
+    let mut build_shards = Command::cargo_bin("orient").unwrap();
+    build_shards
+        .args([
+            "index-shards",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--output-dir",
+            shard_dir.path().to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+    write(
+        &repo.path().join("src/after_shard.rs"),
+        "pub fn after_shard() {}\n",
+    );
+
+    let mut shard_status = Command::cargo_bin("orient").unwrap();
+    shard_status
+        .args([
+            "shard-status",
+            "--index-dir",
+            shard_dir.path().to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"stale\":true"))
+        .stdout(predicate::str::contains("\"stale_shards\":1"))
+        .stdout(predicate::str::contains("src/after_shard.rs"));
+}
+
+#[test]
 fn cli_builds_and_searches_persistent_index() {
     let repo = sample_repo();
     write(

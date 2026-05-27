@@ -79,6 +79,42 @@ fn refresh_reuses_renamed_files_by_content_fingerprint() {
 }
 
 #[test]
+fn indexed_freshness_reports_added_changed_and_deleted_files() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/auth.rs"),
+        "pub struct SessionManager;\npub fn issue_token() {}\n",
+    );
+    write(
+        &repo.path().join("src/billing.rs"),
+        "pub fn invoice_total() {}\n",
+    );
+
+    let index = FastIndex::build(repo.path()).unwrap();
+    let clean = index.freshness().unwrap();
+    assert!(!clean.stale);
+    assert_eq!(clean.changed_files, 0);
+    assert_eq!(clean.deleted_files, 0);
+    assert_eq!(clean.added_files, 0);
+
+    write(
+        &repo.path().join("src/auth.rs"),
+        "pub struct SessionManager;\npub fn issue_token() {}\npub fn rotate_secret_now() {}\n",
+    );
+    fs::remove_file(repo.path().join("src/billing.rs")).unwrap();
+    write(
+        &repo.path().join("src/new_session.rs"),
+        "pub fn new_session_token() {}\n",
+    );
+
+    let stale = index.freshness().unwrap();
+    assert!(stale.stale);
+    assert_eq!(stale.changed_paths, vec!["src/auth.rs"]);
+    assert_eq!(stale.deleted_paths, vec!["src/billing.rs"]);
+    assert_eq!(stale.added_paths, vec!["src/new_session.rs"]);
+}
+
+#[test]
 fn indexed_search_and_read_range_use_persisted_snapshot_text() {
     let repo = tempfile::tempdir().unwrap();
     write(

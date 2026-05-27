@@ -10,7 +10,7 @@ use crate::repo_index::{
 use crate::shards::{
     ShardEntry, ShardManifest, ShardQueryPlan, ShardRepoMap, ShardSearchScope, build_shards,
     ensure_shards, filter_repo_map_by_prefix, filters_for_shard_scope, load_manifest,
-    refresh_shards, resolve_shard_read_path, shard_search_scopes,
+    refresh_shards, resolve_shard_read_path, shard_search_scopes, shard_status,
 };
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
@@ -274,6 +274,12 @@ pub fn tool_manifest() -> Value {
             &[],
         ),
         tool_entry(
+            "index_status",
+            "Report whether a persistent single-repo index is stale versus its live repository.",
+            &["index"],
+            &[],
+        ),
+        tool_entry(
             "warm_shards",
             "Load every shard index from a local shard directory into the daemon cache.",
             &["index_dir"],
@@ -367,6 +373,12 @@ pub fn tool_manifest() -> Value {
         tool_entry(
             "refresh_shards",
             "Refresh every repo index in a local shard directory incrementally.",
+            &["index_dir"],
+            &[],
+        ),
+        tool_entry(
+            "shard_status",
+            "Report stale shards and added, changed, or deleted files in a local shard directory.",
             &["index_dir"],
             &[],
         ),
@@ -787,6 +799,11 @@ impl ToolRuntime {
                     &search_filters(&request.arguments, true)?,
                 )?)?)
             }
+            "index_status" => {
+                let index_path = path_arg(&request.arguments, "index")?;
+                let index = self.cached_index(index_path)?;
+                Ok(serde_json::to_value(index.freshness()?)?)
+            }
             "read_index_range" => {
                 let index_path = path_arg(&request.arguments, "index")?;
                 let path = string_arg(&request.arguments, "path")?;
@@ -836,6 +853,10 @@ impl ToolRuntime {
                 let stats = refresh_shards(index_dir)?;
                 self.clear_runtime_caches()?;
                 Ok(serde_json::to_value(stats)?)
+            }
+            "shard_status" => {
+                let index_dir = path_arg(&request.arguments, "index_dir")?;
+                Ok(serde_json::to_value(shard_status(index_dir)?)?)
             }
             "search_shards" => {
                 let index_dir = path_arg(&request.arguments, "index_dir")?;
@@ -1003,6 +1024,7 @@ impl ToolRuntime {
                 "warm_index",
                 "ensure_index",
                 "refresh_index",
+                "index_status",
                 "warm_shards",
                 "discover_repos",
                 "repo_brief",
@@ -1018,6 +1040,7 @@ impl ToolRuntime {
                 "index_shards",
                 "ensure_shards",
                 "refresh_shards",
+                "shard_status",
                 "search_shards",
                 "shard_query_plan",
                 "read_shard_range",

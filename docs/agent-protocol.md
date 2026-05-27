@@ -39,6 +39,8 @@ For many repos:
 
 `daemon_status` reports warmed index and shard details so multiple local agents can confirm they share the intended codebase set. It does not expose session analytics.
 
+Use `index_status` or `shard_status` when live files may have changed since indexing. They report added, changed, and deleted files so an agent can call `refresh_index` or `refresh_shards` before trusting indexed results.
+
 ## Search First
 
 Use the fastest surface that matches your setup:

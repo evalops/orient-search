@@ -12,6 +12,7 @@ use orient::server::{ToolRuntime, serve_jsonl, serve_tcp, tool_manifest};
 use orient::shards::{
     build_shards, ensure_shards, find_shard_symbol, read_shard_range, refresh_shards,
     related_shard_files, related_shard_symbols, search_shards, shard_query_plans, shard_repo_maps,
+    shard_status,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -60,6 +61,10 @@ enum Commands {
         #[arg(long)]
         index: PathBuf,
     },
+    IndexStatus {
+        #[arg(long)]
+        index: PathBuf,
+    },
     EnsureIndex {
         #[arg(long, default_value = ".")]
         repo: PathBuf,
@@ -83,6 +88,10 @@ enum Commands {
         output_dir: PathBuf,
     },
     RefreshShards {
+        #[arg(long)]
+        index_dir: PathBuf,
+    },
+    ShardStatus {
         #[arg(long)]
         index_dir: PathBuf,
     },
@@ -531,6 +540,10 @@ fn main() -> Result<()> {
                 serde_json::to_string(&refresh_or_build_index(repo, index)?)?
             );
         }
+        Commands::IndexStatus { index } => {
+            let index = FastIndex::load(index)?;
+            println!("{}", serde_json::to_string(&index.freshness()?)?);
+        }
         Commands::IndexShards {
             repos,
             discover_roots,
@@ -556,6 +569,9 @@ fn main() -> Result<()> {
         }
         Commands::RefreshShards { index_dir } => {
             println!("{}", serde_json::to_string(&refresh_shards(index_dir)?)?);
+        }
+        Commands::ShardStatus { index_dir } => {
+            println!("{}", serde_json::to_string(&shard_status(index_dir)?)?);
         }
         Commands::EnsureShards {
             repos,
