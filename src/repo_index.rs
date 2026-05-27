@@ -525,8 +525,8 @@ fn merge_match_result(
     let mut reasons = Vec::new();
     let mut signals = Vec::new();
     let _ = apply_phrase_matches(
-        &path_lower,
-        &line_lower,
+        path,
+        line,
         query_phrases,
         "line_phrase",
         12.0,
@@ -1301,8 +1301,8 @@ fn score_text_file(
     let mut reasons = Vec::new();
     let mut signals = Vec::new();
     if !apply_phrase_matches(
-        &path_lower,
-        &text_lower,
+        path,
+        text,
         query_phrases,
         "content_phrase",
         16.0,

@@ -836,14 +836,13 @@ impl FastIndex {
     ) -> Option<SearchResult> {
         let file = self.files.get(file_id as usize)?;
         let path_lower = file.path.to_lowercase();
-        let content_lower = file.content.to_lowercase();
         let query_name = query_tokens.join("");
         let mut score = 0.0;
         let mut reasons = Vec::new();
         let mut signals = Vec::new();
         if !apply_phrase_matches(
-            &path_lower,
-            &content_lower,
+            &file.path,
+            &file.content,
             query_phrases,
             "content_phrase",
             16.0,
@@ -1239,8 +1238,9 @@ fn first_matching_line(
     offsets.iter().enumerate().find_map(|(index, offset)| {
         let start = *offset as usize;
         let end = line_end(bytes, offsets, index);
-        let lowered = String::from_utf8_lossy(&bytes[start..end]).to_lowercase();
-        let phrase_text = normalize_phrase_text(&lowered);
+        let line = String::from_utf8_lossy(&bytes[start..end]);
+        let lowered = line.to_lowercase();
+        let phrase_text = normalize_phrase_text(&line);
         (query_phrases
             .iter()
             .any(|phrase| phrase_text.contains(phrase))

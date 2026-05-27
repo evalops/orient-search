@@ -139,15 +139,21 @@ pub fn query_phrases(terms: &[String]) -> Vec<String> {
 pub(crate) fn normalize_phrase_text(input: &str) -> String {
     let mut normalized = String::new();
     let mut last_was_space = true;
+    let mut previous_was_lower_or_digit = false;
     for ch in input.chars() {
         if ch.is_alphanumeric() {
+            if ch.is_uppercase() && previous_was_lower_or_digit && !last_was_space {
+                normalized.push(' ');
+            }
             for lower in ch.to_lowercase() {
                 normalized.push(lower);
             }
             last_was_space = false;
+            previous_was_lower_or_digit = ch.is_lowercase() || ch.is_ascii_digit();
         } else if !last_was_space {
             normalized.push(' ');
             last_was_space = true;
+            previous_was_lower_or_digit = false;
         }
     }
     if normalized.ends_with(' ') {
@@ -219,6 +225,17 @@ mod tests {
         assert_eq!(parsed.filters.test, Some(true));
         assert_eq!(parsed.filters.exclude_extension, vec!["md"]);
         assert_eq!(parsed.filters.exclude_repo, vec!["old"]);
+    }
+
+    #[test]
+    fn normalizes_quoted_phrases_across_identifier_boundaries() {
+        assert_eq!(normalize_phrase_text("issue_token"), "issue token");
+        assert_eq!(normalize_phrase_text("issue-token"), "issue token");
+        assert_eq!(normalize_phrase_text("issueToken"), "issue token");
+        assert_eq!(
+            query_phrases(&["issueToken".to_string()]),
+            vec!["issue token"]
+        );
     }
 
     #[test]

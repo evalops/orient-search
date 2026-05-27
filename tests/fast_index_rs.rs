@@ -408,6 +408,48 @@ fn quoted_phrases_require_exact_matches_and_explain_phrase_signals() {
 }
 
 #[test]
+fn quoted_phrases_match_camel_case_identifier_boundaries() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/exact.ts"),
+        "export function issueToken() {\n  return 'session';\n}\n",
+    );
+    write(
+        &repo.path().join("src/scattered.ts"),
+        "export function issueLater() {\n  const token = 'session';\n}\n",
+    );
+
+    let fallback = search_repo_fast_filtered(
+        repo.path(),
+        "\"issue token\"",
+        10,
+        &SearchFilters::default(),
+    )
+    .unwrap();
+    assert_eq!(fallback.len(), 1);
+    assert_eq!(fallback[0].path, "src/exact.ts");
+    assert!(fallback[0].reason.contains("phrase:issue token"));
+    assert!(
+        !fallback
+            .iter()
+            .any(|result| result.path == "src/scattered.ts")
+    );
+
+    let indexed = FastIndex::build(repo.path())
+        .unwrap()
+        .search_filtered("\"issue token\"", 10, &SearchFilters::default())
+        .unwrap();
+    assert_eq!(indexed.len(), 1);
+    assert_eq!(indexed[0].path, "src/exact.ts");
+    assert!(indexed[0].reason.contains("phrase:issue token"));
+    assert!(
+        !indexed
+            .iter()
+            .any(|result| result.path == "src/scattered.ts")
+    );
+}
+
+#[test]
 fn indexed_search_supports_line_offsets_and_snippet_modes() {
     let repo = tempfile::tempdir().unwrap();
     write(
