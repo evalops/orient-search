@@ -155,3 +155,57 @@ impl SessionManager {
         .success()
         .stdout(predicate::str::contains("src/auth.rs"));
 }
+
+#[test]
+fn cli_reports_search_benchmarks() {
+    let repo = sample_repo();
+
+    let mut fallback = Command::cargo_bin("orient").unwrap();
+    fallback
+        .args([
+            "bench-search",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--runs",
+            "2",
+            "--warmup",
+            "1",
+            "issue token",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"mode\":\"fallback\""))
+        .stdout(predicate::str::contains("\"p95_ms\""));
+
+    let index_path = repo.path().join(".orient/index");
+    let mut index = Command::cargo_bin("orient").unwrap();
+    index
+        .args([
+            "index",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--output",
+            index_path.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let mut indexed = Command::cargo_bin("orient").unwrap();
+    indexed
+        .args([
+            "bench-search",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--index",
+            index_path.to_str().unwrap(),
+            "--runs",
+            "2",
+            "--warmup",
+            "1",
+            "issue token",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"mode\":\"indexed\""))
+        .stdout(predicate::str::contains("\"p95_ms\""));
+}

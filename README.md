@@ -36,6 +36,15 @@ cargo run -- symbol --repo /path/to/repo SessionManager
 
 # Find related tests/files.
 cargo run -- related --repo /path/to/repo src/auth.py
+
+# Measure p50/p95/max search latency with the same code paths agents use.
+cargo run --release -- bench-search \
+  --repo /Users/jonathanhaas/Documents/Projects \
+  --runs 10 \
+  --warmup 3 \
+  "session token auth" \
+  "browser session implementation" \
+  "postgres migration user"
 ```
 
 ## JSON-Lines Server
@@ -82,14 +91,21 @@ Product impact criteria for follow-up adoption:
 
 Current search baseline:
 
-- `orient search --repo . "indexed search symbol filters"`: about `11ms` mean after warmup.
-- `orient search --repo /Users/jonathanhaas/Documents/Projects "session token auth"`: about `17ms` mean after warmup, max observed `18ms`.
-- `orient search --repo /Users/jonathanhaas/Documents/Projects "browser session implementation"`: about `20ms` mean after warmup, max observed `26ms`.
-- `orient search --repo /Users/jonathanhaas/Documents/Projects "postgres migration user"`: about `31ms` mean after warmup, max observed `43ms`.
+- `orient bench-search --repo . "indexed search symbol filters"`: `12.055ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "session token auth"`: `16.409ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "browser session implementation"`: `17.226ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "postgres migration user"`: `75.542ms` p95 after warmup.
 - The `rg` hot path has a `250ms` wall-clock timeout plus a bounded match cap; timed-out searches return partial results rather than hanging.
 - `orient index --repo . --output /tmp/orient-self.index`: versioned binary index with file metadata, terms, and symbol boosts.
 - `orient refresh-index --repo . --index /tmp/orient-self.index`: reuses unchanged files and refreshes changed/deleted files.
-- `orient indexed-search --index /tmp/orient-self.index "indexed search symbol filters"`: about `3ms` mean after warmup.
+- `orient bench-search --repo . --index /tmp/orient-self.index "indexed search symbol filters"`: `0.655ms` p95 after warmup.
+
+Benchmark methodology:
+
+- Use `cargo build --release`, then run `orient bench-search`.
+- Warm up each query before collecting samples.
+- Report `p95_ms` and `max_ms` from repeated searches, not one-off timings.
+- Benchmark the fallback path without `--index`; benchmark the persistent indexed path with `--index /tmp/orient-self.index`.
 
 See [docs/fast-search-roadmap.md](docs/fast-search-roadmap.md) for the Zoekt/Sourcegraph/Amp-inspired roadmap.
 

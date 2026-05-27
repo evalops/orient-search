@@ -32,17 +32,18 @@ Implemented now:
 - `orient index`: persistent Rust token/path posting index.
 - `orient refresh-index`: incremental refresh that reuses unchanged file metadata/terms and refreshes changed files.
 - `orient indexed-search`: indexed query path.
+- `orient bench-search`: built-in p50/p95/max latency reporting for fallback and indexed search.
 - JSON-lines tools: `search_code` and `indexed_search_code`.
 - Result de-duping for repeated worktree copies where practical.
 
 Measured on this machine:
 
-- Wide tree fallback: `/Users/jonathanhaas/Documents/Projects`, common top-10 literal/token queries in about `17-31ms` mean after warmup, with max observed `43ms` across the sampled runs.
-- Local repo fallback: query `indexed search symbol filters`, top 10 in about `11ms` mean after warmup.
+- Wide tree fallback: `/Users/jonathanhaas/Documents/Projects`, common top-10 literal/token queries at `16-76ms` p95 after warmup across the sampled runs.
+- Local repo fallback: query `indexed search symbol filters`, top 10 at about `12ms` p95 after warmup.
 - Hot-path fallback has a `250ms` wall-clock timeout plus match caps; if the timeout fires it returns partial results instead of blocking the agent.
 - Local repo index build: about `0.25s`.
 - Local repo refresh after build: reuses unchanged files and rebuilds postings from per-file term lists.
-- Local repo indexed search: query `indexed search symbol filters`, top 10 in about `3ms` mean after warmup.
+- Local repo indexed search: query `indexed search symbol filters`, top 10 at about `0.7ms` p95 after warmup.
 
 ## Exit Conditions
 
@@ -65,7 +66,7 @@ Engineering definition:
 - Persistent index has a versioned on-disk format.
 - Incremental refresh exists.
 - Tests cover fallback search, indexed search, incremental refresh, filters, ranking, duplicate suppression, and JSON-lines server calls.
-- Every release claim is backed by `cargo fmt --check`, `cargo test`, `cargo build --release`, and timed searches.
+- Every release claim is backed by `cargo fmt --check`, `cargo test`, `cargo build --release`, and `orient bench-search` or equivalent timed searches.
 
 ## Architecture Direction
 
@@ -73,7 +74,7 @@ Near term:
 
 - Keep `rg` as the brutally fast no-index baseline.
 - Add more query filters and aliases after the current path/language/extension/require-all surface.
-- Add a repeated-query benchmark command so p50/p95 are visible without external scripts.
+- Extend benchmark reporting with saved comparison baselines for CI or local regression checks.
 - Tighten duplicate suppression based on normalized path suffixes and snippet signatures.
 
 Zoekt-inspired indexed mode:
