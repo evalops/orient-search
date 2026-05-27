@@ -105,6 +105,35 @@ fn indexed_symbol_lookup_returns_definition_paths() {
 }
 
 #[test]
+fn indexed_repo_map_returns_orientation_from_persisted_metadata() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/lib.rs"),
+        "pub struct SessionManager;\npub fn issue_token() {}\n",
+    );
+    write(
+        &repo.path().join("tests/auth_test.rs"),
+        "use sample::SessionManager;\n#[test]\nfn issue_token_round_trip() {}\n",
+    );
+    write(
+        &repo.path().join("Cargo.toml"),
+        "[package]\nname='sample'\nversion='0.1.0'\nedition='2024'\n",
+    );
+
+    let map = FastIndex::build(repo.path()).unwrap().repo_map(5, 5);
+
+    assert!(map.entrypoints.contains(&"src/lib.rs".to_string()));
+    assert!(map.test_files.contains(&"tests/auth_test.rs".to_string()));
+    assert!(
+        map.brief
+            .important_files
+            .contains(&"Cargo.toml".to_string())
+    );
+    assert!(map.brief.known_commands.contains(&"cargo test".to_string()));
+    assert_eq!(map.top_symbols[0].name, "SessionManager");
+}
+
+#[test]
 fn fallback_search_boosts_exact_symbols() {
     let repo = tempfile::tempdir().unwrap();
     write(

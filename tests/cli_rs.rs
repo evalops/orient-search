@@ -230,6 +230,24 @@ fn cli_builds_and_searches_persistent_index() {
         .stdout(predicate::str::contains("\"path\":\"src/auth.rs\""))
         .stdout(predicate::str::contains("\"kind\":\"struct\""));
 
+    let mut index_map = Command::cargo_bin("orient").unwrap();
+    index_map
+        .args([
+            "index-map",
+            "--index",
+            index_path.to_str().unwrap(),
+            "--symbols",
+            "5",
+            "--tests",
+            "5",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"entrypoints\""))
+        .stdout(predicate::str::contains("tests/auth_test.rs"))
+        .stdout(predicate::str::contains("SessionManager"))
+        .stdout(predicate::str::contains("cargo test"));
+
     let mut related_index = Command::cargo_bin("orient").unwrap();
     related_index
         .args([
@@ -385,6 +403,31 @@ fn cli_builds_and_searches_shard_directory() {
             "\"path\":\"{billing_name}/src/billing.rs\""
         )))
         .stdout(predicate::str::contains("\"name\":\"invoice_total\""));
+
+    let mut shard_map = Command::cargo_bin("orient").unwrap();
+    shard_map
+        .args([
+            "shard-map",
+            "--index-dir",
+            shard_dir.path().to_str().unwrap(),
+            "--repo",
+            &billing_name.to_ascii_uppercase(),
+            "--symbols",
+            "5",
+            "--tests",
+            "5",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(&format!(
+            "\"name\":\"{billing_name}\""
+        )))
+        .stdout(predicate::str::contains(&format!(
+            "\"entrypoints\":[\"{billing_name}/Cargo.toml\"]"
+        )))
+        .stdout(predicate::str::contains(&format!(
+            "\"path\":\"{billing_name}/src/billing.rs\""
+        )));
 
     let mut read = Command::cargo_bin("orient").unwrap();
     read.args([

@@ -42,10 +42,12 @@ fn server_reports_tool_manifest_for_agent_wrappers() {
     assert!(stdout.contains("\"required\":[\"repo\",\"query\"]"));
     assert!(stdout.contains("\"optional\""));
     assert!(stdout.contains("read_index_range"));
+    assert!(stdout.contains("indexed_repo_map"));
     assert!(stdout.contains("find_index_symbol"));
     assert!(stdout.contains("related_index_files"));
     assert!(stdout.contains("related_index_symbols"));
     assert!(stdout.contains("read_shard_range"));
+    assert!(stdout.contains("shard_repo_map"));
     assert!(stdout.contains("find_shard_symbol"));
 }
 
@@ -165,6 +167,15 @@ fn server_handles_indexed_search_request() {
             "limit": 5
         }
     });
+    let map_request = serde_json::json!({
+        "id": "indexed-repo-map",
+        "tool": "indexed_repo_map",
+        "arguments": {
+            "index": index_path,
+            "symbols": 5,
+            "tests": 5
+        }
+    });
     let related_request = serde_json::json!({
         "id": "related-index-files",
         "tool": "related_index_files",
@@ -187,6 +198,7 @@ fn server_handles_indexed_search_request() {
     writeln!(child.stdin.as_mut().unwrap(), "{request}").unwrap();
     writeln!(child.stdin.as_mut().unwrap(), "{read_request}").unwrap();
     writeln!(child.stdin.as_mut().unwrap(), "{symbol_request}").unwrap();
+    writeln!(child.stdin.as_mut().unwrap(), "{map_request}").unwrap();
     writeln!(child.stdin.as_mut().unwrap(), "{related_request}").unwrap();
     writeln!(child.stdin.as_mut().unwrap(), "{related_symbols_request}").unwrap();
     drop(child.stdin.take());
@@ -201,6 +213,9 @@ fn server_handles_indexed_search_request() {
     assert!(stdout.contains("issue_token"));
     assert!(stdout.contains("\"id\":\"find-index-symbol\""));
     assert!(stdout.contains("\"kind\":\"struct\""));
+    assert!(stdout.contains("\"id\":\"indexed-repo-map\""));
+    assert!(stdout.contains("\"entrypoints\""));
+    assert!(stdout.contains("tests/auth_test.rs"));
     assert!(stdout.contains("\"id\":\"related-index-files\""));
     assert!(stdout.contains("tests/auth_test.rs"));
     assert!(stdout.contains("\"id\":\"related-index-symbols\""));
@@ -282,9 +297,20 @@ fn server_handles_shard_index_search_and_read_requests() {
             "limit": 5
         }
     });
+    let map_request = serde_json::json!({
+        "id": "shard-repo-map",
+        "tool": "shard_repo_map",
+        "arguments": {
+            "index_dir": parent.path().join(".orient-shards"),
+            "repo": "BILLING",
+            "symbols": 5,
+            "tests": 5
+        }
+    });
     writeln!(child.stdin.as_mut().unwrap(), "{index_request}").unwrap();
     writeln!(child.stdin.as_mut().unwrap(), "{search_request}").unwrap();
     writeln!(child.stdin.as_mut().unwrap(), "{symbol_request}").unwrap();
+    writeln!(child.stdin.as_mut().unwrap(), "{map_request}").unwrap();
     writeln!(child.stdin.as_mut().unwrap(), "{read_request}").unwrap();
     drop(child.stdin.take());
 
@@ -300,6 +326,8 @@ fn server_handles_shard_index_search_and_read_requests() {
     assert!(stdout.contains("\"id\":\"find-shard-symbol\""));
     assert!(stdout.contains("\"path\":\"billing/src/billing.rs\""));
     assert!(stdout.contains("\"name\":\"invoice_total\""));
+    assert!(stdout.contains("\"id\":\"shard-repo-map\""));
+    assert!(stdout.contains("\"entrypoints\":[\"billing/Cargo.toml\"]"));
     assert!(stdout.contains("\"id\":\"read-shard-range\""));
     assert!(stdout.contains("\"path\":\"billing/src/billing.rs\""));
     assert!(stdout.contains("invoice_total"));

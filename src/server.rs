@@ -4,6 +4,7 @@ use crate::repo_index::{
 };
 use crate::shards::{
     build_shards, find_shard_symbol, read_shard_range, refresh_shards, search_shards,
+    shard_repo_maps,
 };
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
@@ -90,6 +91,12 @@ pub fn tool_manifest() -> Value {
             "optional": ["symbols", "tests"]
         },
         {
+            "name": "indexed_repo_map",
+            "description": "Return repo-map orientation from a persistent single-repo index.",
+            "required": ["index"],
+            "optional": ["symbols", "tests"]
+        },
+        {
             "name": "read_range",
             "description": "Read a bounded line range from a repository-relative path.",
             "required": ["repo", "path"],
@@ -136,6 +143,12 @@ pub fn tool_manifest() -> Value {
             "description": "Read a bounded line range from a repo-prefixed shard search result path.",
             "required": ["index_dir", "path"],
             "optional": ["start", "lines"]
+        },
+        {
+            "name": "shard_repo_map",
+            "description": "Return repo-map orientation for every matching repo in a local shard directory.",
+            "required": ["index_dir"],
+            "optional": ["symbols", "tests", "repo", "repo_filter"]
         },
         {
             "name": "find_shard_symbol",
@@ -194,6 +207,15 @@ fn dispatch_result(request: &ToolRequest) -> Result<Value> {
             let symbol_limit = usize_arg(&request.arguments, "symbols").unwrap_or(50);
             let test_limit = usize_arg(&request.arguments, "tests").unwrap_or(50);
             let index = RepoIndexer::new(repo).build()?;
+            Ok(serde_json::to_value(
+                index.repo_map(symbol_limit, test_limit),
+            )?)
+        }
+        "indexed_repo_map" => {
+            let index_path = path_arg(&request.arguments, "index")?;
+            let symbol_limit = usize_arg(&request.arguments, "symbols").unwrap_or(50);
+            let test_limit = usize_arg(&request.arguments, "tests").unwrap_or(50);
+            let index = FastIndex::load(index_path)?;
             Ok(serde_json::to_value(
                 index.repo_map(symbol_limit, test_limit),
             )?)
@@ -268,6 +290,17 @@ fn dispatch_result(request: &ToolRequest) -> Result<Value> {
                 index_dir, &path, start, lines,
             )?)?)
         }
+        "shard_repo_map" => {
+            let index_dir = path_arg(&request.arguments, "index_dir")?;
+            let symbol_limit = usize_arg(&request.arguments, "symbols").unwrap_or(50);
+            let test_limit = usize_arg(&request.arguments, "tests").unwrap_or(50);
+            Ok(serde_json::to_value(shard_repo_maps(
+                index_dir,
+                symbol_limit,
+                test_limit,
+                &search_filters(&request.arguments, true),
+            )?)?)
+        }
         "find_shard_symbol" => {
             let index_dir = path_arg(&request.arguments, "index_dir")?;
             let name = string_arg(&request.arguments, "name")?;
@@ -339,6 +372,7 @@ fn dispatch_result(request: &ToolRequest) -> Result<Value> {
             "tool_manifest",
             "repo_brief",
             "repo_map",
+            "indexed_repo_map",
             "read_range",
             "search_code",
             "indexed_search_code",
@@ -347,6 +381,7 @@ fn dispatch_result(request: &ToolRequest) -> Result<Value> {
             "refresh_shards",
             "search_shards",
             "read_shard_range",
+            "shard_repo_map",
             "find_shard_symbol",
             "find_symbol",
             "find_index_symbol",

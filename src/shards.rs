@@ -3,7 +3,7 @@
 use crate::fast_index::{FastIndex, IndexStats};
 use crate::query::{merge_filters, parse_query};
 use crate::repo_index::{
-    FileRange, SearchFilters, SearchResult, Symbol, finalize_results, normalize_token,
+    FileRange, RepoMap, SearchFilters, SearchResult, Symbol, finalize_results, normalize_token,
     read_file_range, repo_matches,
 };
 use anyhow::{Context, Result};
@@ -52,6 +52,13 @@ pub struct ShardRefreshStats {
     pub reused_files: usize,
     pub refreshed_files: usize,
     pub deleted_files: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ShardRepoMap {
+    pub name: String,
+    pub root: PathBuf,
+    pub map: RepoMap,
 }
 
 pub fn build_shards(repos: &[PathBuf], output_dir: impl AsRef<Path>) -> Result<ShardBuildStats> {
@@ -203,6 +210,33 @@ pub fn find_shard_symbol(
     Ok(symbols)
 }
 
+pub fn shard_repo_maps(
+    index_dir: impl AsRef<Path>,
+    symbol_limit: usize,
+    test_limit: usize,
+    filters: &SearchFilters,
+) -> Result<Vec<ShardRepoMap>> {
+    let index_dir = index_dir.as_ref();
+    let manifest = load_manifest(index_dir)?;
+    let mut maps = Vec::new();
+    for shard in manifest.shards {
+        if !repo_matches(&shard.root, filters) {
+            continue;
+        }
+        let index = FastIndex::load(index_dir.join(&shard.index))
+            .with_context(|| format!("load shard {}", shard.index))?;
+        let mut map = index.repo_map(symbol_limit, test_limit);
+        prefix_repo_map_paths(&mut map, &shard.name);
+        maps.push(ShardRepoMap {
+            name: shard.name,
+            root: shard.root,
+            map,
+        });
+    }
+    maps.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(maps)
+}
+
 pub fn read_shard_range(
     index_dir: impl AsRef<Path>,
     shard_path: &str,
@@ -233,6 +267,21 @@ fn symbol_match_score(symbol: &Symbol, name: &str, needle: &str) -> u8 {
         60
     } else {
         0
+    }
+}
+
+fn prefix_repo_map_paths(map: &mut RepoMap, shard_name: &str) {
+    for path in &mut map.brief.important_files {
+        *path = format!("{shard_name}/{path}");
+    }
+    for path in &mut map.entrypoints {
+        *path = format!("{shard_name}/{path}");
+    }
+    for path in &mut map.test_files {
+        *path = format!("{shard_name}/{path}");
+    }
+    for symbol in &mut map.top_symbols {
+        symbol.path = format!("{shard_name}/{}", symbol.path);
     }
 }
 

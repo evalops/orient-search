@@ -1291,7 +1291,7 @@ fn format_snippet_window(lines: &[&str], center: usize, mode: SnippetMode) -> St
         .collect()
 }
 
-fn is_test_path(path: &str) -> bool {
+pub(crate) fn is_test_path(path: &str) -> bool {
     path.starts_with("test")
         || path.contains("/test")
         || path.ends_with("_test.py")
@@ -1299,7 +1299,7 @@ fn is_test_path(path: &str) -> bool {
         || path.ends_with(".test.tsx")
 }
 
-fn is_entrypoint_path(path: &str) -> bool {
+pub(crate) fn is_entrypoint_path(path: &str) -> bool {
     matches!(
         path,
         "src/main.rs"
@@ -1320,7 +1320,7 @@ fn is_entrypoint_path(path: &str) -> bool {
     ) || path.starts_with("cmd/")
 }
 
-fn symbol_kind_rank(kind: &str) -> usize {
+pub(crate) fn symbol_kind_rank(kind: &str) -> usize {
     match kind {
         "class" | "struct" | "enum" | "interface" => 0,
         "function" => 1,

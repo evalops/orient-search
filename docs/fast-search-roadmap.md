@@ -35,8 +35,8 @@ Implemented now:
 - `orient indexed-search`: indexed query path.
 - `orient index-shards`, `orient refresh-shards`, `orient search-shards`, and `orient read-shard-range`: local multi-repo shard manifest with one versioned index file per repo, incremental shard refresh, and bounded range reads from prefixed shard paths.
 - `orient bench-search`: built-in p50/p95/max latency reporting for fallback and indexed search, with `--fail-p95-ms`, `--write-baseline`, and `--baseline` for regression gates.
-- JSON-lines tools: `tool_manifest`, `search_code`, `indexed_search_code`, `read_index_range`, `find_index_symbol`, `find_shard_symbol`, `related_index_files`, `related_index_symbols`, `index_shards`, `refresh_shards`, `search_shards`, `read_shard_range`, `repo_map`, `read_range`, and `related_symbols`.
-- CLI tools: `repo-map`, `read-range`, `read-index-range`, `index-symbol`, `shard-symbol`, `related-index`, `related-index-symbols`, and `related-symbols`, so agents can inspect entrypoints/tests/top symbols, open bounded file context, and jump to nearby definitions after a search hit.
+- JSON-lines tools: `tool_manifest`, `search_code`, `indexed_search_code`, `indexed_repo_map`, `read_index_range`, `find_index_symbol`, `shard_repo_map`, `find_shard_symbol`, `related_index_files`, `related_index_symbols`, `index_shards`, `refresh_shards`, `search_shards`, `read_shard_range`, `repo_map`, `read_range`, and `related_symbols`.
+- CLI tools: `repo-map`, `index-map`, `shard-map`, `read-range`, `read-index-range`, `index-symbol`, `shard-symbol`, `related-index`, `related-index-symbols`, and `related-symbols`, so agents can inspect entrypoints/tests/top symbols, open bounded file context, and jump to nearby definitions after a search hit.
 - `orient tool-manifest`: emits descriptions plus required/optional argument metadata for JSON-lines wrappers.
 - Search snippet modes: `short`, `medium`, `block`, and `symbol`.
 - Path, file, repo, extension, language, and symbol filters match case-insensitively across fallback, indexed, and shard search surfaces.
@@ -47,15 +47,16 @@ Implemented now:
 - Exact symbol definition boosting in both fallback and indexed search.
 - Direct symbol lookup from persistent indexes, so agent wrappers can jump to definitions without rebuilding a repo index.
 - Direct symbol lookup across local shard directories, returning repo-prefixed paths that can be passed to `read-shard-range`.
+- Repo-map orientation from persistent indexes and shard directories, so agents can inspect entrypoints, tests, symbols, important files, and command hints without rebuilding a separate live repo index.
 
 Measured on this machine:
 
-- Wide tree fallback: `/Users/jonathanhaas/Documents/Projects`, common top-10 literal/token queries at `17-31ms` p95 after warmup across the sampled runs.
-- Local repo fallback: query `indexed search symbol filters`, top 10 at about `7.3ms` p95 after warmup.
+- Wide tree fallback: `/Users/jonathanhaas/Documents/Projects`, common top-10 literal/token queries at `20-35ms` p95 after warmup across the sampled runs.
+- Local repo fallback: query `indexed search symbol filters`, top 10 at about `8.4ms` p95 after warmup.
 - Hot-path fallback has a `250ms` wall-clock timeout plus match caps; if the timeout fires it returns partial results instead of blocking the agent.
 - Local repo index build: about `0.25s`.
 - Local repo refresh after build: reuses unchanged files and rebuilds postings from per-file term lists.
-- Local repo indexed search: query `indexed search symbol filters`, top 10 at about `0.18ms` p95 after warmup.
+- Local repo indexed search: query `indexed search symbol filters`, top 10 at about `0.13ms` p95 after warmup.
 
 ## Exit Conditions
 

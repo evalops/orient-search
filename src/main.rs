@@ -7,6 +7,7 @@ use orient::repo_index::{
 use orient::server::{serve_jsonl, tool_manifest};
 use orient::shards::{
     build_shards, find_shard_symbol, read_shard_range, refresh_shards, search_shards,
+    shard_repo_maps,
 };
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -85,6 +86,16 @@ enum Commands {
         #[arg(long = "repo")]
         repo: Option<String>,
     },
+    ShardMap {
+        #[arg(long)]
+        index_dir: PathBuf,
+        #[arg(long, default_value_t = 50)]
+        symbols: usize,
+        #[arg(long, default_value_t = 50)]
+        tests: usize,
+        #[arg(long = "repo")]
+        repo: Option<String>,
+    },
     Brief {
         #[arg(long, default_value = ".")]
         repo: PathBuf,
@@ -92,6 +103,14 @@ enum Commands {
     RepoMap {
         #[arg(long, default_value = ".")]
         repo: PathBuf,
+        #[arg(long, default_value_t = 50)]
+        symbols: usize,
+        #[arg(long, default_value_t = 50)]
+        tests: usize,
+    },
+    IndexMap {
+        #[arg(long)]
+        index: PathBuf,
         #[arg(long, default_value_t = 50)]
         symbols: usize,
         #[arg(long, default_value_t = 50)]
@@ -351,6 +370,25 @@ fn main() -> Result<()> {
                 )?)?
             );
         }
+        Commands::ShardMap {
+            index_dir,
+            symbols,
+            tests,
+            repo,
+        } => {
+            println!(
+                "{}",
+                serde_json::to_string(&shard_repo_maps(
+                    index_dir,
+                    symbols,
+                    tests,
+                    &SearchFilters {
+                        repo,
+                        ..SearchFilters::default()
+                    },
+                )?)?
+            );
+        }
         Commands::Brief { repo } => {
             let index = RepoIndexer::new(repo).build()?;
             println!("{}", serde_json::to_string(&index.repo_brief())?);
@@ -361,6 +399,17 @@ fn main() -> Result<()> {
             tests,
         } => {
             let index = RepoIndexer::new(repo).build()?;
+            println!(
+                "{}",
+                serde_json::to_string(&index.repo_map(symbols, tests))?
+            );
+        }
+        Commands::IndexMap {
+            index,
+            symbols,
+            tests,
+        } => {
+            let index = FastIndex::load(index)?;
             println!(
                 "{}",
                 serde_json::to_string(&index.repo_map(symbols, tests))?

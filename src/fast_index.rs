@@ -2,10 +2,11 @@
 
 use crate::query::{merge_filters, parse_query, query_text};
 use crate::repo_index::{
-    RankSignal, SearchFilters, SearchResult, SnippetMode, Symbol, best_snippet_for_path,
-    extract_symbols, finalize_results, is_ignored, language_for, matches_filters, normalize_token,
-    repo_matches, result_matches_all_tokens, result_matches_symbol_filters, round4, token_counts,
-    tokenize,
+    RankSignal, RepoBrief, RepoMap, SearchFilters, SearchResult, SnippetMode, Symbol,
+    best_snippet_for_path, extract_symbols, finalize_results, is_entrypoint_path, is_ignored,
+    is_test_path, language_for, matches_filters, normalize_token, repo_matches,
+    result_matches_all_tokens, result_matches_symbol_filters, round4, symbol_kind_rank,
+    token_counts, tokenize,
 };
 use anyhow::{Context, Result};
 use ignore::WalkBuilder;
@@ -239,6 +240,76 @@ impl FastIndex {
 
     pub fn search(&self, query: &str, limit: usize) -> Result<Vec<SearchResult>> {
         self.search_filtered(query, limit, &SearchFilters::default())
+    }
+
+    pub fn repo_map(&self, symbol_limit: usize, test_limit: usize) -> RepoMap {
+        let mut language_counts = HashMap::new();
+        for file in &self.files {
+            *language_counts.entry(file.language.clone()).or_insert(0) += 1;
+        }
+
+        let mut important_files = self
+            .files
+            .iter()
+            .filter(|file| is_important_file(&file.path))
+            .map(|file| file.path.clone())
+            .collect::<Vec<_>>();
+        important_files.sort();
+
+        let mut entrypoints = self
+            .files
+            .iter()
+            .filter(|file| is_entrypoint_path(&file.path))
+            .map(|file| file.path.clone())
+            .collect::<Vec<_>>();
+        entrypoints.sort();
+
+        let mut test_files = self
+            .files
+            .iter()
+            .filter(|file| is_test_path(&file.path.to_ascii_lowercase()))
+            .map(|file| file.path.clone())
+            .collect::<Vec<_>>();
+        test_files.sort();
+        test_files.truncate(test_limit);
+
+        let mut top_symbols = self
+            .files
+            .iter()
+            .flat_map(|file| {
+                file.symbols.iter().map(|symbol| Symbol {
+                    name: symbol.name.clone(),
+                    kind: symbol.kind.clone(),
+                    path: file.path.clone(),
+                    line: symbol.line,
+                })
+            })
+            .collect::<Vec<_>>();
+        top_symbols.sort_by(|a, b| {
+            symbol_kind_rank(&a.kind)
+                .cmp(&symbol_kind_rank(&b.kind))
+                .then_with(|| a.path.cmp(&b.path))
+                .then_with(|| a.line.cmp(&b.line))
+                .then_with(|| a.name.cmp(&b.name))
+        });
+        top_symbols.truncate(symbol_limit);
+
+        RepoMap {
+            brief: RepoBrief {
+                root_name: self
+                    .root
+                    .file_name()
+                    .map(|value| value.to_string_lossy().to_string())
+                    .unwrap_or_else(|| self.root.display().to_string()),
+                file_count: self.files.len(),
+                language_counts,
+                known_commands: known_commands_from_indexed_files(&self.files),
+                important_files,
+            },
+            entrypoints,
+            test_files,
+            top_symbols,
+        }
     }
 
     pub fn find_symbol(&self, name: &str, limit: usize) -> Vec<Symbol> {
@@ -613,6 +684,38 @@ fn index_file(
         symbols,
         line_offsets,
     })
+}
+
+fn is_important_file(path: &str) -> bool {
+    matches!(
+        path,
+        "AGENTS.md"
+            | "CLAUDE.md"
+            | "README.md"
+            | "pyproject.toml"
+            | "package.json"
+            | "Cargo.toml"
+            | "Makefile"
+    )
+}
+
+fn known_commands_from_indexed_files(files: &[IndexedPath]) -> Vec<String> {
+    let has_file = |name: &str| files.iter().any(|file| file.path == name);
+    let mut commands = Vec::new();
+    if has_file("pyproject.toml") {
+        commands.push("pytest".to_string());
+    }
+    if has_file("Cargo.toml") {
+        commands.push("cargo test".to_string());
+    }
+    if has_file("package.json") {
+        commands.push("npm test".to_string());
+        commands.push("npm run lint".to_string());
+    }
+    if has_file("Makefile") {
+        commands.push("make test".to_string());
+    }
+    commands
 }
 
 fn line_offsets(text: &str) -> Vec<u32> {
