@@ -997,6 +997,98 @@ fn cli_builds_and_searches_shard_directory() {
 }
 
 #[test]
+fn cli_shard_manifest_records_git_metadata() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/lib.rs"),
+        "pub fn unique_branch_token() -> &'static str { \"needle\" }\n",
+    );
+    write(
+        &repo.path().join("Cargo.toml"),
+        "[package]\nname='shard-project'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    git(repo.path(), &["init", "-b", "shard-feature-branch"]);
+    git(
+        repo.path(),
+        &[
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/evalops/shard-project.git",
+        ],
+    );
+    git(repo.path(), &["add", "."]);
+    git(
+        repo.path(),
+        &[
+            "-c",
+            "user.name=Orient Tests",
+            "-c",
+            "user.email=orient@example.com",
+            "commit",
+            "-m",
+            "init",
+        ],
+    );
+    let shard_dir = tempfile::tempdir().unwrap();
+
+    let mut build = Command::cargo_bin("orient").unwrap();
+    build
+        .args([
+            "index-shards",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--output-dir",
+            shard_dir.path().to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let manifest = fs::read_to_string(shard_dir.path().join("manifest.json")).unwrap();
+    assert!(manifest.contains("\"branch\": \"shard-feature-branch\""));
+    assert!(manifest.contains("https://github.com/evalops/shard-project.git"));
+    assert!(manifest.contains("\"git_kind\": \"clone\""));
+
+    let mut search_by_branch = Command::cargo_bin("orient").unwrap();
+    search_by_branch
+        .args([
+            "search-shards",
+            "--index-dir",
+            shard_dir.path().to_str().unwrap(),
+            "unique branch token",
+            "--repo",
+            "shard-feature-branch",
+            "--require-all",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("src/lib.rs"));
+
+    let mut map_by_origin = Command::cargo_bin("orient").unwrap();
+    map_by_origin
+        .args([
+            "shard-map",
+            "--index-dir",
+            shard_dir.path().to_str().unwrap(),
+            "--repo",
+            "shard-project",
+            "--symbols",
+            "5",
+            "--tests",
+            "5",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"git\""))
+        .stdout(predicate::str::contains(
+            "\"branch\":\"shard-feature-branch\"",
+        ))
+        .stdout(predicate::str::contains(
+            "https://github.com/evalops/shard-project.git",
+        ));
+}
+
+#[test]
 fn cli_filters_shard_search_by_nested_repo_alias() {
     let workspace = tempfile::tempdir().unwrap();
     let billing_repo = workspace.path().join("billing");

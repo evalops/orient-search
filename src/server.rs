@@ -1250,6 +1250,7 @@ impl ToolRuntime {
                         .collect(),
                     name: scope.output_prefix.clone(),
                     root: shard.root.clone(),
+                    git: shard.git.clone(),
                     map,
                 });
             }

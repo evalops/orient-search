@@ -167,7 +167,7 @@ fn inspect_candidate_repo(
     let metadata = if git && options.git_metadata {
         git_metadata_for_repo(&path, options.tracked_files)
     } else {
-        GitMetadata::default()
+        RepoGitMetadata::default()
     };
 
     Ok(Some(DiscoveredRepo {
@@ -184,29 +184,34 @@ fn inspect_candidate_repo(
     }))
 }
 
-#[derive(Debug, Default)]
-struct GitMetadata {
-    git_kind: Option<String>,
-    branch: Option<String>,
-    origin: Option<String>,
-    git_common_dir: Option<PathBuf>,
-    tracked_files: Option<usize>,
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RepoGitMetadata {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_common_dir: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tracked_files: Option<usize>,
 }
 
-fn git_metadata_for_repo(repo: &Path, include_tracked_files: bool) -> GitMetadata {
+pub fn git_metadata_for_repo(repo: &Path, include_tracked_files: bool) -> RepoGitMetadata {
     let Some(common_dir) = git_stdout(
         repo,
         &["rev-parse", "--path-format=absolute", "--git-common-dir"],
     )
     .map(PathBuf::from) else {
-        return GitMetadata::default();
+        return RepoGitMetadata::default();
     };
     let git_kind = if repo.join(".git").is_file() {
         "worktree"
     } else {
         "clone"
     };
-    GitMetadata {
+    RepoGitMetadata {
         git_kind: Some(git_kind.to_string()),
         branch: git_stdout(repo, &["branch", "--show-current"]),
         origin: git_stdout(repo, &["remote", "get-url", "origin"]),

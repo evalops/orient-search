@@ -34,7 +34,7 @@ Implemented now:
 - `orient refresh-index`: incremental refresh that reuses unchanged file metadata/terms, detects same-content renames, and refreshes changed files.
 - `orient indexed-search`: indexed query path.
 - `orient discover-repos`: bounded local repo discovery for broad workspaces and repeated worktree layouts.
-- `orient index-shards`, `orient ensure-shards`, `orient refresh-shards`, `orient search-shards`, `orient read-shard-range`, and `orient read-shard-ranges`: local multi-repo shard manifest with one versioned index file per repo, optional discovery from workspace roots, one-step build-or-refresh bootstrap, incremental shard refresh, and bounded range reads from prefixed shard paths.
+- `orient index-shards`, `orient ensure-shards`, `orient refresh-shards`, `orient search-shards`, `orient read-shard-range`, and `orient read-shard-ranges`: local multi-repo shard manifest with one versioned index file per repo, optional discovery from workspace roots, one-step build-or-refresh bootstrap, incremental shard refresh, git topology metadata, and bounded range reads from prefixed shard paths.
 - `orient bench-search`: built-in p50/p95/max latency reporting for fallback and indexed search, with `--fail-p95-ms`, `--write-baseline`, and `--baseline` for regression gates.
 - JSON-lines tools: `tool_manifest`, `daemon_status`, `warm_index`, `warm_shards`, `discover_repos`, `search_code`, `indexed_search_code`, `indexed_repo_map`, `read_index_range`, `read_index_ranges`, `find_index_symbol`, `shard_repo_map`, `find_shard_symbol`, `related_index_files`, `related_index_symbols`, `related_shard_files`, `related_shard_symbols`, `index_shards`, `ensure_shards`, `refresh_shards`, `search_shards`, `read_shard_range`, `read_shard_ranges`, `repo_map`, `read_range`, `read_ranges`, and `related_symbols`.
 - Local TCP daemon/client mode for sharing one warm JSON-lines runtime across many local agents working in the same repeated worktree layout, with startup prewarming via `--index` and `--index-dir`, cached shard manifests, cached shard range/related-context followups, single-flight cold index loads, bounded parallel fanout for broad cached shard searches, and no global search lock around cached index requests.
@@ -59,6 +59,7 @@ Implemented now:
 - Repo-map orientation from persistent indexes and shard directories, so agents can inspect entrypoints, manifests, tests, symbols, important files, and command hints without rebuilding a separate live repo index.
 - Command hints are manifest-aware and parse common `package.json` scripts while respecting package-manager lockfiles.
 - Shard manifests record aliases for nested repo-looking child directories, so broad dated worktree shards can still answer stable filters like `repo:maestro` and scope results to the matching child path.
+- Shard manifests record bounded git metadata for each shard, including origin, branch, clone/worktree kind, and common git dir when available. Shard repo filters and shard maps can use this topology, so agents can target an active branch or origin without knowing the exact checkout path.
 - Alias-scoped shard search, symbol lookup, and repo maps emit stable alias-prefixed paths, so search hits like `maestro/src/foo.rs` can be opened without knowing the enclosing worktree shard name.
 - Shard related-file and related-symbol tools accept alias-prefixed search-hit paths and keep returned context inside the same alias scope.
 - Batch read tools open several repo, index, or shard result paths in one request, reducing JSON-lines round trips after a multi-result search.
@@ -67,12 +68,12 @@ Implemented now:
 
 Measured on this machine:
 
-- Wide tree fallback: `/Users/jonathanhaas/Documents/Projects`, common top-10 literal/token queries at `20-35ms` p95 after warmup across the sampled runs, with a `23ms` p95 outlier on `browser session implementation` in the latest release run.
+- Wide tree fallback: `/Users/jonathanhaas/Documents/Projects`, common top-10 literal/token queries at about `21-45ms` p95 after warmup across the latest sampled release run.
 - Local repo fallback: query `indexed search symbol filters`, top 10 at about `12.5ms` p95 after warmup.
 - Hot-path fallback has a `250ms` wall-clock timeout plus match caps; if the timeout fires it returns partial results instead of blocking the agent.
 - Local repo index build: about `0.25s`.
 - Local repo refresh after build: reuses unchanged files, reuses same-content renames by retargeting path-derived postings, and rebuilds postings from per-file term lists.
-- Local repo indexed search: query `indexed search symbol filters`, top 10 at about `1.10ms` p95 after warmup.
+- Local repo indexed search: query `indexed search symbol filters`, top 10 at about `1.03ms` p95 after warmup.
 
 ## Exit Conditions
 

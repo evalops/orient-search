@@ -348,6 +348,90 @@ fn runtime_indexes_shards_from_discovered_root() {
 }
 
 #[test]
+fn runtime_shard_repo_map_reports_git_metadata() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/lib.rs"),
+        "pub fn unique_branch_token() -> &'static str { \"needle\" }\n",
+    );
+    write(
+        &repo.path().join("Cargo.toml"),
+        "[package]\nname='shard-project'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    git(repo.path(), &["init", "-b", "shard-feature-branch"]);
+    git(
+        repo.path(),
+        &[
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/evalops/shard-project.git",
+        ],
+    );
+    git(repo.path(), &["add", "."]);
+    git(
+        repo.path(),
+        &[
+            "-c",
+            "user.name=Orient Tests",
+            "-c",
+            "user.email=orient@example.com",
+            "commit",
+            "-m",
+            "init",
+        ],
+    );
+    let shard_dir = tempfile::tempdir().unwrap();
+
+    let runtime = ToolRuntime::default();
+    let build = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("index"),
+        tool: "index_shards".to_string(),
+        arguments: serde_json::json!({
+            "repos": [repo.path()],
+            "output_dir": shard_dir.path()
+        }),
+    });
+    assert!(build.error.is_none(), "{:?}", build.error);
+
+    let search = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("search"),
+        tool: "search_shards".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": shard_dir.path(),
+            "query": "unique branch token",
+            "repo": "shard-feature-branch",
+            "require_all": true
+        }),
+    });
+    assert!(search.error.is_none(), "{:?}", search.error);
+    let search_result = serde_json::to_string(&search.result).unwrap();
+    assert!(search_result.contains("src/lib.rs"), "{search_result}");
+
+    let map = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("map"),
+        tool: "shard_repo_map".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": shard_dir.path(),
+            "repo": "shard-project",
+            "symbols": 5,
+            "tests": 5
+        }),
+    });
+    assert!(map.error.is_none(), "{:?}", map.error);
+    let result = serde_json::to_string(&map.result).unwrap();
+    assert!(result.contains("\"git\""), "{result}");
+    assert!(
+        result.contains("\"branch\":\"shard-feature-branch\""),
+        "{result}"
+    );
+    assert!(
+        result.contains("https://github.com/evalops/shard-project.git"),
+        "{result}"
+    );
+}
+
+#[test]
 fn runtime_indexes_shards_from_multiple_discovered_roots() {
     let left = tempfile::tempdir().unwrap();
     let right = tempfile::tempdir().unwrap();

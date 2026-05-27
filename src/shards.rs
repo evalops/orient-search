@@ -1,5 +1,6 @@
 //! Multi-repo shard manifests for local indexed search.
 
+use crate::discover::{RepoGitMetadata, git_metadata_for_repo};
 use crate::fast_index::{FastIndex, IndexStats};
 use crate::query::{merge_filters, parse_query, query_text};
 use crate::repo_index::{
@@ -27,6 +28,8 @@ pub struct ShardEntry {
     pub index: String,
     #[serde(default)]
     pub aliases: Vec<ShardAlias>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git: Option<RepoGitMetadata>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -86,6 +89,8 @@ pub struct ShardRepoMap {
     pub name: String,
     pub root: PathBuf,
     pub aliases: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git: Option<RepoGitMetadata>,
     pub map: RepoMap,
 }
 
@@ -124,6 +129,7 @@ pub fn build_shards(repos: &[PathBuf], output_dir: impl AsRef<Path>) -> Result<S
         add_stats(&mut total, &stats);
         manifest.shards.push(ShardEntry {
             aliases: shard_aliases(&root, &base_name)?,
+            git: shard_git_metadata(&root),
             name,
             root,
             index: index_name,
@@ -221,6 +227,7 @@ pub fn refresh_shards(index_dir: impl AsRef<Path>) -> Result<ShardRefreshStats> 
             .map(|value| value.to_string_lossy().to_string())
             .unwrap_or_else(|| shard.name.clone());
         shard.aliases = shard_aliases(&shard.root, &base_name)?;
+        shard.git = shard_git_metadata(&shard.root);
     }
 
     save_manifest(index_dir, &manifest)?;
@@ -341,6 +348,7 @@ pub fn shard_repo_maps(
                     .iter()
                     .map(|alias| alias.name.clone())
                     .collect(),
+                git: shard.git.clone(),
                 name: scope.output_prefix.clone(),
                 root: shard.root.clone(),
                 map,
@@ -713,6 +721,11 @@ fn shard_aliases(root: &Path, base_name: &str) -> Result<Vec<ShardAlias>> {
     Ok(aliases)
 }
 
+fn shard_git_metadata(root: &Path) -> Option<RepoGitMetadata> {
+    let metadata = git_metadata_for_repo(root, false);
+    (metadata.origin.is_some() || metadata.git_common_dir.is_some()).then_some(metadata)
+}
+
 fn directory_has_manifest(path: &Path) -> Result<bool> {
     for entry in fs::read_dir(path)? {
         let entry = entry?;
@@ -764,6 +777,11 @@ fn shard_identity_matches(shard: &ShardEntry, filter: &str) -> bool {
             .to_string_lossy()
             .to_ascii_lowercase()
             .contains(&filter)
+        || shard
+            .git
+            .as_ref()
+            .map(|git| git_metadata_matches(git, &filter))
+            .unwrap_or(false)
 }
 
 fn alias_matches(alias: &ShardAlias, filter: &str) -> bool {
@@ -771,6 +789,26 @@ fn alias_matches(alias: &ShardAlias, filter: &str) -> bool {
         .name
         .to_ascii_lowercase()
         .contains(&filter.to_ascii_lowercase())
+}
+
+fn git_metadata_matches(git: &RepoGitMetadata, filter: &str) -> bool {
+    git.origin
+        .as_deref()
+        .is_some_and(|value| value.to_ascii_lowercase().contains(filter))
+        || git
+            .branch
+            .as_deref()
+            .is_some_and(|value| value.to_ascii_lowercase().contains(filter))
+        || git
+            .git_kind
+            .as_deref()
+            .is_some_and(|value| value.to_ascii_lowercase().contains(filter))
+        || git.git_common_dir.as_ref().is_some_and(|value| {
+            value
+                .to_string_lossy()
+                .to_ascii_lowercase()
+                .contains(filter)
+        })
 }
 
 fn add_stats(total: &mut ShardBuildStats, stats: &IndexStats) {
