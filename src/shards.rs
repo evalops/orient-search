@@ -348,7 +348,7 @@ pub fn search_shards(
         .into_iter()
         .filter_map(|shard| {
             let scopes = shard_search_scopes(&shard, &filters);
-            (!scopes.is_empty()).then_some(ShardSearchJob { shard, scopes })
+            (!scopes.is_empty()).then_some(ShardJob { shard, scopes })
         })
         .collect::<Vec<_>>();
     let results = search_shard_jobs(index_dir, &shard_query, limit, &filters, jobs)?;
@@ -356,7 +356,7 @@ pub fn search_shards(
 }
 
 #[derive(Debug, Clone)]
-struct ShardSearchJob {
+struct ShardJob {
     shard: ShardEntry,
     scopes: Vec<ShardSearchScope>,
 }
@@ -366,7 +366,7 @@ fn search_shard_jobs(
     query: &str,
     limit: usize,
     filters: &SearchFilters,
-    jobs: Vec<ShardSearchJob>,
+    jobs: Vec<ShardJob>,
 ) -> Result<Vec<SearchResult>> {
     if jobs.is_empty() || limit == 0 {
         return Ok(Vec::new());
@@ -406,7 +406,7 @@ fn search_shard_job_batch(
     query: &str,
     limit: usize,
     filters: &SearchFilters,
-    jobs: &[ShardSearchJob],
+    jobs: &[ShardJob],
 ) -> Result<Vec<SearchResult>> {
     let mut results = Vec::new();
     for job in jobs {
@@ -439,30 +439,84 @@ pub fn shard_query_plans(
     let parsed = parse_query(query);
     let filters = merge_filters(filters.clone(), parsed.filters);
     let shard_query = query_text(&parsed.terms, &filters);
+    let jobs = manifest
+        .shards
+        .into_iter()
+        .filter_map(|shard| {
+            let scopes = shard_search_scopes(&shard, &filters);
+            (!scopes.is_empty()).then_some(ShardJob { shard, scopes })
+        })
+        .collect::<Vec<_>>();
+    let mut plans = shard_query_plan_jobs(index_dir, &shard_query, &filters, jobs)?;
+    plans.sort_by(|left, right| left.name.cmp(&right.name));
+    Ok(plans)
+}
+
+fn shard_query_plan_jobs(
+    index_dir: &Path,
+    query: &str,
+    filters: &SearchFilters,
+    jobs: Vec<ShardJob>,
+) -> Result<Vec<ShardQueryPlan>> {
+    if jobs.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let workers = std::thread::available_parallelism()
+        .map(|count| count.get())
+        .unwrap_or(1)
+        .min(jobs.len());
+    if workers <= 1 {
+        return shard_query_plan_job_batch(index_dir, query, filters, &jobs);
+    }
+
+    let chunk_size = jobs.len().div_ceil(workers);
     let mut plans = Vec::new();
-    for shard in manifest.shards {
-        let scopes = shard_search_scopes(&shard, &filters);
-        if scopes.is_empty() {
-            continue;
+    thread::scope(|scope| {
+        let handles = jobs
+            .chunks(chunk_size)
+            .map(|chunk| {
+                scope.spawn(move || shard_query_plan_job_batch(index_dir, query, filters, chunk))
+            })
+            .collect::<Vec<_>>();
+
+        for handle in handles {
+            let batch = handle
+                .join()
+                .map_err(|_| anyhow::anyhow!("shard query-plan worker panicked"))??;
+            plans.extend(batch);
         }
-        let index = FastIndex::load(index_dir.join(&shard.index))
-            .with_context(|| format!("load shard {}", shard.index))?;
-        for scope in scopes {
-            let scoped_filters = filters_for_shard_scope(&filters, scope.path_prefix.as_deref());
+        Ok::<(), anyhow::Error>(())
+    })?;
+    Ok(plans)
+}
+
+fn shard_query_plan_job_batch(
+    index_dir: &Path,
+    query: &str,
+    filters: &SearchFilters,
+    jobs: &[ShardJob],
+) -> Result<Vec<ShardQueryPlan>> {
+    let mut plans = Vec::new();
+    for job in jobs {
+        let index = FastIndex::load(index_dir.join(&job.shard.index))
+            .with_context(|| format!("load shard {}", job.shard.index))?;
+        for scope in &job.scopes {
+            let scoped_filters = filters_for_shard_scope(filters, scope.path_prefix.as_deref());
             plans.push(ShardQueryPlan {
-                aliases: shard
+                aliases: job
+                    .shard
                     .aliases
                     .iter()
                     .map(|alias| alias.name.clone())
                     .collect(),
-                git: shard.git.clone(),
-                name: scope.output_prefix,
-                root: shard.root.clone(),
-                plan: index.query_plan(&shard_query, &scoped_filters)?,
+                git: job.shard.git.clone(),
+                name: scope.output_prefix.clone(),
+                root: job.shard.root.clone(),
+                plan: index.query_plan(query, &scoped_filters)?,
             });
         }
     }
-    plans.sort_by(|left, right| left.name.cmp(&right.name));
     Ok(plans)
 }
 

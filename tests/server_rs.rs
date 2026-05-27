@@ -1229,6 +1229,67 @@ fn runtime_serves_parallel_warm_shard_searches() {
 }
 
 #[test]
+fn runtime_serves_parallel_warm_shard_query_plans() {
+    let root = tempfile::tempdir().unwrap();
+    let mut repos = Vec::new();
+    for index in 0..6 {
+        let repo = root.path().join(format!("service_{index}"));
+        write(
+            &repo.join("src/lib.rs"),
+            &format!("pub fn shared_plan_token_{index}() -> usize {{ {index} }}\n"),
+        );
+        write(
+            &repo.join("Cargo.toml"),
+            &format!("[package]\nname='service-{index}'\nversion='0.1.0'\nedition='2024'\n"),
+        );
+        repos.push(repo);
+    }
+    let shard_dir = tempfile::tempdir().unwrap();
+    let runtime = Arc::new(ToolRuntime::default());
+    let build = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("build"),
+        tool: "index_shards".to_string(),
+        arguments: serde_json::json!({
+            "repos": repos,
+            "output_dir": shard_dir.path()
+        }),
+    });
+    assert!(build.error.is_none(), "{:?}", build.error);
+    assert_eq!(build.result.unwrap()["shards"], serde_json::json!(6));
+
+    runtime.warm_shards(shard_dir.path().to_path_buf()).unwrap();
+    assert_eq!(runtime.cached_index_count(), 6);
+
+    let mut handles = Vec::new();
+    for index in 0..8 {
+        let runtime = Arc::clone(&runtime);
+        let shard_dir = shard_dir.path().to_path_buf();
+        handles.push(thread::spawn(move || {
+            runtime.dispatch(ToolRequest {
+                id: serde_json::json!(index),
+                tool: "shard_query_plan".to_string(),
+                arguments: serde_json::json!({
+                    "index_dir": shard_dir,
+                    "query": "shared plan missingterm",
+                    "require_all": true
+                }),
+            })
+        }));
+    }
+
+    for handle in handles {
+        let response = handle.join().unwrap();
+        assert!(response.error.is_none(), "{:?}", response.error);
+        let result = serde_json::to_string(&response.result).unwrap();
+        assert!(result.contains("\"missing_terms\""), "{result}");
+        assert!(result.contains("missingterm"), "{result}");
+        assert!(result.contains("drop_missing_terms"), "{result}");
+        assert!(result.contains("service_"), "{result}");
+    }
+    assert_eq!(runtime.cached_index_count(), 6);
+}
+
+#[test]
 fn runtime_filters_shard_search_by_nested_repo_alias() {
     let workspace = tempfile::tempdir().unwrap();
     let billing_repo = workspace.path().join("billing");
