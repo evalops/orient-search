@@ -108,7 +108,7 @@ cargo run --release -- bench-search \
 ## JSON-Lines Server
 
 `orient serve-jsonl` reads one request per line from stdin and writes one response per line to stdout.
-`orient serve-tcp` exposes the same protocol over localhost TCP with a shared in-process index cache, which is the better shape when several local agents are searching the same shard directory or persistent indexes.
+`orient serve-tcp` exposes the same protocol over localhost TCP with a shared in-process index cache, which is the better shape when several local agents are searching the same shard directory or persistent indexes. Cached index objects are shared across connections, and request execution does not hold a global daemon lock around searches.
 
 ```bash
 cargo run -- serve-jsonl
@@ -243,10 +243,10 @@ Product impact criteria for follow-up adoption:
 
 Current search baseline:
 
-- `orient bench-search --repo . "indexed search symbol filters"`: `8.686ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "session token auth"`: `18.255ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "browser session implementation"`: `18.514ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "postgres migration user"`: `31.310ms` p95 after warmup.
+- `orient bench-search --repo . "indexed search symbol filters"`: `9.413ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "session token auth"`: `18.692ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "browser session implementation"`: `20.560ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "postgres migration user"`: `25.708ms` p95 after warmup.
 - The `rg` hot path has a `250ms` wall-clock timeout plus a bounded match cap; timed-out searches return partial results rather than hanging.
 - `orient index --repo . --output /tmp/orient-self.index`: versioned binary index with file metadata, content token postings, path token postings, trigram postings, line offsets, and symbol boosts.
 - `orient discover-repos --root /Users/jonathanhaas/Documents/Projects --max-depth 4 --limit 200`: finds git or manifest-backed repo roots while skipping dependency/build directories.
@@ -259,7 +259,7 @@ Current search baseline:
 - `orient refresh-index --repo . --index /tmp/orient-self.index`: reuses unchanged files and refreshes changed/deleted files.
 - `orient index-map --index /tmp/orient-self.index`: returns repo-map orientation directly from the persistent index without rebuilding a live repo scan.
 - `orient shard-map --index-dir /tmp/orient-shards`: returns repo-prefixed repo maps for local multi-repo shard directories.
-- `orient bench-search --repo . --index /tmp/orient-self.index "indexed search symbol filters"`: `0.223ms` p95 after warmup.
+- `orient bench-search --repo . --index /tmp/orient-self.index "indexed search symbol filters"`: `0.191ms` p95 after warmup.
 
 Benchmark methodology:
 
@@ -278,5 +278,5 @@ See [docs/fast-search-roadmap.md](docs/fast-search-roadmap.md) for the Zoekt/Sou
 - `src/shards.rs`: local multi-repo shard manifests and merged shard search.
 - `src/repo_index.rs`: repo indexing, symbol extraction, snippet rendering, code search, related-file lookup.
 - `src/query.rs`: inline query-language parsing and filter merging.
-- `src/server.rs`: JSON-lines tool dispatch.
+- `src/server.rs`: JSON-lines tool dispatch and a localhost TCP daemon with a shared concurrent index cache.
 - `src/main.rs`: CLI.

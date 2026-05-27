@@ -791,7 +791,7 @@ fn main() -> Result<()> {
             index_dirs,
         } => {
             let listener = TcpListener::bind(&addr)?;
-            let mut runtime = ToolRuntime::default();
+            let runtime = ToolRuntime::default();
             for index in indexes {
                 runtime.warm_index(index)?;
             }

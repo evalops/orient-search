@@ -3,6 +3,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::net::TcpStream;
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::thread;
 
 use orient::fast_index::FastIndex;
 use orient::server::{ToolRequest, ToolRuntime};
@@ -10,6 +11,15 @@ use orient::server::{ToolRequest, ToolRuntime};
 fn write(path: &Path, text: &str) {
     fs::create_dir_all(path.parent().unwrap()).unwrap();
     fs::write(path, text).unwrap();
+}
+
+fn tcp_tool_request(addr: &str, request: serde_json::Value) -> String {
+    let mut stream = TcpStream::connect(addr).unwrap();
+    let mut reader = BufReader::new(stream.try_clone().unwrap());
+    writeln!(stream, "{request}").unwrap();
+    let mut response = String::new();
+    reader.read_line(&mut response).unwrap();
+    response
 }
 
 #[test]
@@ -82,7 +92,7 @@ fn runtime_discovers_repos_by_tool_request() {
         "[package]\nname='ignored'\nversion='0.1.0'\nedition='2024'\n",
     );
 
-    let mut runtime = ToolRuntime::default();
+    let runtime = ToolRuntime::default();
     let response = runtime.dispatch(ToolRequest {
         id: serde_json::json!("discover"),
         tool: "discover_repos".to_string(),
@@ -121,7 +131,7 @@ fn runtime_indexes_shards_from_discovered_root() {
     );
     let shard_dir = tempfile::tempdir().unwrap();
 
-    let mut runtime = ToolRuntime::default();
+    let runtime = ToolRuntime::default();
     let build = runtime.dispatch(ToolRequest {
         id: serde_json::json!("index"),
         tool: "index_shards".to_string(),
@@ -164,7 +174,7 @@ fn runtime_warms_index_by_tool_request() {
         .save(&index_path)
         .unwrap();
 
-    let mut runtime = ToolRuntime::default();
+    let runtime = ToolRuntime::default();
     let warm = runtime.dispatch(ToolRequest {
         id: serde_json::json!("warm"),
         tool: "warm_index".to_string(),
@@ -208,7 +218,7 @@ fn runtime_reuses_cached_index_after_initial_load() {
         .save(&index_path)
         .unwrap();
 
-    let mut runtime = ToolRuntime::default();
+    let runtime = ToolRuntime::default();
     let first = runtime.dispatch(ToolRequest {
         id: serde_json::json!("first"),
         tool: "indexed_search_code".to_string(),
@@ -271,7 +281,7 @@ fn runtime_reuses_cached_shard_index_after_initial_load() {
         "[package]\nname='billing'\nversion='0.1.0'\nedition='2024'\n",
     );
     let shard_dir = tempfile::tempdir().unwrap();
-    let mut runtime = ToolRuntime::default();
+    let runtime = ToolRuntime::default();
 
     let build = runtime.dispatch(ToolRequest {
         id: serde_json::json!("build"),
@@ -334,7 +344,7 @@ fn runtime_warms_shards_by_tool_request() {
         "[package]\nname='billing'\nversion='0.1.0'\nedition='2024'\n",
     );
     let shard_dir = tempfile::tempdir().unwrap();
-    let mut runtime = ToolRuntime::default();
+    let runtime = ToolRuntime::default();
     let build = runtime.dispatch(ToolRequest {
         id: serde_json::json!("build"),
         tool: "index_shards".to_string(),
@@ -384,7 +394,7 @@ fn runtime_filters_shard_search_by_nested_repo_alias() {
         "[package]\nname='auth'\nversion='0.1.0'\nedition='2024'\n",
     );
     let shard_dir = tempfile::tempdir().unwrap();
-    let mut runtime = ToolRuntime::default();
+    let runtime = ToolRuntime::default();
     let build = runtime.dispatch(ToolRequest {
         id: serde_json::json!("build"),
         tool: "index_shards".to_string(),
@@ -510,7 +520,7 @@ fn runtime_refresh_shards_updates_nested_repo_aliases() {
         "[package]\nname='billing'\nversion='0.1.0'\nedition='2024'\n",
     );
     let shard_dir = tempfile::tempdir().unwrap();
-    let mut runtime = ToolRuntime::default();
+    let runtime = ToolRuntime::default();
     let build = runtime.dispatch(ToolRequest {
         id: serde_json::json!("build"),
         tool: "index_shards".to_string(),
@@ -652,6 +662,89 @@ fn tcp_daemon_starts_with_warmed_index() {
 }
 
 #[test]
+fn tcp_daemon_serves_parallel_cached_index_requests() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/auth.rs"),
+        "pub struct SessionManager;\npub fn issue_token() {}\npub fn rotate_secret() {}\n",
+    );
+    write(
+        &repo.path().join("Cargo.toml"),
+        "[package]\nname='sample'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    let index_path = repo.path().join(".orient/index");
+    FastIndex::build(repo.path())
+        .unwrap()
+        .save(&index_path)
+        .unwrap();
+
+    let binary = assert_cmd::cargo::cargo_bin("orient");
+    let mut child = Command::new(binary)
+        .args([
+            "serve-tcp",
+            "--addr",
+            "127.0.0.1:0",
+            "--index",
+            index_path.to_str().unwrap(),
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let stdout = child.stdout.take().unwrap();
+    let mut startup_reader = BufReader::new(stdout);
+    let mut startup = String::new();
+    startup_reader.read_line(&mut startup).unwrap();
+    let startup_json: serde_json::Value = serde_json::from_str(&startup).unwrap();
+    let addr = startup_json["addr"].as_str().unwrap().to_string();
+
+    let first_index = index_path.clone();
+    let first_addr = addr.clone();
+    let first = thread::spawn(move || {
+        tcp_tool_request(
+            &first_addr,
+            serde_json::json!({
+                "id": "first",
+                "tool": "indexed_search_code",
+                "arguments": {
+                    "index": first_index,
+                    "query": "issue token",
+                    "limit": 3,
+                    "require_all": true
+                }
+            }),
+        )
+    });
+    let second_index = index_path.clone();
+    let second = thread::spawn(move || {
+        tcp_tool_request(
+            &addr,
+            serde_json::json!({
+                "id": "second",
+                "tool": "indexed_search_code",
+                "arguments": {
+                    "index": second_index,
+                    "query": "rotate secret",
+                    "limit": 3,
+                    "require_all": true
+                }
+            }),
+        )
+    });
+
+    let first_response = first.join().unwrap();
+    let second_response = second.join().unwrap();
+
+    child.kill().unwrap();
+    let _ = child.wait();
+
+    assert!(first_response.contains("\"id\":\"first\""));
+    assert!(first_response.contains("src/auth.rs"));
+    assert!(second_response.contains("\"id\":\"second\""));
+    assert!(second_response.contains("src/auth.rs"));
+}
+
+#[test]
 fn tcp_daemon_starts_with_warmed_shards() {
     let repo = tempfile::tempdir().unwrap();
     write(
@@ -663,7 +756,7 @@ fn tcp_daemon_starts_with_warmed_shards() {
         "[package]\nname='billing'\nversion='0.1.0'\nedition='2024'\n",
     );
     let shard_dir = tempfile::tempdir().unwrap();
-    let mut runtime = ToolRuntime::default();
+    let runtime = ToolRuntime::default();
     let build = runtime.dispatch(ToolRequest {
         id: serde_json::json!("build"),
         tool: "index_shards".to_string(),

@@ -60,7 +60,7 @@ pub fn serve_jsonl_with_runtime(
 }
 
 pub fn serve_tcp(listener: TcpListener, runtime: ToolRuntime) -> Result<()> {
-    let runtime = Arc::new(Mutex::new(runtime));
+    let runtime = Arc::new(runtime);
     for stream in listener.incoming() {
         let stream = stream?;
         let runtime = Arc::clone(&runtime);
@@ -71,7 +71,7 @@ pub fn serve_tcp(listener: TcpListener, runtime: ToolRuntime) -> Result<()> {
     Ok(())
 }
 
-fn serve_tcp_stream(stream: TcpStream, runtime: Arc<Mutex<ToolRuntime>>) -> Result<()> {
+fn serve_tcp_stream(stream: TcpStream, runtime: Arc<ToolRuntime>) -> Result<()> {
     let reader = std::io::BufReader::new(stream.try_clone()?);
     let mut writer = stream;
     for line in reader.lines() {
@@ -79,12 +79,7 @@ fn serve_tcp_stream(stream: TcpStream, runtime: Arc<Mutex<ToolRuntime>>) -> Resu
         if line.trim().is_empty() {
             continue;
         }
-        let response = {
-            let mut runtime = runtime
-                .lock()
-                .map_err(|_| anyhow!("tool runtime lock poisoned"))?;
-            runtime.dispatch_line(&line)
-        };
+        let response = runtime.dispatch_line(&line);
         writeln!(writer, "{}", serde_json::to_string(&response)?)?;
         writer.flush()?;
     }
@@ -97,20 +92,30 @@ pub fn dispatch(request: ToolRequest) -> ToolResponse {
 
 #[derive(Default)]
 pub struct ToolRuntime {
-    indexes: HashMap<PathBuf, FastIndex>,
+    indexes: Mutex<HashMap<PathBuf, Arc<FastIndex>>>,
 }
 
 impl ToolRuntime {
-    pub fn warm_index(&mut self, index_path: PathBuf) -> Result<PathBuf> {
+    pub fn warm_index(&self, index_path: PathBuf) -> Result<PathBuf> {
         let key = canonical_cache_key(&index_path);
-        if !self.indexes.contains_key(&key) {
-            let index = FastIndex::load(&index_path)?;
-            self.indexes.insert(key.clone(), index);
+        if self
+            .indexes
+            .lock()
+            .map_err(|_| anyhow!("index cache lock poisoned"))?
+            .contains_key(&key)
+        {
+            return Ok(key);
         }
+        let index = Arc::new(FastIndex::load(&index_path)?);
+        self.indexes
+            .lock()
+            .map_err(|_| anyhow!("index cache lock poisoned"))?
+            .entry(key.clone())
+            .or_insert(index);
         Ok(key)
     }
 
-    pub fn warm_shards(&mut self, index_dir: PathBuf) -> Result<usize> {
+    pub fn warm_shards(&self, index_dir: PathBuf) -> Result<usize> {
         let manifest = load_manifest(&index_dir)?;
         let mut warmed = 0usize;
         for shard in manifest.shards {
@@ -121,10 +126,13 @@ impl ToolRuntime {
     }
 
     pub fn cached_index_count(&self) -> usize {
-        self.indexes.len()
+        self.indexes
+            .lock()
+            .map(|indexes| indexes.len())
+            .unwrap_or(0)
     }
 
-    pub fn dispatch_line(&mut self, line: &str) -> ToolResponse {
+    pub fn dispatch_line(&self, line: &str) -> ToolResponse {
         match serde_json::from_str::<ToolRequest>(line) {
             Ok(request) => self.dispatch(request),
             Err(error) => ToolResponse {
@@ -135,7 +143,7 @@ impl ToolRuntime {
         }
     }
 
-    pub fn dispatch(&mut self, request: ToolRequest) -> ToolResponse {
+    pub fn dispatch(&self, request: ToolRequest) -> ToolResponse {
         match self.dispatch_result(&request) {
             Ok(result) => ToolResponse {
                 id: request.id,
@@ -337,7 +345,7 @@ pub fn tool_manifest() -> Value {
 }
 
 impl ToolRuntime {
-    fn dispatch_result(&mut self, request: &ToolRequest) -> Result<Value> {
+    fn dispatch_result(&self, request: &ToolRequest) -> Result<Value> {
         match request.tool.as_str() {
             "discover_repos" => {
                 let root = path_arg(&request.arguments, "root")?;
@@ -448,13 +456,13 @@ impl ToolRuntime {
                 let repos = shard_repos_from_arguments(&request.arguments)?;
                 let output_dir = path_arg(&request.arguments, "output_dir")?;
                 let stats = build_shards(&repos, output_dir)?;
-                self.indexes.clear();
+                self.clear_index_cache()?;
                 Ok(serde_json::to_value(stats)?)
             }
             "refresh_shards" => {
                 let index_dir = path_arg(&request.arguments, "index_dir")?;
                 let stats = refresh_shards(index_dir)?;
-                self.indexes.clear();
+                self.clear_index_cache()?;
                 Ok(serde_json::to_value(stats)?)
             }
             "search_shards" => {
@@ -591,7 +599,7 @@ impl ToolRuntime {
                 let index_path = path_arg(&request.arguments, "index")?;
                 let key = self.warm_index(index_path)?;
                 Ok(json!({
-                    "cached_indexes": self.indexes.len(),
+                    "cached_indexes": self.cached_index_count(),
                     "index": key
                 }))
             }
@@ -599,12 +607,12 @@ impl ToolRuntime {
                 let index_dir = path_arg(&request.arguments, "index_dir")?;
                 let warmed_indexes = self.warm_shards(index_dir)?;
                 Ok(json!({
-                    "cached_indexes": self.indexes.len(),
+                    "cached_indexes": self.cached_index_count(),
                     "warmed_indexes": warmed_indexes
                 }))
             }
             "daemon_status" => Ok(json!({
-                "cached_indexes": self.indexes.len(),
+                "cached_indexes": self.cached_index_count(),
                 "cached_index_paths": self.cached_index_paths()
             })),
             "tool_manifest" => Ok(tool_manifest()),
@@ -644,23 +652,41 @@ impl ToolRuntime {
         }
     }
 
-    fn cached_index(&mut self, index_path: PathBuf) -> Result<&FastIndex> {
+    fn cached_index(&self, index_path: PathBuf) -> Result<Arc<FastIndex>> {
         let key = self.warm_index(index_path)?;
-        Ok(self.indexes.get(&key).expect("cached index inserted"))
+        self.indexes
+            .lock()
+            .map_err(|_| anyhow!("index cache lock poisoned"))?
+            .get(&key)
+            .cloned()
+            .ok_or_else(|| anyhow!("cached index missing after warm: {}", key.display()))
     }
 
     fn cached_index_paths(&self) -> Vec<String> {
         let mut paths = self
             .indexes
-            .keys()
-            .map(|path| path.to_string_lossy().to_string())
-            .collect::<Vec<_>>();
+            .lock()
+            .map(|indexes| {
+                indexes
+                    .keys()
+                    .map(|path| path.to_string_lossy().to_string())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
         paths.sort();
         paths
     }
 
+    fn clear_index_cache(&self) -> Result<()> {
+        self.indexes
+            .lock()
+            .map_err(|_| anyhow!("index cache lock poisoned"))?
+            .clear();
+        Ok(())
+    }
+
     fn search_shards_cached(
-        &mut self,
+        &self,
         index_dir: &std::path::Path,
         query: &str,
         limit: usize,
@@ -696,7 +722,7 @@ impl ToolRuntime {
     }
 
     fn shard_repo_maps_cached(
-        &mut self,
+        &self,
         index_dir: &std::path::Path,
         symbol_limit: usize,
         test_limit: usize,
@@ -738,7 +764,7 @@ impl ToolRuntime {
     }
 
     fn find_shard_symbol_cached(
-        &mut self,
+        &self,
         index_dir: &std::path::Path,
         name: &str,
         limit: usize,
