@@ -2141,7 +2141,6 @@ fn tcp_daemon_starts_with_warmed_index() {
         "id": "search",
         "tool": "indexed_search_code",
         "arguments": {
-            "index": index_path,
             "query": "issue token",
             "limit": 3,
             "require_all": true
@@ -2150,12 +2149,40 @@ fn tcp_daemon_starts_with_warmed_index() {
     writeln!(stream, "{request}").unwrap();
     let mut response = String::new();
     reader.read_line(&mut response).unwrap();
+    let plan_response = tcp_tool_request(
+        addr,
+        serde_json::json!({
+            "id": "plan",
+            "tool": "indexed_query_plan",
+            "arguments": {
+                "query": "SessionManager missingterm",
+                "require_all": true
+            }
+        }),
+    );
+    let read_response = tcp_tool_request(
+        addr,
+        serde_json::json!({
+            "id": "read",
+            "tool": "read_index_range",
+            "arguments": {
+                "path": "src/auth.rs",
+                "start": 1,
+                "lines": 2
+            }
+        }),
+    );
 
     child.kill().unwrap();
     let _ = child.wait();
 
     assert!(response.contains("\"id\":\"search\""));
     assert!(response.contains("src/auth.rs"));
+    assert!(plan_response.contains("\"id\":\"plan\""));
+    assert!(plan_response.contains("\"missing_terms\""));
+    assert!(plan_response.contains("missingterm"));
+    assert!(read_response.contains("\"id\":\"read\""));
+    assert!(read_response.contains("SessionManager"));
 }
 
 #[test]
@@ -2265,7 +2292,6 @@ fn tcp_daemon_serves_parallel_cached_index_requests() {
     let startup_json: serde_json::Value = serde_json::from_str(&startup).unwrap();
     let addr = startup_json["addr"].as_str().unwrap().to_string();
 
-    let first_index = index_path.clone();
     let first_addr = addr.clone();
     let first = thread::spawn(move || {
         tcp_tool_request(
@@ -2274,7 +2300,6 @@ fn tcp_daemon_serves_parallel_cached_index_requests() {
                 "id": "first",
                 "tool": "indexed_search_code",
                 "arguments": {
-                    "index": first_index,
                     "query": "issue token",
                     "limit": 3,
                     "require_all": true
@@ -2282,7 +2307,6 @@ fn tcp_daemon_serves_parallel_cached_index_requests() {
             }),
         )
     });
-    let second_index = index_path.clone();
     let second = thread::spawn(move || {
         tcp_tool_request(
             &addr,
@@ -2290,7 +2314,6 @@ fn tcp_daemon_serves_parallel_cached_index_requests() {
                 "id": "second",
                 "tool": "indexed_search_code",
                 "arguments": {
-                    "index": second_index,
                     "query": "rotate secret",
                     "limit": 3,
                     "require_all": true
@@ -2321,6 +2344,10 @@ fn tcp_daemon_starts_with_warmed_shards() {
     write(
         &repo.path().join("Cargo.toml"),
         "[package]\nname='billing'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    let shard_read_path = format!(
+        "{}/src/billing.rs",
+        repo.path().file_name().unwrap().to_string_lossy()
     );
     let shard_dir = tempfile::tempdir().unwrap();
     let runtime = ToolRuntime::default();
@@ -2373,7 +2400,6 @@ fn tcp_daemon_starts_with_warmed_shards() {
         "id": "search",
         "tool": "search_shards",
         "arguments": {
-            "index_dir": shard_dir.path(),
             "query": "invoice total",
             "limit": 3,
             "require_all": true
@@ -2382,12 +2408,26 @@ fn tcp_daemon_starts_with_warmed_shards() {
     writeln!(stream, "{request}").unwrap();
     let mut response = String::new();
     reader.read_line(&mut response).unwrap();
+    let read_response = tcp_tool_request(
+        addr,
+        serde_json::json!({
+            "id": "read",
+            "tool": "read_shard_range",
+            "arguments": {
+                "path": shard_read_path,
+                "start": 1,
+                "lines": 1
+            }
+        }),
+    );
 
     child.kill().unwrap();
     let _ = child.wait();
 
     assert!(response.contains("\"id\":\"search\""));
     assert!(response.contains("src/billing.rs"));
+    assert!(read_response.contains("\"id\":\"read\""));
+    assert!(read_response.contains("invoice_total"));
 }
 
 #[test]

@@ -679,8 +679,12 @@ fn argument_description(name: &str) -> &'static str {
     match name {
         "repo" => "Local repository root or shard repo filter, depending on the tool.",
         "repo_filter" => "Repository name filter when repo is already used as a root path.",
-        "index" => "Path to a persistent single-repo Orient index.",
-        "index_dir" => "Path to a local multi-repo shard directory.",
+        "index" => {
+            "Path to a persistent single-repo Orient index. Daemon tools may omit this when exactly one index is warmed."
+        }
+        "index_dir" => {
+            "Path to a local multi-repo shard directory. Daemon tools may omit this when exactly one shard directory is warmed."
+        }
         "output_dir" => "Directory where shard indexes and manifest.json should be written.",
         "query" => "Agent query string with filters, quoted phrases, and normal search terms.",
         "queries" => "Agent query strings to run as one batch against the same search target.",
@@ -782,7 +786,7 @@ impl ToolRuntime {
                 )?)
             }
             "indexed_repo_map" => {
-                let index_path = path_arg(&request.arguments, "index")?;
+                let index_path = self.index_path_arg_or_single_cached(&request.arguments)?;
                 let symbol_limit = usize_arg(&request.arguments, "symbols").unwrap_or(50);
                 let test_limit = usize_arg(&request.arguments, "tests").unwrap_or(50);
                 let index = self.cached_index(index_path)?;
@@ -846,7 +850,7 @@ impl ToolRuntime {
                 Ok(serde_json::to_value(batch)?)
             }
             "indexed_search_code" => {
-                let index_path = path_arg(&request.arguments, "index")?;
+                let index_path = self.index_path_arg_or_single_cached(&request.arguments)?;
                 let query = string_arg(&request.arguments, "query")?;
                 let limit = usize_arg(&request.arguments, "limit").unwrap_or(10);
                 let context_lines = usize_arg(&request.arguments, "context_lines").unwrap_or(0);
@@ -863,7 +867,7 @@ impl ToolRuntime {
                 Ok(serde_json::to_value(results)?)
             }
             "indexed_search_batch" => {
-                let index_path = path_arg(&request.arguments, "index")?;
+                let index_path = self.index_path_arg_or_single_cached(&request.arguments)?;
                 let queries = string_array_arg(&request.arguments, "queries")?;
                 let limit = usize_arg(&request.arguments, "limit").unwrap_or(10);
                 let context_lines = usize_arg(&request.arguments, "context_lines").unwrap_or(0);
@@ -881,7 +885,7 @@ impl ToolRuntime {
                 Ok(serde_json::to_value(batch)?)
             }
             "indexed_query_plan" => {
-                let index_path = path_arg(&request.arguments, "index")?;
+                let index_path = self.index_path_arg_or_single_cached(&request.arguments)?;
                 let query = string_arg(&request.arguments, "query")?;
                 let refresh_if_stale = bool_arg(&request.arguments, "refresh_if_stale");
                 let index = self.cached_index_maybe_refresh(index_path, refresh_if_stale)?;
@@ -891,7 +895,7 @@ impl ToolRuntime {
                 )?)?)
             }
             "indexed_query_plan_batch" => {
-                let index_path = path_arg(&request.arguments, "index")?;
+                let index_path = self.index_path_arg_or_single_cached(&request.arguments)?;
                 let queries = string_array_arg(&request.arguments, "queries")?;
                 let refresh_if_stale = bool_arg(&request.arguments, "refresh_if_stale");
                 let index = self.cached_index_maybe_refresh(index_path, refresh_if_stale)?;
@@ -904,12 +908,12 @@ impl ToolRuntime {
                 Ok(serde_json::to_value(batch)?)
             }
             "index_status" => {
-                let index_path = path_arg(&request.arguments, "index")?;
+                let index_path = self.index_path_arg_or_single_cached(&request.arguments)?;
                 let index = self.cached_index(index_path)?;
                 Ok(serde_json::to_value(index.freshness()?)?)
             }
             "read_index_range" => {
-                let index_path = path_arg(&request.arguments, "index")?;
+                let index_path = self.index_path_arg_or_single_cached(&request.arguments)?;
                 let path = string_arg(&request.arguments, "path")?;
                 let start = usize_arg(&request.arguments, "start").unwrap_or(1);
                 let lines = usize_arg(&request.arguments, "lines").unwrap_or(80);
@@ -919,7 +923,7 @@ impl ToolRuntime {
                 )?)
             }
             "read_index_ranges" => {
-                let index_path = path_arg(&request.arguments, "index")?;
+                let index_path = self.index_path_arg_or_single_cached(&request.arguments)?;
                 let ranges = range_args(&request.arguments)?;
                 let index = self.cached_index(index_path)?;
                 let mut results = Vec::new();
@@ -953,17 +957,17 @@ impl ToolRuntime {
                 }))
             }
             "refresh_shards" => {
-                let index_dir = path_arg(&request.arguments, "index_dir")?;
+                let index_dir = self.shard_dir_arg_or_single_cached(&request.arguments)?;
                 let stats = refresh_shards(index_dir)?;
                 self.clear_runtime_caches()?;
                 Ok(serde_json::to_value(stats)?)
             }
             "shard_status" => {
-                let index_dir = path_arg(&request.arguments, "index_dir")?;
+                let index_dir = self.shard_dir_arg_or_single_cached(&request.arguments)?;
                 Ok(serde_json::to_value(shard_status(index_dir)?)?)
             }
             "search_shards" => {
-                let index_dir = path_arg(&request.arguments, "index_dir")?;
+                let index_dir = self.shard_dir_arg_or_single_cached(&request.arguments)?;
                 let query = string_arg(&request.arguments, "query")?;
                 let limit = usize_arg(&request.arguments, "limit").unwrap_or(10);
                 let context_lines = usize_arg(&request.arguments, "context_lines").unwrap_or(0);
@@ -979,7 +983,7 @@ impl ToolRuntime {
                 )?)?)
             }
             "search_shards_batch" => {
-                let index_dir = path_arg(&request.arguments, "index_dir")?;
+                let index_dir = self.shard_dir_arg_or_single_cached(&request.arguments)?;
                 let queries = string_array_arg(&request.arguments, "queries")?;
                 let limit = usize_arg(&request.arguments, "limit").unwrap_or(10);
                 let context_lines = usize_arg(&request.arguments, "context_lines").unwrap_or(0);
@@ -1001,7 +1005,7 @@ impl ToolRuntime {
                 Ok(serde_json::to_value(batch)?)
             }
             "shard_query_plan" => {
-                let index_dir = path_arg(&request.arguments, "index_dir")?;
+                let index_dir = self.shard_dir_arg_or_single_cached(&request.arguments)?;
                 let query = string_arg(&request.arguments, "query")?;
                 if bool_arg(&request.arguments, "refresh_if_stale") {
                     self.refresh_shards_if_stale(&index_dir)?;
@@ -1013,7 +1017,7 @@ impl ToolRuntime {
                 )?)?)
             }
             "shard_query_plan_batch" => {
-                let index_dir = path_arg(&request.arguments, "index_dir")?;
+                let index_dir = self.shard_dir_arg_or_single_cached(&request.arguments)?;
                 let queries = string_array_arg(&request.arguments, "queries")?;
                 if bool_arg(&request.arguments, "refresh_if_stale") {
                     self.refresh_shards_if_stale(&index_dir)?;
@@ -1027,7 +1031,7 @@ impl ToolRuntime {
                 Ok(serde_json::to_value(batch)?)
             }
             "read_shard_range" => {
-                let index_dir = path_arg(&request.arguments, "index_dir")?;
+                let index_dir = self.shard_dir_arg_or_single_cached(&request.arguments)?;
                 let path = string_arg(&request.arguments, "path")?;
                 let start = usize_arg(&request.arguments, "start").unwrap_or(1);
                 let lines = usize_arg(&request.arguments, "lines").unwrap_or(80);
@@ -1036,7 +1040,7 @@ impl ToolRuntime {
                 )?)?)
             }
             "read_shard_ranges" => {
-                let index_dir = path_arg(&request.arguments, "index_dir")?;
+                let index_dir = self.shard_dir_arg_or_single_cached(&request.arguments)?;
                 let ranges = range_args(&request.arguments)?;
                 let mut results = Vec::new();
                 for range in ranges {
@@ -1050,7 +1054,7 @@ impl ToolRuntime {
                 Ok(serde_json::to_value(results)?)
             }
             "shard_repo_map" => {
-                let index_dir = path_arg(&request.arguments, "index_dir")?;
+                let index_dir = self.shard_dir_arg_or_single_cached(&request.arguments)?;
                 let symbol_limit = usize_arg(&request.arguments, "symbols").unwrap_or(50);
                 let test_limit = usize_arg(&request.arguments, "tests").unwrap_or(50);
                 Ok(serde_json::to_value(self.shard_repo_maps_cached(
@@ -1061,7 +1065,7 @@ impl ToolRuntime {
                 )?)?)
             }
             "find_shard_symbol" => {
-                let index_dir = path_arg(&request.arguments, "index_dir")?;
+                let index_dir = self.shard_dir_arg_or_single_cached(&request.arguments)?;
                 let name = string_arg(&request.arguments, "name")?;
                 let limit = usize_arg(&request.arguments, "limit").unwrap_or(10);
                 Ok(serde_json::to_value(self.find_shard_symbol_cached(
@@ -1079,7 +1083,7 @@ impl ToolRuntime {
                 Ok(serde_json::to_value(index.find_symbol(&name, limit))?)
             }
             "find_index_symbol" => {
-                let index_path = path_arg(&request.arguments, "index")?;
+                let index_path = self.index_path_arg_or_single_cached(&request.arguments)?;
                 let name = string_arg(&request.arguments, "name")?;
                 let limit = usize_arg(&request.arguments, "limit").unwrap_or(10);
                 let index = self.cached_index(index_path)?;
@@ -1093,14 +1097,14 @@ impl ToolRuntime {
                 Ok(serde_json::to_value(index.related_files(&path, limit))?)
             }
             "related_index_files" => {
-                let index_path = path_arg(&request.arguments, "index")?;
+                let index_path = self.index_path_arg_or_single_cached(&request.arguments)?;
                 let path = string_arg(&request.arguments, "path")?;
                 let limit = usize_arg(&request.arguments, "limit").unwrap_or(10);
                 let index = self.cached_index(index_path)?;
                 Ok(serde_json::to_value(index.related_files(&path, limit))?)
             }
             "related_shard_files" => {
-                let index_dir = path_arg(&request.arguments, "index_dir")?;
+                let index_dir = self.shard_dir_arg_or_single_cached(&request.arguments)?;
                 let path = string_arg(&request.arguments, "path")?;
                 let limit = usize_arg(&request.arguments, "limit").unwrap_or(10);
                 Ok(serde_json::to_value(
@@ -1120,7 +1124,7 @@ impl ToolRuntime {
                 ))?)
             }
             "related_shard_symbols" => {
-                let index_dir = path_arg(&request.arguments, "index_dir")?;
+                let index_dir = self.shard_dir_arg_or_single_cached(&request.arguments)?;
                 let path = string_arg(&request.arguments, "path")?;
                 let query = optional_string_arg(&request.arguments, "query");
                 let limit = usize_arg(&request.arguments, "limit").unwrap_or(10);
@@ -1132,7 +1136,7 @@ impl ToolRuntime {
                 )?)?)
             }
             "related_index_symbols" => {
-                let index_path = path_arg(&request.arguments, "index")?;
+                let index_path = self.index_path_arg_or_single_cached(&request.arguments)?;
                 let path = optional_string_arg(&request.arguments, "path");
                 let query = optional_string_arg(&request.arguments, "query");
                 let limit = usize_arg(&request.arguments, "limit").unwrap_or(10);
@@ -1213,6 +1217,62 @@ impl ToolRuntime {
 
     fn cached_index(&self, index_path: PathBuf) -> Result<Arc<FastIndex>> {
         Ok(self.cached_index_with_key(index_path)?.1)
+    }
+
+    fn index_path_arg_or_single_cached(&self, arguments: &Value) -> Result<PathBuf> {
+        if arguments.get("index").is_some() {
+            return path_arg(arguments, "index");
+        }
+        self.single_cached_index_path()
+    }
+
+    fn shard_dir_arg_or_single_cached(&self, arguments: &Value) -> Result<PathBuf> {
+        if arguments.get("index_dir").is_some() {
+            return path_arg(arguments, "index_dir");
+        }
+        self.single_cached_shard_manifest_path()
+    }
+
+    fn single_cached_index_path(&self) -> Result<PathBuf> {
+        let mut paths = self
+            .indexes
+            .lock()
+            .map_err(|_| anyhow!("index cache lock poisoned"))?
+            .iter()
+            .filter_map(|(path, entry)| entry.is_ready().then(|| path.clone()))
+            .collect::<Vec<_>>();
+        paths.sort();
+        match paths.as_slice() {
+            [path] => Ok(path.clone()),
+            [] => Err(anyhow!(
+                "index is required unless exactly one index is warmed in the daemon"
+            )),
+            _ => Err(anyhow!(
+                "index is required because multiple indexes are warmed in the daemon: {}",
+                join_paths_for_error(&paths)
+            )),
+        }
+    }
+
+    fn single_cached_shard_manifest_path(&self) -> Result<PathBuf> {
+        let mut paths = self
+            .shard_manifests
+            .lock()
+            .map_err(|_| anyhow!("shard manifest cache lock poisoned"))?
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        paths.sort();
+        match paths.as_slice() {
+            [path] => Ok(path.clone()),
+            [] => Err(anyhow!(
+                "index_dir is required unless exactly one shard directory is warmed in the daemon"
+            )),
+            _ => Err(anyhow!(
+                "index_dir is required because multiple shard directories are warmed in the daemon: {}",
+                join_paths_for_error(&paths)
+            )),
+        }
     }
 
     fn cached_index_maybe_refresh(
@@ -1981,6 +2041,14 @@ fn string_arg(arguments: &Value, name: &str) -> Result<String> {
 
 fn path_arg(arguments: &Value, name: &str) -> Result<PathBuf> {
     Ok(PathBuf::from(string_arg(arguments, name)?))
+}
+
+fn join_paths_for_error(paths: &[PathBuf]) -> String {
+    paths
+        .iter()
+        .map(|path| path.to_string_lossy())
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn bool_arg(arguments: &Value, name: &str) -> bool {
