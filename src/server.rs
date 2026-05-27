@@ -1,4 +1,5 @@
-use crate::repo_index::RepoIndexer;
+use crate::fast_index::FastIndex;
+use crate::repo_index::{RepoIndexer, SearchFilters, search_repo_fast_filtered};
 use crate::session_metrics::{ScanOptions, scan_jsonl_roots};
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
@@ -69,8 +70,23 @@ fn dispatch_result(request: &ToolRequest) -> Result<Value> {
             let repo = path_arg(&request.arguments, "repo")?;
             let query = string_arg(&request.arguments, "query")?;
             let limit = usize_arg(&request.arguments, "limit").unwrap_or(10);
-            let index = RepoIndexer::new(repo).build()?;
-            Ok(serde_json::to_value(index.search_code(&query, limit))?)
+            Ok(serde_json::to_value(search_repo_fast_filtered(
+                repo,
+                &query,
+                limit,
+                &search_filters(&request.arguments),
+            )?)?)
+        }
+        "indexed_search_code" => {
+            let index_path = path_arg(&request.arguments, "index")?;
+            let query = string_arg(&request.arguments, "query")?;
+            let limit = usize_arg(&request.arguments, "limit").unwrap_or(10);
+            let index = FastIndex::load(index_path)?;
+            Ok(serde_json::to_value(index.search_filtered(
+                &query,
+                limit,
+                &search_filters(&request.arguments),
+            )?)?)
         }
         "find_symbol" => {
             let repo = path_arg(&request.arguments, "repo")?;
@@ -115,6 +131,7 @@ fn dispatch_result(request: &ToolRequest) -> Result<Value> {
         "list_tools" => Ok(json!([
             "repo_brief",
             "search_code",
+            "indexed_search_code",
             "find_symbol",
             "related_files",
             "metrics"
@@ -140,4 +157,18 @@ fn usize_arg(arguments: &Value, name: &str) -> Option<usize> {
         .get(name)
         .and_then(Value::as_u64)
         .map(|value| value as usize)
+}
+
+fn optional_string_arg(arguments: &Value, name: &str) -> Option<String> {
+    arguments
+        .get(name)
+        .and_then(Value::as_str)
+        .map(String::from)
+}
+
+fn search_filters(arguments: &Value) -> SearchFilters {
+    SearchFilters {
+        path: optional_string_arg(arguments, "path"),
+        language: optional_string_arg(arguments, "language"),
+    }
 }

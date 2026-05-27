@@ -7,7 +7,9 @@ use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::fs;
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 
 const MAX_FILE_BYTES: u64 = 512_000;
 
@@ -25,6 +27,12 @@ pub struct SearchResult {
     pub score: f64,
     pub reason: String,
     pub snippet: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SearchFilters {
+    pub path: Option<String>,
+    pub language: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -63,6 +71,254 @@ pub struct RepoIndex {
 #[derive(Debug, Clone)]
 pub struct RepoIndexer {
     root: PathBuf,
+}
+
+pub fn search_repo_fast(
+    root: impl AsRef<Path>,
+    query: &str,
+    limit: usize,
+) -> Result<Vec<SearchResult>> {
+    search_repo_fast_filtered(root, query, limit, &SearchFilters::default())
+}
+
+pub fn search_repo_fast_filtered(
+    root: impl AsRef<Path>,
+    query: &str,
+    limit: usize,
+    filters: &SearchFilters,
+) -> Result<Vec<SearchResult>> {
+    let root = root.as_ref().canonicalize()?;
+    let query_tokens = tokenize(query);
+    if query_tokens.is_empty() || limit == 0 {
+        return Ok(Vec::new());
+    }
+
+    if let Some(results) = search_repo_ripgrep(&root, &query_tokens, limit, filters)? {
+        return Ok(results);
+    }
+
+    search_repo_streaming(&root, &query_tokens, limit, filters)
+}
+
+fn search_repo_ripgrep(
+    root: &Path,
+    query_tokens: &[String],
+    limit: usize,
+    filters: &SearchFilters,
+) -> Result<Option<Vec<SearchResult>>> {
+    let mut command = Command::new("rg");
+    command
+        .current_dir(root)
+        .arg("--json")
+        .arg("--hidden")
+        .arg("--ignore-case")
+        .arg("--fixed-strings")
+        .arg("--line-number")
+        .arg("--max-count")
+        .arg("12")
+        .arg("--max-filesize")
+        .arg(format!("{MAX_FILE_BYTES}"))
+        .arg("--glob")
+        .arg("!.git/**")
+        .arg("--glob")
+        .arg("!.venv/**")
+        .arg("--glob")
+        .arg("!__pycache__/**")
+        .arg("--glob")
+        .arg("!.pytest_cache/**")
+        .arg("--glob")
+        .arg("!.orient/**")
+        .arg("--glob")
+        .arg("!node_modules/**")
+        .arg("--glob")
+        .arg("!dist/**")
+        .arg("--glob")
+        .arg("!build/**")
+        .arg("--glob")
+        .arg("!.next/**")
+        .arg("--glob")
+        .arg("!coverage/**")
+        .arg("--glob")
+        .arg("!target/**");
+
+    for token in query_tokens {
+        command.arg("-e").arg(token);
+    }
+    command.arg(".");
+
+    let Ok(mut child) = command.stdout(Stdio::piped()).stderr(Stdio::null()).spawn() else {
+        return Ok(None);
+    };
+    let Some(stdout) = child.stdout.take() else {
+        return Ok(None);
+    };
+
+    let mut scored: HashMap<String, SearchResult> = HashMap::new();
+    let max_matches = (limit.max(1) * 300).clamp(1_000, 8_000);
+    let mut match_count = 0usize;
+
+    for line in BufReader::new(stdout).lines() {
+        let line = line?;
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else {
+            continue;
+        };
+        if value.get("type").and_then(|value| value.as_str()) != Some("match") {
+            continue;
+        }
+        let Some(data) = value.get("data") else {
+            continue;
+        };
+        let Some(raw_path) = data
+            .get("path")
+            .and_then(|path| path.get("text"))
+            .and_then(|text| text.as_str())
+        else {
+            continue;
+        };
+        let path = raw_path
+            .trim_start_matches("./")
+            .trim_start_matches('/')
+            .to_string();
+        if language_for(Path::new(&path)).is_none()
+            || is_ignored(Path::new(&path))
+            || !matches_filters(&path, filters)
+        {
+            continue;
+        }
+        let Some(text) = data
+            .get("lines")
+            .and_then(|lines| lines.get("text"))
+            .and_then(|text| text.as_str())
+        else {
+            continue;
+        };
+        let line_number = data
+            .get("line_number")
+            .and_then(|line| line.as_u64())
+            .unwrap_or_default();
+        merge_match_result(&mut scored, &path, text, line_number, query_tokens);
+        match_count += 1;
+        if match_count >= max_matches {
+            let _ = child.kill();
+            break;
+        }
+    }
+
+    let _ = child.wait();
+    Ok(Some(finalize_results(
+        scored.into_values().collect::<Vec<_>>(),
+        limit,
+    )))
+}
+
+fn search_repo_streaming(
+    root: &Path,
+    query_tokens: &[String],
+    limit: usize,
+    filters: &SearchFilters,
+) -> Result<Vec<SearchResult>> {
+    let mut results = Vec::new();
+
+    for entry in WalkBuilder::new(&root)
+        .hidden(false)
+        .filter_entry(|entry| !is_ignored(entry.path()))
+        .build()
+    {
+        let entry = entry?;
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let metadata = entry.metadata()?;
+        if metadata.len() > MAX_FILE_BYTES || language_for(path).is_none() {
+            continue;
+        }
+        let text = fs::read_to_string(path).unwrap_or_default();
+        if text.contains('\0') {
+            continue;
+        }
+        let rel = path
+            .strip_prefix(&root)?
+            .to_string_lossy()
+            .replace('\\', "/");
+        if !matches_filters(&rel, filters) {
+            continue;
+        }
+        if let Some(result) = score_text_file(&rel, &text, &query_tokens) {
+            results.push(result);
+        }
+    }
+
+    Ok(finalize_results(results, limit))
+}
+
+fn merge_match_result(
+    scored: &mut HashMap<String, SearchResult>,
+    path: &str,
+    line: &str,
+    line_number: u64,
+    query_tokens: &[String],
+) {
+    let path_lower = path.to_lowercase();
+    let line_lower = line.to_lowercase();
+    let mut score = 0.0;
+    let mut reasons = Vec::new();
+
+    for token in query_tokens {
+        let mut token_score = 0.0;
+        if path_lower.contains(token) {
+            token_score += 6.0;
+        }
+        if line_lower.contains(token) {
+            token_score += 2.0;
+        }
+        if token_score > 0.0 {
+            score += token_score;
+            reasons.push(token.clone());
+        }
+    }
+
+    if score == 0.0 {
+        return;
+    }
+
+    let snippet_line = line.trim_end();
+    let snippet = if line_number > 0 {
+        format!("{line_number}: {snippet_line}")
+    } else {
+        snippet_line.to_string()
+    };
+
+    scored
+        .entry(path.to_string())
+        .and_modify(|result| {
+            result.score = round4(result.score + score);
+            if result.snippet.len() < 700 && !result.snippet.contains(snippet_line) {
+                result.snippet.push('\n');
+                result
+                    .snippet
+                    .push_str(&snippet.chars().take(240).collect::<String>());
+            }
+            let mut merged = result
+                .reason
+                .trim_start_matches("matched ")
+                .split(", ")
+                .filter(|value| !value.is_empty())
+                .map(String::from)
+                .collect::<HashSet<_>>();
+            for reason in &reasons {
+                merged.insert(reason.clone());
+            }
+            let mut merged = merged.into_iter().collect::<Vec<_>>();
+            merged.sort();
+            result.reason = format!("matched {}", merged.join(", "));
+        })
+        .or_insert_with(|| SearchResult {
+            path: path.to_string(),
+            score: round4(score),
+            reason: format!("matched {}", reasons.join(", ")),
+            snippet,
+        });
 }
 
 impl RepoIndexer {
@@ -202,14 +458,7 @@ impl RepoIndex {
             }
         }
 
-        results.sort_by(|a, b| {
-            b.score
-                .partial_cmp(&a.score)
-                .unwrap_or(Ordering::Equal)
-                .then_with(|| a.path.cmp(&b.path))
-        });
-        results.truncate(limit);
-        results
+        finalize_results(results, limit)
     }
 
     pub fn related_files(&self, path: &str, limit: usize) -> Vec<RelatedFile> {
@@ -318,7 +567,7 @@ impl RepoIndex {
     }
 }
 
-fn is_ignored(path: &Path) -> bool {
+pub(crate) fn is_ignored(path: &Path) -> bool {
     path.components().any(|component| {
         let part = component.as_os_str().to_string_lossy();
         matches!(
@@ -327,6 +576,7 @@ fn is_ignored(path: &Path) -> bool {
                 | ".venv"
                 | "__pycache__"
                 | ".pytest_cache"
+                | ".orient"
                 | "node_modules"
                 | "dist"
                 | "build"
@@ -337,7 +587,7 @@ fn is_ignored(path: &Path) -> bool {
     })
 }
 
-fn language_for(path: &Path) -> Option<String> {
+pub(crate) fn language_for(path: &Path) -> Option<String> {
     let file_name = path.file_name()?.to_string_lossy();
     if matches!(
         file_name.as_ref(),
@@ -425,7 +675,7 @@ fn build_doc_freq(files: &HashMap<String, IndexedFile>) -> HashMap<String, usize
     doc_freq
 }
 
-fn token_counts(text: &str) -> HashMap<String, usize> {
+pub(crate) fn token_counts(text: &str) -> HashMap<String, usize> {
     let mut counts = HashMap::new();
     for token in tokenize(text) {
         *counts.entry(token).or_insert(0) += 1;
@@ -433,7 +683,40 @@ fn token_counts(text: &str) -> HashMap<String, usize> {
     counts
 }
 
-fn tokenize(text: &str) -> Vec<String> {
+fn score_text_file(path: &str, text: &str, query_tokens: &[String]) -> Option<SearchResult> {
+    let path_lower = path.to_lowercase();
+    let text_lower = text.to_lowercase();
+    let mut score = 0.0;
+    let mut reasons = Vec::new();
+
+    for token in query_tokens {
+        let mut token_score = 0.0;
+        if path_lower.contains(token) {
+            token_score += 6.0;
+        }
+        let occurrences = text_lower.matches(token).take(12).count();
+        if occurrences > 0 {
+            token_score += 1.0 + (occurrences as f64).ln();
+        }
+        if token_score > 0.0 {
+            score += token_score;
+            reasons.push(token.clone());
+        }
+    }
+
+    if score == 0.0 {
+        return None;
+    }
+
+    Some(SearchResult {
+        path: path.to_string(),
+        score: round4(score),
+        reason: format!("matched {}", reasons.join(", ")),
+        snippet: best_snippet(text, query_tokens),
+    })
+}
+
+pub(crate) fn tokenize(text: &str) -> Vec<String> {
     let camel = Regex::new(r"([a-z0-9])([A-Z])").unwrap();
     let split = camel.replace_all(text, "$1 $2").replace('_', " ");
     let re = Regex::new(r"[A-Za-z][A-Za-z0-9_]*").unwrap();
@@ -447,7 +730,7 @@ fn normalize_token(text: &str) -> String {
     tokenize(text).join("")
 }
 
-fn best_snippet(text: &str, query_tokens: &[String]) -> String {
+pub(crate) fn best_snippet(text: &str, query_tokens: &[String]) -> String {
     let lines = text.lines().collect::<Vec<_>>();
     for (idx, line) in lines.iter().enumerate() {
         let lowered = line.to_lowercase();
@@ -468,6 +751,67 @@ fn is_test_path(path: &str) -> bool {
         || path.ends_with(".test.tsx")
 }
 
-fn round4(value: f64) -> f64 {
+pub(crate) fn round4(value: f64) -> f64 {
     (value * 10_000.0).round() / 10_000.0
+}
+
+pub(crate) fn finalize_results(mut results: Vec<SearchResult>, limit: usize) -> Vec<SearchResult> {
+    results.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(Ordering::Equal)
+            .then_with(|| a.path.cmp(&b.path))
+    });
+
+    let mut seen = HashSet::new();
+    let mut deduped = Vec::new();
+    for result in results {
+        if seen.insert(result_signature(&result)) {
+            deduped.push(result);
+        }
+        if deduped.len() >= limit {
+            break;
+        }
+    }
+    deduped
+}
+
+pub(crate) fn matches_filters(path: &str, filters: &SearchFilters) -> bool {
+    if let Some(path_filter) = &filters.path {
+        if !path.contains(path_filter) {
+            return false;
+        }
+    }
+    if let Some(language_filter) = &filters.language {
+        let Some(language) = language_for(Path::new(path)) else {
+            return false;
+        };
+        if language != language_filter.trim().to_lowercase() {
+            return false;
+        }
+    }
+    true
+}
+
+fn result_signature(result: &SearchResult) -> String {
+    let comparable_path = ["/src/", "/tests/", "/test/", "/pkg/", "/cmd/", "/internal/"]
+        .iter()
+        .find_map(|marker| {
+            result
+                .path
+                .find(marker)
+                .map(|index| result.path[index + 1..].to_string())
+        })
+        .unwrap_or_else(|| result.path.clone());
+    let snippet = result
+        .snippet
+        .lines()
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .trim_start_matches(|ch: char| ch.is_ascii_digit() || ch == ':' || ch.is_whitespace())
+        .chars()
+        .take(160)
+        .collect::<String>();
+    format!("{comparable_path}\n{snippet}")
 }

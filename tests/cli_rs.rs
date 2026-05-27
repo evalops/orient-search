@@ -53,6 +53,10 @@ fn cli_searches_symbols_and_related_files() {
             "--repo",
             repo.path().to_str().unwrap(),
             "issue token",
+            "--path",
+            "src/",
+            "--language",
+            "rust",
         ])
         .assert()
         .success()
@@ -69,6 +73,42 @@ fn cli_searches_symbols_and_related_files() {
         .assert()
         .success()
         .stdout(predicate::str::contains("\"kind\":\"struct\""));
+}
+
+#[test]
+fn cli_builds_and_searches_persistent_index() {
+    let repo = sample_repo();
+    let index_path = repo.path().join(".orient/index.json");
+
+    let mut index = Command::cargo_bin("orient").unwrap();
+    index
+        .args([
+            "index",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--output",
+            index_path.to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"terms\""));
+
+    let mut search = Command::cargo_bin("orient").unwrap();
+    search
+        .args([
+            "indexed-search",
+            "--index",
+            index_path.to_str().unwrap(),
+            "issue token",
+            "--path",
+            "src/",
+            "--language",
+            "rust",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("src/auth.rs"))
+        .stdout(predicate::str::contains("indexed match"));
 }
 
 #[test]

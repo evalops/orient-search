@@ -92,14 +92,14 @@ pub fn scan_jsonl_roots(options: ScanOptions) -> Result<Metrics> {
         let mut file_failed: HashMap<String, bool> = HashMap::new();
         for line in BufReader::new(file).lines().map_while(Result::ok) {
             let trimmed = line.trim();
-            if trimmed.is_empty() {
+            if trimmed.is_empty() || !looks_like_tool_line(trimmed) {
                 continue;
             }
             let Ok(value) = serde_json::from_str::<Value>(trimmed) else {
                 continue;
             };
             file_calls.extend(parse_tool_calls(&value));
-            if let Some((call_id, is_failed)) = parse_tool_output(&value) {
+            for (call_id, is_failed) in parse_tool_outputs(&value) {
                 file_failed.insert(call_id, is_failed);
             }
         }
@@ -162,6 +162,22 @@ fn discover_jsonl_files(options: &ScanOptions) -> Result<Vec<PathBuf>> {
         files.truncate(max_files);
     }
     Ok(files)
+}
+
+fn looks_like_tool_line(line: &str) -> bool {
+    [
+        "function_call",
+        "custom_tool_call",
+        "web_search_call",
+        "tool_search_call",
+        "function_call_output",
+        "custom_tool_call_output",
+        "tool_search_output",
+        "tool_use",
+        "tool_result",
+    ]
+    .iter()
+    .any(|needle| line.contains(needle))
 }
 
 fn parse_tool_calls(value: &Value) -> Vec<ToolCall> {
@@ -231,36 +247,52 @@ fn parse_tool_calls(value: &Value) -> Vec<ToolCall> {
     Vec::new()
 }
 
-fn parse_tool_output(value: &Value) -> Option<(String, bool)> {
-    let top_type = value.get("type")?.as_str()?;
+fn parse_tool_outputs(value: &Value) -> Vec<(String, bool)> {
+    let Some(top_type) = value.get("type").and_then(Value::as_str) else {
+        return Vec::new();
+    };
     if top_type == "response_item" {
-        let payload = value.get("payload")?;
-        let item_type = payload.get("type")?.as_str()?;
+        let Some(payload) = value.get("payload") else {
+            return Vec::new();
+        };
+        let Some(item_type) = payload.get("type").and_then(Value::as_str) else {
+            return Vec::new();
+        };
         if !matches!(
             item_type,
             "function_call_output" | "custom_tool_call_output" | "tool_search_output"
         ) {
-            return None;
+            return Vec::new();
         }
-        let call_id = payload.get("call_id")?.as_str()?.to_string();
+        let Some(call_id) = payload.get("call_id").and_then(Value::as_str) else {
+            return Vec::new();
+        };
         let output = compact_value(payload.get("output"));
-        return Some((call_id, output_failed(&output)));
+        return vec![(call_id.to_string(), output_failed(&output))];
     }
     if top_type == "user" {
-        let content = value.get("message")?.get("content")?.as_array()?;
-        for item in content {
-            if item.get("type").and_then(Value::as_str) == Some("tool_result") {
+        let Some(content) = value
+            .get("message")
+            .and_then(|message| message.get("content"))
+            .and_then(Value::as_array)
+        else {
+            return Vec::new();
+        };
+        return content
+            .iter()
+            .filter(|item| item.get("type").and_then(Value::as_str) == Some("tool_result"))
+            .filter_map(|item| {
                 let call_id = item.get("tool_use_id")?.as_str()?.to_string();
                 let explicit_error = item
                     .get("is_error")
                     .and_then(Value::as_bool)
                     .unwrap_or(false);
                 let output = compact_value(item.get("content"));
-                return Some((call_id, explicit_error || output_failed(&output)));
-            }
-        }
+                Some((call_id, explicit_error || output_failed(&output)))
+            })
+            .collect();
     }
-    None
+    Vec::new()
 }
 
 fn output_failed(output: &str) -> bool {

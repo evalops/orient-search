@@ -1,6 +1,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use orient::repo_index::RepoIndexer;
+use orient::fast_index::FastIndex;
+use orient::repo_index::{RepoIndexer, SearchFilters, search_repo_fast_filtered};
 use orient::server::serve_jsonl;
 use orient::session_metrics::{ScanOptions, scan_jsonl_roots};
 use std::io;
@@ -16,6 +17,12 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Commands {
+    Index {
+        #[arg(long, default_value = ".")]
+        repo: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+    },
     Brief {
         #[arg(long, default_value = ".")]
         repo: PathBuf,
@@ -26,6 +33,21 @@ enum Commands {
         query: String,
         #[arg(long, default_value_t = 10)]
         limit: usize,
+        #[arg(long)]
+        path: Option<String>,
+        #[arg(long)]
+        language: Option<String>,
+    },
+    IndexedSearch {
+        #[arg(long)]
+        index: PathBuf,
+        query: String,
+        #[arg(long, default_value_t = 10)]
+        limit: usize,
+        #[arg(long)]
+        path: Option<String>,
+        #[arg(long)]
+        language: Option<String>,
     },
     Symbol {
         #[arg(long, default_value = ".")]
@@ -55,15 +77,47 @@ enum Commands {
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
+        Commands::Index { repo, output } => {
+            let index = FastIndex::build(repo)?;
+            index.save(&output)?;
+            println!("{}", serde_json::to_string(&index.stats())?);
+        }
         Commands::Brief { repo } => {
             let index = RepoIndexer::new(repo).build()?;
             println!("{}", serde_json::to_string(&index.repo_brief())?);
         }
-        Commands::Search { repo, query, limit } => {
-            let index = RepoIndexer::new(repo).build()?;
+        Commands::Search {
+            repo,
+            query,
+            limit,
+            path,
+            language,
+        } => {
             println!(
                 "{}",
-                serde_json::to_string(&index.search_code(&query, limit))?
+                serde_json::to_string(&search_repo_fast_filtered(
+                    repo,
+                    &query,
+                    limit,
+                    &SearchFilters { path, language },
+                )?)?
+            );
+        }
+        Commands::IndexedSearch {
+            index,
+            query,
+            limit,
+            path,
+            language,
+        } => {
+            let index = FastIndex::load(index)?;
+            println!(
+                "{}",
+                serde_json::to_string(&index.search_filtered(
+                    &query,
+                    limit,
+                    &SearchFilters { path, language },
+                )?)?
             );
         }
         Commands::Symbol { repo, name, limit } => {

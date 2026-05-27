@@ -1,11 +1,11 @@
-# Agent Orientation Layer
+# Orient Search
 
-Local orientation layer for coding agents, implemented in Rust. It gives Codex, Claude, and similar agents a cheap way to answer “where is the relevant thing?” before they burn tool calls on repeated `rg`, `find`, `cat`, and failed path probes.
+Rust-native fast code search and session analytics for coding agents. It gives Codex, Claude, Amp-style agents, and similar tools a cheap way to answer “where is the relevant thing?” before they burn tool calls on repeated `rg`, `find`, `cat`, and failed path probes.
 
 ## What It Does
 
 - Indexes a local repo and returns compact orientation answers.
-- Searches code with lexical + symbol-aware ranking.
+- Searches code with a fast `rg`-backed hot path plus an experimental persistent Rust index.
 - Finds symbols and related test/source files.
 - Infers known commands from repo manifests.
 - Scans Codex/Claude JSONL logs for tool-call metrics.
@@ -22,6 +22,10 @@ cargo run -- brief --repo /path/to/repo
 
 # Search code.
 cargo run -- search --repo /path/to/repo "session token auth"
+
+# Build and query a persistent local index.
+cargo run -- index --repo /path/to/repo --output /tmp/orient.index.json
+cargo run -- indexed-search --index /tmp/orient.index.json "session token auth"
 
 # Find a symbol.
 cargo run -- symbol --repo /path/to/repo SessionManager
@@ -58,6 +62,7 @@ Supported tools:
 - `list_tools`
 - `repo_brief`
 - `search_code`
+- `indexed_search_code`
 - `find_symbol`
 - `related_files`
 - `metrics`
@@ -67,6 +72,8 @@ Supported tools:
 The build is useful when it can:
 
 - Answer repo brief/search/symbol/related-file questions through Rust CLI and JSON-lines server.
+- Return wide-tree search results in hundreds of milliseconds, not seconds.
+- Provide a persistent indexed search mode that can evolve toward Zoekt-style shards/postings.
 - Parse recent Codex/Claude logs and report total calls, failed calls, action-kind counts, and orientation share.
 - Establish a baseline for search/read behavior so future agent runs can be compared.
 - Pass the Rust test suite.
@@ -85,9 +92,19 @@ Product impact criteria for follow-up adoption:
 - Fewer calls before first edit.
 - No task-quality regression.
 
+Current search baseline:
+
+- `orient search --repo . "session metrics jsonl tool calls"`: about `0.24s`.
+- `orient search --repo /Users/jonathanhaas/Documents/Projects "session token auth"`: about `0.25s`.
+- `orient index --repo . --output /tmp/orient-self.index.json`: about `0.25s`.
+- `orient indexed-search --index /tmp/orient-self.index.json "session metrics jsonl tool calls"`: below `/usr/bin/time`'s `0.01s` display precision.
+
+See [docs/fast-search-roadmap.md](docs/fast-search-roadmap.md) for the Zoekt/Sourcegraph/Amp-inspired roadmap.
+
 ## Architecture
 
-- `src-rs/repo_index.rs`: repo indexing, symbol extraction, code search, related-file lookup.
-- `src-rs/session_metrics.rs`: Codex/Claude JSONL tool-call parsing and action classification.
-- `src-rs/server.rs`: JSON-lines tool dispatch.
-- `src-rs/main.rs`: CLI.
+- `src/fast_index.rs`: experimental persistent token index and indexed search.
+- `src/repo_index.rs`: repo indexing, symbol extraction, code search, related-file lookup.
+- `src/session_metrics.rs`: Codex/Claude JSONL tool-call parsing and action classification.
+- `src/server.rs`: JSON-lines tool dispatch.
+- `src/main.rs`: CLI.

@@ -1,17 +1,16 @@
 [package]
-name = "agent-orientation-layer"
+name = "orient-search"
 version = "0.1.0"
 edition = "2024"
-description = "Local repo and session orientation layer for coding agents"
+description = "Rust-native fast code search and session analytics for coding agents"
 license = "MIT"
 
 [lib]
 name = "orient"
-path = "src-rs/lib.rs"
 
 [[bin]]
 name = "orient"
-path = "src-rs/main.rs"
+path = "src/main.rs"
 
 [dependencies]
 anyhow = "1"
