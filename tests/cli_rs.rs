@@ -1206,6 +1206,23 @@ fn cli_filters_shard_search_by_nested_repo_alias() {
         .stdout(predicate::str::contains("invoice_total"))
         .stdout(predicate::str::contains("auth.rs").not());
 
+    let mut shard_plan = Command::cargo_bin("orient").unwrap();
+    shard_plan
+        .args([
+            "shard-plan",
+            "--index-dir",
+            shard_dir.path().to_str().unwrap(),
+            "repo:billing invoice missingterm",
+            "--require-all",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"name\":\"billing\""))
+        .stdout(predicate::str::contains("\"missing_terms\""))
+        .stdout(predicate::str::contains("missingterm"))
+        .stdout(predicate::str::contains("\"candidate_count\":0"))
+        .stdout(predicate::str::contains("\"name\":\"auth\"").not());
+
     let mut shard_symbol = Command::cargo_bin("orient").unwrap();
     shard_symbol
         .args([

@@ -3,7 +3,7 @@ use std::path::Path;
 
 use orient::fast_index::FastIndex;
 use orient::repo_index::{SearchFilters, search_repo_fast_filtered};
-use orient::shards::{build_shards, search_shards};
+use orient::shards::{build_shards, search_shards, shard_query_plans};
 
 fn write(path: &Path, text: &str) {
     fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -160,4 +160,16 @@ fn golden_corpus_indexed_plan_explains_empty_queries() {
     assert!(plan.require_all);
     assert_eq!(plan.missing_terms, vec!["zzzxxyneverterm"]);
     assert_eq!(plan.candidate_count, 0);
+
+    let shard_dir = tempfile::tempdir().unwrap();
+    build_shards(&[repo.path().to_path_buf()], shard_dir.path()).unwrap();
+    let shard_plans = shard_query_plans(
+        shard_dir.path(),
+        "SessionManager zzzxxyneverterm",
+        &SearchFilters::default(),
+    )
+    .unwrap();
+    assert_eq!(shard_plans.len(), 1);
+    assert_eq!(shard_plans[0].plan.missing_terms, vec!["zzzxxyneverterm"]);
+    assert_eq!(shard_plans[0].plan.candidate_count, 0);
 }

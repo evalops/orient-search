@@ -4,7 +4,7 @@ use crate::discover::{RepoGitMetadata, git_metadata_for_repo};
 use crate::fast_index::{FastIndex, IndexStats};
 use crate::query::{merge_filters, parse_query, query_text};
 use crate::repo_index::{
-    FileRange, RelatedFile, RelatedSymbol, RepoMap, SearchFilters, SearchResult, Symbol,
+    FileRange, QueryPlan, RelatedFile, RelatedSymbol, RepoMap, SearchFilters, SearchResult, Symbol,
     finalize_results, is_manifest_file, language_for, normalize_token,
 };
 use anyhow::{Context, Result};
@@ -92,6 +92,16 @@ pub struct ShardRepoMap {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub git: Option<RepoGitMetadata>,
     pub map: RepoMap,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ShardQueryPlan {
+    pub name: String,
+    pub root: PathBuf,
+    pub aliases: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git: Option<RepoGitMetadata>,
+    pub plan: QueryPlan,
 }
 
 pub fn build_shards(repos: &[PathBuf], output_dir: impl AsRef<Path>) -> Result<ShardBuildStats> {
@@ -268,6 +278,43 @@ pub fn search_shards(
         }
     }
     Ok(finalize_results(results, limit))
+}
+
+pub fn shard_query_plans(
+    index_dir: impl AsRef<Path>,
+    query: &str,
+    filters: &SearchFilters,
+) -> Result<Vec<ShardQueryPlan>> {
+    let index_dir = index_dir.as_ref();
+    let manifest = load_manifest(index_dir)?;
+    let parsed = parse_query(query);
+    let filters = merge_filters(filters.clone(), parsed.filters);
+    let shard_query = query_text(&parsed.terms, &filters);
+    let mut plans = Vec::new();
+    for shard in manifest.shards {
+        let scopes = shard_search_scopes(&shard, &filters);
+        if scopes.is_empty() {
+            continue;
+        }
+        let index = FastIndex::load(index_dir.join(&shard.index))
+            .with_context(|| format!("load shard {}", shard.index))?;
+        for scope in scopes {
+            let scoped_filters = filters_for_shard_scope(&filters, scope.path_prefix.as_deref());
+            plans.push(ShardQueryPlan {
+                aliases: shard
+                    .aliases
+                    .iter()
+                    .map(|alias| alias.name.clone())
+                    .collect(),
+                git: shard.git.clone(),
+                name: scope.output_prefix,
+                root: shard.root.clone(),
+                plan: index.query_plan(&shard_query, &scoped_filters)?,
+            });
+        }
+    }
+    plans.sort_by(|left, right| left.name.cmp(&right.name));
+    Ok(plans)
 }
 
 pub fn find_shard_symbol(

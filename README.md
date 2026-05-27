@@ -75,6 +75,7 @@ cargo run -- search-shards --index-dir /tmp/orient-shards "session token auth"
 cargo run -- search-shards --index-dir /tmp/orient-shards "repo:repo-a session token auth"
 cargo run -- search-shards --index-dir /tmp/orient-shards "repo:maestro app server"
 cargo run -- search-shards --index-dir /tmp/orient-shards "repo:billing invoice total" --context-lines 80
+cargo run -- shard-plan --index-dir /tmp/orient-shards "repo:billing invoice missing_term"
 cargo run -- shard-symbol --index-dir /tmp/orient-shards --repo repo-a SessionManager
 cargo run -- read-shard-range --index-dir /tmp/orient-shards repo-a/src/auth.rs --start 40 --lines 80
 cargo run -- read-shard-range --index-dir /tmp/orient-shards maestro/src/app.rs --start 40 --lines 80
@@ -183,6 +184,7 @@ Supported tools:
 - `ensure_shards`
 - `refresh_shards`
 - `search_shards`
+- `shard_query_plan`
 - `read_shard_range`
 - `read_shard_ranges`
 - `shard_repo_map`
@@ -262,7 +264,7 @@ Search commands and JSON-lines tools accept `--explain` or JSON `"explain":true`
 - `symbol_exact` or `symbol_overlap`: symbol matching contributed to score.
 - `line_phrase`, `content_phrase`, or `path_phrase`: an exact quoted phrase contributed to score.
 
-Indexed searches also include a `query_plan` object in explain mode. It reports the planner strategy, normalized query tokens, exact phrases, trigrams, the rarest planned posting lists with posting counts, missing terms/trigrams, whether AND semantics are required, and the final candidate count before scoring. `orient index-plan` and the `indexed_query_plan` JSON-lines tool return the same plan even when search returns zero hits, so wrappers can distinguish missing postings from overly tight filters.
+Indexed searches also include a `query_plan` object in explain mode. It reports the planner strategy, normalized query tokens, exact phrases, trigrams, the rarest planned posting lists with posting counts, missing terms/trigrams, whether AND semantics are required, and the final candidate count before scoring. `orient index-plan`, `orient shard-plan`, and the `indexed_query_plan` / `shard_query_plan` JSON-lines tools return plans even when search returns zero hits, so wrappers can distinguish missing postings from overly tight filters.
 
 When repeated worktrees or manifest copies produce equivalent hits, the top result can include a compact `duplicate_group` with a normalized `canonical_path`, a suppressed duplicate count, and up to eight hidden duplicate paths. This keeps result lists short while still showing agents when a match exists in multiple local copies.
 
@@ -289,10 +291,10 @@ Product impact criteria for follow-up adoption:
 
 Current search baseline:
 
-- `orient bench-search --repo . --index /tmp/orient-self.index "indexed search symbol filters"`: `0.894ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "session token auth"`: `22.691ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "browser session implementation"`: `23.102ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "postgres migration user"`: `35.148ms` p95 after warmup.
+- `orient bench-search --repo . --index /tmp/orient-self.index "indexed search symbol filters"`: `1.063ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "session token auth"`: `22.131ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "browser session implementation"`: `23.489ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "postgres migration user"`: `48.618ms` p95 after warmup.
 - The `rg` hot path has a `250ms` wall-clock timeout plus a bounded match cap; timed-out searches return partial results rather than hanging.
 - `orient index --repo . --output /tmp/orient-self.index`: versioned binary index with file metadata, content token postings, path token postings, trigram postings, line offsets, token-to-line tables, bounded source snapshots, and symbol boosts.
 - `orient discover-repos --root /Users/jonathanhaas/Documents/Projects --max-depth 2 --limit 500`: found 369 git or manifest-backed repo roots after scanning 2,889 directories, while skipping dependency/build directories and prioritizing visible canonical repos ahead of dated split, temp, and worktree folders when limits are small.

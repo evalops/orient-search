@@ -8,7 +8,7 @@ use crate::repo_index::{
 use crate::shards::{
     ShardEntry, ShardManifest, ShardRepoMap, ShardSearchScope, build_shards, ensure_shards,
     filter_repo_map_by_prefix, filters_for_shard_scope, load_manifest, refresh_shards,
-    resolve_shard_read_path, shard_search_scopes,
+    resolve_shard_read_path, shard_query_plans, shard_search_scopes,
 };
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
@@ -316,6 +316,12 @@ pub fn tool_manifest() -> Value {
             "Search a local multi-repo shard directory and return repo-prefixed ranked snippets.",
             &["index_dir", "query"],
             SEARCH_INDEX_OPTIONAL_ARGS,
+        ),
+        tool_entry(
+            "shard_query_plan",
+            "Return indexed query plans for every matching shard repo or alias.",
+            &["index_dir", "query"],
+            PLAN_INDEX_OPTIONAL_ARGS,
         ),
         tool_entry(
             "read_shard_range",
@@ -756,6 +762,15 @@ impl ToolRuntime {
                     context_lines,
                 )?)?)
             }
+            "shard_query_plan" => {
+                let index_dir = path_arg(&request.arguments, "index_dir")?;
+                let query = string_arg(&request.arguments, "query")?;
+                Ok(serde_json::to_value(shard_query_plans(
+                    &index_dir,
+                    &query,
+                    &search_filters(&request.arguments, true)?,
+                )?)?)
+            }
             "read_shard_range" => {
                 let index_dir = path_arg(&request.arguments, "index_dir")?;
                 let path = string_arg(&request.arguments, "path")?;
@@ -914,6 +929,7 @@ impl ToolRuntime {
                 "ensure_shards",
                 "refresh_shards",
                 "search_shards",
+                "shard_query_plan",
                 "read_shard_range",
                 "read_shard_ranges",
                 "shard_repo_map",

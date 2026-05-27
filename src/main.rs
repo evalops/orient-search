@@ -9,7 +9,7 @@ use orient::repo_index::{
 use orient::server::{ToolRuntime, serve_jsonl, serve_tcp, tool_manifest};
 use orient::shards::{
     build_shards, ensure_shards, find_shard_symbol, read_shard_range, refresh_shards,
-    related_shard_files, related_shard_symbols, search_shards, shard_repo_maps,
+    related_shard_files, related_shard_symbols, search_shards, shard_query_plans, shard_repo_maps,
 };
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -92,6 +92,15 @@ enum Commands {
         filters: CommonSearchArgs,
         #[arg(long, default_value_t = 0)]
         context_lines: usize,
+    },
+    ShardPlan {
+        #[arg(long)]
+        index_dir: PathBuf,
+        query: String,
+        #[arg(long = "repo")]
+        repo: Option<String>,
+        #[command(flatten)]
+        filters: CommonSearchArgs,
     },
     ReadShardRange {
         #[arg(long)]
@@ -504,6 +513,21 @@ fn main() -> Result<()> {
                 read_shard_range(&index_dir, path, start, lines)
             })?;
             println!("{}", serde_json::to_string(&results)?);
+        }
+        Commands::ShardPlan {
+            index_dir,
+            query,
+            repo,
+            filters,
+        } => {
+            println!(
+                "{}",
+                serde_json::to_string(&shard_query_plans(
+                    &index_dir,
+                    &query,
+                    &search_filters_from_args(&filters, repo)?,
+                )?)?
+            );
         }
         Commands::ReadShardRange {
             index_dir,

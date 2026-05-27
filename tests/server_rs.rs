@@ -126,6 +126,7 @@ fn server_reports_tool_manifest_for_agent_wrappers() {
     assert!(stdout.contains("read_index_range"));
     assert!(stdout.contains("indexed_query_plan"));
     assert!(stdout.contains("indexed_repo_map"));
+    assert!(stdout.contains("shard_query_plan"));
     assert!(stdout.contains("find_index_symbol"));
     assert!(stdout.contains("related_index_files"));
     assert!(stdout.contains("related_index_symbols"));
@@ -1833,6 +1834,15 @@ fn server_handles_shard_index_search_and_read_requests() {
             "limit": 5
         }
     });
+    let plan_request = serde_json::json!({
+        "id": "shard-query-plan",
+        "tool": "shard_query_plan",
+        "arguments": {
+            "index_dir": parent.path().join(".orient-shards"),
+            "query": "repo:BILLING invoice missingterm",
+            "require_all": true
+        }
+    });
     writeln!(child.stdin.as_mut().unwrap(), "{index_request}").unwrap();
     writeln!(child.stdin.as_mut().unwrap(), "{search_request}").unwrap();
     writeln!(child.stdin.as_mut().unwrap(), "{symbol_request}").unwrap();
@@ -1841,6 +1851,7 @@ fn server_handles_shard_index_search_and_read_requests() {
     writeln!(child.stdin.as_mut().unwrap(), "{read_ranges_request}").unwrap();
     writeln!(child.stdin.as_mut().unwrap(), "{related_request}").unwrap();
     writeln!(child.stdin.as_mut().unwrap(), "{related_symbols_request}").unwrap();
+    writeln!(child.stdin.as_mut().unwrap(), "{plan_request}").unwrap();
     drop(child.stdin.take());
 
     let output = child.wait_with_output().unwrap();
@@ -1868,6 +1879,10 @@ fn server_handles_shard_index_search_and_read_requests() {
     assert!(stdout.contains("billing/tests/billing_test.rs"));
     assert!(stdout.contains("\"id\":\"related-shard-symbols\""));
     assert!(stdout.contains("\"path\":\"billing/src/billing.rs\""));
+    assert!(stdout.contains("\"id\":\"shard-query-plan\""));
+    assert!(stdout.contains("\"name\":\"billing\""));
+    assert!(stdout.contains("\"missing_terms\""));
+    assert!(stdout.contains("missingterm"));
 }
 
 #[test]
