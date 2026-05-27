@@ -44,6 +44,8 @@ pub struct SearchResult {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub explanation: Option<Vec<RankSignal>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub query_plan: Option<QueryPlan>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duplicate_group: Option<DuplicateGroup>,
 }
 
@@ -52,6 +54,23 @@ pub struct RankSignal {
     pub kind: String,
     pub value: String,
     pub score: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QueryPlan {
+    pub strategy: String,
+    pub require_all: bool,
+    pub query_tokens: Vec<String>,
+    pub query_trigrams: Vec<String>,
+    pub planned_postings: Vec<QueryPlanPosting>,
+    pub candidate_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QueryPlanPosting {
+    pub kind: String,
+    pub value: String,
+    pub postings: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -566,6 +585,7 @@ fn merge_match_result(
             reason: format!("matched {}", reasons.join(", ")),
             snippet,
             explanation: explain.then_some(signals),
+            query_plan: None,
             duplicate_group: None,
         });
 }
@@ -708,6 +728,7 @@ impl RepoIndex {
                     reason: format!("matched {}", reasons.join(", ")),
                     snippet: best_snippet(&file.text, &query_tokens),
                     explanation: None,
+                    query_plan: None,
                     duplicate_group: None,
                 });
             }
@@ -1181,6 +1202,7 @@ fn score_text_file(
         reason: format!("matched {}", reasons.join(", ")),
         snippet: best_snippet_for_path(path, text, query_tokens, snippet_mode),
         explanation: explain.then_some(signals),
+        query_plan: None,
         duplicate_group: None,
     })
 }

@@ -446,11 +446,21 @@ fn search_explain_mode_returns_structured_rank_signals() {
             .iter()
             .any(|signal| signal.kind == "symbol_exact" && signal.value == "SessionManager")
     );
+    let plan = indexed[0].query_plan.as_ref().unwrap();
+    assert_eq!(plan.strategy, "posting_intersection");
+    assert_eq!(plan.query_tokens, vec!["session", "manager"]);
+    assert!(plan.candidate_count >= 1);
+    assert!(
+        plan.planned_postings
+            .iter()
+            .any(|posting| posting.kind == "content" && posting.value == "session")
+    );
 
     let compact =
         search_repo_fast_filtered(repo.path(), "SessionManager", 10, &SearchFilters::default())
             .unwrap();
     assert!(compact[0].explanation.is_none());
+    assert!(compact[0].query_plan.is_none());
 }
 
 #[test]

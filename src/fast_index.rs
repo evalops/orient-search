@@ -2,11 +2,12 @@
 
 use crate::query::{merge_filters, parse_query, query_text};
 use crate::repo_index::{
-    RankSignal, RelatedFile, RelatedSymbol, RepoBrief, RepoMap, SearchFilters, SearchResult,
-    SnippetMode, Symbol, best_snippet_for_path, extract_symbols, finalize_results,
-    is_entrypoint_path, is_ignored, is_important_file, is_manifest_file, is_test_path,
-    language_for, matches_filters, normalize_token, repo_matches, result_matches_all_tokens,
-    result_matches_symbol_filters, round4, symbol_kind_rank, token_counts, tokenize,
+    QueryPlan, QueryPlanPosting, RankSignal, RelatedFile, RelatedSymbol, RepoBrief, RepoMap,
+    SearchFilters, SearchResult, SnippetMode, Symbol, best_snippet_for_path, extract_symbols,
+    finalize_results, is_entrypoint_path, is_ignored, is_important_file, is_manifest_file,
+    is_test_path, language_for, matches_filters, normalize_token, repo_matches,
+    result_matches_all_tokens, result_matches_symbol_filters, round4, symbol_kind_rank,
+    token_counts, tokenize,
 };
 use anyhow::{Context, Result};
 use ignore::WalkBuilder;
@@ -641,6 +642,18 @@ impl FastIndex {
         } else {
             intersect_planned_postings(&planned_postings, filters.require_all)
         };
+        let query_plan = filters.explain.then(|| {
+            indexed_query_plan(
+                &query_tokens,
+                &query_trigrams,
+                &token_postings,
+                &path_postings,
+                &trigram_postings,
+                use_trigrams,
+                filters.require_all,
+                candidate_ids.len(),
+            )
+        });
 
         let posting_maps = token_postings
             .iter()
@@ -695,6 +708,7 @@ impl FastIndex {
                     &trigram_maps,
                     filters.snippet,
                     filters.explain,
+                    query_plan.as_ref(),
                 )
             })
             .collect::<Vec<_>>();
@@ -716,6 +730,7 @@ impl FastIndex {
         trigram_maps: &[(String, HashMap<u32, u16>)],
         snippet_mode: SnippetMode,
         explain: bool,
+        query_plan: Option<&QueryPlan>,
     ) -> Option<SearchResult> {
         let file = self.files.get(file_id as usize)?;
         let path_lower = file.path.to_lowercase();
@@ -799,6 +814,7 @@ impl FastIndex {
             reason: format!("indexed match {}", reasons.join(", ")),
             snippet,
             explanation: explain.then_some(signals),
+            query_plan: query_plan.cloned(),
             duplicate_group: None,
         })
     }
@@ -809,6 +825,63 @@ fn rank_signal(kind: &str, value: &str, score: f64) -> RankSignal {
         kind: kind.to_string(),
         value: value.to_string(),
         score: round4(score),
+    }
+}
+
+fn indexed_query_plan(
+    query_tokens: &[String],
+    query_trigrams: &[String],
+    token_postings: &[(&String, &Vec<Posting>)],
+    path_postings: &[(&String, &Vec<Posting>)],
+    trigram_postings: &[(&String, &Vec<Posting>)],
+    use_trigrams: bool,
+    require_all: bool,
+    candidate_count: usize,
+) -> QueryPlan {
+    let mut planned_postings = token_postings
+        .iter()
+        .map(|(token, postings)| plan_posting("content", token, postings))
+        .chain(
+            path_postings
+                .iter()
+                .map(|(token, postings)| plan_posting("path", token, postings)),
+        )
+        .chain(
+            trigram_postings
+                .iter()
+                .take(8)
+                .map(|(trigram, postings)| plan_posting("trigram", trigram, postings)),
+        )
+        .collect::<Vec<_>>();
+    planned_postings.sort_by(|left, right| {
+        left.postings
+            .cmp(&right.postings)
+            .then_with(|| left.kind.cmp(&right.kind))
+            .then_with(|| left.value.cmp(&right.value))
+    });
+    planned_postings.truncate(16);
+
+    QueryPlan {
+        strategy: if use_trigrams && query_tokens.len() == 1 {
+            "token_or_trigram_union".to_string()
+        } else if require_all {
+            "posting_intersection".to_string()
+        } else {
+            "posting_union".to_string()
+        },
+        require_all,
+        query_tokens: query_tokens.to_vec(),
+        query_trigrams: query_trigrams.to_vec(),
+        planned_postings,
+        candidate_count,
+    }
+}
+
+fn plan_posting(kind: &str, value: &str, postings: &[Posting]) -> QueryPlanPosting {
+    QueryPlanPosting {
+        kind: kind.to_string(),
+        value: value.to_string(),
+        postings: postings.len(),
     }
 }
 
