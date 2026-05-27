@@ -47,16 +47,16 @@ Implemented now:
 - Exact symbol definition boosting in both fallback and indexed search.
 - Direct symbol lookup from persistent indexes, so agent wrappers can jump to definitions without rebuilding a repo index.
 - Direct symbol lookup across local shard directories, returning repo-prefixed paths that can be passed to `read-shard-range`.
-- Repo-map orientation from persistent indexes and shard directories, so agents can inspect entrypoints, tests, symbols, important files, and command hints without rebuilding a separate live repo index.
+- Repo-map orientation from persistent indexes and shard directories, so agents can inspect entrypoints, manifests, tests, symbols, important files, and command hints without rebuilding a separate live repo index.
 
 Measured on this machine:
 
-- Wide tree fallback: `/Users/jonathanhaas/Documents/Projects`, common top-10 literal/token queries at `20-35ms` p95 after warmup across the sampled runs.
-- Local repo fallback: query `indexed search symbol filters`, top 10 at about `8.4ms` p95 after warmup.
+- Wide tree fallback: `/Users/jonathanhaas/Documents/Projects`, common top-10 literal/token queries at `18-31ms` p95 after warmup across the sampled runs.
+- Local repo fallback: query `indexed search symbol filters`, top 10 at about `7.4ms` p95 after warmup.
 - Hot-path fallback has a `250ms` wall-clock timeout plus match caps; if the timeout fires it returns partial results instead of blocking the agent.
 - Local repo index build: about `0.25s`.
 - Local repo refresh after build: reuses unchanged files and rebuilds postings from per-file term lists.
-- Local repo indexed search: query `indexed search symbol filters`, top 10 at about `0.13ms` p95 after warmup.
+- Local repo indexed search: query `indexed search symbol filters`, top 10 at about `0.17ms` p95 after warmup.
 
 ## Exit Conditions
 

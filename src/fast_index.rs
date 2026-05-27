@@ -4,9 +4,9 @@ use crate::query::{merge_filters, parse_query, query_text};
 use crate::repo_index::{
     RankSignal, RepoBrief, RepoMap, SearchFilters, SearchResult, SnippetMode, Symbol,
     best_snippet_for_path, extract_symbols, finalize_results, is_entrypoint_path, is_ignored,
-    is_test_path, language_for, matches_filters, normalize_token, repo_matches,
-    result_matches_all_tokens, result_matches_symbol_filters, round4, symbol_kind_rank,
-    token_counts, tokenize,
+    is_important_file, is_manifest_file, is_test_path, language_for, matches_filters,
+    normalize_token, repo_matches, result_matches_all_tokens, result_matches_symbol_filters,
+    round4, symbol_kind_rank, token_counts, tokenize,
 };
 use anyhow::{Context, Result};
 use ignore::WalkBuilder;
@@ -248,6 +248,14 @@ impl FastIndex {
             *language_counts.entry(file.language.clone()).or_insert(0) += 1;
         }
 
+        let mut manifest_files = self
+            .files
+            .iter()
+            .filter(|file| is_manifest_file(&file.path))
+            .map(|file| file.path.clone())
+            .collect::<Vec<_>>();
+        manifest_files.sort();
+
         let mut important_files = self
             .files
             .iter()
@@ -304,6 +312,7 @@ impl FastIndex {
                 file_count: self.files.len(),
                 language_counts,
                 known_commands: known_commands_from_indexed_files(&self.files),
+                manifest_files,
                 important_files,
             },
             entrypoints,
@@ -684,19 +693,6 @@ fn index_file(
         symbols,
         line_offsets,
     })
-}
-
-fn is_important_file(path: &str) -> bool {
-    matches!(
-        path,
-        "AGENTS.md"
-            | "CLAUDE.md"
-            | "README.md"
-            | "pyproject.toml"
-            | "package.json"
-            | "Cargo.toml"
-            | "Makefile"
-    )
 }
 
 fn known_commands_from_indexed_files(files: &[IndexedPath]) -> Vec<String> {

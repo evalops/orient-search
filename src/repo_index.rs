@@ -152,6 +152,7 @@ pub struct RepoBrief {
     pub file_count: usize,
     pub language_counts: HashMap<String, usize>,
     pub known_commands: Vec<String>,
+    pub manifest_files: Vec<String>,
     pub important_files: Vec<String>,
 }
 
@@ -860,19 +861,21 @@ impl RepoIndex {
         for file in self.files.values() {
             *language_counts.entry(file.language.clone()).or_insert(0) += 1;
         }
-        let important_files = [
-            "AGENTS.md",
-            "CLAUDE.md",
-            "README.md",
-            "pyproject.toml",
-            "package.json",
-            "Cargo.toml",
-            "Makefile",
-        ]
-        .into_iter()
-        .filter(|name| self.files.contains_key(*name))
-        .map(String::from)
-        .collect();
+        let mut manifest_files = self
+            .files
+            .keys()
+            .filter(|path| is_manifest_file(path))
+            .cloned()
+            .collect::<Vec<_>>();
+        manifest_files.sort();
+
+        let mut important_files = self
+            .files
+            .keys()
+            .filter(|path| is_important_file(path))
+            .cloned()
+            .collect::<Vec<_>>();
+        important_files.sort();
 
         RepoBrief {
             root_name: self
@@ -883,6 +886,7 @@ impl RepoIndex {
             file_count: self.files.len(),
             language_counts,
             known_commands: self.known_commands(),
+            manifest_files,
             important_files,
         }
     }
@@ -1318,6 +1322,31 @@ pub(crate) fn is_entrypoint_path(path: &str) -> bool {
             | "package.json"
             | "pyproject.toml"
     ) || path.starts_with("cmd/")
+}
+
+pub(crate) fn is_manifest_file(path: &str) -> bool {
+    matches!(
+        path,
+        "Cargo.toml"
+            | "pyproject.toml"
+            | "package.json"
+            | "package-lock.json"
+            | "pnpm-lock.yaml"
+            | "yarn.lock"
+            | "go.mod"
+            | "go.sum"
+            | "Gemfile"
+            | "Package.swift"
+            | "pom.xml"
+            | "build.gradle"
+            | "settings.gradle"
+            | "deno.json"
+            | "composer.json"
+    )
+}
+
+pub(crate) fn is_important_file(path: &str) -> bool {
+    matches!(path, "AGENTS.md" | "CLAUDE.md" | "README.md" | "Makefile") || is_manifest_file(path)
 }
 
 pub(crate) fn symbol_kind_rank(kind: &str) -> usize {

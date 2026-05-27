@@ -39,6 +39,7 @@ fn cli_outputs_repo_brief_as_json() {
         .assert()
         .success()
         .stdout(predicate::str::contains("\"known_commands\""))
+        .stdout(predicate::str::contains("\"manifest_files\""))
         .stdout(predicate::str::contains("cargo test"));
 }
 
@@ -77,6 +78,7 @@ fn cli_outputs_repo_map_and_reads_ranges() {
         .assert()
         .success()
         .stdout(predicate::str::contains("\"entrypoints\""))
+        .stdout(predicate::str::contains("\"manifest_files\""))
         .stdout(predicate::str::contains("src/auth.rs"))
         .stdout(predicate::str::contains("tests/auth_test.rs"))
         .stdout(predicate::str::contains("SessionManager"));
@@ -244,6 +246,7 @@ fn cli_builds_and_searches_persistent_index() {
         .assert()
         .success()
         .stdout(predicate::str::contains("\"entrypoints\""))
+        .stdout(predicate::str::contains("\"manifest_files\""))
         .stdout(predicate::str::contains("tests/auth_test.rs"))
         .stdout(predicate::str::contains("SessionManager"))
         .stdout(predicate::str::contains("cargo test"));
@@ -424,6 +427,9 @@ fn cli_builds_and_searches_shard_directory() {
         )))
         .stdout(predicate::str::contains(&format!(
             "\"entrypoints\":[\"{billing_name}/Cargo.toml\"]"
+        )))
+        .stdout(predicate::str::contains(&format!(
+            "\"manifest_files\":[\"{billing_name}/Cargo.toml\"]"
         )))
         .stdout(predicate::str::contains(&format!(
             "\"path\":\"{billing_name}/src/billing.rs\""

@@ -124,6 +124,7 @@ fn indexed_repo_map_returns_orientation_from_persisted_metadata() {
 
     assert!(map.entrypoints.contains(&"src/lib.rs".to_string()));
     assert!(map.test_files.contains(&"tests/auth_test.rs".to_string()));
+    assert!(map.brief.manifest_files.contains(&"Cargo.toml".to_string()));
     assert!(
         map.brief
             .important_files

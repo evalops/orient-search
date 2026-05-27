@@ -9,7 +9,7 @@ Rust-native fast local code search for coding agents. It gives Codex, Claude, Am
 - Boosts exact symbol definitions in both fallback and indexed search.
 - Finds symbols plus related test/source files and nearby definitions.
 - Reads bounded line ranges after search hits, with line-numbered output.
-- Builds repo maps with entrypoints, tests, top symbols, commands, and important files.
+- Builds repo maps with entrypoints, manifests, tests, top symbols, commands, and important files.
 - Infers known commands from repo manifests.
 - Exposes a Rust CLI and JSON-lines tool server suitable for MCP-style wrapping.
 
@@ -198,10 +198,10 @@ Product impact criteria for follow-up adoption:
 
 Current search baseline:
 
-- `orient bench-search --repo . "indexed search symbol filters"`: `8.381ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "session token auth"`: `19.658ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "browser session implementation"`: `24.877ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "postgres migration user"`: `35.069ms` p95 after warmup.
+- `orient bench-search --repo . "indexed search symbol filters"`: `7.435ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "session token auth"`: `18.681ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "browser session implementation"`: `22.023ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "postgres migration user"`: `30.557ms` p95 after warmup.
 - The `rg` hot path has a `250ms` wall-clock timeout plus a bounded match cap; timed-out searches return partial results rather than hanging.
 - `orient index --repo . --output /tmp/orient-self.index`: versioned binary index with file metadata, content token postings, path token postings, trigram postings, line offsets, and symbol boosts.
 - `orient index-shards --repo repo-a --repo repo-b --output-dir /tmp/orient-shards`: writes per-repo index shards plus a manifest for local multi-repo search.
@@ -209,7 +209,7 @@ Current search baseline:
 - `orient refresh-index --repo . --index /tmp/orient-self.index`: reuses unchanged files and refreshes changed/deleted files.
 - `orient index-map --index /tmp/orient-self.index`: returns repo-map orientation directly from the persistent index without rebuilding a live repo scan.
 - `orient shard-map --index-dir /tmp/orient-shards`: returns repo-prefixed repo maps for local multi-repo shard directories.
-- `orient bench-search --repo . --index /tmp/orient-self.index "indexed search symbol filters"`: `0.131ms` p95 after warmup.
+- `orient bench-search --repo . --index /tmp/orient-self.index "indexed search symbol filters"`: `0.171ms` p95 after warmup.
 
 Benchmark methodology:
 

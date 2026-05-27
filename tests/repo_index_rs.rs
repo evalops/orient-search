@@ -70,6 +70,12 @@ def test_issue_token_round_trip():
     let brief = index.repo_brief();
     assert_eq!(brief.language_counts.get("python"), Some(&2));
     assert!(brief.known_commands.contains(&"pytest".to_string()));
+    assert!(brief.manifest_files.contains(&"pyproject.toml".to_string()));
+    assert!(
+        brief
+            .important_files
+            .contains(&"pyproject.toml".to_string())
+    );
 }
 
 #[test]

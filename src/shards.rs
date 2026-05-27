@@ -271,6 +271,9 @@ fn symbol_match_score(symbol: &Symbol, name: &str, needle: &str) -> u8 {
 }
 
 fn prefix_repo_map_paths(map: &mut RepoMap, shard_name: &str) {
+    for path in &mut map.brief.manifest_files {
+        *path = format!("{shard_name}/{path}");
+    }
     for path in &mut map.brief.important_files {
         *path = format!("{shard_name}/{path}");
     }
