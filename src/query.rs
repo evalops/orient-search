@@ -1,4 +1,4 @@
-use crate::repo_index::{SearchFilters, tokenize};
+use crate::repo_index::{SearchFilters, identifier_boundary_text, tokenize};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedQuery {
@@ -139,21 +139,15 @@ pub fn query_phrases(terms: &[String]) -> Vec<String> {
 pub(crate) fn normalize_phrase_text(input: &str) -> String {
     let mut normalized = String::new();
     let mut last_was_space = true;
-    let mut previous_was_lower_or_digit = false;
-    for ch in input.chars() {
+    for ch in identifier_boundary_text(input).chars() {
         if ch.is_alphanumeric() {
-            if ch.is_uppercase() && previous_was_lower_or_digit && !last_was_space {
-                normalized.push(' ');
-            }
             for lower in ch.to_lowercase() {
                 normalized.push(lower);
             }
             last_was_space = false;
-            previous_was_lower_or_digit = ch.is_lowercase() || ch.is_ascii_digit();
         } else if !last_was_space {
             normalized.push(' ');
             last_was_space = true;
-            previous_was_lower_or_digit = false;
         }
     }
     if normalized.ends_with(' ') {
@@ -232,6 +226,9 @@ mod tests {
         assert_eq!(normalize_phrase_text("issue_token"), "issue token");
         assert_eq!(normalize_phrase_text("issue-token"), "issue token");
         assert_eq!(normalize_phrase_text("issueToken"), "issue token");
+        assert_eq!(normalize_phrase_text("HTTPServer"), "http server");
+        assert_eq!(normalize_phrase_text("XMLHTTPServer"), "xmlhttp server");
+        assert_eq!(tokenize("HTTPServer"), vec!["http", "server"]);
         assert_eq!(
             query_phrases(&["issueToken".to_string()]),
             vec!["issue token"]

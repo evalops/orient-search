@@ -19,7 +19,6 @@ const MAX_FILE_BYTES: u64 = 512_000;
 const MAX_ATTACHED_CONTEXT_LINES: usize = 500;
 const RIPGREP_TIMEOUT: Duration = Duration::from_millis(250);
 const RIPGREP_POLL_INTERVAL: Duration = Duration::from_millis(5);
-static CAMEL_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"([a-z0-9])([A-Z])").unwrap());
 static TOKEN_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[A-Za-z][A-Za-z0-9_]*").unwrap());
 static SYMBOL_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"\b(?:pub\s+)?(?:async\s+)?(?:fn|function|class|interface|struct|enum|const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)").unwrap()
@@ -1521,7 +1520,7 @@ fn rank_signal(kind: &str, value: &str, score: f64) -> RankSignal {
 }
 
 pub(crate) fn tokenize(text: &str) -> Vec<String> {
-    let split = CAMEL_RE.replace_all(text, "$1 $2").replace('_', " ");
+    let split = identifier_boundary_text(text);
     TOKEN_RE
         .find_iter(&split)
         .map(|m| m.as_str().to_lowercase())
@@ -1531,6 +1530,35 @@ pub(crate) fn tokenize(text: &str) -> Vec<String> {
 
 pub(crate) fn normalize_token(text: &str) -> String {
     tokenize(text).join("")
+}
+
+pub(crate) fn identifier_boundary_text(text: &str) -> String {
+    let chars = text.chars().collect::<Vec<_>>();
+    let mut split = String::with_capacity(text.len());
+    for (index, ch) in chars.iter().copied().enumerate() {
+        if should_split_identifier_boundary(&chars, index) {
+            split.push(' ');
+        }
+        split.push(ch);
+    }
+    split.replace('_', " ")
+}
+
+fn should_split_identifier_boundary(chars: &[char], index: usize) -> bool {
+    let ch = chars[index];
+    if !ch.is_uppercase() {
+        return false;
+    }
+    let Some(previous) = index
+        .checked_sub(1)
+        .and_then(|previous| chars.get(previous))
+    else {
+        return false;
+    };
+    if previous.is_lowercase() || previous.is_ascii_digit() {
+        return true;
+    }
+    previous.is_uppercase() && chars.get(index + 1).is_some_and(|next| next.is_lowercase())
 }
 
 pub(crate) fn best_snippet(text: &str, query_tokens: &[String]) -> String {

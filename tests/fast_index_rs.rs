@@ -450,6 +450,46 @@ fn quoted_phrases_match_camel_case_identifier_boundaries() {
 }
 
 #[test]
+fn quoted_phrases_match_acronym_identifier_boundaries() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/server.ts"),
+        "export class HTTPServer {\n  listen() {}\n}\n",
+    );
+    write(
+        &repo.path().join("src/scattered.ts"),
+        "const HTTP_STATUS = 200;\nconst server = 'dev';\n",
+    );
+
+    let fallback = search_repo_fast_filtered(
+        repo.path(),
+        "\"http server\"",
+        10,
+        &SearchFilters::default(),
+    )
+    .unwrap();
+    assert_eq!(fallback.len(), 1);
+    assert_eq!(fallback[0].path, "src/server.ts");
+    assert!(
+        !fallback
+            .iter()
+            .any(|result| result.path == "src/scattered.ts")
+    );
+
+    let indexed = FastIndex::build(repo.path())
+        .unwrap()
+        .search_filtered("\"http server\"", 10, &SearchFilters::default())
+        .unwrap();
+    assert_eq!(indexed.len(), 1);
+    assert_eq!(indexed[0].path, "src/server.ts");
+    assert!(
+        !indexed
+            .iter()
+            .any(|result| result.path == "src/scattered.ts")
+    );
+}
+
+#[test]
 fn indexed_search_supports_line_offsets_and_snippet_modes() {
     let repo = tempfile::tempdir().unwrap();
     write(
