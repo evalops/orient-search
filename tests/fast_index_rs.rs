@@ -144,7 +144,7 @@ fn query_language_filters_fallback_and_indexed_search() {
         "SessionManager issue token docs.\n",
     );
 
-    let query = r#"symbol:SessionManager lang:rust ext:rs path:src -path:docs "issue token""#;
+    let query = r#"symbol:sessionmanager lang:Rust ext:.RS path:SRC -path:DOCS "issue token""#;
     let fallback =
         search_repo_fast_filtered(repo.path(), query, 10, &SearchFilters::default()).unwrap();
     assert_eq!(fallback.len(), 1);
@@ -156,6 +156,16 @@ fn query_language_filters_fallback_and_indexed_search() {
         .unwrap();
     assert_eq!(indexed_results.len(), 1);
     assert_eq!(indexed_results[0].path, "src/auth.rs");
+
+    let file_filtered = search_repo_fast_filtered(
+        repo.path(),
+        r#"file:AUTH.RS issue token"#,
+        10,
+        &SearchFilters::default(),
+    )
+    .unwrap();
+    assert_eq!(file_filtered.len(), 1);
+    assert_eq!(file_filtered[0].path, "src/auth.rs");
 
     let test_results = search_repo_fast_filtered(
         repo.path(),

@@ -39,6 +39,7 @@ Implemented now:
 - CLI tools: `repo-map`, `read-range`, `read-index-range`, `index-symbol`, `shard-symbol`, `related-index`, `related-index-symbols`, and `related-symbols`, so agents can inspect entrypoints/tests/top symbols, open bounded file context, and jump to nearby definitions after a search hit.
 - `orient tool-manifest`: emits descriptions plus required/optional argument metadata for JSON-lines wrappers.
 - Search snippet modes: `short`, `medium`, `block`, and `symbol`.
+- Path, file, repo, extension, language, and symbol filters match case-insensitively across fallback, indexed, and shard search surfaces.
 - Optional structured ranking explanations with path/content/term-frequency/symbol signals.
 - Indexed search plans candidates from the rarest content/path token postings, falling back to rare trigram postings for substring queries.
 - Indexed files persist line-offset tables for bounded snippet rendering.
@@ -49,7 +50,7 @@ Implemented now:
 
 Measured on this machine:
 
-- Wide tree fallback: `/Users/jonathanhaas/Documents/Projects`, common top-10 literal/token queries at `17-30ms` p95 after warmup across the sampled runs.
+- Wide tree fallback: `/Users/jonathanhaas/Documents/Projects`, common top-10 literal/token queries at `17-31ms` p95 after warmup across the sampled runs.
 - Local repo fallback: query `indexed search symbol filters`, top 10 at about `7.3ms` p95 after warmup.
 - Hot-path fallback has a `250ms` wall-clock timeout plus match caps; if the timeout fires it returns partial results instead of blocking the agent.
 - Local repo index build: about `0.25s`.

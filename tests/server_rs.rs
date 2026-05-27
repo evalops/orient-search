@@ -256,7 +256,7 @@ fn server_handles_shard_index_search_and_read_requests() {
         "arguments": {
             "index_dir": parent.path().join(".orient-shards"),
             "query": "invoice total",
-            "repo": "billing",
+            "repo": "BILLING",
             "limit": 5,
             "require_all": true,
             "explain": true
@@ -278,7 +278,7 @@ fn server_handles_shard_index_search_and_read_requests() {
         "arguments": {
             "index_dir": parent.path().join(".orient-shards"),
             "name": "invoice total",
-            "repo": "billing",
+            "repo": "BILLING",
             "limit": 5
         }
     });

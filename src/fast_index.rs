@@ -511,7 +511,7 @@ impl FastIndex {
             reasons.push(format!("trigrams:{trigram_hits}"));
         }
         for symbol in &file.symbols {
-            if symbol.normalized == query_name {
+            if symbol.normalized == query_name || query_tokens.contains(&symbol.normalized) {
                 score += 25.0;
                 reasons.push(format!("symbol:{}", symbol.name));
                 signals.push(rank_signal("symbol_exact", &symbol.name, 25.0));

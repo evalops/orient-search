@@ -43,6 +43,8 @@ def test_issue_token_round_trip():
     let symbol = index.find_symbol("SessionManager", 10).remove(0);
     assert_eq!(symbol.path, "src/auth.py");
     assert_eq!(symbol.kind, "class");
+    assert!(index.find_symbol("", 10).is_empty());
+    assert!(index.find_symbol("SessionManager", 0).is_empty());
 
     let search = index.search_code("issue token user session", 3);
     assert_eq!(search[0].path, "src/auth.py");

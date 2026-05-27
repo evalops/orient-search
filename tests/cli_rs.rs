@@ -362,7 +362,7 @@ fn cli_builds_and_searches_shard_directory() {
             shard_dir.path().to_str().unwrap(),
             "invoice total",
             "--repo",
-            &billing_name,
+            &billing_name.to_ascii_uppercase(),
             "--require-all",
         ])
         .assert()
@@ -377,7 +377,7 @@ fn cli_builds_and_searches_shard_directory() {
             shard_dir.path().to_str().unwrap(),
             "invoice total",
             "--repo",
-            &billing_name,
+            &billing_name.to_ascii_uppercase(),
         ])
         .assert()
         .success()

@@ -627,6 +627,10 @@ impl RepoIndexer {
 impl RepoIndex {
     pub fn find_symbol(&self, name: &str, limit: usize) -> Vec<Symbol> {
         let needle = normalize_token(name);
+        if needle.is_empty() || limit == 0 {
+            return Vec::new();
+        }
+
         let mut scored = Vec::new();
         for symbol in &self.symbols {
             let symbol_token = normalize_token(&symbol.name);
@@ -1198,7 +1202,7 @@ fn apply_symbol_match(
     signals: &mut Vec<RankSignal>,
 ) {
     let normalized = normalize_token(symbol_name);
-    if normalized == query_name {
+    if normalized == query_name || query_tokens.contains(&normalized) {
         *score += 25.0;
         reasons.push(format!("symbol:{symbol_name}"));
         signals.push(rank_signal("symbol_exact", symbol_name, 25.0));
@@ -1381,19 +1385,20 @@ fn compact_rank_signals(signals: Vec<RankSignal>) -> Vec<RankSignal> {
 }
 
 pub(crate) fn matches_filters(path: &str, filters: &SearchFilters) -> bool {
+    let path_lower = path.to_ascii_lowercase();
     if let Some(file_filter) = &filters.file {
         let Some(file_name) = Path::new(path)
             .file_name()
-            .map(|value| value.to_string_lossy())
+            .map(|value| value.to_string_lossy().to_ascii_lowercase())
         else {
             return false;
         };
-        if !file_name.contains(file_filter) {
+        if !file_name.contains(&file_filter.to_ascii_lowercase()) {
             return false;
         }
     }
     if let Some(path_filter) = &filters.path {
-        if !path.contains(path_filter) {
+        if !path_lower.contains(&path_filter.to_ascii_lowercase()) {
             return false;
         }
     }
@@ -1421,25 +1426,25 @@ pub(crate) fn matches_filters(path: &str, filters: &SearchFilters) -> bool {
         }
     }
     if let Some(test) = filters.test {
-        if is_test_path(&path.to_ascii_lowercase()) != test {
+        if is_test_path(&path_lower) != test {
             return false;
         }
     }
     let file_name = Path::new(path)
         .file_name()
-        .map(|value| value.to_string_lossy().to_string())
+        .map(|value| value.to_string_lossy().to_ascii_lowercase())
         .unwrap_or_default();
     if filters
         .exclude_file
         .iter()
-        .any(|filter| file_name.contains(filter))
+        .any(|filter| file_name.contains(&filter.to_ascii_lowercase()))
     {
         return false;
     }
     if filters
         .exclude_path
         .iter()
-        .any(|filter| path.contains(filter))
+        .any(|filter| path_lower.contains(&filter.to_ascii_lowercase()))
     {
         return false;
     }
@@ -1470,17 +1475,17 @@ pub(crate) fn matches_filters(path: &str, filters: &SearchFilters) -> bool {
 pub(crate) fn repo_matches(root: &Path, filters: &SearchFilters) -> bool {
     let repo = root
         .file_name()
-        .map(|value| value.to_string_lossy().to_string())
+        .map(|value| value.to_string_lossy().to_ascii_lowercase())
         .unwrap_or_else(|| root.display().to_string());
     if let Some(filter) = &filters.repo {
-        if !repo.contains(filter) {
+        if !repo.contains(&filter.to_ascii_lowercase()) {
             return false;
         }
     }
     !filters
         .exclude_repo
         .iter()
-        .any(|filter| repo.contains(filter))
+        .any(|filter| repo.contains(&filter.to_ascii_lowercase()))
 }
 
 pub(crate) fn result_matches_all_tokens(result: &SearchResult, query_tokens: &[String]) -> bool {
@@ -1493,15 +1498,26 @@ pub(crate) fn result_matches_symbol_filters(
     filters: &SearchFilters,
 ) -> bool {
     if let Some(symbol) = &filters.symbol {
-        let wanted = format!("symbol:{symbol}");
-        if !result.reason.contains(&wanted) {
+        if !reason_contains_symbol(&result.reason, symbol) {
             return false;
         }
     }
     !filters
         .exclude_symbol
         .iter()
-        .any(|symbol| result.reason.contains(&format!("symbol:{symbol}")))
+        .any(|symbol| reason_contains_symbol(&result.reason, symbol))
+}
+
+fn reason_contains_symbol(reason: &str, wanted: &str) -> bool {
+    let wanted = normalize_token(wanted);
+    if wanted.is_empty() {
+        return false;
+    }
+    reason
+        .trim_start_matches("matched ")
+        .split(", ")
+        .filter_map(|part| part.strip_prefix("symbol:"))
+        .any(|symbol| normalize_token(symbol) == wanted)
 }
 
 fn format_numbered_lines(lines: &[&str], start: usize, end: usize) -> String {
