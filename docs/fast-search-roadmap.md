@@ -41,12 +41,12 @@ Implemented now:
 - Optional structured ranking explanations with path/content/term-frequency/symbol signals.
 - Indexed search plans candidates from the rarest content/path token postings, falling back to rare trigram postings for substring queries.
 - Indexed files persist line-offset tables for bounded snippet rendering.
-- Result de-duping for repeated worktree copies where practical.
+- Result de-duping for repeated worktree copies using normalized path suffixes and snippet signatures.
 - Exact symbol definition boosting in both fallback and indexed search.
 
 Measured on this machine:
 
-- Wide tree fallback: `/Users/jonathanhaas/Documents/Projects`, common top-10 literal/token queries at `19-36ms` p95 after warmup across the sampled runs.
+- Wide tree fallback: `/Users/jonathanhaas/Documents/Projects`, common top-10 literal/token queries at `18-33ms` p95 after warmup across the sampled runs.
 - Local repo fallback: query `indexed search symbol filters`, top 10 at about `8ms` p95 after warmup.
 - Hot-path fallback has a `250ms` wall-clock timeout plus match caps; if the timeout fires it returns partial results instead of blocking the agent.
 - Local repo index build: about `0.25s`.
@@ -87,7 +87,6 @@ Near term:
 - Keep `rg` as the brutally fast no-index baseline.
 - Add more query filters and aliases after the current path/language/extension/require-all surface.
 - Add CI wiring around saved benchmark baselines once a stable runner is available.
-- Tighten duplicate suppression based on normalized path suffixes and snippet signatures.
 
 Zoekt-inspired indexed mode:
 

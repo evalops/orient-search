@@ -1514,24 +1514,49 @@ fn format_numbered_lines(lines: &[&str], start: usize, end: usize) -> String {
 }
 
 fn result_signature(result: &SearchResult) -> String {
-    let comparable_path = ["/src/", "/tests/", "/test/", "/pkg/", "/cmd/", "/internal/"]
-        .iter()
-        .find_map(|marker| {
-            result
-                .path
-                .find(marker)
-                .map(|index| result.path[index + 1..].to_string())
-        })
-        .unwrap_or_else(|| result.path.clone());
-    let snippet = result
-        .snippet
-        .lines()
-        .next()
-        .unwrap_or_default()
-        .trim()
-        .trim_start_matches(|ch: char| ch.is_ascii_digit() || ch == ':' || ch.is_whitespace())
-        .chars()
-        .take(160)
-        .collect::<String>();
+    let comparable_path = normalized_result_path(&result.path);
+    let snippet = normalized_snippet_signature(&result.snippet);
     format!("{comparable_path}\n{snippet}")
+}
+
+fn normalized_result_path(path: &str) -> String {
+    let path = path.trim_start_matches("./").trim_start_matches('/');
+    if let Some(manifest) = Path::new(path).file_name().and_then(|value| value.to_str()) {
+        if matches!(
+            manifest,
+            "Cargo.toml"
+                | "package.json"
+                | "pyproject.toml"
+                | "go.mod"
+                | "Package.swift"
+                | "Makefile"
+        ) {
+            return manifest.to_string();
+        }
+    }
+
+    ["/src/", "/tests/", "/test/", "/pkg/", "/cmd/", "/internal/"]
+        .iter()
+        .find_map(|marker| path.find(marker).map(|index| path[index + 1..].to_string()))
+        .unwrap_or_else(|| path.to_string())
+}
+
+fn normalized_snippet_signature(snippet: &str) -> String {
+    snippet
+        .lines()
+        .map(|line| {
+            line.trim()
+                .trim_start_matches(|ch: char| {
+                    ch.is_ascii_digit() || ch == ':' || ch.is_whitespace()
+                })
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
+        .chars()
+        .take(320)
+        .collect()
 }

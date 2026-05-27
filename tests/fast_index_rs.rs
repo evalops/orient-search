@@ -453,6 +453,29 @@ fn fast_search_deduplicates_repeated_worktree_hits() {
 }
 
 #[test]
+fn fast_search_deduplicates_repeated_manifest_hits_by_snippet() {
+    let repo = tempfile::tempdir().unwrap();
+    let manifest = "[package]\nname = \"sample\"\nversion = \"0.1.0\"\n";
+    write(&repo.path().join("alpha/Cargo.toml"), manifest);
+    write(&repo.path().join("beta/Cargo.toml"), manifest);
+
+    let results = search_repo_fast_filtered(
+        repo.path(),
+        "package sample",
+        10,
+        &SearchFilters {
+            require_all: true,
+            snippet: SnippetMode::Block,
+            ..SearchFilters::default()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].path, "alpha/Cargo.toml");
+}
+
+#[test]
 fn fast_search_timeout_is_bounded() {
     let repo = tempfile::tempdir().unwrap();
     for index in 0..200 {
