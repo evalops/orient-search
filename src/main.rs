@@ -6,7 +6,8 @@ use orient::repo_index::{
 };
 use orient::server::serve_jsonl;
 use orient::shards::{build_shards, read_shard_range, refresh_shards, search_shards};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use std::fs;
 use std::io;
 use std::path::PathBuf;
 use std::time::Instant;
@@ -181,13 +182,19 @@ enum Commands {
         explain: bool,
         #[arg(long)]
         fail_p95_ms: Option<f64>,
+        #[arg(long)]
+        baseline: Option<PathBuf>,
+        #[arg(long)]
+        write_baseline: Option<PathBuf>,
+        #[arg(long, default_value_t = 0.25)]
+        max_p95_regression: f64,
         #[arg(required = true)]
         queries: Vec<String>,
     },
     ServeJsonl,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct BenchReport {
     mode: String,
     runs: usize,
@@ -196,7 +203,7 @@ struct BenchReport {
     queries: Vec<QueryBench>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct QueryBench {
     query: String,
     result_count: usize,
@@ -409,6 +416,9 @@ fn main() -> Result<()> {
             snippet,
             explain,
             fail_p95_ms,
+            baseline,
+            write_baseline,
+            max_p95_regression,
             queries,
         } => {
             let snippet = snippet_mode_arg(&snippet)?;
@@ -431,6 +441,12 @@ fn main() -> Result<()> {
                 queries,
             })?;
             println!("{}", serde_json::to_string(&report)?);
+            if let Some(path) = write_baseline {
+                write_bench_baseline(&path, &report)?;
+            }
+            if let Some(path) = baseline {
+                compare_bench_baseline(&path, &report, max_p95_regression)?;
+            }
             if let Some(threshold) = fail_p95_ms {
                 if let Some(slowest) = report
                     .queries
@@ -556,6 +572,51 @@ fn percentile(sorted: &[f64], quantile: f64) -> f64 {
 
 fn round_ms(value: f64) -> f64 {
     (value * 1_000.0).round() / 1_000.0
+}
+
+fn write_bench_baseline(path: &PathBuf, report: &BenchReport) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(path, serde_json::to_vec_pretty(report)?)?;
+    Ok(())
+}
+
+fn compare_bench_baseline(
+    path: &PathBuf,
+    current: &BenchReport,
+    max_regression: f64,
+) -> Result<()> {
+    let baseline = serde_json::from_slice::<BenchReport>(&fs::read(path)?)?;
+    if baseline.mode != current.mode {
+        bail!(
+            "benchmark mode {:?} does not match baseline mode {:?}",
+            current.mode,
+            baseline.mode
+        );
+    }
+
+    for query in &current.queries {
+        let Some(previous) = baseline
+            .queries
+            .iter()
+            .find(|previous| previous.query == query.query)
+        else {
+            bail!("query {:?} is missing from benchmark baseline", query.query);
+        };
+        let allowed = previous.p95_ms * (1.0 + max_regression.max(0.0));
+        if query.p95_ms > allowed {
+            bail!(
+                "p95 {:.3}ms for query {:?} exceeded baseline {:.3}ms by more than {:.1}%",
+                query.p95_ms,
+                query.query,
+                previous.p95_ms,
+                max_regression.max(0.0) * 100.0
+            );
+        }
+    }
+
+    Ok(())
 }
 
 fn snippet_mode_arg(value: &str) -> Result<SnippetMode> {

@@ -370,6 +370,7 @@ fn cli_builds_and_searches_shard_directory() {
 #[test]
 fn cli_reports_search_benchmarks() {
     let repo = sample_repo();
+    let baseline_path = repo.path().join(".orient/fallback-bench.json");
 
     let mut fallback = Command::cargo_bin("orient").unwrap();
     fallback
@@ -383,12 +384,35 @@ fn cli_reports_search_benchmarks() {
             "1",
             "--fail-p95-ms",
             "1000",
+            "--write-baseline",
+            baseline_path.to_str().unwrap(),
             "issue token",
         ])
         .assert()
         .success()
         .stdout(predicate::str::contains("\"mode\":\"fallback\""))
         .stdout(predicate::str::contains("\"p95_ms\""));
+    assert!(baseline_path.exists());
+
+    let mut baseline_check = Command::cargo_bin("orient").unwrap();
+    baseline_check
+        .args([
+            "bench-search",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--runs",
+            "2",
+            "--warmup",
+            "1",
+            "--baseline",
+            baseline_path.to_str().unwrap(),
+            "--max-p95-regression",
+            "1000",
+            "issue token",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"mode\":\"fallback\""));
 
     let index_path = repo.path().join(".orient/index");
     let mut index = Command::cargo_bin("orient").unwrap();
@@ -445,4 +469,49 @@ fn cli_benchmark_can_fail_on_p95_threshold() {
     .assert()
     .failure()
     .stderr(predicate::str::contains("exceeded threshold"));
+}
+
+#[test]
+fn cli_benchmark_can_fail_against_saved_baseline() {
+    let repo = sample_repo();
+    let baseline_path = repo.path().join(".orient/too-fast.json");
+    write(
+        &baseline_path,
+        r#"{
+  "mode": "fallback",
+  "runs": 1,
+  "warmup": 0,
+  "limit": 10,
+  "queries": [
+    {
+      "query": "issue token",
+      "result_count": 1,
+      "min_ms": 0.0,
+      "p50_ms": 0.0,
+      "p95_ms": 0.0,
+      "max_ms": 0.0,
+      "samples_ms": [0.0]
+    }
+  ]
+}"#,
+    );
+
+    let mut cmd = Command::cargo_bin("orient").unwrap();
+    cmd.args([
+        "bench-search",
+        "--repo",
+        repo.path().to_str().unwrap(),
+        "--runs",
+        "1",
+        "--warmup",
+        "0",
+        "--baseline",
+        baseline_path.to_str().unwrap(),
+        "--max-p95-regression",
+        "0",
+        "issue token",
+    ])
+    .assert()
+    .failure()
+    .stderr(predicate::str::contains("exceeded baseline"));
 }

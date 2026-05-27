@@ -65,6 +65,17 @@ cargo run --release -- bench-search \
   --runs 10 \
   --warmup 3 \
   --fail-p95-ms 300 \
+  --write-baseline /tmp/orient-projects-bench.json \
+  "session token auth" \
+  "browser session implementation" \
+  "postgres migration user"
+
+cargo run --release -- bench-search \
+  --repo /Users/jonathanhaas/Documents/Projects \
+  --runs 10 \
+  --warmup 3 \
+  --baseline /tmp/orient-projects-bench.json \
+  --max-p95-regression 0.25 \
   "session token auth" \
   "browser session implementation" \
   "postgres migration user"
@@ -165,16 +176,16 @@ Product impact criteria for follow-up adoption:
 
 Current search baseline:
 
-- `orient bench-search --repo . "indexed search symbol filters"`: `8.405ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "session token auth"`: `21.505ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "browser session implementation"`: `18.681ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "postgres migration user"`: `32.331ms` p95 after warmup.
+- `orient bench-search --repo . "indexed search symbol filters"`: `9.079ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "session token auth"`: `19.618ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "browser session implementation"`: `18.602ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "postgres migration user"`: `35.141ms` p95 after warmup.
 - The `rg` hot path has a `250ms` wall-clock timeout plus a bounded match cap; timed-out searches return partial results rather than hanging.
 - `orient index --repo . --output /tmp/orient-self.index`: versioned binary index with file metadata, content token postings, path token postings, trigram postings, line offsets, and symbol boosts.
 - `orient index-shards --repo repo-a --repo repo-b --output-dir /tmp/orient-shards`: writes per-repo index shards plus a manifest for local multi-repo search.
 - `orient refresh-shards --index-dir /tmp/orient-shards`: refreshes each shard incrementally, reusing unchanged file metadata and postings per repo.
 - `orient refresh-index --repo . --index /tmp/orient-self.index`: reuses unchanged files and refreshes changed/deleted files.
-- `orient bench-search --repo . --index /tmp/orient-self.index "indexed search symbol filters"`: `0.105ms` p95 after warmup.
+- `orient bench-search --repo . --index /tmp/orient-self.index "indexed search symbol filters"`: `0.235ms` p95 after warmup.
 
 Benchmark methodology:
 
@@ -183,6 +194,7 @@ Benchmark methodology:
 - Report `p95_ms` and `max_ms` from repeated searches, not one-off timings.
 - Benchmark the fallback path without `--index`; benchmark the persistent indexed path with `--index /tmp/orient-self.index`.
 - Use `--fail-p95-ms <milliseconds>` in CI or local regression checks when you want slow queries to fail the command.
+- Use `--write-baseline <path>` to save a benchmark report and `--baseline <path> --max-p95-regression <ratio>` to fail later runs when matching query p95 latency regresses beyond that ratio.
 
 See [docs/fast-search-roadmap.md](docs/fast-search-roadmap.md) for the Zoekt/Sourcegraph/Amp-inspired roadmap.
 
