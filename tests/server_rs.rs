@@ -97,6 +97,23 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         false
     );
     assert_eq!(
+        indexed_search["daemon_default"]["argument"],
+        serde_json::json!("index")
+    );
+    assert_eq!(
+        indexed_search["daemon_default"]["source"],
+        serde_json::json!("single_warmed_index")
+    );
+    assert_eq!(
+        indexed_search["input_schema"]["properties"]["index"]["x-daemon-default"],
+        serde_json::json!("single_warmed_index")
+    );
+    assert_eq!(
+        indexed_search["arguments"][0]["daemon_default"],
+        serde_json::json!("single_warmed_index")
+    );
+    assert!(search.get("daemon_default").is_none());
+    assert_eq!(
         search_batch["required"],
         serde_json::json!(["repo", "queries"])
     );
@@ -115,6 +132,18 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
     assert_eq!(
         shard_plan_batch["required"],
         serde_json::json!(["index_dir", "queries"])
+    );
+    assert_eq!(
+        shard_plan_batch["daemon_default"]["argument"],
+        serde_json::json!("index_dir")
+    );
+    assert_eq!(
+        shard_plan_batch["daemon_default"]["source"],
+        serde_json::json!("single_warmed_shard_dir")
+    );
+    assert_eq!(
+        shard_status["input_schema"]["properties"]["index_dir"]["x-daemon-default"],
+        serde_json::json!("single_warmed_shard_dir")
     );
     assert_eq!(
         discover["input_schema"]["properties"]["limit"]["default"],

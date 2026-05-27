@@ -519,14 +519,23 @@ pub fn tool_manifest() -> Value {
 }
 
 fn tool_entry(name: &str, description: &str, required: &[&str], optional: &[&str]) -> Value {
-    json!({
-        "name": name,
-        "description": description,
-        "required": required,
-        "optional": optional,
-        "arguments": argument_metadata(name, required, optional),
-        "input_schema": input_schema(name, required, optional)
-    })
+    let mut entry = Map::new();
+    entry.insert("name".to_string(), json!(name));
+    entry.insert("description".to_string(), json!(description));
+    entry.insert("required".to_string(), json!(required));
+    entry.insert("optional".to_string(), json!(optional));
+    entry.insert(
+        "arguments".to_string(),
+        json!(argument_metadata(name, required, optional)),
+    );
+    entry.insert(
+        "input_schema".to_string(),
+        input_schema(name, required, optional),
+    );
+    if let Some(default) = tool_daemon_default(name) {
+        entry.insert("daemon_default".to_string(), default);
+    }
+    Value::Object(entry)
 }
 
 fn argument_metadata(tool_name: &str, required: &[&str], optional: &[&str]) -> Vec<Value> {
@@ -552,6 +561,9 @@ fn argument_metadata_entry(tool_name: &str, name: &str, required: bool) -> Value
     }
     if let Some(values) = argument_enum(name) {
         entry.insert("enum".to_string(), json!(values));
+    }
+    if let Some(default) = argument_daemon_default(tool_name, name) {
+        entry.insert("daemon_default".to_string(), default);
     }
     Value::Object(entry)
 }
@@ -628,7 +640,68 @@ fn argument_schema(tool_name: &str, name: &str) -> Value {
     if let Some(values) = argument_enum(name) {
         schema.insert("enum".to_string(), json!(values));
     }
+    if let Some(default) = argument_daemon_default(tool_name, name) {
+        schema.insert("x-daemon-default".to_string(), default);
+    }
     Value::Object(schema)
+}
+
+fn tool_daemon_default(tool_name: &str) -> Option<Value> {
+    match daemon_default_kind(tool_name)? {
+        DaemonDefaultKind::Index => Some(json!({
+            "argument": "index",
+            "source": "single_warmed_index",
+            "when": "argument omitted and exactly one index is warmed in the daemon"
+        })),
+        DaemonDefaultKind::ShardDir => Some(json!({
+            "argument": "index_dir",
+            "source": "single_warmed_shard_dir",
+            "when": "argument omitted and exactly one shard directory is warmed in the daemon"
+        })),
+    }
+}
+
+fn argument_daemon_default(tool_name: &str, name: &str) -> Option<Value> {
+    match (daemon_default_kind(tool_name)?, name) {
+        (DaemonDefaultKind::Index, "index") => Some(json!("single_warmed_index")),
+        (DaemonDefaultKind::ShardDir, "index_dir") => Some(json!("single_warmed_shard_dir")),
+        _ => None,
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum DaemonDefaultKind {
+    Index,
+    ShardDir,
+}
+
+fn daemon_default_kind(tool_name: &str) -> Option<DaemonDefaultKind> {
+    match tool_name {
+        "indexed_repo_map"
+        | "indexed_search_code"
+        | "indexed_search_batch"
+        | "indexed_query_plan"
+        | "indexed_query_plan_batch"
+        | "index_status"
+        | "read_index_range"
+        | "read_index_ranges"
+        | "find_index_symbol"
+        | "related_index_files"
+        | "related_index_symbols" => Some(DaemonDefaultKind::Index),
+        "refresh_shards"
+        | "shard_status"
+        | "search_shards"
+        | "search_shards_batch"
+        | "shard_query_plan"
+        | "shard_query_plan_batch"
+        | "read_shard_range"
+        | "read_shard_ranges"
+        | "shard_repo_map"
+        | "find_shard_symbol"
+        | "related_shard_files"
+        | "related_shard_symbols" => Some(DaemonDefaultKind::ShardDir),
+        _ => None,
+    }
 }
 
 fn argument_type(name: &str) -> &'static str {

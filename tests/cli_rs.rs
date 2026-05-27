@@ -68,6 +68,8 @@ fn cli_outputs_tool_manifest() {
         .stdout(predicate::str::contains("daemon_status"))
         .stdout(predicate::str::contains("warm_index"))
         .stdout(predicate::str::contains("warm_shards"))
+        .stdout(predicate::str::contains("single_warmed_index"))
+        .stdout(predicate::str::contains("single_warmed_shard_dir"))
         .stdout(predicate::str::contains("read_ranges"))
         .stdout(predicate::str::contains("search_batch"))
         .stdout(predicate::str::contains("read_index_ranges"))

@@ -19,7 +19,7 @@ Each request is one JSON object per line:
 {"id":"search","tool":"search_shards","arguments":{"index_dir":"/tmp/orient-shards","query":"repo:platform session token auth","limit":5,"require_all":true}}
 ```
 
-Responses preserve `id` and return either `result` or `error`. Use `tool_manifest` for the complete tool list, argument metadata, defaults, enums, and JSON-schema-like input schemas.
+Responses preserve `id` and return either `result` or `error`. Use `tool_manifest` for the complete tool list, argument metadata, daemon-default hints, defaults, enums, and JSON-schema-like input schemas.
 
 ## Bootstrap
 
@@ -37,7 +37,7 @@ For many repos:
 {"id":"status","tool":"daemon_status","arguments":{}}
 ```
 
-`daemon_status` reports warmed index and shard details so multiple local agents can confirm they share the intended codebase set. When exactly one index or shard directory is warmed, indexed and shard tools may omit `index` or `index_dir`; if zero or multiple targets are warmed, pass the path explicitly. Orient does not expose session analytics.
+`daemon_status` reports warmed index and shard details so multiple local agents can confirm they share the intended codebase set. When exactly one index or shard directory is warmed, indexed and shard tools marked with `daemon_default.source` may omit `index` or `index_dir`; if zero or multiple targets are warmed, pass the path explicitly. Orient does not expose session analytics.
 
 Use `index_status` or `shard_status` when live files may have changed since indexing. They report added, changed, and deleted files so an agent can call `refresh_index` or `refresh_shards` before trusting indexed results. `indexed_search_code` and `search_shards` also accept `refresh_if_stale:true` for a one-call freshness check and refresh before search.
 
