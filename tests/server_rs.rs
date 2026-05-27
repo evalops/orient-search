@@ -73,6 +73,10 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         false
     );
     assert_eq!(
+        discover["input_schema"]["properties"]["family_limit"]["default"],
+        0
+    );
+    assert_eq!(
         discover["input_schema"]["properties"]["nested_manifests"]["default"],
         false
     );
@@ -366,6 +370,75 @@ fn runtime_discovers_repo_families_with_git_metadata() {
     assert!(result.contains("\"tracked_files\":2"), "{result}");
     assert!(result.contains("\"git_kind\":\"worktree\""), "{result}");
     assert!(result.contains("\"branch\":\"feature/search\""), "{result}");
+}
+
+#[test]
+fn runtime_discovery_can_limit_repeated_repo_families() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("workspace/project");
+    write(
+        &repo.join("Cargo.toml"),
+        "[package]\nname='project'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    git(&repo, &["init", "-b", "main"]);
+    git(
+        &repo,
+        &[
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/evalops/project.git",
+        ],
+    );
+    git(&repo, &["add", "Cargo.toml"]);
+    git(
+        &repo,
+        &[
+            "-c",
+            "user.name=Orient Tests",
+            "-c",
+            "user.email=orient@example.com",
+            "commit",
+            "-m",
+            "init",
+        ],
+    );
+    git(
+        &repo,
+        &[
+            "worktree",
+            "add",
+            "-b",
+            "feature/search",
+            "../project-feature",
+        ],
+    );
+
+    let runtime = ToolRuntime::default();
+    let response = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("discover"),
+        tool: "discover_repos".to_string(),
+        arguments: serde_json::json!({
+            "root": root.path(),
+            "max_depth": 2,
+            "limit": 10,
+            "family_limit": 1
+        }),
+    });
+    assert!(response.error.is_none(), "{:?}", response.error);
+    let result = response.result.unwrap();
+    assert_eq!(result["candidates_found"], 2);
+    assert_eq!(result["repos_found"], 1);
+    assert_eq!(result["family_limit"], 1);
+    assert_eq!(result["repos"][0]["name"], "project");
+    assert_eq!(result["families"][0]["checkouts"], 2);
+    assert!(
+        result["families"][0]["paths"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|path| path.as_str().unwrap().contains("project-feature"))
+    );
 }
 
 #[test]

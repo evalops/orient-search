@@ -232,6 +232,81 @@ fn cli_discovery_can_group_git_worktree_families() {
 }
 
 #[test]
+fn cli_discovery_can_limit_repeated_repo_families() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("workspace/project");
+    write(
+        &repo.join("Cargo.toml"),
+        "[package]\nname='project'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    git(&repo, &["init", "-b", "main"]);
+    git(
+        &repo,
+        &[
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/evalops/project.git",
+        ],
+    );
+    git(&repo, &["add", "Cargo.toml"]);
+    git(
+        &repo,
+        &[
+            "-c",
+            "user.name=Orient Tests",
+            "-c",
+            "user.email=orient@example.com",
+            "commit",
+            "-m",
+            "init",
+        ],
+    );
+    git(
+        &repo,
+        &[
+            "worktree",
+            "add",
+            "-b",
+            "feature/search",
+            "../project-feature",
+        ],
+    );
+
+    let mut cmd = Command::cargo_bin("orient").unwrap();
+    let output = cmd
+        .args([
+            "discover-repos",
+            "--root",
+            root.path().to_str().unwrap(),
+            "--max-depth",
+            "2",
+            "--limit",
+            "10",
+            "--family-limit",
+            "1",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let report: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(report["candidates_found"], 2);
+    assert_eq!(report["repos_found"], 1);
+    assert_eq!(report["family_limit"], 1);
+    assert_eq!(report["repos"][0]["name"], "project");
+    assert_eq!(report["families"][0]["checkouts"], 2);
+    assert!(
+        report["families"][0]["paths"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|path| path.as_str().unwrap().contains("project-feature"))
+    );
+}
+
+#[test]
 fn cli_discovery_treats_git_roots_as_manifest_boundaries_by_default() {
     let root = tempfile::tempdir().unwrap();
     let repo = root.path().join("workspace/platform");
@@ -328,6 +403,71 @@ fn cli_indexes_shards_from_discovered_root() {
         .assert()
         .success()
         .stdout(predicate::str::contains("billing/src/lib.rs"));
+}
+
+#[test]
+fn cli_indexes_only_selected_family_representatives_when_limited() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("workspace/project");
+    write(
+        &repo.join("src/lib.rs"),
+        "pub fn selected_family_repo() -> usize { 1 }\n",
+    );
+    write(
+        &repo.join("Cargo.toml"),
+        "[package]\nname='project'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    git(&repo, &["init", "-b", "main"]);
+    git(
+        &repo,
+        &[
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/evalops/project.git",
+        ],
+    );
+    git(&repo, &["add", "Cargo.toml", "src/lib.rs"]);
+    git(
+        &repo,
+        &[
+            "-c",
+            "user.name=Orient Tests",
+            "-c",
+            "user.email=orient@example.com",
+            "commit",
+            "-m",
+            "init",
+        ],
+    );
+    git(
+        &repo,
+        &[
+            "worktree",
+            "add",
+            "-b",
+            "feature/search",
+            "../project-feature",
+        ],
+    );
+    let shard_dir = tempfile::tempdir().unwrap();
+
+    let mut index = Command::cargo_bin("orient").unwrap();
+    index
+        .args([
+            "index-shards",
+            "--discover-root",
+            root.path().to_str().unwrap(),
+            "--max-depth",
+            "2",
+            "--family-limit",
+            "1",
+            "--output-dir",
+            shard_dir.path().to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"shards\":1"));
 }
 
 #[test]

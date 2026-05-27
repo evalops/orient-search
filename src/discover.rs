@@ -16,6 +16,7 @@ const GIT_METADATA_TIMEOUT: Duration = Duration::from_millis(250);
 pub struct DiscoverOptions {
     pub max_depth: usize,
     pub limit: usize,
+    pub family_limit: Option<usize>,
     pub git_metadata: bool,
     pub tracked_files: bool,
     pub nested_manifests: bool,
@@ -26,6 +27,7 @@ impl Default for DiscoverOptions {
         Self {
             max_depth: 4,
             limit: 500,
+            family_limit: None,
             git_metadata: false,
             tracked_files: false,
             nested_manifests: false,
@@ -38,7 +40,10 @@ pub struct DiscoverReport {
     pub root: PathBuf,
     pub max_depth: usize,
     pub limit: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub family_limit: Option<usize>,
     pub dirs_scanned: usize,
+    pub candidates_found: usize,
     pub repos_found: usize,
     pub repos: Vec<DiscoveredRepo>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -89,8 +94,10 @@ pub fn discover_repos(root: impl AsRef<Path>, options: &DiscoverOptions) -> Resu
     let mut queue = VecDeque::from([(root.clone(), 0usize)]);
     let mut seen_dirs = HashSet::new();
     let mut seen_repos = HashSet::new();
+    let mut family_counts = HashMap::<String, usize>::new();
     let mut dirs_scanned = 0usize;
     let mut repos = Vec::new();
+    let mut discovered_repos = Vec::new();
 
     while let Some((dir, depth)) = queue.pop_front() {
         let key = canonical_or_self(&dir);
@@ -109,9 +116,12 @@ pub fn discover_repos(root: impl AsRef<Path>, options: &DiscoverOptions) -> Resu
         if let Some(repo) = candidate {
             let repo_key = canonical_or_self(&repo.path);
             if seen_repos.insert(repo_key) {
-                repos.push(repo);
-                if limit > 0 && repos.len() >= limit {
-                    break;
+                discovered_repos.push(repo.clone());
+                if should_select_repo(&repo, options.family_limit, &mut family_counts) {
+                    repos.push(repo);
+                    if limit > 0 && repos.len() >= limit {
+                        break;
+                    }
                 }
             }
         }
@@ -141,9 +151,11 @@ pub fn discover_repos(root: impl AsRef<Path>, options: &DiscoverOptions) -> Resu
         root,
         max_depth,
         limit,
+        family_limit: options.family_limit,
         dirs_scanned,
+        candidates_found: discovered_repos.len(),
         repos_found: repos.len(),
-        families: repo_families(&repos),
+        families: repo_families(&discovered_repos),
         repos,
     })
 }
@@ -173,7 +185,7 @@ fn inspect_candidate_repo(
                 .to_string()
         });
 
-    let metadata = if git && options.git_metadata {
+    let metadata = if git && (options.git_metadata || options.family_limit.is_some()) {
         git_metadata_for_repo(&path, options.tracked_files)
     } else {
         RepoGitMetadata::default()
@@ -191,6 +203,23 @@ fn inspect_candidate_repo(
         git_common_dir: metadata.git_common_dir,
         tracked_files: metadata.tracked_files,
     }))
+}
+
+fn should_select_repo(
+    repo: &DiscoveredRepo,
+    family_limit: Option<usize>,
+    family_counts: &mut HashMap<String, usize>,
+) -> bool {
+    let Some(limit) = family_limit.filter(|limit| *limit > 0) else {
+        return true;
+    };
+    let key = repo_family_key(repo);
+    let count = family_counts.entry(key).or_insert(0);
+    if *count >= limit {
+        return false;
+    }
+    *count += 1;
+    true
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -280,15 +309,7 @@ fn repo_families(repos: &[DiscoveredRepo]) -> Vec<DiscoveredRepoFamily> {
         if repo.origin.is_none() && repo.git_common_dir.is_none() {
             continue;
         }
-        let key = repo
-            .origin
-            .clone()
-            .or_else(|| {
-                repo.git_common_dir
-                    .as_ref()
-                    .map(|path| path.to_string_lossy().to_string())
-            })
-            .unwrap_or_else(|| repo.name.clone());
+        let key = repo_family_key(repo);
         let builder = builders.entry(key).or_insert_with(|| {
             DiscoveredRepoFamilyBuilder::new(
                 repo_family_name(repo),
@@ -320,6 +341,17 @@ fn repo_families(repos: &[DiscoveredRepo]) -> Vec<DiscoveredRepoFamily> {
             .then_with(|| left.name.cmp(&right.name))
     });
     families
+}
+
+fn repo_family_key(repo: &DiscoveredRepo) -> String {
+    repo.origin
+        .clone()
+        .or_else(|| {
+            repo.git_common_dir
+                .as_ref()
+                .map(|path| path.to_string_lossy().to_string())
+        })
+        .unwrap_or_else(|| repo.name.clone())
 }
 
 struct DiscoveredRepoFamilyBuilder {

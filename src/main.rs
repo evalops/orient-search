@@ -36,6 +36,8 @@ enum Commands {
         #[arg(long, default_value_t = 500)]
         limit: usize,
         #[arg(long)]
+        family_limit: Option<usize>,
+        #[arg(long)]
         git_metadata: bool,
         #[arg(long)]
         tracked_files: bool,
@@ -64,6 +66,8 @@ enum Commands {
         #[arg(long, default_value_t = 500)]
         discover_limit: usize,
         #[arg(long)]
+        family_limit: Option<usize>,
+        #[arg(long)]
         nested_manifests: bool,
         #[arg(long)]
         output_dir: PathBuf,
@@ -81,6 +85,8 @@ enum Commands {
         max_depth: usize,
         #[arg(long, default_value_t = 500)]
         discover_limit: usize,
+        #[arg(long)]
+        family_limit: Option<usize>,
         #[arg(long)]
         nested_manifests: bool,
         #[arg(long)]
@@ -467,6 +473,7 @@ fn main() -> Result<()> {
             root,
             max_depth,
             limit,
+            family_limit,
             git_metadata,
             tracked_files,
             nested_manifests,
@@ -478,6 +485,7 @@ fn main() -> Result<()> {
                     &DiscoverOptions {
                         max_depth,
                         limit,
+                        family_limit: normalize_family_limit(family_limit),
                         git_metadata,
                         tracked_files,
                         nested_manifests,
@@ -508,6 +516,7 @@ fn main() -> Result<()> {
             discover_roots,
             max_depth,
             discover_limit,
+            family_limit,
             nested_manifests,
             output_dir,
         } => {
@@ -516,6 +525,7 @@ fn main() -> Result<()> {
                 discover_roots,
                 max_depth,
                 discover_limit,
+                normalize_family_limit(family_limit),
                 nested_manifests,
             )?;
             println!(
@@ -531,6 +541,7 @@ fn main() -> Result<()> {
             discover_roots,
             max_depth,
             discover_limit,
+            family_limit,
             nested_manifests,
             output_dir,
         } => {
@@ -539,6 +550,7 @@ fn main() -> Result<()> {
                 discover_roots,
                 max_depth,
                 discover_limit,
+                normalize_family_limit(family_limit),
                 nested_manifests,
             )?;
             println!(
@@ -982,6 +994,7 @@ fn shard_repos_from_args(
     discover_roots: Vec<PathBuf>,
     max_depth: usize,
     discover_limit: usize,
+    family_limit: Option<usize>,
     nested_manifests: bool,
 ) -> Result<Vec<PathBuf>> {
     for root in discover_roots {
@@ -990,6 +1003,7 @@ fn shard_repos_from_args(
             &DiscoverOptions {
                 max_depth,
                 limit: discover_limit,
+                family_limit,
                 nested_manifests,
                 ..DiscoverOptions::default()
             },
@@ -1006,6 +1020,7 @@ fn shard_repos_from_args_required(
     discover_roots: Vec<PathBuf>,
     max_depth: usize,
     discover_limit: usize,
+    family_limit: Option<usize>,
     nested_manifests: bool,
 ) -> Result<Vec<PathBuf>> {
     let repos = shard_repos_from_args(
@@ -1013,12 +1028,17 @@ fn shard_repos_from_args_required(
         discover_roots,
         max_depth,
         discover_limit,
+        family_limit,
         nested_manifests,
     )?;
     if repos.is_empty() {
         bail!("provide at least one --repo or --discover-root");
     }
     Ok(repos)
+}
+
+fn normalize_family_limit(value: Option<usize>) -> Option<usize> {
+    value.filter(|limit| *limit > 0)
 }
 
 struct BenchConfig {

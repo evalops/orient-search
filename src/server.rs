@@ -244,6 +244,7 @@ pub fn tool_manifest() -> Value {
             &[
                 "max_depth",
                 "limit",
+                "family_limit",
                 "git_metadata",
                 "tracked_files",
                 "nested_manifests",
@@ -501,12 +502,16 @@ fn argument_schema(tool_name: &str, name: &str) -> Value {
         | "nested_manifests" => {
             schema.insert("type".to_string(), json!("boolean"));
         }
-        "limit" | "max_depth" | "discover_limit" | "symbols" | "start" | "lines" | "tests"
-        | "context_lines" => {
+        "limit" | "max_depth" | "discover_limit" | "family_limit" | "symbols" | "start"
+        | "lines" | "tests" | "context_lines" => {
             schema.insert("type".to_string(), json!("integer"));
             schema.insert(
                 "minimum".to_string(),
-                json!(if name == "context_lines" { 0 } else { 1 }),
+                json!(if name == "context_lines" || name == "family_limit" {
+                    0
+                } else {
+                    1
+                }),
             );
         }
         _ => {
@@ -525,8 +530,8 @@ fn argument_schema(tool_name: &str, name: &str) -> Value {
 
 fn argument_type(name: &str) -> &'static str {
     match name {
-        "limit" | "max_depth" | "discover_limit" | "symbols" | "start" | "lines" | "tests"
-        | "context_lines" => "integer",
+        "limit" | "max_depth" | "discover_limit" | "family_limit" | "symbols" | "start"
+        | "lines" | "tests" | "context_lines" => "integer",
         "test" | "explain" | "require_all" | "git_metadata" | "tracked_files"
         | "nested_manifests" => "boolean",
         "exclude_file" | "exclude_path" | "exclude_language" | "exclude_extension"
@@ -542,6 +547,7 @@ fn argument_default(tool_name: &str, name: &str) -> Option<Value> {
         ("discover_repos", "limit") | ("index_shards" | "ensure_shards", "limit") => {
             Some(json!(500))
         }
+        (_, "family_limit") => Some(json!(0)),
         (_, "limit") => Some(json!(10)),
         (_, "max_depth") => Some(json!(4)),
         (_, "discover_limit") => Some(json!(500)),
@@ -595,6 +601,9 @@ fn argument_description(name: &str) -> &'static str {
         "repos" => "Explicit repository roots to add to a shard directory.",
         "max_depth" => "Maximum directory depth for repository discovery.",
         "discover_limit" => "Maximum discovered repositories to add when building shards.",
+        "family_limit" => {
+            "Maximum selected repos per discovered git family; 0 means no per-family limit."
+        }
         "git_metadata" => {
             "Include git origin, branch, common git dir, clone/worktree kind, and repo-family groups in discovery results."
         }
@@ -620,6 +629,8 @@ impl ToolRuntime {
                 let root = path_arg(&request.arguments, "root")?;
                 let max_depth = usize_arg(&request.arguments, "max_depth").unwrap_or(4);
                 let limit = usize_arg(&request.arguments, "limit").unwrap_or(500);
+                let family_limit =
+                    usize_arg(&request.arguments, "family_limit").filter(|limit| *limit > 0);
                 let git_metadata = request
                     .arguments
                     .get("git_metadata")
@@ -640,6 +651,7 @@ impl ToolRuntime {
                     &DiscoverOptions {
                         max_depth,
                         limit,
+                        family_limit,
                         git_metadata,
                         tracked_files,
                         nested_manifests,
@@ -1606,6 +1618,7 @@ const SHARD_BUILD_OPTIONAL_ARGS: &[&str] = &[
     "max_depth",
     "discover_limit",
     "limit",
+    "family_limit",
     "nested_manifests",
 ];
 
@@ -1675,6 +1688,7 @@ fn shard_repos_from_arguments(arguments: &Value) -> Result<Vec<PathBuf>> {
         let limit = usize_arg(arguments, "discover_limit")
             .or_else(|| usize_arg(arguments, "limit"))
             .unwrap_or(500);
+        let family_limit = usize_arg(arguments, "family_limit").filter(|limit| *limit > 0);
         let nested_manifests = arguments
             .get("nested_manifests")
             .and_then(Value::as_bool)
@@ -1686,6 +1700,7 @@ fn shard_repos_from_arguments(arguments: &Value) -> Result<Vec<PathBuf>> {
                     &DiscoverOptions {
                         max_depth,
                         limit,
+                        family_limit,
                         nested_manifests,
                         ..DiscoverOptions::default()
                     },
