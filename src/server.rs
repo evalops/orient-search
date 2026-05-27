@@ -39,6 +39,12 @@ pub struct ToolResponse {
     pub error: Option<String>,
 }
 
+#[derive(Debug, Serialize)]
+struct SearchBatchResult {
+    query: String,
+    results: Vec<SearchResult>,
+}
+
 pub fn serve_jsonl(reader: impl BufRead, mut writer: impl Write) -> Result<()> {
     let mut runtime = ToolRuntime::default();
     serve_jsonl_with_runtime(reader, &mut writer, &mut runtime)
@@ -335,9 +341,21 @@ pub fn tool_manifest() -> Value {
             SEARCH_OPTIONAL_ARGS,
         ),
         tool_entry(
+            "search_batch",
+            "Run several fast fallback searches against one local repository in a single request.",
+            &["repo", "queries"],
+            SEARCH_OPTIONAL_ARGS,
+        ),
+        tool_entry(
             "indexed_search_code",
             "Search a persistent single-repo index and return ranked snippets.",
             &["index", "query"],
+            SEARCH_INDEX_OPTIONAL_ARGS,
+        ),
+        tool_entry(
+            "indexed_search_batch",
+            "Run several searches against one persistent index in a single request.",
+            &["index", "queries"],
             SEARCH_INDEX_OPTIONAL_ARGS,
         ),
         tool_entry(
@@ -386,6 +404,12 @@ pub fn tool_manifest() -> Value {
             "search_shards",
             "Search a local multi-repo shard directory and return repo-prefixed ranked snippets.",
             &["index_dir", "query"],
+            SEARCH_INDEX_OPTIONAL_ARGS,
+        ),
+        tool_entry(
+            "search_shards_batch",
+            "Run several searches against one local multi-repo shard directory in a single request.",
+            &["index_dir", "queries"],
             SEARCH_INDEX_OPTIONAL_ARGS,
         ),
         tool_entry(
@@ -548,7 +572,7 @@ fn argument_schema(tool_name: &str, name: &str) -> Value {
                 }),
             );
         }
-        "repos" | "discover_roots" => {
+        "repos" | "discover_roots" | "queries" => {
             schema.insert("type".to_string(), json!("array"));
             schema.insert("items".to_string(), json!({"type": "string"}));
         }
@@ -591,7 +615,7 @@ fn argument_type(name: &str) -> &'static str {
         "exclude_file" | "exclude_path" | "exclude_language" | "exclude_extension"
         | "exclude_symbol" | "exclude_repo" => "string|string[]",
         "ranges" => "range[]",
-        "repos" | "discover_roots" => "string[]",
+        "repos" | "discover_roots" | "queries" => "string[]",
         _ => "string",
     }
 }
@@ -634,6 +658,7 @@ fn argument_description(name: &str) -> &'static str {
         "index_dir" => "Path to a local multi-repo shard directory.",
         "output_dir" => "Directory where shard indexes and manifest.json should be written.",
         "query" => "Agent query string with filters, quoted phrases, and normal search terms.",
+        "queries" => "Agent query strings to run as one batch against the same search target.",
         "path" => "Repository-relative, index-relative, or shard-prefixed result path.",
         "ranges" => "Array of {path,start,lines} objects for batch range reads.",
         "limit" => "Maximum number of results to return.",
@@ -779,6 +804,22 @@ impl ToolRuntime {
                 })?;
                 Ok(serde_json::to_value(results)?)
             }
+            "search_batch" => {
+                let repo = path_arg(&request.arguments, "repo")?;
+                let queries = string_array_arg(&request.arguments, "queries")?;
+                let limit = usize_arg(&request.arguments, "limit").unwrap_or(10);
+                let context_lines = usize_arg(&request.arguments, "context_lines").unwrap_or(0);
+                let filters = search_filters(&request.arguments, false)?;
+                let mut batch = Vec::new();
+                for query in queries {
+                    let mut results = search_repo_fast_filtered(&repo, &query, limit, &filters)?;
+                    attach_result_context(&mut results, context_lines, |path, start, lines| {
+                        read_file_range(&repo, path, start, lines)
+                    })?;
+                    batch.push(SearchBatchResult { query, results });
+                }
+                Ok(serde_json::to_value(batch)?)
+            }
             "indexed_search_code" => {
                 let index_path = path_arg(&request.arguments, "index")?;
                 let query = string_arg(&request.arguments, "query")?;
@@ -795,6 +836,24 @@ impl ToolRuntime {
                     index.read_range(path, start, lines)
                 })?;
                 Ok(serde_json::to_value(results)?)
+            }
+            "indexed_search_batch" => {
+                let index_path = path_arg(&request.arguments, "index")?;
+                let queries = string_array_arg(&request.arguments, "queries")?;
+                let limit = usize_arg(&request.arguments, "limit").unwrap_or(10);
+                let context_lines = usize_arg(&request.arguments, "context_lines").unwrap_or(0);
+                let refresh_if_stale = bool_arg(&request.arguments, "refresh_if_stale");
+                let index = self.cached_index_maybe_refresh(index_path, refresh_if_stale)?;
+                let filters = search_filters(&request.arguments, true)?;
+                let mut batch = Vec::new();
+                for query in queries {
+                    let mut results = index.search_filtered(&query, limit, &filters)?;
+                    attach_result_context(&mut results, context_lines, |path, start, lines| {
+                        index.read_range(path, start, lines)
+                    })?;
+                    batch.push(SearchBatchResult { query, results });
+                }
+                Ok(serde_json::to_value(batch)?)
             }
             "indexed_query_plan" => {
                 let index_path = path_arg(&request.arguments, "index")?;
@@ -879,6 +938,28 @@ impl ToolRuntime {
                     &search_filters(&request.arguments, true)?,
                     context_lines,
                 )?)?)
+            }
+            "search_shards_batch" => {
+                let index_dir = path_arg(&request.arguments, "index_dir")?;
+                let queries = string_array_arg(&request.arguments, "queries")?;
+                let limit = usize_arg(&request.arguments, "limit").unwrap_or(10);
+                let context_lines = usize_arg(&request.arguments, "context_lines").unwrap_or(0);
+                if bool_arg(&request.arguments, "refresh_if_stale") {
+                    self.refresh_shards_if_stale(&index_dir)?;
+                }
+                let filters = search_filters(&request.arguments, true)?;
+                let mut batch = Vec::new();
+                for query in queries {
+                    let results = self.search_shards_cached(
+                        &index_dir,
+                        &query,
+                        limit,
+                        &filters,
+                        context_lines,
+                    )?;
+                    batch.push(SearchBatchResult { query, results });
+                }
+                Ok(serde_json::to_value(batch)?)
             }
             "shard_query_plan" => {
                 let index_dir = path_arg(&request.arguments, "index_dir")?;
@@ -1042,7 +1123,9 @@ impl ToolRuntime {
                 "read_range",
                 "read_ranges",
                 "search_code",
+                "search_batch",
                 "indexed_search_code",
+                "indexed_search_batch",
                 "indexed_query_plan",
                 "read_index_range",
                 "read_index_ranges",
@@ -1051,6 +1134,7 @@ impl ToolRuntime {
                 "refresh_shards",
                 "shard_status",
                 "search_shards",
+                "search_shards_batch",
                 "shard_query_plan",
                 "read_shard_range",
                 "read_shard_ranges",
@@ -1845,6 +1929,24 @@ fn bool_arg(arguments: &Value, name: &str) -> bool {
         .get(name)
         .and_then(Value::as_bool)
         .unwrap_or(false)
+}
+
+fn string_array_arg(arguments: &Value, name: &str) -> Result<Vec<String>> {
+    let Some(value) = arguments.get(name) else {
+        return Err(anyhow!("missing string array argument: {name}"));
+    };
+    let values = value
+        .as_array()
+        .ok_or_else(|| anyhow!("argument {name} must be an array of strings"))?;
+    values
+        .iter()
+        .map(|value| {
+            value
+                .as_str()
+                .map(String::from)
+                .ok_or_else(|| anyhow!("argument {name} must be an array of strings"))
+        })
+        .collect()
 }
 
 fn optional_path_array_arg(arguments: &Value, name: &str) -> Result<Vec<PathBuf>> {

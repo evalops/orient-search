@@ -48,6 +48,7 @@ Use the fastest surface that matches your setup:
 - `search_code` for a live repo without a prebuilt index.
 - `indexed_search_code` for one persistent repo index.
 - `search_shards` for a multi-repo shard directory.
+- `search_batch`, `indexed_search_batch`, or `search_shards_batch` when an agent wants to try several query formulations in one round trip.
 
 Query strings support filters such as `repo:platform`, `path:src/auth`, `file:auth.rs`, `lang:rust`, `ext:rs`, `symbol:SessionManager`, `test:false`, negative filters like `-path:docs`, and quoted phrases like `"issue token"`. Multi-token queries use AND behavior when appropriate.
 

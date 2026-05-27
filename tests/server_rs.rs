@@ -65,6 +65,10 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         .iter()
         .find(|tool| tool["name"] == "read_ranges")
         .unwrap();
+    let search_batch = tools
+        .iter()
+        .find(|tool| tool["name"] == "search_batch")
+        .unwrap();
 
     assert_eq!(search["required"], serde_json::json!(["repo", "query"]));
     assert_eq!(search["input_schema"]["properties"]["limit"]["default"], 10);
@@ -83,6 +87,14 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
     assert_eq!(
         indexed_search["input_schema"]["properties"]["refresh_if_stale"]["default"],
         false
+    );
+    assert_eq!(
+        search_batch["required"],
+        serde_json::json!(["repo", "queries"])
+    );
+    assert_eq!(
+        search_batch["input_schema"]["properties"]["queries"]["items"]["type"],
+        "string"
     );
     assert_eq!(
         discover["input_schema"]["properties"]["limit"]["default"],
@@ -163,7 +175,9 @@ fn server_reports_tool_manifest_for_agent_wrappers() {
     assert!(stdout.contains("exclude_path"));
     assert!(stdout.contains("exclude_symbol"));
     assert!(stdout.contains("read_ranges"));
+    assert!(stdout.contains("search_batch"));
     assert!(stdout.contains("read_index_ranges"));
+    assert!(stdout.contains("indexed_search_batch"));
     assert!(stdout.contains("read_shard_ranges"));
     assert!(stdout.contains("read_index_range"));
     assert!(stdout.contains("index_status"));
@@ -183,7 +197,84 @@ fn server_reports_tool_manifest_for_agent_wrappers() {
     assert!(stdout.contains("warm_shards"));
     assert!(stdout.contains("ensure_shards"));
     assert!(stdout.contains("shard_status"));
+    assert!(stdout.contains("search_shards_batch"));
     assert!(stdout.contains("discover_repos"));
+}
+
+#[test]
+fn runtime_batches_searches_against_repo_index_and_shards() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/auth.rs"),
+        "pub struct SessionManager;\npub fn issue_token() {}\n",
+    );
+    write(
+        &repo.path().join("src/billing.rs"),
+        "pub fn invoice_total() {}\n",
+    );
+    let index_path = repo.path().join(".orient/index");
+    FastIndex::build(repo.path())
+        .unwrap()
+        .save(&index_path)
+        .unwrap();
+    let runtime = ToolRuntime::default();
+
+    let fallback = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("fallback-batch"),
+        tool: "search_batch".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "queries": ["SessionManager", "invoice total"],
+            "limit": 2,
+            "require_all": true
+        }),
+    });
+    assert!(fallback.error.is_none(), "{:?}", fallback.error);
+    let result = serde_json::to_string(&fallback.result).unwrap();
+    assert!(result.contains("\"query\":\"SessionManager\""), "{result}");
+    assert!(result.contains("src/auth.rs"), "{result}");
+    assert!(result.contains("\"query\":\"invoice total\""), "{result}");
+    assert!(result.contains("src/billing.rs"), "{result}");
+
+    let indexed = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("indexed-batch"),
+        tool: "indexed_search_batch".to_string(),
+        arguments: serde_json::json!({
+            "index": index_path,
+            "queries": ["SessionManager", "invoice total"],
+            "limit": 2,
+            "require_all": true
+        }),
+    });
+    assert!(indexed.error.is_none(), "{:?}", indexed.error);
+    let result = serde_json::to_string(&indexed.result).unwrap();
+    assert!(result.contains("src/auth.rs"), "{result}");
+    assert!(result.contains("src/billing.rs"), "{result}");
+
+    let shard_dir = tempfile::tempdir().unwrap();
+    let build = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("build-shards"),
+        tool: "index_shards".to_string(),
+        arguments: serde_json::json!({
+            "repos": [repo.path()],
+            "output_dir": shard_dir.path()
+        }),
+    });
+    assert!(build.error.is_none(), "{:?}", build.error);
+    let shards = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("shard-batch"),
+        tool: "search_shards_batch".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": shard_dir.path(),
+            "queries": ["SessionManager", "invoice total"],
+            "limit": 2,
+            "require_all": true
+        }),
+    });
+    assert!(shards.error.is_none(), "{:?}", shards.error);
+    let result = serde_json::to_string(&shards.result).unwrap();
+    assert!(result.contains("src/auth.rs"), "{result}");
+    assert!(result.contains("src/billing.rs"), "{result}");
 }
 
 #[test]
