@@ -409,22 +409,22 @@ pub fn related_shard_symbols(
     Ok(related)
 }
 
-struct ResolvedShardRead {
-    index: String,
-    relative_path: String,
-    output_prefix: String,
-    path_prefix: Option<String>,
+pub(crate) struct ResolvedShardRead {
+    pub(crate) index: String,
+    pub(crate) relative_path: String,
+    pub(crate) output_prefix: String,
+    pub(crate) path_prefix: Option<String>,
 }
 
 impl ResolvedShardRead {
-    fn contains_actual_path(&self, path: &str) -> bool {
+    pub(crate) fn contains_actual_path(&self, path: &str) -> bool {
         self.path_prefix
             .as_deref()
             .map(|prefix| path == prefix.trim_end_matches('/') || path.starts_with(prefix))
             .unwrap_or(true)
     }
 
-    fn output_path(&self, path: &str) -> String {
+    pub(crate) fn output_path(&self, path: &str) -> String {
         let trimmed = self
             .path_prefix
             .as_deref()
@@ -439,7 +439,7 @@ impl ResolvedShardRead {
     }
 }
 
-fn resolve_shard_path(index_dir: &Path, shard_path: &str) -> Result<ResolvedShardRead> {
+pub(crate) fn resolve_shard_path(index_dir: &Path, shard_path: &str) -> Result<ResolvedShardRead> {
     let manifest = load_manifest(index_dir)?;
     let (prefix, relative_path) = shard_path
         .split_once('/')
@@ -448,7 +448,7 @@ fn resolve_shard_path(index_dir: &Path, shard_path: &str) -> Result<ResolvedShar
         .ok_or_else(|| anyhow::anyhow!("unknown shard or alias: {prefix}"))
 }
 
-fn resolve_shard_read_path(
+pub(crate) fn resolve_shard_read_path(
     manifest: &ShardManifest,
     prefix: &str,
     relative_path: &str,

@@ -7,8 +7,7 @@ use crate::repo_index::{
 };
 use crate::shards::{
     ShardRepoMap, build_shards, ensure_shards, filter_repo_map_by_prefix, filters_for_shard_scope,
-    load_manifest, read_shard_range, refresh_shards, related_shard_files, related_shard_symbols,
-    shard_search_scopes,
+    load_manifest, refresh_shards, resolve_shard_path, shard_search_scopes,
 };
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
@@ -491,8 +490,8 @@ impl ToolRuntime {
                 let path = string_arg(&request.arguments, "path")?;
                 let start = usize_arg(&request.arguments, "start").unwrap_or(1);
                 let lines = usize_arg(&request.arguments, "lines").unwrap_or(80);
-                Ok(serde_json::to_value(read_shard_range(
-                    index_dir, &path, start, lines,
+                Ok(serde_json::to_value(self.read_shard_range_cached(
+                    &index_dir, &path, start, lines,
                 )?)?)
             }
             "read_shard_ranges" => {
@@ -500,7 +499,7 @@ impl ToolRuntime {
                 let ranges = range_args(&request.arguments)?;
                 let mut results = Vec::new();
                 for range in ranges {
-                    results.push(read_shard_range(
+                    results.push(self.read_shard_range_cached(
                         &index_dir,
                         &range.path,
                         range.start,
@@ -563,9 +562,9 @@ impl ToolRuntime {
                 let index_dir = path_arg(&request.arguments, "index_dir")?;
                 let path = string_arg(&request.arguments, "path")?;
                 let limit = usize_arg(&request.arguments, "limit").unwrap_or(10);
-                Ok(serde_json::to_value(related_shard_files(
-                    index_dir, &path, limit,
-                )?)?)
+                Ok(serde_json::to_value(
+                    self.related_shard_files_cached(&index_dir, &path, limit)?,
+                )?)
             }
             "related_symbols" => {
                 let repo = path_arg(&request.arguments, "repo")?;
@@ -584,8 +583,8 @@ impl ToolRuntime {
                 let path = string_arg(&request.arguments, "path")?;
                 let query = optional_string_arg(&request.arguments, "query");
                 let limit = usize_arg(&request.arguments, "limit").unwrap_or(10);
-                Ok(serde_json::to_value(related_shard_symbols(
-                    index_dir,
+                Ok(serde_json::to_value(self.related_shard_symbols_cached(
+                    &index_dir,
                     &path,
                     query.as_deref(),
                     limit,
@@ -728,6 +727,60 @@ impl ToolRuntime {
             }
         }
         Ok(finalize_results(results, limit))
+    }
+
+    fn read_shard_range_cached(
+        &self,
+        index_dir: &std::path::Path,
+        path: &str,
+        start: usize,
+        lines: usize,
+    ) -> Result<crate::repo_index::FileRange> {
+        let resolved = resolve_shard_path(index_dir, path)?;
+        let index = self.cached_index(index_dir.join(&resolved.index))?;
+        let mut range = index.read_range(&resolved.relative_path, start, lines)?;
+        range.path = resolved.output_path(&range.path);
+        Ok(range)
+    }
+
+    fn related_shard_files_cached(
+        &self,
+        index_dir: &std::path::Path,
+        path: &str,
+        limit: usize,
+    ) -> Result<Vec<crate::repo_index::RelatedFile>> {
+        let resolved = resolve_shard_path(index_dir, path)?;
+        let index = self.cached_index(index_dir.join(&resolved.index))?;
+        let mut related =
+            index.related_files(&resolved.relative_path, limit.saturating_mul(4).max(10));
+        related.retain(|file| resolved.contains_actual_path(&file.path));
+        for file in &mut related {
+            file.path = resolved.output_path(&file.path);
+        }
+        related.truncate(limit);
+        Ok(related)
+    }
+
+    fn related_shard_symbols_cached(
+        &self,
+        index_dir: &std::path::Path,
+        path: &str,
+        query: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<crate::repo_index::RelatedSymbol>> {
+        let resolved = resolve_shard_path(index_dir, path)?;
+        let index = self.cached_index(index_dir.join(&resolved.index))?;
+        let mut related = index.related_symbols(
+            Some(&resolved.relative_path),
+            query,
+            limit.saturating_mul(4).max(10),
+        );
+        related.retain(|symbol| resolved.contains_actual_path(&symbol.symbol.path));
+        for symbol in &mut related {
+            symbol.symbol.path = resolved.output_path(&symbol.symbol.path);
+        }
+        related.truncate(limit);
+        Ok(related)
     }
 
     fn shard_repo_maps_cached(

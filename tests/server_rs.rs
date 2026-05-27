@@ -377,6 +377,10 @@ fn runtime_reuses_cached_shard_index_after_initial_load() {
         "pub fn invoice_total() -> usize { 42 }\n",
     );
     write(
+        &repo.path().join("tests/billing_test.rs"),
+        "use billing::invoice_total;\n#[test]\nfn totals_invoice() {}\n",
+    );
+    write(
         &repo.path().join("Cargo.toml"),
         "[package]\nname='billing'\nversion='0.1.0'\nedition='2024'\n",
     );
@@ -416,6 +420,7 @@ fn runtime_reuses_cached_shard_index_after_initial_load() {
     let manifest: serde_json::Value =
         serde_json::from_slice(&fs::read(shard_dir.path().join("manifest.json")).unwrap()).unwrap();
     let shard_index = manifest["shards"][0]["index"].as_str().unwrap();
+    let shard_name = manifest["shards"][0]["name"].as_str().unwrap();
     fs::remove_file(shard_dir.path().join(shard_index)).unwrap();
     let second = runtime.dispatch(ToolRequest {
         id: serde_json::json!("second"),
@@ -429,6 +434,66 @@ fn runtime_reuses_cached_shard_index_after_initial_load() {
             .contains("src/billing.rs"),
         "{:?}",
         second.result
+    );
+
+    let range = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("range"),
+        tool: "read_shard_range".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": shard_dir.path(),
+            "path": format!("{shard_name}/src/billing.rs"),
+            "start": 1,
+            "lines": 1
+        }),
+    });
+    assert!(range.error.is_none(), "{:?}", range.error);
+    assert!(
+        serde_json::to_string(&range.result)
+            .unwrap()
+            .contains("invoice_total"),
+        "{:?}",
+        range.result
+    );
+
+    let related = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("related"),
+        tool: "related_shard_files".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": shard_dir.path(),
+            "path": format!("{shard_name}/src/billing.rs"),
+            "limit": 5
+        }),
+    });
+    assert!(related.error.is_none(), "{:?}", related.error);
+    assert!(
+        serde_json::to_string(&related.result)
+            .unwrap()
+            .contains(&format!("{shard_name}/tests/billing_test.rs")),
+        "{:?}",
+        related.result
+    );
+
+    let related_symbols = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("related-symbols"),
+        tool: "related_shard_symbols".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": shard_dir.path(),
+            "path": format!("{shard_name}/src/billing.rs"),
+            "query": "invoice total",
+            "limit": 5
+        }),
+    });
+    assert!(
+        related_symbols.error.is_none(),
+        "{:?}",
+        related_symbols.error
+    );
+    assert!(
+        serde_json::to_string(&related_symbols.result)
+            .unwrap()
+            .contains("invoice_total"),
+        "{:?}",
+        related_symbols.result
     );
 }
 
