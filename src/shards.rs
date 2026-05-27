@@ -59,6 +59,7 @@ pub struct ShardRefreshStats {
     pub trigrams: usize,
     pub symbols: usize,
     pub reused_files: usize,
+    pub renamed_files: usize,
     pub refreshed_files: usize,
     pub deleted_files: usize,
 }
@@ -75,6 +76,7 @@ pub struct ShardEnsureStats {
     pub trigrams: usize,
     pub symbols: usize,
     pub reused_files: usize,
+    pub renamed_files: usize,
     pub refreshed_files: usize,
     pub deleted_files: usize,
 }
@@ -148,6 +150,7 @@ pub fn ensure_shards(repos: &[PathBuf], output_dir: impl AsRef<Path>) -> Result<
             trigrams: stats.trigrams,
             symbols: stats.symbols,
             reused_files: stats.reused_files,
+            renamed_files: stats.renamed_files,
             refreshed_files: stats.refreshed_files,
             deleted_files: stats.deleted_files,
         });
@@ -169,6 +172,7 @@ pub fn ensure_shards(repos: &[PathBuf], output_dir: impl AsRef<Path>) -> Result<
         trigrams: stats.trigrams,
         symbols: stats.symbols,
         reused_files: 0,
+        renamed_files: 0,
         refreshed_files: stats.files,
         deleted_files: 0,
     })
@@ -187,6 +191,7 @@ pub fn refresh_shards(index_dir: impl AsRef<Path>) -> Result<ShardRefreshStats> 
         trigrams: 0,
         symbols: 0,
         reused_files: 0,
+        renamed_files: 0,
         refreshed_files: 0,
         deleted_files: 0,
     };
@@ -207,6 +212,7 @@ pub fn refresh_shards(index_dir: impl AsRef<Path>) -> Result<ShardRefreshStats> 
         let stats = outcome.index.stats();
         add_index_stats(&mut total, &stats);
         total.reused_files += outcome.reused_files;
+        total.renamed_files += outcome.renamed_files;
         total.refreshed_files += outcome.refreshed_files;
         total.deleted_files += outcome.deleted_files;
         let base_name = shard

@@ -31,7 +31,7 @@ Implemented now:
 - `orient search`: fast `rg`-backed candidate collection with Rust-side scoring/snippets.
 - Agent-oriented query language for `file:`, `path:`, `lang:`, `ext:`, `symbol:`, `repo:`, `test:`, quoted literals, negative filters, and default multi-term AND behavior.
 - `orient index`: persistent Rust content-token, path-token, and trigram posting index.
-- `orient refresh-index`: incremental refresh that reuses unchanged file metadata/terms and refreshes changed files.
+- `orient refresh-index`: incremental refresh that reuses unchanged file metadata/terms, detects same-content renames, and refreshes changed files.
 - `orient indexed-search`: indexed query path.
 - `orient discover-repos`: bounded local repo discovery for broad workspaces and repeated worktree layouts.
 - `orient index-shards`, `orient ensure-shards`, `orient refresh-shards`, `orient search-shards`, `orient read-shard-range`, and `orient read-shard-ranges`: local multi-repo shard manifest with one versioned index file per repo, optional discovery from workspace roots, one-step build-or-refresh bootstrap, incremental shard refresh, and bounded range reads from prefixed shard paths.
@@ -63,12 +63,12 @@ Implemented now:
 
 Measured on this machine:
 
-- Wide tree fallback: `/Users/jonathanhaas/Documents/Projects`, common top-10 literal/token queries at `22-31ms` p95 after warmup across the sampled runs.
+- Wide tree fallback: `/Users/jonathanhaas/Documents/Projects`, common top-10 literal/token queries at `46-73ms` p95 after warmup across the sampled runs.
 - Local repo fallback: query `indexed search symbol filters`, top 10 at about `12.5ms` p95 after warmup.
 - Hot-path fallback has a `250ms` wall-clock timeout plus match caps; if the timeout fires it returns partial results instead of blocking the agent.
 - Local repo index build: about `0.25s`.
-- Local repo refresh after build: reuses unchanged files and rebuilds postings from per-file term lists.
-- Local repo indexed search: query `indexed search symbol filters`, top 10 at about `0.39ms` p95 after warmup.
+- Local repo refresh after build: reuses unchanged files, reuses same-content renames by retargeting path-derived postings, and rebuilds postings from per-file term lists.
+- Local repo indexed search: query `indexed search symbol filters`, top 10 at about `0.25ms` p95 after warmup.
 
 ## Exit Conditions
 
@@ -93,7 +93,7 @@ Engineering definition:
 - Persistent index stores separate content-token, path-token, and trigram postings.
 - Multi-repo shard directories store a manifest plus one versioned index per repo, and can refresh those indexes incrementally.
 - Persistent indexed files include line-offset tables for snippet retrieval.
-- Incremental refresh exists.
+- Incremental refresh covers add/edit/delete and same-content rename detection.
 - Tests cover fallback search, indexed search, shard search/read tools, incremental refresh, filters, query parser stress cases, ranking explanations, duplicate suppression, JSON-lines server calls, corrupt index errors, path safety including symlink escapes, snippet modes, and a guarded `rg` differential check.
 - Every release claim is backed by `cargo fmt --check`, `cargo test`, `cargo build --release`, and `orient bench-search` or equivalent timed searches, with saved baselines available for local or CI regression checks.
 

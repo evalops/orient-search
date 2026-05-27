@@ -42,6 +42,42 @@ fn refresh_reuses_unchanged_files_and_picks_up_changed_terms() {
 }
 
 #[test]
+fn refresh_reuses_renamed_files_by_content_fingerprint() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/auth.rs"),
+        "pub struct SessionManager;\npub fn issue_token() {}\n",
+    );
+
+    let first = FastIndex::build(repo.path()).unwrap();
+    fs::rename(
+        repo.path().join("src/auth.rs"),
+        repo.path().join("src/session.rs"),
+    )
+    .unwrap();
+
+    let outcome = FastIndex::refresh(repo.path(), Some(&first)).unwrap();
+    assert_eq!(outcome.renamed_files, 1);
+    assert_eq!(outcome.deleted_files, 0);
+    assert_eq!(outcome.refreshed_files, 0);
+    assert_eq!(outcome.reused_files, 1);
+
+    let refreshed = outcome.index;
+    let results = refreshed.search("SessionManager", 10).unwrap();
+    assert_eq!(results[0].path, "src/session.rs");
+    assert!(refreshed.search("auth", 10).unwrap().is_empty());
+    assert_eq!(
+        refreshed
+            .files
+            .iter()
+            .find(|file| file.path == "src/session.rs")
+            .unwrap()
+            .content_hash,
+        first.files[0].content_hash
+    );
+}
+
+#[test]
 fn indexed_search_supports_filters_require_all_and_symbol_boosting() {
     let repo = tempfile::tempdir().unwrap();
     write(

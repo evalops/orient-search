@@ -18,7 +18,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const INDEX_VERSION: u32 = 6;
+const INDEX_VERSION: u32 = 7;
 const MAX_FILE_BYTES: u64 = 512_000;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -36,6 +36,7 @@ pub struct IndexedPath {
     pub path: String,
     pub language: String,
     pub size: u64,
+    pub content_hash: u64,
     pub modified_secs: u64,
     pub modified_nanos: u32,
     pub terms: Vec<TermCount>,
@@ -87,6 +88,7 @@ pub struct RefreshStats {
     pub trigrams: usize,
     pub symbols: usize,
     pub reused_files: usize,
+    pub renamed_files: usize,
     pub refreshed_files: usize,
     pub deleted_files: usize,
 }
@@ -95,8 +97,18 @@ pub struct RefreshStats {
 pub struct RefreshOutcome {
     pub index: FastIndex,
     pub reused_files: usize,
+    pub renamed_files: usize,
     pub refreshed_files: usize,
     pub deleted_files: usize,
+}
+
+#[derive(Debug, Clone)]
+struct RefreshCandidate {
+    rel: String,
+    language: String,
+    size: u64,
+    modified_secs: u64,
+    modified_nanos: u32,
 }
 
 impl FastIndex {
@@ -116,11 +128,8 @@ impl FastIndex {
                     .collect::<HashMap<_, _>>()
             })
             .unwrap_or_default();
-        let mut seen = HashSet::new();
-        let mut files = Vec::new();
-        let mut reused_files = 0usize;
-        let mut refreshed_files = 0usize;
-
+        let mut candidates = Vec::new();
+        let mut current_paths = HashSet::new();
         for entry in WalkBuilder::new(&root)
             .hidden(false)
             .filter_entry(|entry| !is_ignored(entry.path()))
@@ -143,25 +152,67 @@ impl FastIndex {
                 .to_string_lossy()
                 .replace('\\', "/");
             let (modified_secs, modified_nanos) = modified_parts(metadata.modified().ok());
-            seen.insert(rel.clone());
-            if let Some(previous) = previous_files.get(&rel) {
-                if previous.size == metadata.len()
-                    && previous.modified_secs == modified_secs
-                    && previous.modified_nanos == modified_nanos
-                    && previous.language == language
+            current_paths.insert(rel.clone());
+            candidates.push(RefreshCandidate {
+                rel,
+                language,
+                size: metadata.len(),
+                modified_secs,
+                modified_nanos,
+            });
+        }
+
+        let mut rename_candidates = previous_files
+            .values()
+            .filter(|file| !current_paths.contains(&file.path))
+            .fold(
+                HashMap::<(String, u64, u64), Vec<IndexedPath>>::new(),
+                |mut grouped, file| {
+                    grouped
+                        .entry((file.language.clone(), file.size, file.content_hash))
+                        .or_default()
+                        .push(file.clone());
+                    grouped
+                },
+            );
+        let mut files = Vec::new();
+        let mut reused_files = 0usize;
+        let mut renamed_files = 0usize;
+        let mut refreshed_files = 0usize;
+
+        for candidate in candidates {
+            if let Some(previous) = previous_files.get(&candidate.rel) {
+                if previous.size == candidate.size
+                    && previous.modified_secs == candidate.modified_secs
+                    && previous.modified_nanos == candidate.modified_nanos
+                    && previous.language == candidate.language
                 {
                     files.push(previous.clone());
                     reused_files += 1;
                     continue;
                 }
             }
+            let text = fs::read_to_string(root.join(&candidate.rel)).unwrap_or_default();
+            let content_hash = content_hash(text.as_bytes());
+            let rename_key = (candidate.language.clone(), candidate.size, content_hash);
+            if !text.contains('\0') {
+                if let Some(previous) = rename_candidates
+                    .get_mut(&rename_key)
+                    .and_then(|files| files.pop())
+                {
+                    files.push(retarget_indexed_file(previous, &candidate, &text));
+                    reused_files += 1;
+                    renamed_files += 1;
+                    continue;
+                }
+            }
             let Some(file) = index_file(
                 &root,
-                &rel,
-                language,
-                metadata.len(),
-                modified_secs,
-                modified_nanos,
+                &candidate.rel,
+                candidate.language,
+                candidate.size,
+                candidate.modified_secs,
+                candidate.modified_nanos,
             ) else {
                 continue;
             };
@@ -169,10 +220,11 @@ impl FastIndex {
             refreshed_files += 1;
         }
 
-        let deleted_files = previous_files
+        let missing_previous_files = previous_files
             .keys()
-            .filter(|path| !seen.contains(*path))
+            .filter(|path| !current_paths.contains(*path))
             .count();
+        let deleted_files = missing_previous_files.saturating_sub(renamed_files);
         let postings = rebuild_postings(&files, |file| &file.terms);
         let path_postings = rebuild_postings(&files, |file| &file.path_terms);
         let trigram_postings = rebuild_postings(&files, |file| &file.trigrams);
@@ -187,6 +239,7 @@ impl FastIndex {
         .map(|index| RefreshOutcome {
             index,
             reused_files,
+            renamed_files,
             refreshed_files,
             deleted_files,
         })
@@ -235,6 +288,7 @@ impl FastIndex {
             trigrams: self.trigram_postings.len(),
             symbols: self.files.iter().map(|file| file.symbols.len()).sum(),
             reused_files: outcome.reused_files,
+            renamed_files: outcome.renamed_files,
             refreshed_files: outcome.refreshed_files,
             deleted_files: outcome.deleted_files,
         }
@@ -898,6 +952,7 @@ fn index_file(
     if text.contains('\0') {
         return None;
     }
+    let content_hash = content_hash(text.as_bytes());
     let line_offsets = line_offsets(&text);
     let mut terms = token_counts(&text)
         .into_iter()
@@ -938,6 +993,7 @@ fn index_file(
         path: rel.to_string(),
         language,
         size,
+        content_hash,
         modified_secs,
         modified_nanos,
         terms,
@@ -946,6 +1002,34 @@ fn index_file(
         symbols,
         line_offsets,
     })
+}
+
+fn retarget_indexed_file(
+    mut previous: IndexedPath,
+    candidate: &RefreshCandidate,
+    text: &str,
+) -> IndexedPath {
+    previous.path = candidate.rel.clone();
+    previous.language = candidate.language.clone();
+    previous.size = candidate.size;
+    previous.content_hash = content_hash(text.as_bytes());
+    previous.modified_secs = candidate.modified_secs;
+    previous.modified_nanos = candidate.modified_nanos;
+    previous.path_terms = counted_terms(&token_counts(&candidate.rel));
+    previous.trigrams = counted_terms(&trigram_counts(&format!("{}\n{text}", candidate.rel)));
+    previous
+}
+
+fn counted_terms(counts: &HashMap<String, usize>) -> Vec<TermCount> {
+    let mut terms = counts
+        .iter()
+        .map(|(term, count)| TermCount {
+            term: term.clone(),
+            count: (*count).min(u16::MAX as usize) as u16,
+        })
+        .collect::<Vec<_>>();
+    terms.sort_by(|a, b| a.term.cmp(&b.term));
+    terms
 }
 
 fn known_commands_from_indexed_files(files: &[IndexedPath]) -> Vec<String> {
@@ -975,6 +1059,15 @@ fn line_offsets(text: &str) -> Vec<u32> {
         }
     }
     offsets
+}
+
+fn content_hash(bytes: &[u8]) -> u64 {
+    let mut hash = 0xcbf29ce484222325u64;
+    for byte in bytes {
+        hash ^= *byte as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash
 }
 
 fn indexed_snippet(

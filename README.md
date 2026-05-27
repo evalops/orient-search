@@ -245,7 +245,7 @@ The build is useful when it can:
 - Return wide-tree search results in hundreds of milliseconds, not seconds.
 - Bound the hot path with a wall-clock timeout and match caps so pathological trees cannot hang searches.
 - Provide a persistent indexed search mode that can evolve toward Zoekt-style shards/postings.
-- Refresh the persistent index incrementally by reusing unchanged file metadata and postings.
+- Refresh the persistent index incrementally by reusing unchanged and renamed file metadata/postings.
 - Establish a baseline for fast local code search so future agent runs can use fewer exploratory commands.
 - Pass the Rust test suite.
 
@@ -259,9 +259,9 @@ Product impact criteria for follow-up adoption:
 Current search baseline:
 
 - `orient bench-search --repo . "indexed search symbol filters"`: `9.413ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "session token auth"`: `22.141ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "browser session implementation"`: `22.407ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "postgres migration user"`: `30.535ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "session token auth"`: `46.450ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "browser session implementation"`: `70.275ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "postgres migration user"`: `72.992ms` p95 after warmup.
 - The `rg` hot path has a `250ms` wall-clock timeout plus a bounded match cap; timed-out searches return partial results rather than hanging.
 - `orient index --repo . --output /tmp/orient-self.index`: versioned binary index with file metadata, content token postings, path token postings, trigram postings, line offsets, and symbol boosts.
 - `orient discover-repos --root /Users/jonathanhaas/Documents/Projects --max-depth 4 --limit 200`: finds git or manifest-backed repo roots while skipping dependency/build directories and prioritizing visible canonical repos ahead of dated split, temp, and worktree folders when limits are small.
@@ -275,10 +275,10 @@ Current search baseline:
 - `orient related-index` and `orient related-index-symbols`: return nearby files and definitions directly from persisted index metadata, without rebuilding a live repo scan.
 - Search results include structured `line_range` metadata for direct read-range follow-up calls.
 - `orient refresh-shards --index-dir /tmp/orient-shards`: refreshes each shard incrementally, reusing unchanged file metadata and postings per repo, and refreshes nested repo aliases.
-- `orient refresh-index --repo . --index /tmp/orient-self.index`: reuses unchanged files and refreshes changed/deleted files.
+- `orient refresh-index --repo . --index /tmp/orient-self.index`: reuses unchanged files, detects same-content renames, and refreshes changed/deleted files. Refresh stats include `renamed_files`.
 - `orient index-map --index /tmp/orient-self.index`: returns repo-map orientation directly from the persistent index without rebuilding a live repo scan.
 - `orient shard-map --index-dir /tmp/orient-shards`: returns repo-prefixed repo maps for local multi-repo shard directories.
-- `orient bench-search --repo . --index /tmp/orient-self.index "indexed search symbol filters"`: `0.390ms` p95 after warmup.
+- `orient bench-search --repo . --index /tmp/orient-self.index "indexed search symbol filters"`: `0.252ms` p95 after warmup.
 
 Benchmark methodology:
 
