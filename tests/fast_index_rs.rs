@@ -5,7 +5,8 @@ use std::time::{Duration, Instant};
 
 use orient::fast_index::FastIndex;
 use orient::repo_index::{
-    SearchFilters, SnippetMode, search_repo_fast_filtered, search_repo_fast_filtered_with_timeout,
+    SearchFilters, SnippetMode, attach_result_context, search_repo_fast_filtered,
+    search_repo_fast_filtered_with_timeout,
 };
 
 fn write(path: &Path, text: &str) {
@@ -90,7 +91,7 @@ fn indexed_search_and_read_range_use_persisted_snapshot_text() {
     fs::remove_file(repo.path().join("src/auth.rs")).unwrap();
 
     let loaded = FastIndex::load(&index_path).unwrap();
-    let results = loaded
+    let mut results = loaded
         .search_filtered(
             "issue_token",
             10,
@@ -103,6 +104,13 @@ fn indexed_search_and_read_range_use_persisted_snapshot_text() {
     assert_eq!(results[0].path, "src/auth.rs");
     assert!(results[0].snippet.contains("3:     pub fn issue_token"));
     assert_eq!(results[0].line_range.as_ref().unwrap().start_line, 1);
+    attach_result_context(&mut results, 3, |path, start, lines| {
+        loaded.read_range(path, start, lines)
+    })
+    .unwrap();
+    let context = results[0].context.as_ref().unwrap();
+    assert_eq!(context.start_line, 2);
+    assert!(context.text.contains("3:     pub fn issue_token"));
 
     let range = loaded.read_range("src/auth.rs", 2, 3).unwrap();
     assert_eq!(range.start_line, 2);

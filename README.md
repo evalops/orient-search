@@ -28,7 +28,8 @@ cargo run -- repo-map --repo /path/to/repo --symbols 50 --tests 50
 cargo run -- search --repo /path/to/repo "session token auth"
 cargo run -- search --repo /path/to/repo 'symbol:SessionManager lang:rust -path:docs "issue token"' \
   --snippet block \
-  --explain
+  --explain \
+  --context-lines 80
 
 # Build and query a persistent local index.
 cargo run -- index --repo /path/to/repo --output /tmp/orient.index
@@ -38,7 +39,8 @@ cargo run -- indexed-search --index /tmp/orient.index "session token auth" \
   --language rust \
   --extension rs \
   --require-all \
-  --snippet symbol
+  --snippet symbol \
+  --context-lines 80
 cargo run -- index-map --index /tmp/orient.index --symbols 50 --tests 50
 cargo run -- read-index-range --index /tmp/orient.index src/auth.rs --start 40 --lines 80
 
@@ -65,6 +67,7 @@ cargo run -- shard-map --index-dir /tmp/orient-shards --repo repo-a --symbols 50
 cargo run -- search-shards --index-dir /tmp/orient-shards "session token auth"
 cargo run -- search-shards --index-dir /tmp/orient-shards "repo:repo-a session token auth"
 cargo run -- search-shards --index-dir /tmp/orient-shards "repo:maestro app server"
+cargo run -- search-shards --index-dir /tmp/orient-shards "repo:billing invoice total" --context-lines 80
 cargo run -- shard-symbol --index-dir /tmp/orient-shards --repo repo-a SessionManager
 cargo run -- read-shard-range --index-dir /tmp/orient-shards repo-a/src/auth.rs --start 40 --lines 80
 cargo run -- read-shard-range --index-dir /tmp/orient-shards maestro/src/app.rs --start 40 --lines 80
@@ -129,7 +132,7 @@ cargo run -- client-jsonl --addr 127.0.0.1:8796
 Example request:
 
 ```json
-{"id":1,"tool":"search_code","arguments":{"repo":"/path/to/repo","query":"issue token","limit":5,"extension":"rs","require_all":true,"snippet":"block","explain":true}}
+{"id":1,"tool":"search_code","arguments":{"repo":"/path/to/repo","query":"issue token","limit":5,"extension":"rs","require_all":true,"snippet":"block","explain":true,"context_lines":80}}
 ```
 
 Discover and index shard roots:
@@ -224,6 +227,8 @@ Indexed search persists line-offset tables, token-to-line tables, and bounded so
 
 Every search result with a numbered snippet includes a `line_range` object with `start_line` and `end_line`, so agents can immediately call `read-range`, `read-index-range`, or `read-shard-range` without scraping snippet text. Results also include `match_lines` when the engine can identify exact query-hit lines inside the file, which lets wrappers jump to the most relevant line after reading the broader range.
 
+Search commands and JSON search tools also accept `--context-lines <n>` or JSON `"context_lines":n`. When set, each result includes a bounded line-numbered `context` range centered near the best match, so an agent can search and inspect likely edit context in one round trip. Attached context is capped to 500 lines per result.
+
 ## Ranking Explanations
 
 Search commands and JSON-lines tools accept `--explain` or JSON `"explain":true`. Normal output stays compact; explain mode adds an `explanation` array to each result with structured ranking signals such as:
@@ -261,9 +266,9 @@ Product impact criteria for follow-up adoption:
 Current search baseline:
 
 - `orient bench-search --repo . "indexed search symbol filters"`: `9.413ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "session token auth"`: `18.779ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "browser session implementation"`: `18.582ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "postgres migration user"`: `31.078ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "session token auth"`: `19.030ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "browser session implementation"`: `19.306ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "postgres migration user"`: `31.104ms` p95 after warmup.
 - The `rg` hot path has a `250ms` wall-clock timeout plus a bounded match cap; timed-out searches return partial results rather than hanging.
 - `orient index --repo . --output /tmp/orient-self.index`: versioned binary index with file metadata, content token postings, path token postings, trigram postings, line offsets, token-to-line tables, bounded source snapshots, and symbol boosts.
 - `orient discover-repos --root /Users/jonathanhaas/Documents/Projects --max-depth 4 --limit 200`: finds git or manifest-backed repo roots while skipping dependency/build directories and prioritizing visible canonical repos ahead of dated split, temp, and worktree folders when limits are small.
@@ -276,12 +281,13 @@ Current search baseline:
 - `orient related-shard-symbols --index-dir /tmp/orient-shards maestro/src/app.rs --query "app server"`: returns nearby definitions from the same shard alias scope.
 - `orient related-index` and `orient related-index-symbols`: return nearby files and definitions directly from persisted index metadata, without rebuilding a live repo scan.
 - Search results include structured `line_range` and `match_lines` metadata for direct read-range follow-up calls.
+- Search results can attach bounded `context` ranges with `--context-lines` / JSON `context_lines`, covering fallback, indexed, and shard search.
 - `orient refresh-shards --index-dir /tmp/orient-shards`: refreshes each shard incrementally, reusing unchanged file metadata and postings per repo, and refreshes nested repo aliases.
 - `orient refresh-index --repo . --index /tmp/orient-self.index`: reuses unchanged files, detects same-content renames, and refreshes changed/deleted files. Refresh stats include `renamed_files`.
 - `orient index-map --index /tmp/orient-self.index`: returns repo-map orientation directly from the persistent index without rebuilding a live repo scan.
 - `orient shard-map --index-dir /tmp/orient-shards`: returns repo-prefixed repo maps for local multi-repo shard directories.
 - Repo maps infer command hints from manifests and common scripts, including `cargo test`, `pytest`, `go test ./...`, `swift test`, package-manager-specific `test` scripts, and common `lint`/`typecheck`/`check`/`build` scripts.
-- `orient bench-search --repo . --index /tmp/orient-self.index "indexed search symbol filters"`: `0.749ms` p95 after warmup.
+- `orient bench-search --repo . --index /tmp/orient-self.index "indexed search symbol filters"`: `0.615ms` p95 after warmup.
 
 Benchmark methodology:
 

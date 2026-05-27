@@ -3,7 +3,8 @@ use clap::{Parser, Subcommand};
 use orient::discover::{DiscoverOptions, discover_repos};
 use orient::fast_index::FastIndex;
 use orient::repo_index::{
-    RepoIndexer, SearchFilters, SnippetMode, read_file_range, search_repo_fast_filtered,
+    RepoIndexer, SearchFilters, SnippetMode, attach_result_context, read_file_range,
+    search_repo_fast_filtered,
 };
 use orient::server::{ToolRuntime, serve_jsonl, serve_tcp, tool_manifest};
 use orient::shards::{
@@ -95,6 +96,8 @@ enum Commands {
         snippet: String,
         #[arg(long)]
         explain: bool,
+        #[arg(long, default_value_t = 0)]
+        context_lines: usize,
     },
     ReadShardRange {
         #[arg(long)]
@@ -191,6 +194,8 @@ enum Commands {
         snippet: String,
         #[arg(long)]
         explain: bool,
+        #[arg(long, default_value_t = 0)]
+        context_lines: usize,
     },
     IndexedSearch {
         #[arg(long)]
@@ -210,6 +215,8 @@ enum Commands {
         snippet: String,
         #[arg(long)]
         explain: bool,
+        #[arg(long, default_value_t = 0)]
+        context_lines: usize,
     },
     ReadIndexRange {
         #[arg(long)]
@@ -439,26 +446,28 @@ fn main() -> Result<()> {
             require_all,
             snippet,
             explain,
+            context_lines,
         } => {
             let snippet = snippet_mode_arg(&snippet)?;
-            println!(
-                "{}",
-                serde_json::to_string(&search_shards(
-                    index_dir,
-                    &query,
-                    limit,
-                    &SearchFilters {
-                        path,
-                        language,
-                        extension,
-                        repo,
-                        require_all,
-                        snippet,
-                        explain,
-                        ..SearchFilters::default()
-                    },
-                )?)?
-            );
+            let mut results = search_shards(
+                &index_dir,
+                &query,
+                limit,
+                &SearchFilters {
+                    path,
+                    language,
+                    extension,
+                    repo,
+                    require_all,
+                    snippet,
+                    explain,
+                    ..SearchFilters::default()
+                },
+            )?;
+            attach_result_context(&mut results, context_lines, |path, start, lines| {
+                read_shard_range(&index_dir, path, start, lines)
+            })?;
+            println!("{}", serde_json::to_string(&results)?);
         }
         Commands::ReadShardRange {
             index_dir,
@@ -580,25 +589,27 @@ fn main() -> Result<()> {
             require_all,
             snippet,
             explain,
+            context_lines,
         } => {
             let snippet = snippet_mode_arg(&snippet)?;
-            println!(
-                "{}",
-                serde_json::to_string(&search_repo_fast_filtered(
-                    repo,
-                    &query,
-                    limit,
-                    &SearchFilters {
-                        path,
-                        language,
-                        extension,
-                        require_all,
-                        snippet,
-                        explain,
-                        ..SearchFilters::default()
-                    },
-                )?)?
-            );
+            let mut results = search_repo_fast_filtered(
+                &repo,
+                &query,
+                limit,
+                &SearchFilters {
+                    path,
+                    language,
+                    extension,
+                    require_all,
+                    snippet,
+                    explain,
+                    ..SearchFilters::default()
+                },
+            )?;
+            attach_result_context(&mut results, context_lines, |path, start, lines| {
+                read_file_range(&repo, path, start, lines)
+            })?;
+            println!("{}", serde_json::to_string(&results)?);
         }
         Commands::IndexedSearch {
             index,
@@ -610,25 +621,27 @@ fn main() -> Result<()> {
             require_all,
             snippet,
             explain,
+            context_lines,
         } => {
             let snippet = snippet_mode_arg(&snippet)?;
             let index = FastIndex::load(index)?;
-            println!(
-                "{}",
-                serde_json::to_string(&index.search_filtered(
-                    &query,
-                    limit,
-                    &SearchFilters {
-                        path,
-                        language,
-                        extension,
-                        require_all,
-                        snippet,
-                        explain,
-                        ..SearchFilters::default()
-                    },
-                )?)?
-            );
+            let mut results = index.search_filtered(
+                &query,
+                limit,
+                &SearchFilters {
+                    path,
+                    language,
+                    extension,
+                    require_all,
+                    snippet,
+                    explain,
+                    ..SearchFilters::default()
+                },
+            )?;
+            attach_result_context(&mut results, context_lines, |path, start, lines| {
+                index.read_range(path, start, lines)
+            })?;
+            println!("{}", serde_json::to_string(&results)?);
         }
         Commands::ReadIndexRange {
             index,

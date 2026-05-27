@@ -916,6 +916,7 @@ impl FastIndex {
             explanation: explain.then_some(signals),
             query_plan: query_plan.cloned(),
             duplicate_group: None,
+            context: None,
         })
     }
 }

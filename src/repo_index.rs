@@ -16,6 +16,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 const MAX_FILE_BYTES: u64 = 512_000;
+const MAX_ATTACHED_CONTEXT_LINES: usize = 500;
 const RIPGREP_TIMEOUT: Duration = Duration::from_millis(250);
 const RIPGREP_POLL_INTERVAL: Duration = Duration::from_millis(5);
 static CAMEL_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"([a-z0-9])([A-Z])").unwrap());
@@ -51,6 +52,8 @@ pub struct SearchResult {
     pub query_plan: Option<QueryPlan>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duplicate_group: Option<DuplicateGroup>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<FileRange>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -606,6 +609,7 @@ fn merge_match_result(
             explanation: explain.then_some(signals),
             query_plan: None,
             duplicate_group: None,
+            context: None,
         });
 }
 
@@ -751,6 +755,7 @@ impl RepoIndex {
                     explanation: None,
                     query_plan: None,
                     duplicate_group: None,
+                    context: None,
                 });
             }
         }
@@ -1307,7 +1312,37 @@ fn score_text_file(
         explanation: explain.then_some(signals),
         query_plan: None,
         duplicate_group: None,
+        context: None,
     })
+}
+
+pub fn attach_result_context(
+    results: &mut [SearchResult],
+    line_count: usize,
+    mut read_range: impl FnMut(&str, usize, usize) -> Result<FileRange>,
+) -> Result<()> {
+    let Some(line_count) = attached_context_line_count(line_count) else {
+        return Ok(());
+    };
+    for result in results {
+        let start = context_start_line(result, line_count);
+        result.context = Some(read_range(&result.path, start, line_count)?);
+    }
+    Ok(())
+}
+
+fn attached_context_line_count(line_count: usize) -> Option<usize> {
+    (line_count > 0).then(|| line_count.min(MAX_ATTACHED_CONTEXT_LINES))
+}
+
+fn context_start_line(result: &SearchResult, line_count: usize) -> usize {
+    let anchor = result
+        .match_lines
+        .first()
+        .copied()
+        .or_else(|| result.line_range.as_ref().map(|range| range.start_line))
+        .unwrap_or(1);
+    anchor.saturating_sub(line_count / 3).max(1)
 }
 
 fn apply_symbol_boost(

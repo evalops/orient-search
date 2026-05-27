@@ -62,7 +62,8 @@ fn cli_outputs_tool_manifest() {
         .stdout(predicate::str::contains("read_shard_ranges"))
         .stdout(predicate::str::contains("read_shard_range"))
         .stdout(predicate::str::contains("related_shard_files"))
-        .stdout(predicate::str::contains("related_shard_symbols"));
+        .stdout(predicate::str::contains("related_shard_symbols"))
+        .stdout(predicate::str::contains("context_lines"));
 }
 
 #[test]
@@ -325,13 +326,17 @@ fn cli_searches_symbols_and_related_files() {
             "--snippet",
             "block",
             "--explain",
+            "--context-lines",
+            "6",
         ])
         .assert()
         .success()
         .stdout(predicate::str::contains("src/auth.rs"))
         .stdout(predicate::str::contains("SessionManager"))
         .stdout(predicate::str::contains("\"line_range\""))
-        .stdout(predicate::str::contains("\"explanation\""));
+        .stdout(predicate::str::contains("\"explanation\""))
+        .stdout(predicate::str::contains("\"context\""))
+        .stdout(predicate::str::contains("\"total_lines\""));
 
     let mut symbol = Command::cargo_bin("orient").unwrap();
     symbol
@@ -401,6 +406,8 @@ fn cli_builds_and_searches_persistent_index() {
             "--snippet",
             "symbol",
             "--explain",
+            "--context-lines",
+            "4",
         ])
         .assert()
         .success()
@@ -408,7 +415,8 @@ fn cli_builds_and_searches_persistent_index() {
         .stdout(predicate::str::contains("indexed match"))
         .stdout(predicate::str::contains("\"match_lines\""))
         .stdout(predicate::str::contains("\"query_plan\""))
-        .stdout(predicate::str::contains("\"planned_postings\""));
+        .stdout(predicate::str::contains("\"planned_postings\""))
+        .stdout(predicate::str::contains("\"context\""));
 
     fs::remove_file(repo.path().join("src/auth.rs")).unwrap();
 

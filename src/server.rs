@@ -2,8 +2,8 @@ use crate::discover::{DiscoverOptions, discover_repos};
 use crate::fast_index::FastIndex;
 use crate::query::{merge_filters, parse_query, query_text};
 use crate::repo_index::{
-    RepoIndexer, SearchFilters, SearchResult, SnippetMode, Symbol, finalize_results,
-    normalize_token, read_file_range, search_repo_fast_filtered,
+    RepoIndexer, SearchFilters, SearchResult, SnippetMode, Symbol, attach_result_context,
+    finalize_results, normalize_token, read_file_range, search_repo_fast_filtered,
 };
 use crate::shards::{
     ShardRepoMap, build_shards, ensure_shards, filter_repo_map_by_prefix, filters_for_shard_scope,
@@ -411,23 +411,33 @@ impl ToolRuntime {
                 let repo = path_arg(&request.arguments, "repo")?;
                 let query = string_arg(&request.arguments, "query")?;
                 let limit = usize_arg(&request.arguments, "limit").unwrap_or(10);
-                Ok(serde_json::to_value(search_repo_fast_filtered(
-                    repo,
+                let context_lines = usize_arg(&request.arguments, "context_lines").unwrap_or(0);
+                let mut results = search_repo_fast_filtered(
+                    &repo,
                     &query,
                     limit,
                     &search_filters(&request.arguments, false)?,
-                )?)?)
+                )?;
+                attach_result_context(&mut results, context_lines, |path, start, lines| {
+                    read_file_range(&repo, path, start, lines)
+                })?;
+                Ok(serde_json::to_value(results)?)
             }
             "indexed_search_code" => {
                 let index_path = path_arg(&request.arguments, "index")?;
                 let query = string_arg(&request.arguments, "query")?;
                 let limit = usize_arg(&request.arguments, "limit").unwrap_or(10);
+                let context_lines = usize_arg(&request.arguments, "context_lines").unwrap_or(0);
                 let index = self.cached_index(index_path)?;
-                Ok(serde_json::to_value(index.search_filtered(
+                let mut results = index.search_filtered(
                     &query,
                     limit,
                     &search_filters(&request.arguments, true)?,
-                )?)?)
+                )?;
+                attach_result_context(&mut results, context_lines, |path, start, lines| {
+                    index.read_range(path, start, lines)
+                })?;
+                Ok(serde_json::to_value(results)?)
             }
             "read_index_range" => {
                 let index_path = path_arg(&request.arguments, "index")?;
@@ -478,11 +488,13 @@ impl ToolRuntime {
                 let index_dir = path_arg(&request.arguments, "index_dir")?;
                 let query = string_arg(&request.arguments, "query")?;
                 let limit = usize_arg(&request.arguments, "limit").unwrap_or(10);
+                let context_lines = usize_arg(&request.arguments, "context_lines").unwrap_or(0);
                 Ok(serde_json::to_value(self.search_shards_cached(
                     &index_dir,
                     &query,
                     limit,
                     &search_filters(&request.arguments, true)?,
+                    context_lines,
                 )?)?)
             }
             "read_shard_range" => {
@@ -699,6 +711,7 @@ impl ToolRuntime {
         query: &str,
         limit: usize,
         filters: &SearchFilters,
+        context_lines: usize,
     ) -> Result<Vec<SearchResult>> {
         let manifest = load_manifest(index_dir)?;
         let parsed = parse_query(query);
@@ -726,7 +739,11 @@ impl ToolRuntime {
                 }
             }
         }
-        Ok(finalize_results(results, limit))
+        let mut results = finalize_results(results, limit);
+        attach_result_context(&mut results, context_lines, |path, start, lines| {
+            self.read_shard_range_cached(index_dir, path, start, lines)
+        })?;
+        Ok(results)
     }
 
     fn read_shard_range_cached(
@@ -942,6 +959,7 @@ const SEARCH_OPTIONAL_ARGS: &[&str] = &[
     "snippet",
     "explain",
     "require_all",
+    "context_lines",
     "exclude_file",
     "exclude_path",
     "exclude_language",
@@ -963,6 +981,7 @@ const SEARCH_INDEX_OPTIONAL_ARGS: &[&str] = &[
     "snippet",
     "explain",
     "require_all",
+    "context_lines",
     "exclude_file",
     "exclude_path",
     "exclude_language",
