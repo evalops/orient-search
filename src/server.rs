@@ -552,8 +552,8 @@ fn argument_schema(tool_name: &str, name: &str) -> Value {
             schema.insert("type".to_string(), json!("array"));
             schema.insert("items".to_string(), json!({"type": "string"}));
         }
-        "test" | "explain" | "require_all" | "git_metadata" | "tracked_files"
-        | "nested_manifests" => {
+        "test" | "explain" | "require_all" | "refresh_if_stale" | "git_metadata"
+        | "tracked_files" | "nested_manifests" => {
             schema.insert("type".to_string(), json!("boolean"));
         }
         "limit" | "max_depth" | "discover_limit" | "family_limit" | "symbols" | "start"
@@ -586,8 +586,8 @@ fn argument_type(name: &str) -> &'static str {
     match name {
         "limit" | "max_depth" | "discover_limit" | "family_limit" | "symbols" | "start"
         | "lines" | "tests" | "context_lines" => "integer",
-        "test" | "explain" | "require_all" | "git_metadata" | "tracked_files"
-        | "nested_manifests" => "boolean",
+        "test" | "explain" | "require_all" | "refresh_if_stale" | "git_metadata"
+        | "tracked_files" | "nested_manifests" => "boolean",
         "exclude_file" | "exclude_path" | "exclude_language" | "exclude_extension"
         | "exclude_symbol" | "exclude_repo" => "string|string[]",
         "ranges" => "range[]",
@@ -610,9 +610,11 @@ fn argument_default(tool_name: &str, name: &str) -> Option<Value> {
         (_, "lines") => Some(json!(80)),
         (_, "snippet") => Some(json!("medium")),
         (_, "context_lines") => Some(json!(0)),
-        (_, "explain" | "require_all" | "git_metadata" | "tracked_files" | "nested_manifests") => {
-            Some(json!(false))
-        }
+        (
+            _,
+            "explain" | "require_all" | "refresh_if_stale" | "git_metadata" | "tracked_files"
+            | "nested_manifests",
+        ) => Some(json!(false)),
         _ => None,
     }
 }
@@ -644,6 +646,9 @@ fn argument_description(name: &str) -> &'static str {
         "explain" => "Include structured rank signals and indexed query plans.",
         "require_all" => "Require all normalized query tokens to appear in each result.",
         "context_lines" => "Attach this many bounded line-numbered context lines per result.",
+        "refresh_if_stale" => {
+            "When true, refresh a stale persistent index or shard directory before searching."
+        }
         "exclude_file" => "File basename substring or list of substrings to exclude.",
         "exclude_path" => "Path substring or list of substrings to exclude.",
         "exclude_language" => "Language or list of languages to exclude.",
@@ -779,7 +784,8 @@ impl ToolRuntime {
                 let query = string_arg(&request.arguments, "query")?;
                 let limit = usize_arg(&request.arguments, "limit").unwrap_or(10);
                 let context_lines = usize_arg(&request.arguments, "context_lines").unwrap_or(0);
-                let index = self.cached_index(index_path)?;
+                let refresh_if_stale = bool_arg(&request.arguments, "refresh_if_stale");
+                let index = self.cached_index_maybe_refresh(index_path, refresh_if_stale)?;
                 let mut results = index.search_filtered(
                     &query,
                     limit,
@@ -863,6 +869,9 @@ impl ToolRuntime {
                 let query = string_arg(&request.arguments, "query")?;
                 let limit = usize_arg(&request.arguments, "limit").unwrap_or(10);
                 let context_lines = usize_arg(&request.arguments, "context_lines").unwrap_or(0);
+                if bool_arg(&request.arguments, "refresh_if_stale") {
+                    self.refresh_shards_if_stale(&index_dir)?;
+                }
                 Ok(serde_json::to_value(self.search_shards_cached(
                     &index_dir,
                     &query,
@@ -1062,6 +1071,29 @@ impl ToolRuntime {
 
     fn cached_index(&self, index_path: PathBuf) -> Result<Arc<FastIndex>> {
         Ok(self.cached_index_with_key(index_path)?.1)
+    }
+
+    fn cached_index_maybe_refresh(
+        &self,
+        index_path: PathBuf,
+        refresh_if_stale: bool,
+    ) -> Result<Arc<FastIndex>> {
+        let index = self.cached_index(index_path.clone())?;
+        if !refresh_if_stale || !index.freshness()?.stale {
+            return Ok(index);
+        }
+        let root = index.root.clone();
+        drop(index);
+        self.refresh_index(root, index_path.clone())?;
+        self.cached_index(index_path)
+    }
+
+    fn refresh_shards_if_stale(&self, index_dir: &Path) -> Result<()> {
+        if !shard_status(index_dir)?.stale {
+            return Ok(());
+        }
+        refresh_shards(index_dir)?;
+        self.clear_runtime_caches()
     }
 
     fn replace_cached_index(&self, index_path: PathBuf, index: Arc<FastIndex>) -> Result<PathBuf> {
@@ -1757,6 +1789,7 @@ const SEARCH_INDEX_OPTIONAL_ARGS: &[&str] = &[
     "explain",
     "require_all",
     "context_lines",
+    "refresh_if_stale",
     "exclude_file",
     "exclude_path",
     "exclude_language",
@@ -1805,6 +1838,13 @@ fn string_arg(arguments: &Value, name: &str) -> Result<String> {
 
 fn path_arg(arguments: &Value, name: &str) -> Result<PathBuf> {
     Ok(PathBuf::from(string_arg(arguments, name)?))
+}
+
+fn bool_arg(arguments: &Value, name: &str) -> bool {
+    arguments
+        .get(name)
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
 }
 
 fn optional_path_array_arg(arguments: &Value, name: &str) -> Result<Vec<PathBuf>> {

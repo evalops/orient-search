@@ -123,6 +123,8 @@ enum Commands {
         filters: CommonSearchArgs,
         #[arg(long, default_value_t = 0)]
         context_lines: usize,
+        #[arg(long)]
+        refresh_if_stale: bool,
     },
     ShardPlan {
         #[arg(long)]
@@ -246,6 +248,8 @@ enum Commands {
         filters: CommonSearchArgs,
         #[arg(long, default_value_t = 0)]
         context_lines: usize,
+        #[arg(long)]
+        refresh_if_stale: bool,
     },
     ReadIndexRange {
         #[arg(long)]
@@ -603,7 +607,11 @@ fn main() -> Result<()> {
             repo,
             filters,
             context_lines,
+            refresh_if_stale,
         } => {
+            if refresh_if_stale && shard_status(&index_dir)?.stale {
+                refresh_shards(&index_dir)?;
+            }
             let filters = search_filters_from_args(&filters, repo)?;
             let mut results = search_shards(&index_dir, &query, limit, &filters)?;
             attach_result_context(&mut results, context_lines, |path, start, lines| {
@@ -784,8 +792,9 @@ fn main() -> Result<()> {
             repo_filter,
             filters,
             context_lines,
+            refresh_if_stale,
         } => {
-            let index = FastIndex::load(index)?;
+            let index = load_index_for_search(index, refresh_if_stale)?;
             let filters = search_filters_from_args(&filters, repo_filter)?;
             let mut results = index.search_filtered(&query, limit, &filters)?;
             attach_result_context(&mut results, context_lines, |path, start, lines| {
@@ -1133,6 +1142,15 @@ fn refresh_or_build_index(repo: PathBuf, index: PathBuf) -> Result<RefreshStats>
     let outcome = FastIndex::refresh(repo, previous.as_ref())?;
     outcome.index.save(&index)?;
     Ok(outcome.index.refresh_stats(&outcome))
+}
+
+fn load_index_for_search(index_path: PathBuf, refresh_if_stale: bool) -> Result<FastIndex> {
+    let index = FastIndex::load(&index_path)?;
+    if !refresh_if_stale || !index.freshness()?.stale {
+        return Ok(index);
+    }
+    refresh_or_build_index(index.root.clone(), index_path.clone())?;
+    FastIndex::load(index_path)
 }
 
 #[derive(Debug, Clone)]

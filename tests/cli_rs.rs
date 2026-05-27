@@ -996,6 +996,33 @@ fn cli_reports_index_and_shard_freshness() {
             "\"added_paths\":[\"src/new_session.rs\"]",
         ));
 
+    let mut stale_index_search = Command::cargo_bin("orient").unwrap();
+    stale_index_search
+        .args([
+            "indexed-search",
+            "--index",
+            index_path.to_str().unwrap(),
+            "new session",
+            "--require-all",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::is_match("^\\[\\]\\n?$").unwrap());
+
+    let mut refreshed_index_search = Command::cargo_bin("orient").unwrap();
+    refreshed_index_search
+        .args([
+            "indexed-search",
+            "--index",
+            index_path.to_str().unwrap(),
+            "new session",
+            "--require-all",
+            "--refresh-if-stale",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("src/new_session.rs"));
+
     let shard_dir = tempfile::tempdir().unwrap();
     let mut build_shards = Command::cargo_bin("orient").unwrap();
     build_shards
@@ -1024,6 +1051,33 @@ fn cli_reports_index_and_shard_freshness() {
         .success()
         .stdout(predicate::str::contains("\"stale\":true"))
         .stdout(predicate::str::contains("\"stale_shards\":1"))
+        .stdout(predicate::str::contains("src/after_shard.rs"));
+
+    let mut stale_shard_search = Command::cargo_bin("orient").unwrap();
+    stale_shard_search
+        .args([
+            "search-shards",
+            "--index-dir",
+            shard_dir.path().to_str().unwrap(),
+            "after shard",
+            "--require-all",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::is_match("^\\[\\]\\n?$").unwrap());
+
+    let mut refreshed_shard_search = Command::cargo_bin("orient").unwrap();
+    refreshed_shard_search
+        .args([
+            "search-shards",
+            "--index-dir",
+            shard_dir.path().to_str().unwrap(),
+            "after shard",
+            "--require-all",
+            "--refresh-if-stale",
+        ])
+        .assert()
+        .success()
         .stdout(predicate::str::contains("src/after_shard.rs"));
 }
 

@@ -76,6 +76,14 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         search["input_schema"]["properties"]["exclude_path"]["oneOf"][1]["items"]["type"],
         "string"
     );
+    let indexed_search = tools
+        .iter()
+        .find(|tool| tool["name"] == "indexed_search_code")
+        .unwrap();
+    assert_eq!(
+        indexed_search["input_schema"]["properties"]["refresh_if_stale"]["default"],
+        false
+    );
     assert_eq!(
         discover["input_schema"]["properties"]["limit"]["default"],
         500
@@ -760,6 +768,34 @@ fn runtime_ensures_shards_builds_refreshes_and_warms() {
     assert_eq!(status["stale"], serde_json::json!(true));
     assert_eq!(status["stale_shards"], serde_json::json!(1));
     assert_eq!(status["added_files"], serde_json::json!(1));
+
+    let stale_search = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("stale-shard-search"),
+        tool: "search_shards".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": root.path().join(".orient-shards"),
+            "query": "after_status_session"
+        }),
+    });
+    assert!(stale_search.error.is_none(), "{:?}", stale_search.error);
+    assert_eq!(stale_search.result.unwrap(), serde_json::json!([]));
+
+    let refreshed_search = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("fresh-shard-search"),
+        tool: "search_shards".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": root.path().join(".orient-shards"),
+            "query": "after_status_session",
+            "refresh_if_stale": true
+        }),
+    });
+    assert!(
+        refreshed_search.error.is_none(),
+        "{:?}",
+        refreshed_search.error
+    );
+    let result = serde_json::to_string(&refreshed_search.result).unwrap();
+    assert!(result.contains("platform/src/after_status.rs"), "{result}");
 }
 
 #[test]
@@ -1075,6 +1111,57 @@ fn runtime_reports_index_status_for_cached_indexes() {
         result["added_paths"],
         serde_json::json!(["src/new_session.rs"])
     );
+}
+
+#[test]
+fn runtime_can_refresh_stale_index_before_search() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/auth.rs"),
+        "pub struct SessionManager;\npub fn issue_token() {}\n",
+    );
+    let index_path = repo.path().join(".orient/index");
+    FastIndex::build(repo.path())
+        .unwrap()
+        .save(&index_path)
+        .unwrap();
+    write(
+        &repo.path().join("src/new_session.rs"),
+        "pub fn new_session_token() {}\n",
+    );
+    let runtime = ToolRuntime::default();
+
+    let stale_search = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("stale"),
+        tool: "indexed_search_code".to_string(),
+        arguments: serde_json::json!({
+            "index": index_path,
+            "query": "new session token",
+            "limit": 3,
+            "require_all": true
+        }),
+    });
+    assert!(stale_search.error.is_none(), "{:?}", stale_search.error);
+    assert_eq!(stale_search.result.unwrap(), serde_json::json!([]));
+
+    let refreshed_search = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("fresh"),
+        tool: "indexed_search_code".to_string(),
+        arguments: serde_json::json!({
+            "index": index_path,
+            "query": "new session token",
+            "limit": 3,
+            "require_all": true,
+            "refresh_if_stale": true
+        }),
+    });
+    assert!(
+        refreshed_search.error.is_none(),
+        "{:?}",
+        refreshed_search.error
+    );
+    let result = serde_json::to_string(&refreshed_search.result).unwrap();
+    assert!(result.contains("src/new_session.rs"), "{result}");
 }
 
 #[test]
