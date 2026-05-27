@@ -3,6 +3,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::net::TcpStream;
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::sync::Arc;
 use std::thread;
 
 use orient::fast_index::FastIndex;
@@ -471,6 +472,61 @@ fn runtime_reuses_cached_index_after_initial_load() {
         status.result.unwrap()["cached_indexes"],
         serde_json::json!(1)
     );
+}
+
+#[test]
+fn runtime_coalesces_parallel_cold_index_requests() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/auth.rs"),
+        "pub struct SessionManager;\npub fn issue_token() {}\npub fn rotate_secret() {}\n",
+    );
+    write(
+        &repo.path().join("Cargo.toml"),
+        "[package]\nname='sample'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    let index_path = repo.path().join(".orient/index");
+    FastIndex::build(repo.path())
+        .unwrap()
+        .save(&index_path)
+        .unwrap();
+
+    let runtime = Arc::new(ToolRuntime::default());
+    let mut handles = Vec::new();
+    for index in 0..12 {
+        let runtime = Arc::clone(&runtime);
+        let index_path = index_path.clone();
+        handles.push(thread::spawn(move || {
+            let query = if index % 2 == 0 {
+                "issue token"
+            } else {
+                "rotate secret"
+            };
+            runtime.dispatch(ToolRequest {
+                id: serde_json::json!(index),
+                tool: "indexed_search_code".to_string(),
+                arguments: serde_json::json!({
+                    "index": index_path,
+                    "query": query,
+                    "limit": 3,
+                    "require_all": true
+                }),
+            })
+        }));
+    }
+
+    for handle in handles {
+        let response = handle.join().unwrap();
+        assert!(response.error.is_none(), "{:?}", response.error);
+        assert!(
+            serde_json::to_string(&response.result)
+                .unwrap()
+                .contains("src/auth.rs"),
+            "{:?}",
+            response.result
+        );
+    }
+    assert_eq!(runtime.cached_index_count(), 1);
 }
 
 #[test]

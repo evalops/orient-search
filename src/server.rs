@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::io::{BufRead, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 
 #[derive(Debug, Deserialize)]
@@ -91,26 +91,39 @@ pub fn dispatch(request: ToolRequest) -> ToolResponse {
 
 #[derive(Default)]
 pub struct ToolRuntime {
-    indexes: Mutex<HashMap<PathBuf, Arc<FastIndex>>>,
+    indexes: Mutex<HashMap<PathBuf, Arc<IndexCacheEntry>>>,
+}
+
+struct IndexCacheEntry {
+    state: Mutex<IndexCacheState>,
+    ready: Condvar,
+}
+
+enum IndexCacheState {
+    Loading,
+    Ready(Arc<FastIndex>),
+    Failed(String),
+}
+
+impl IndexCacheEntry {
+    fn loading() -> Self {
+        Self {
+            state: Mutex::new(IndexCacheState::Loading),
+            ready: Condvar::new(),
+        }
+    }
+
+    fn is_ready(&self) -> bool {
+        self.state
+            .lock()
+            .map(|state| matches!(*state, IndexCacheState::Ready(_)))
+            .unwrap_or(false)
+    }
 }
 
 impl ToolRuntime {
     pub fn warm_index(&self, index_path: PathBuf) -> Result<PathBuf> {
-        let key = canonical_cache_key(&index_path);
-        if self
-            .indexes
-            .lock()
-            .map_err(|_| anyhow!("index cache lock poisoned"))?
-            .contains_key(&key)
-        {
-            return Ok(key);
-        }
-        let index = Arc::new(FastIndex::load(&index_path)?);
-        self.indexes
-            .lock()
-            .map_err(|_| anyhow!("index cache lock poisoned"))?
-            .entry(key.clone())
-            .or_insert(index);
+        let (key, _) = self.cached_index_with_key(index_path)?;
         Ok(key)
     }
 
@@ -127,7 +140,7 @@ impl ToolRuntime {
     pub fn cached_index_count(&self) -> usize {
         self.indexes
             .lock()
-            .map(|indexes| indexes.len())
+            .map(|indexes| indexes.values().filter(|entry| entry.is_ready()).count())
             .unwrap_or(0)
     }
 
@@ -859,13 +872,78 @@ impl ToolRuntime {
     }
 
     fn cached_index(&self, index_path: PathBuf) -> Result<Arc<FastIndex>> {
-        let key = self.warm_index(index_path)?;
-        self.indexes
+        Ok(self.cached_index_with_key(index_path)?.1)
+    }
+
+    fn cached_index_with_key(&self, index_path: PathBuf) -> Result<(PathBuf, Arc<FastIndex>)> {
+        let key = canonical_cache_key(&index_path);
+        let (entry, should_load) = {
+            let mut indexes = self
+                .indexes
+                .lock()
+                .map_err(|_| anyhow!("index cache lock poisoned"))?;
+            if let Some(entry) = indexes.get(&key) {
+                (Arc::clone(entry), false)
+            } else {
+                let entry = Arc::new(IndexCacheEntry::loading());
+                indexes.insert(key.clone(), Arc::clone(&entry));
+                (entry, true)
+            }
+        };
+
+        if should_load {
+            let loaded = FastIndex::load(&index_path).map(Arc::new);
+            let result = match loaded {
+                Ok(index) => {
+                    *entry
+                        .state
+                        .lock()
+                        .map_err(|_| anyhow!("index cache entry lock poisoned"))? =
+                        IndexCacheState::Ready(Arc::clone(&index));
+                    Ok((key.clone(), index))
+                }
+                Err(error) => {
+                    let message = error.to_string();
+                    *entry
+                        .state
+                        .lock()
+                        .map_err(|_| anyhow!("index cache entry lock poisoned"))? =
+                        IndexCacheState::Failed(message.clone());
+                    Err(anyhow!(message))
+                }
+            };
+            entry.ready.notify_all();
+            if result.is_err() {
+                let mut indexes = self
+                    .indexes
+                    .lock()
+                    .map_err(|_| anyhow!("index cache lock poisoned"))?;
+                if indexes
+                    .get(&key)
+                    .is_some_and(|cached| Arc::ptr_eq(cached, &entry))
+                {
+                    indexes.remove(&key);
+                }
+            }
+            return result;
+        }
+
+        let mut state = entry
+            .state
             .lock()
-            .map_err(|_| anyhow!("index cache lock poisoned"))?
-            .get(&key)
-            .cloned()
-            .ok_or_else(|| anyhow!("cached index missing after warm: {}", key.display()))
+            .map_err(|_| anyhow!("index cache entry lock poisoned"))?;
+        loop {
+            match &*state {
+                IndexCacheState::Ready(index) => return Ok((key, Arc::clone(index))),
+                IndexCacheState::Failed(message) => return Err(anyhow!(message.clone())),
+                IndexCacheState::Loading => {
+                    state = entry
+                        .ready
+                        .wait(state)
+                        .map_err(|_| anyhow!("index cache entry lock poisoned"))?;
+                }
+            }
+        }
     }
 
     fn cached_index_paths(&self) -> Vec<String> {
@@ -874,8 +952,10 @@ impl ToolRuntime {
             .lock()
             .map(|indexes| {
                 indexes
-                    .keys()
-                    .map(|path| path.to_string_lossy().to_string())
+                    .iter()
+                    .filter_map(|(path, entry)| {
+                        entry.is_ready().then(|| path.to_string_lossy().to_string())
+                    })
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
