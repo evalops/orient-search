@@ -1,0 +1,27 @@
+[package]
+name = "agent-orientation-layer"
+version = "0.1.0"
+edition = "2024"
+description = "Local repo and session orientation layer for coding agents"
+license = "MIT"
+
+[lib]
+name = "orient"
+path = "src-rs/lib.rs"
+
+[[bin]]
+name = "orient"
+path = "src-rs/main.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+ignore = "0.4"
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+assert_cmd = "2"
+predicates = "3"
+tempfile = "3"
