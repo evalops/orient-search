@@ -62,7 +62,7 @@ Search results include:
 - `context`: optional attached file context when `context_lines` is set.
 - `explanation` and `query_plan` when `explain` is set.
 
-Search result counts are capped by the manifest `limit.maximum` so broad queries stay bounded even when callers request more.
+Search result counts are capped by the manifest `limit.maximum`, and batch query arrays by `queries.maxItems`, so broad requests stay bounded even when callers ask for more.
 
 ## Read Next
 
@@ -86,7 +86,7 @@ target/release/orient read-index-ranges --index /tmp/orient.index --range src/au
 target/release/orient read-shard-ranges --index-dir /tmp/orient-shards --range platform/src/auth.rs:40:80
 ```
 
-Range reads are capped by the manifest `lines.maximum` so a mistaken large request cannot dump an unbounded file.
+Range reads are capped by the manifest `lines.maximum`, and batch range arrays by `ranges.maxItems`, so a mistaken large request cannot dump unbounded file content.
 
 ## Orientation And Repair
 

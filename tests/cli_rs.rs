@@ -3,6 +3,7 @@ use std::path::Path;
 use std::process::Command as ProcessCommand;
 
 use assert_cmd::Command;
+use orient::server::{MAX_BATCH_QUERIES, MAX_BATCH_RANGES};
 use predicates::prelude::*;
 
 fn write(path: &Path, text: &str) {
@@ -87,7 +88,35 @@ fn cli_outputs_tool_manifest() {
         .stdout(predicate::str::contains("\"default\":10"))
         .stdout(predicate::str::contains("\"maximum\":100"))
         .stdout(predicate::str::contains("\"maximum\":1000"))
+        .stdout(predicate::str::contains("\"maxItems\":32"))
+        .stdout(predicate::str::contains("\"maxItems\":64"))
         .stdout(predicate::str::contains("\"type\":\"range[]\""));
+}
+
+#[test]
+fn cli_rejects_oversized_batches() {
+    let repo = sample_repo();
+    let mut cmd = Command::cargo_bin("orient").unwrap();
+    let mut args = vec!["search-batch", "--repo", repo.path().to_str().unwrap()];
+    let queries = (0..=MAX_BATCH_QUERIES)
+        .map(|index| format!("query_{index}"))
+        .collect::<Vec<_>>();
+    args.extend(queries.iter().map(String::as_str));
+    cmd.args(args)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("max 32"));
+
+    let mut cmd = Command::cargo_bin("orient").unwrap();
+    let mut args = vec!["read-ranges", "--repo", repo.path().to_str().unwrap()];
+    let paths = (0..=MAX_BATCH_RANGES)
+        .map(|_| "src/auth.rs".to_string())
+        .collect::<Vec<_>>();
+    args.extend(paths.iter().map(String::as_str));
+    cmd.args(args)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("max 64"));
 }
 
 #[test]

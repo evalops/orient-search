@@ -23,6 +23,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 
+pub const MAX_BATCH_QUERIES: usize = 32;
+pub const MAX_BATCH_RANGES: usize = 64;
+
 #[derive(Debug, Deserialize)]
 pub struct ToolRequest {
     pub id: Value,
@@ -562,6 +565,9 @@ fn argument_metadata_entry(tool_name: &str, name: &str, required: bool) -> Value
     if let Some(maximum) = argument_maximum(tool_name, name) {
         entry.insert("maximum".to_string(), json!(maximum));
     }
+    if let Some(max_items) = argument_max_items(name) {
+        entry.insert("max_items".to_string(), json!(max_items));
+    }
     if let Some(values) = argument_enum(name) {
         entry.insert("enum".to_string(), json!(values));
     }
@@ -599,6 +605,7 @@ fn argument_schema(tool_name: &str, name: &str) -> Value {
         }
         "ranges" => {
             schema.insert("type".to_string(), json!("array"));
+            schema.insert("maxItems".to_string(), json!(MAX_BATCH_RANGES));
             schema.insert(
                 "items".to_string(),
                 json!({
@@ -612,7 +619,12 @@ fn argument_schema(tool_name: &str, name: &str) -> Value {
                 }),
             );
         }
-        "repos" | "discover_roots" | "queries" => {
+        "queries" => {
+            schema.insert("type".to_string(), json!("array"));
+            schema.insert("maxItems".to_string(), json!(MAX_BATCH_QUERIES));
+            schema.insert("items".to_string(), json!({"type": "string"}));
+        }
+        "repos" | "discover_roots" => {
             schema.insert("type".to_string(), json!("array"));
             schema.insert("items".to_string(), json!({"type": "string"}));
         }
@@ -759,6 +771,14 @@ fn argument_maximum(tool_name: &str, name: &str) -> Option<usize> {
         "lines" => Some(MAX_READ_RANGE_LINES),
         "context_lines" => Some(MAX_ATTACHED_CONTEXT_LINES),
         "limit" if tool_has_result_limit(tool_name) => Some(MAX_SEARCH_RESULTS),
+        _ => None,
+    }
+}
+
+fn argument_max_items(name: &str) -> Option<usize> {
+    match name {
+        "queries" => Some(MAX_BATCH_QUERIES),
+        "ranges" => Some(MAX_BATCH_RANGES),
         _ => None,
     }
 }
@@ -2165,6 +2185,13 @@ fn string_array_arg(arguments: &Value, name: &str) -> Result<Vec<String>> {
     let values = value
         .as_array()
         .ok_or_else(|| anyhow!("argument {name} must be an array of strings"))?;
+    if values.len() > MAX_BATCH_QUERIES {
+        return Err(anyhow!(
+            "argument {name} has {} items, max {}",
+            values.len(),
+            MAX_BATCH_QUERIES
+        ));
+    }
     values
         .iter()
         .map(|value| {
@@ -2205,6 +2232,13 @@ fn range_args(arguments: &Value) -> Result<Vec<RangeArg>> {
         .get("ranges")
         .and_then(Value::as_array)
         .ok_or_else(|| anyhow!("missing ranges array argument"))?;
+    if values.len() > MAX_BATCH_RANGES {
+        return Err(anyhow!(
+            "argument ranges has {} items, max {}",
+            values.len(),
+            MAX_BATCH_RANGES
+        ));
+    }
     let mut ranges = Vec::with_capacity(values.len());
     for value in values {
         let path = value

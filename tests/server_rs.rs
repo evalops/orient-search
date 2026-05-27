@@ -8,7 +8,9 @@ use std::thread;
 
 use orient::fast_index::FastIndex;
 use orient::repo_index::{MAX_ATTACHED_CONTEXT_LINES, MAX_READ_RANGE_LINES, MAX_SEARCH_RESULTS};
-use orient::server::{ToolRequest, ToolRuntime, tool_manifest};
+use orient::server::{
+    MAX_BATCH_QUERIES, MAX_BATCH_RANGES, ToolRequest, ToolRuntime, tool_manifest,
+};
 
 fn write(path: &Path, text: &str) {
     fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -136,6 +138,14 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         "string"
     );
     assert_eq!(
+        search_batch["input_schema"]["properties"]["queries"]["maxItems"],
+        serde_json::json!(MAX_BATCH_QUERIES)
+    );
+    assert_eq!(
+        search_batch["arguments"][1]["max_items"],
+        serde_json::json!(MAX_BATCH_QUERIES)
+    );
+    assert_eq!(
         indexed_plan_batch["required"],
         serde_json::json!(["index", "queries"])
     );
@@ -202,7 +212,15 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         read_ranges["input_schema"]["properties"]["ranges"]["items"]["properties"]["lines"]["maximum"],
         serde_json::json!(MAX_READ_RANGE_LINES)
     );
+    assert_eq!(
+        read_ranges["input_schema"]["properties"]["ranges"]["maxItems"],
+        serde_json::json!(MAX_BATCH_RANGES)
+    );
     assert_eq!(read_ranges["arguments"][1]["type"], "range[]");
+    assert_eq!(
+        read_ranges["arguments"][1]["max_items"],
+        serde_json::json!(MAX_BATCH_RANGES)
+    );
     assert_eq!(
         search["input_schema"]["properties"]["context_lines"]["maximum"],
         serde_json::json!(MAX_ATTACHED_CONTEXT_LINES)
@@ -286,6 +304,50 @@ fn server_reports_tool_manifest_for_agent_wrappers() {
     assert!(stdout.contains("shard_status"));
     assert!(stdout.contains("search_shards_batch"));
     assert!(stdout.contains("discover_repos"));
+}
+
+#[test]
+fn runtime_rejects_oversized_batches() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/auth.rs"),
+        "pub struct SessionManager;\npub fn issue_token() {}\n",
+    );
+    let runtime = ToolRuntime::default();
+    let too_many_queries = (0..=MAX_BATCH_QUERIES)
+        .map(|index| format!("query_{index}"))
+        .collect::<Vec<_>>();
+
+    let response = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("too-many-queries"),
+        tool: "search_batch".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "queries": too_many_queries
+        }),
+    });
+    let error = response.error.unwrap();
+    assert!(error.contains("max 32"), "{error}");
+
+    let too_many_ranges = (0..=MAX_BATCH_RANGES)
+        .map(|_| {
+            serde_json::json!({
+                "path": "src/auth.rs",
+                "start": 1,
+                "lines": 1
+            })
+        })
+        .collect::<Vec<_>>();
+    let response = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("too-many-ranges"),
+        tool: "read_ranges".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "ranges": too_many_ranges
+        }),
+    });
+    let error = response.error.unwrap();
+    assert!(error.contains("max 64"), "{error}");
 }
 
 #[test]

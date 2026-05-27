@@ -8,7 +8,9 @@ use orient::repo_index::{
     QueryPlan, RepoIndexer, SearchFilters, SearchResult, SnippetMode, attach_result_context,
     read_file_range, search_repo_fast_filtered,
 };
-use orient::server::{ToolRuntime, serve_jsonl, serve_tcp, tool_manifest};
+use orient::server::{
+    MAX_BATCH_QUERIES, MAX_BATCH_RANGES, ToolRuntime, serve_jsonl, serve_tcp, tool_manifest,
+};
 use orient::shards::{
     ShardQueryPlan, build_shards, ensure_shards, find_shard_symbol, read_shard_range,
     refresh_shards, related_shard_files, related_shard_symbols, search_shards, shard_query_plans,
@@ -720,6 +722,7 @@ fn main() -> Result<()> {
             context_lines,
             refresh_if_stale,
         } => {
+            let queries = cli_batch_queries(queries)?;
             if refresh_if_stale && shard_status(&index_dir)?.stale {
                 refresh_shards(&index_dir)?;
             }
@@ -760,6 +763,7 @@ fn main() -> Result<()> {
             filters,
             refresh_if_stale,
         } => {
+            let queries = cli_batch_queries(queries)?;
             if refresh_if_stale && shard_status(&index_dir)?.stale {
                 refresh_shards(&index_dir)?;
             }
@@ -886,6 +890,7 @@ fn main() -> Result<()> {
             filters,
             refresh_if_stale,
         } => {
+            let queries = cli_batch_queries(queries)?;
             let index = load_index_for_search(index, refresh_if_stale)?;
             let filters = search_filters_from_args(&filters, repo_filter)?;
             let mut batch = Vec::new();
@@ -947,6 +952,7 @@ fn main() -> Result<()> {
             filters,
             context_lines,
         } => {
+            let queries = cli_batch_queries(queries)?;
             let filters = search_filters_from_args(&filters, repo_filter)?;
             let mut batch = Vec::new();
             for query in queries {
@@ -984,6 +990,7 @@ fn main() -> Result<()> {
             context_lines,
             refresh_if_stale,
         } => {
+            let queries = cli_batch_queries(queries)?;
             let index = load_index_for_search(index, refresh_if_stale)?;
             let filters = search_filters_from_args(&filters, repo_filter)?;
             let mut batch = Vec::new();
@@ -1395,7 +1402,25 @@ fn cli_ranges(
     if ranges.is_empty() {
         bail!("provide at least one path or --range PATH:START:LINES");
     }
+    if ranges.len() > MAX_BATCH_RANGES {
+        bail!(
+            "ranges has {} items, max {}",
+            ranges.len(),
+            MAX_BATCH_RANGES
+        );
+    }
     Ok(ranges)
+}
+
+fn cli_batch_queries(queries: Vec<String>) -> Result<Vec<String>> {
+    if queries.len() > MAX_BATCH_QUERIES {
+        bail!(
+            "queries has {} items, max {}",
+            queries.len(),
+            MAX_BATCH_QUERIES
+        );
+    }
+    Ok(queries)
 }
 
 fn shard_bootstrap_output<T: Serialize>(
