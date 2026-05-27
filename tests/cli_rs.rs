@@ -588,6 +588,24 @@ fn cli_filters_shard_search_by_nested_repo_alias() {
             "{workspace_name}/billing/Cargo.toml"
         )))
         .stdout(predicate::str::contains("auth/src/auth.rs").not());
+
+    let mut read = Command::cargo_bin("orient").unwrap();
+    read.args([
+        "read-shard-range",
+        "--index-dir",
+        shard_dir.path().to_str().unwrap(),
+        "billing/src/billing.rs",
+        "--start",
+        "1",
+        "--lines",
+        "1",
+    ])
+    .assert()
+    .success()
+    .stdout(predicate::str::contains(
+        "\"path\":\"billing/src/billing.rs\"",
+    ))
+    .stdout(predicate::str::contains("invoice_total"));
 }
 
 #[test]

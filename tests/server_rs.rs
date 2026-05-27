@@ -332,6 +332,24 @@ fn runtime_filters_shard_search_by_nested_repo_alias() {
     assert!(result.contains("billing/Cargo.toml"), "{result}");
     assert!(result.contains("cargo test"), "{result}");
     assert!(!result.contains("auth/src/auth.rs"), "{result}");
+
+    let range = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("range"),
+        tool: "read_shard_range".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": shard_dir.path(),
+            "path": "billing/src/billing.rs",
+            "start": 1,
+            "lines": 1
+        }),
+    });
+    assert!(range.error.is_none(), "{:?}", range.error);
+    let result = serde_json::to_string(&range.result).unwrap();
+    assert!(
+        result.contains("\"path\":\"billing/src/billing.rs\""),
+        "{result}"
+    );
+    assert!(result.contains("invoice_total"), "{result}");
 }
 
 #[test]

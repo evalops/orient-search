@@ -53,6 +53,7 @@ cargo run -- search-shards --index-dir /tmp/orient-shards "repo:repo-a session t
 cargo run -- search-shards --index-dir /tmp/orient-shards "repo:maestro app server"
 cargo run -- shard-symbol --index-dir /tmp/orient-shards --repo repo-a SessionManager
 cargo run -- read-shard-range --index-dir /tmp/orient-shards repo-a/src/auth.rs --start 40 --lines 80
+cargo run -- read-shard-range --index-dir /tmp/orient-shards maestro/src/app.rs --start 40 --lines 80
 
 # Find a symbol.
 cargo run -- symbol --repo /path/to/repo SessionManager
@@ -148,7 +149,7 @@ Supported tools:
 `tool_manifest` returns the same tool list with descriptions plus required and optional argument names, so a wrapper can bootstrap the JSON-lines surface without scraping this README.
 `daemon_status` reports local warm-cache counts for the current daemon process; it does not inspect Codex/Claude sessions or emit telemetry.
 Use `warm_index` or `warm_shards`, or pass `--index` / `--index-dir` to `serve-tcp`, to load persistent indexes before the first agent query.
-For indexed or shard JSON search arguments, use `repo` or `repo_filter` to restrict by repository name. Shard search also records aliases for immediate child directories that look like repos, so a shard rooted at a dated worktree can still answer filters like `repo:maestro` or `repo:platform`. For `search_code`, `repo` is the repository root path, so use `repo_filter` for name filtering.
+For indexed or shard JSON search arguments, use `repo` or `repo_filter` to restrict by repository name. Shard search also records aliases for immediate child directories that look like repos, so a shard rooted at a dated worktree can still answer filters like `repo:maestro` or `repo:platform`; `read-shard-range` accepts those alias-prefixed paths too. For `search_code`, `repo` is the repository root path, so use `repo_filter` for name filtering.
 
 ## Query Language
 

@@ -295,17 +295,52 @@ pub fn read_shard_range(
     lines: usize,
 ) -> Result<FileRange> {
     let manifest = load_manifest(index_dir.as_ref())?;
-    let (shard_name, relative_path) = shard_path
+    let (prefix, relative_path) = shard_path
         .split_once('/')
         .ok_or_else(|| anyhow::anyhow!("shard path must be '<repo>/<path>'"))?;
-    let shard = manifest
-        .shards
-        .iter()
-        .find(|shard| shard.name == shard_name)
-        .ok_or_else(|| anyhow::anyhow!("unknown shard: {shard_name}"))?;
-    let mut range = read_file_range(&shard.root, relative_path, start, lines)?;
-    range.path = format!("{}/{}", shard.name, range.path);
+    let resolved = resolve_shard_read_path(&manifest, prefix, relative_path)
+        .ok_or_else(|| anyhow::anyhow!("unknown shard or alias: {prefix}"))?;
+    let mut range = read_file_range(&resolved.root, &resolved.relative_path, start, lines)?;
+    range.path = format!("{}/{}", resolved.output_prefix, relative_path);
     Ok(range)
+}
+
+struct ResolvedShardRead {
+    root: PathBuf,
+    relative_path: String,
+    output_prefix: String,
+}
+
+fn resolve_shard_read_path(
+    manifest: &ShardManifest,
+    prefix: &str,
+    relative_path: &str,
+) -> Option<ResolvedShardRead> {
+    if let Some(shard) = manifest.shards.iter().find(|shard| shard.name == prefix) {
+        return Some(ResolvedShardRead {
+            root: shard.root.clone(),
+            relative_path: relative_path.to_string(),
+            output_prefix: shard.name.clone(),
+        });
+    }
+
+    for shard in &manifest.shards {
+        let Some(alias) = shard.aliases.iter().find(|alias| alias.name == prefix) else {
+            continue;
+        };
+        let relative_path = alias
+            .path_prefix
+            .as_ref()
+            .map(|path_prefix| format!("{}{}", path_prefix, relative_path))
+            .unwrap_or_else(|| relative_path.to_string());
+        return Some(ResolvedShardRead {
+            root: shard.root.clone(),
+            relative_path,
+            output_prefix: alias.name.clone(),
+        });
+    }
+
+    None
 }
 
 fn symbol_match_score(symbol: &Symbol, name: &str, needle: &str) -> u8 {

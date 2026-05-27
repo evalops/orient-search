@@ -51,6 +51,7 @@ Implemented now:
 - Repo-map orientation from persistent indexes and shard directories, so agents can inspect entrypoints, manifests, tests, symbols, important files, and command hints without rebuilding a separate live repo index.
 - Shard manifests record aliases for nested repo-looking child directories, so broad dated worktree shards can still answer stable filters like `repo:maestro` and scope results to the matching child path.
 - Shard refresh recomputes nested repo aliases, so newly added child repos become filterable after `refresh-shards`.
+- `read-shard-range` resolves alias-prefixed paths, so agents can read `maestro/src/foo.rs` even when `maestro` lives inside a broader dated worktree shard.
 
 Measured on this machine:
 
