@@ -46,6 +46,7 @@ fn server_reports_tool_manifest_for_agent_wrappers() {
     assert!(stdout.contains("related_index_files"));
     assert!(stdout.contains("related_index_symbols"));
     assert!(stdout.contains("read_shard_range"));
+    assert!(stdout.contains("find_shard_symbol"));
 }
 
 #[test]
@@ -271,8 +272,19 @@ fn server_handles_shard_index_search_and_read_requests() {
             "lines": 1
         }
     });
+    let symbol_request = serde_json::json!({
+        "id": "find-shard-symbol",
+        "tool": "find_shard_symbol",
+        "arguments": {
+            "index_dir": parent.path().join(".orient-shards"),
+            "name": "invoice total",
+            "repo": "billing",
+            "limit": 5
+        }
+    });
     writeln!(child.stdin.as_mut().unwrap(), "{index_request}").unwrap();
     writeln!(child.stdin.as_mut().unwrap(), "{search_request}").unwrap();
+    writeln!(child.stdin.as_mut().unwrap(), "{symbol_request}").unwrap();
     writeln!(child.stdin.as_mut().unwrap(), "{read_request}").unwrap();
     drop(child.stdin.take());
 
@@ -285,6 +297,9 @@ fn server_handles_shard_index_search_and_read_requests() {
     assert!(stdout.contains("billing/src/billing.rs"));
     assert!(stdout.contains("shard:billing"));
     assert!(!stdout.contains("auth/src/auth.rs"));
+    assert!(stdout.contains("\"id\":\"find-shard-symbol\""));
+    assert!(stdout.contains("\"path\":\"billing/src/billing.rs\""));
+    assert!(stdout.contains("\"name\":\"invoice_total\""));
     assert!(stdout.contains("\"id\":\"read-shard-range\""));
     assert!(stdout.contains("\"path\":\"billing/src/billing.rs\""));
     assert!(stdout.contains("invoice_total"));

@@ -3,7 +3,8 @@
 use crate::fast_index::{FastIndex, IndexStats};
 use crate::query::{merge_filters, parse_query};
 use crate::repo_index::{
-    FileRange, SearchFilters, SearchResult, finalize_results, read_file_range, repo_matches,
+    FileRange, SearchFilters, SearchResult, Symbol, finalize_results, normalize_token,
+    read_file_range, repo_matches,
 };
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -165,6 +166,43 @@ pub fn search_shards(
     Ok(finalize_results(results, limit))
 }
 
+pub fn find_shard_symbol(
+    index_dir: impl AsRef<Path>,
+    name: &str,
+    limit: usize,
+    filters: &SearchFilters,
+) -> Result<Vec<Symbol>> {
+    let needle = normalize_token(name);
+    if needle.is_empty() || limit == 0 {
+        return Ok(Vec::new());
+    }
+
+    let index_dir = index_dir.as_ref();
+    let manifest = load_manifest(index_dir)?;
+    let mut symbols = Vec::new();
+    for shard in manifest.shards {
+        if !repo_matches(&shard.root, filters) {
+            continue;
+        }
+        let index = FastIndex::load(index_dir.join(&shard.index))
+            .with_context(|| format!("load shard {}", shard.index))?;
+        for mut symbol in index.find_symbol(name, limit) {
+            symbol.path = format!("{}/{}", shard.name, symbol.path);
+            symbols.push(symbol);
+        }
+    }
+
+    symbols.sort_by(|a, b| {
+        symbol_match_score(b, name, &needle)
+            .cmp(&symbol_match_score(a, name, &needle))
+            .then_with(|| a.path.cmp(&b.path))
+            .then_with(|| a.line.cmp(&b.line))
+            .then_with(|| a.name.cmp(&b.name))
+    });
+    symbols.truncate(limit);
+    Ok(symbols)
+}
+
 pub fn read_shard_range(
     index_dir: impl AsRef<Path>,
     shard_path: &str,
@@ -183,6 +221,19 @@ pub fn read_shard_range(
     let mut range = read_file_range(&shard.root, relative_path, start, lines)?;
     range.path = format!("{}/{}", shard.name, range.path);
     Ok(range)
+}
+
+fn symbol_match_score(symbol: &Symbol, name: &str, needle: &str) -> u8 {
+    let normalized = normalize_token(&symbol.name);
+    if symbol.name == name {
+        100
+    } else if normalized == needle {
+        90
+    } else if normalized.contains(needle) {
+        60
+    } else {
+        0
+    }
 }
 
 fn load_manifest(index_dir: &Path) -> Result<ShardManifest> {

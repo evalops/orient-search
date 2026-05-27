@@ -2,7 +2,9 @@ use crate::fast_index::FastIndex;
 use crate::repo_index::{
     RepoIndexer, SearchFilters, SnippetMode, read_file_range, search_repo_fast_filtered,
 };
-use crate::shards::{build_shards, read_shard_range, refresh_shards, search_shards};
+use crate::shards::{
+    build_shards, find_shard_symbol, read_shard_range, refresh_shards, search_shards,
+};
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -136,6 +138,12 @@ pub fn tool_manifest() -> Value {
             "optional": ["start", "lines"]
         },
         {
+            "name": "find_shard_symbol",
+            "description": "Find symbol definitions across a local multi-repo shard directory.",
+            "required": ["index_dir", "name"],
+            "optional": ["limit", "repo", "repo_filter"]
+        },
+        {
             "name": "find_symbol",
             "description": "Find symbol definitions in a local repository.",
             "required": ["repo", "name"],
@@ -260,6 +268,17 @@ fn dispatch_result(request: &ToolRequest) -> Result<Value> {
                 index_dir, &path, start, lines,
             )?)?)
         }
+        "find_shard_symbol" => {
+            let index_dir = path_arg(&request.arguments, "index_dir")?;
+            let name = string_arg(&request.arguments, "name")?;
+            let limit = usize_arg(&request.arguments, "limit").unwrap_or(10);
+            Ok(serde_json::to_value(find_shard_symbol(
+                index_dir,
+                &name,
+                limit,
+                &search_filters(&request.arguments, true),
+            )?)?)
+        }
         "find_symbol" => {
             let repo = path_arg(&request.arguments, "repo")?;
             let name = string_arg(&request.arguments, "name")?;
@@ -328,6 +347,7 @@ fn dispatch_result(request: &ToolRequest) -> Result<Value> {
             "refresh_shards",
             "search_shards",
             "read_shard_range",
+            "find_shard_symbol",
             "find_symbol",
             "find_index_symbol",
             "related_files",

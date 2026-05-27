@@ -5,7 +5,9 @@ use orient::repo_index::{
     RepoIndexer, SearchFilters, SnippetMode, read_file_range, search_repo_fast_filtered,
 };
 use orient::server::{serve_jsonl, tool_manifest};
-use orient::shards::{build_shards, read_shard_range, refresh_shards, search_shards};
+use orient::shards::{
+    build_shards, find_shard_symbol, read_shard_range, refresh_shards, search_shards,
+};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io;
@@ -73,6 +75,15 @@ enum Commands {
         start: usize,
         #[arg(long, default_value_t = 80)]
         lines: usize,
+    },
+    ShardSymbol {
+        #[arg(long)]
+        index_dir: PathBuf,
+        name: String,
+        #[arg(long, default_value_t = 10)]
+        limit: usize,
+        #[arg(long = "repo")]
+        repo: Option<String>,
     },
     Brief {
         #[arg(long, default_value = ".")]
@@ -319,6 +330,25 @@ fn main() -> Result<()> {
             println!(
                 "{}",
                 serde_json::to_string(&read_shard_range(index_dir, &path, start, lines)?)?
+            );
+        }
+        Commands::ShardSymbol {
+            index_dir,
+            name,
+            limit,
+            repo,
+        } => {
+            println!(
+                "{}",
+                serde_json::to_string(&find_shard_symbol(
+                    index_dir,
+                    &name,
+                    limit,
+                    &SearchFilters {
+                        repo,
+                        ..SearchFilters::default()
+                    },
+                )?)?
             );
         }
         Commands::Brief { repo } => {
