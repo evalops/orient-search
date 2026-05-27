@@ -799,6 +799,7 @@ impl FastIndex {
             reason: format!("indexed match {}", reasons.join(", ")),
             snippet,
             explanation: explain.then_some(signals),
+            duplicate_group: None,
         })
     }
 }

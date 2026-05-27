@@ -43,6 +43,8 @@ pub struct SearchResult {
     pub snippet: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub explanation: Option<Vec<RankSignal>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duplicate_group: Option<DuplicateGroup>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -50,6 +52,13 @@ pub struct RankSignal {
     pub kind: String,
     pub value: String,
     pub score: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DuplicateGroup {
+    pub canonical_path: String,
+    pub duplicate_count: usize,
+    pub duplicate_paths: Vec<String>,
 }
 
 #[derive(Debug, Copy, Clone, Default, PartialEq, Eq)]
@@ -557,6 +566,7 @@ fn merge_match_result(
             reason: format!("matched {}", reasons.join(", ")),
             snippet,
             explanation: explain.then_some(signals),
+            duplicate_group: None,
         });
 }
 
@@ -698,6 +708,7 @@ impl RepoIndex {
                     reason: format!("matched {}", reasons.join(", ")),
                     snippet: best_snippet(&file.text, &query_tokens),
                     explanation: None,
+                    duplicate_group: None,
                 });
             }
         }
@@ -1170,6 +1181,7 @@ fn score_text_file(
         reason: format!("matched {}", reasons.join(", ")),
         snippet: best_snippet_for_path(path, text, query_tokens, snippet_mode),
         explanation: explain.then_some(signals),
+        duplicate_group: None,
     })
 }
 
@@ -1379,17 +1391,33 @@ pub(crate) fn finalize_results(mut results: Vec<SearchResult>, limit: usize) -> 
             .then_with(|| a.path.cmp(&b.path))
     });
 
-    let mut seen = HashSet::new();
+    let mut seen = HashMap::<String, usize>::new();
     let mut deduped = Vec::new();
     for result in results {
-        if seen.insert(result_signature(&result)) {
+        let signature = result_signature(&result);
+        if let Some(existing) = seen.get(&signature).copied() {
+            record_duplicate(&mut deduped[existing], result.path);
+        } else if deduped.len() < limit {
+            seen.insert(signature, deduped.len());
             deduped.push(result);
-        }
-        if deduped.len() >= limit {
-            break;
         }
     }
     deduped
+}
+
+fn record_duplicate(result: &mut SearchResult, path: String) {
+    let canonical_path = normalized_result_path(&result.path);
+    let group = result
+        .duplicate_group
+        .get_or_insert_with(|| DuplicateGroup {
+            canonical_path,
+            duplicate_count: 0,
+            duplicate_paths: Vec::new(),
+        });
+    group.duplicate_count += 1;
+    if group.duplicate_paths.len() < 8 && !group.duplicate_paths.contains(&path) {
+        group.duplicate_paths.push(path);
+    }
 }
 
 fn compact_rank_signals(signals: Vec<RankSignal>) -> Vec<RankSignal> {

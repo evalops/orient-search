@@ -553,6 +553,28 @@ fn fast_search_deduplicates_repeated_worktree_hits() {
 
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].path, "one/src/auth.rs");
+    let group = results[0].duplicate_group.as_ref().unwrap();
+    assert_eq!(group.canonical_path, "src/auth.rs");
+    assert_eq!(group.duplicate_count, 1);
+    assert_eq!(group.duplicate_paths, vec!["two/src/auth.rs"]);
+
+    let indexed = FastIndex::build(repo.path())
+        .unwrap()
+        .search_filtered(
+            "issue token session",
+            10,
+            &SearchFilters {
+                require_all: true,
+                ..SearchFilters::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(indexed.len(), 1);
+    assert_eq!(indexed[0].path, "one/src/auth.rs");
+    let group = indexed[0].duplicate_group.as_ref().unwrap();
+    assert_eq!(group.canonical_path, "src/auth.rs");
+    assert_eq!(group.duplicate_count, 1);
+    assert_eq!(group.duplicate_paths, vec!["two/src/auth.rs"]);
 }
 
 #[test]
@@ -576,6 +598,10 @@ fn fast_search_deduplicates_repeated_manifest_hits_by_snippet() {
 
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].path, "alpha/Cargo.toml");
+    let group = results[0].duplicate_group.as_ref().unwrap();
+    assert_eq!(group.canonical_path, "Cargo.toml");
+    assert_eq!(group.duplicate_count, 1);
+    assert_eq!(group.duplicate_paths, vec!["beta/Cargo.toml"]);
 }
 
 #[test]
