@@ -94,9 +94,12 @@ cargo run --release -- bench-search \
 ## JSON-Lines Server
 
 `orient serve-jsonl` reads one request per line from stdin and writes one response per line to stdout.
+`orient serve-tcp` exposes the same protocol over localhost TCP with a shared in-process index cache, which is the better shape when several local agents are searching the same shard directory or persistent indexes.
 
 ```bash
 cargo run -- serve-jsonl
+cargo run -- serve-tcp --addr 127.0.0.1:8796
+cargo run -- client-jsonl --addr 127.0.0.1:8796
 ```
 
 Example request:
@@ -115,6 +118,7 @@ Supported tools:
 
 - `list_tools`
 - `tool_manifest`
+- `daemon_status`
 - `repo_brief`
 - `repo_map`
 - `indexed_repo_map`
@@ -136,6 +140,7 @@ Supported tools:
 - `related_index_symbols`
 
 `tool_manifest` returns the same tool list with descriptions plus required and optional argument names, so a wrapper can bootstrap the JSON-lines surface without scraping this README.
+`daemon_status` reports local warm-cache counts for the current daemon process; it does not inspect Codex/Claude sessions or emit telemetry.
 For indexed or shard JSON search arguments, use `repo` or `repo_filter` to restrict by repository name. For `search_code`, `repo` is the repository root path, so use `repo_filter` for name filtering.
 
 ## Query Language
@@ -198,10 +203,10 @@ Product impact criteria for follow-up adoption:
 
 Current search baseline:
 
-- `orient bench-search --repo . "indexed search symbol filters"`: `7.435ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "session token auth"`: `18.681ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "browser session implementation"`: `22.023ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "postgres migration user"`: `30.557ms` p95 after warmup.
+- `orient bench-search --repo . "indexed search symbol filters"`: `10.667ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "session token auth"`: `20.901ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "browser session implementation"`: `24.120ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "postgres migration user"`: `67.153ms` p95 after warmup.
 - The `rg` hot path has a `250ms` wall-clock timeout plus a bounded match cap; timed-out searches return partial results rather than hanging.
 - `orient index --repo . --output /tmp/orient-self.index`: versioned binary index with file metadata, content token postings, path token postings, trigram postings, line offsets, and symbol boosts.
 - `orient index-shards --repo repo-a --repo repo-b --output-dir /tmp/orient-shards`: writes per-repo index shards plus a manifest for local multi-repo search.
@@ -209,7 +214,7 @@ Current search baseline:
 - `orient refresh-index --repo . --index /tmp/orient-self.index`: reuses unchanged files and refreshes changed/deleted files.
 - `orient index-map --index /tmp/orient-self.index`: returns repo-map orientation directly from the persistent index without rebuilding a live repo scan.
 - `orient shard-map --index-dir /tmp/orient-shards`: returns repo-prefixed repo maps for local multi-repo shard directories.
-- `orient bench-search --repo . --index /tmp/orient-self.index "indexed search symbol filters"`: `0.171ms` p95 after warmup.
+- `orient bench-search --repo . --index /tmp/orient-self.index "indexed search symbol filters"`: `0.385ms` p95 after warmup.
 
 Benchmark methodology:
 

@@ -53,6 +53,7 @@ fn cli_outputs_tool_manifest() {
         .stdout(predicate::str::contains(
             "\"required\":[\"repo\",\"query\"]",
         ))
+        .stdout(predicate::str::contains("daemon_status"))
         .stdout(predicate::str::contains("read_shard_range"));
 }
 

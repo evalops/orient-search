@@ -288,7 +288,7 @@ fn prefix_repo_map_paths(map: &mut RepoMap, shard_name: &str) {
     }
 }
 
-fn load_manifest(index_dir: &Path) -> Result<ShardManifest> {
+pub(crate) fn load_manifest(index_dir: &Path) -> Result<ShardManifest> {
     let bytes = fs::read(index_dir.join("manifest.json"))
         .with_context(|| format!("read shard manifest {}", index_dir.display()))?;
     let manifest = serde_json::from_slice::<ShardManifest>(&bytes)?;

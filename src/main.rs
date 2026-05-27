@@ -4,14 +4,15 @@ use orient::fast_index::FastIndex;
 use orient::repo_index::{
     RepoIndexer, SearchFilters, SnippetMode, read_file_range, search_repo_fast_filtered,
 };
-use orient::server::{serve_jsonl, tool_manifest};
+use orient::server::{serve_jsonl, serve_tcp, tool_manifest};
 use orient::shards::{
     build_shards, find_shard_symbol, read_shard_range, refresh_shards, search_shards,
     shard_repo_maps,
 };
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::io;
+use std::io::{self, BufRead, BufReader, Write};
+use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -256,6 +257,14 @@ enum Commands {
     },
     ToolManifest,
     ServeJsonl,
+    ServeTcp {
+        #[arg(long, default_value = "127.0.0.1:8796")]
+        addr: String,
+    },
+    ClientJsonl {
+        #[arg(long, default_value = "127.0.0.1:8796")]
+        addr: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -628,7 +637,47 @@ fn main() -> Result<()> {
             let stdout = io::stdout();
             serve_jsonl(stdin.lock(), stdout.lock())?;
         }
+        Commands::ServeTcp { addr } => {
+            let listener = TcpListener::bind(&addr)?;
+            println!(
+                "{}",
+                serde_json::to_string(&serde_json::json!({
+                    "addr": listener.local_addr()?.to_string()
+                }))?
+            );
+            io::stdout().flush()?;
+            serve_tcp(listener)?;
+        }
+        Commands::ClientJsonl { addr } => {
+            client_jsonl(&addr)?;
+        }
     }
+    Ok(())
+}
+
+fn client_jsonl(addr: &str) -> Result<()> {
+    let mut writer = TcpStream::connect(addr)?;
+    let mut reader = BufReader::new(writer.try_clone()?);
+    let stdin = io::stdin();
+    let mut stdout = io::stdout();
+    let mut response = String::new();
+
+    for line in stdin.lock().lines() {
+        let line = line?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        writeln!(writer, "{line}")?;
+        writer.flush()?;
+        response.clear();
+        reader.read_line(&mut response)?;
+        if response.is_empty() {
+            bail!("daemon closed connection without a response");
+        }
+        write!(stdout, "{response}")?;
+        stdout.flush()?;
+    }
+
     Ok(())
 }
 

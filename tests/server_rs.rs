@@ -1,7 +1,11 @@
 use std::fs;
-use std::io::Write;
+use std::io::{BufRead, BufReader, Write};
+use std::net::TcpStream;
 use std::path::Path;
 use std::process::{Command, Stdio};
+
+use orient::fast_index::FastIndex;
+use orient::server::{ToolRequest, ToolRuntime};
 
 fn write(path: &Path, text: &str) {
     fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -49,6 +53,172 @@ fn server_reports_tool_manifest_for_agent_wrappers() {
     assert!(stdout.contains("read_shard_range"));
     assert!(stdout.contains("shard_repo_map"));
     assert!(stdout.contains("find_shard_symbol"));
+    assert!(stdout.contains("daemon_status"));
+}
+
+#[test]
+fn runtime_reuses_cached_index_after_initial_load() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/auth.rs"),
+        "pub struct SessionManager;\npub fn issue_token() {}\n",
+    );
+    write(
+        &repo.path().join("Cargo.toml"),
+        "[package]\nname='sample'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    let index_path = repo.path().join(".orient/index");
+    FastIndex::build(repo.path())
+        .unwrap()
+        .save(&index_path)
+        .unwrap();
+
+    let mut runtime = ToolRuntime::default();
+    let first = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("first"),
+        tool: "indexed_search_code".to_string(),
+        arguments: serde_json::json!({
+            "index": index_path,
+            "query": "issue token",
+            "limit": 3,
+            "require_all": true
+        }),
+    });
+    assert!(first.error.is_none(), "{:?}", first.error);
+    assert!(
+        serde_json::to_string(&first.result)
+            .unwrap()
+            .contains("src/auth.rs"),
+        "{:?}",
+        first.result
+    );
+
+    fs::remove_file(&index_path).unwrap();
+    let second = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("second"),
+        tool: "indexed_search_code".to_string(),
+        arguments: serde_json::json!({
+            "index": index_path,
+            "query": "issue token",
+            "limit": 3,
+            "require_all": true
+        }),
+    });
+    assert!(second.error.is_none(), "{:?}", second.error);
+    assert!(
+        serde_json::to_string(&second.result)
+            .unwrap()
+            .contains("src/auth.rs"),
+        "{:?}",
+        second.result
+    );
+
+    let status = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("status"),
+        tool: "daemon_status".to_string(),
+        arguments: serde_json::json!({}),
+    });
+    assert_eq!(
+        status.result.unwrap()["cached_indexes"],
+        serde_json::json!(1)
+    );
+}
+
+#[test]
+fn runtime_reuses_cached_shard_index_after_initial_load() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/billing.rs"),
+        "pub fn invoice_total() -> usize { 42 }\n",
+    );
+    write(
+        &repo.path().join("Cargo.toml"),
+        "[package]\nname='billing'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    let shard_dir = tempfile::tempdir().unwrap();
+    let mut runtime = ToolRuntime::default();
+
+    let build = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("build"),
+        tool: "index_shards".to_string(),
+        arguments: serde_json::json!({
+            "repos": [repo.path()],
+            "output_dir": shard_dir.path()
+        }),
+    });
+    assert!(build.error.is_none(), "{:?}", build.error);
+
+    let search_args = serde_json::json!({
+        "index_dir": shard_dir.path(),
+        "query": "invoice total",
+        "limit": 3,
+        "require_all": true
+    });
+    let first = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("first"),
+        tool: "search_shards".to_string(),
+        arguments: search_args.clone(),
+    });
+    assert!(first.error.is_none(), "{:?}", first.error);
+    assert!(
+        serde_json::to_string(&first.result)
+            .unwrap()
+            .contains("src/billing.rs"),
+        "{:?}",
+        first.result
+    );
+
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(shard_dir.path().join("manifest.json")).unwrap()).unwrap();
+    let shard_index = manifest["shards"][0]["index"].as_str().unwrap();
+    fs::remove_file(shard_dir.path().join(shard_index)).unwrap();
+    let second = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("second"),
+        tool: "search_shards".to_string(),
+        arguments: search_args,
+    });
+    assert!(second.error.is_none(), "{:?}", second.error);
+    assert!(
+        serde_json::to_string(&second.result)
+            .unwrap()
+            .contains("src/billing.rs"),
+        "{:?}",
+        second.result
+    );
+}
+
+#[test]
+fn tcp_daemon_serves_json_lines_requests() {
+    let binary = assert_cmd::cargo::cargo_bin("orient");
+    let mut child = Command::new(binary)
+        .args(["serve-tcp", "--addr", "127.0.0.1:0"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let stdout = child.stdout.take().unwrap();
+    let mut startup_reader = BufReader::new(stdout);
+    let mut startup = String::new();
+    startup_reader.read_line(&mut startup).unwrap();
+    let startup_json: serde_json::Value = serde_json::from_str(&startup).unwrap();
+    let addr = startup_json["addr"].as_str().unwrap();
+
+    let mut stream = TcpStream::connect(addr).unwrap();
+    let mut reader = BufReader::new(stream.try_clone().unwrap());
+    let request = serde_json::json!({
+        "id": "status",
+        "tool": "daemon_status",
+        "arguments": {}
+    });
+    writeln!(stream, "{request}").unwrap();
+    let mut response = String::new();
+    reader.read_line(&mut response).unwrap();
+
+    child.kill().unwrap();
+    let _ = child.wait();
+
+    assert!(response.contains("\"id\":\"status\""));
+    assert!(response.contains("\"cached_indexes\":0"));
 }
 
 #[test]
