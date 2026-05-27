@@ -192,6 +192,11 @@ fn indexed_repo_map_returns_orientation_from_persisted_metadata() {
         &repo.path().join("Cargo.toml"),
         "[package]\nname='sample'\nversion='0.1.0'\nedition='2024'\n",
     );
+    write(
+        &repo.path().join("package.json"),
+        r#"{"scripts":{"test":"vitest run","lint":"eslint .","build":"vite build"}}"#,
+    );
+    write(&repo.path().join("yarn.lock"), "# yarn lockfile\n");
 
     let map = FastIndex::build(repo.path()).unwrap().repo_map(5, 5);
 
@@ -204,6 +209,17 @@ fn indexed_repo_map_returns_orientation_from_persisted_metadata() {
             .contains(&"Cargo.toml".to_string())
     );
     assert!(map.brief.known_commands.contains(&"cargo test".to_string()));
+    assert!(map.brief.known_commands.contains(&"yarn test".to_string()));
+    assert!(
+        map.brief
+            .known_commands
+            .contains(&"yarn run lint".to_string())
+    );
+    assert!(
+        map.brief
+            .known_commands
+            .contains(&"yarn run build".to_string())
+    );
     assert_eq!(map.top_symbols[0].name, "SessionManager");
 }
 

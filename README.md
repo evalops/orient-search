@@ -10,7 +10,7 @@ Rust-native fast local code search for coding agents. It gives Codex, Claude, Am
 - Finds symbols plus related test/source files and nearby definitions.
 - Reads bounded line ranges after search hits, with line-numbered output.
 - Builds repo maps with entrypoints, manifests, tests, top symbols, commands, and important files.
-- Infers known commands from repo manifests.
+- Infers known commands from repo manifests, package-manager lockfiles, and common `package.json` scripts.
 - Discovers local repo roots under broad workspaces for fast shard setup.
 - Exposes a Rust CLI and JSON-lines tool server suitable for MCP-style wrapping.
 
@@ -261,9 +261,9 @@ Product impact criteria for follow-up adoption:
 Current search baseline:
 
 - `orient bench-search --repo . "indexed search symbol filters"`: `9.413ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "session token auth"`: `17.476ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "browser session implementation"`: `25.863ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "postgres migration user"`: `68.141ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "session token auth"`: `18.779ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "browser session implementation"`: `18.582ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "postgres migration user"`: `31.078ms` p95 after warmup.
 - The `rg` hot path has a `250ms` wall-clock timeout plus a bounded match cap; timed-out searches return partial results rather than hanging.
 - `orient index --repo . --output /tmp/orient-self.index`: versioned binary index with file metadata, content token postings, path token postings, trigram postings, line offsets, token-to-line tables, bounded source snapshots, and symbol boosts.
 - `orient discover-repos --root /Users/jonathanhaas/Documents/Projects --max-depth 4 --limit 200`: finds git or manifest-backed repo roots while skipping dependency/build directories and prioritizing visible canonical repos ahead of dated split, temp, and worktree folders when limits are small.
@@ -280,7 +280,8 @@ Current search baseline:
 - `orient refresh-index --repo . --index /tmp/orient-self.index`: reuses unchanged files, detects same-content renames, and refreshes changed/deleted files. Refresh stats include `renamed_files`.
 - `orient index-map --index /tmp/orient-self.index`: returns repo-map orientation directly from the persistent index without rebuilding a live repo scan.
 - `orient shard-map --index-dir /tmp/orient-shards`: returns repo-prefixed repo maps for local multi-repo shard directories.
-- `orient bench-search --repo . --index /tmp/orient-self.index "indexed search symbol filters"`: `0.565ms` p95 after warmup.
+- Repo maps infer command hints from manifests and common scripts, including `cargo test`, `pytest`, `go test ./...`, `swift test`, package-manager-specific `test` scripts, and common `lint`/`typecheck`/`check`/`build` scripts.
+- `orient bench-search --repo . --index /tmp/orient-self.index "indexed search symbol filters"`: `0.749ms` p95 after warmup.
 
 Benchmark methodology:
 

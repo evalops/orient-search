@@ -56,6 +56,7 @@ Implemented now:
 - Direct symbol lookup across local shard directories, returning repo-prefixed paths that can be passed to `read-shard-range`.
 - Bounded workspace discovery finds git or manifest-backed repo roots while skipping dependency/build directories, so agents can build shard directories from layouts like `Documents/Projects`, `~/repos`, and `.codex-worktrees` without manual repo lists. It prioritizes visible canonical repos before dated split, temp, and worktree folders when limits are small, and `index-shards` accepts repeated discovery roots so one daemon can warm the canonical repos and active worktrees together.
 - Repo-map orientation from persistent indexes and shard directories, so agents can inspect entrypoints, manifests, tests, symbols, important files, and command hints without rebuilding a separate live repo index.
+- Command hints are manifest-aware and parse common `package.json` scripts while respecting package-manager lockfiles.
 - Shard manifests record aliases for nested repo-looking child directories, so broad dated worktree shards can still answer stable filters like `repo:maestro` and scope results to the matching child path.
 - Alias-scoped shard search, symbol lookup, and repo maps emit stable alias-prefixed paths, so search hits like `maestro/src/foo.rs` can be opened without knowing the enclosing worktree shard name.
 - Shard related-file and related-symbol tools accept alias-prefixed search-hit paths and keep returned context inside the same alias scope.
@@ -65,12 +66,12 @@ Implemented now:
 
 Measured on this machine:
 
-- Wide tree fallback: `/Users/jonathanhaas/Documents/Projects`, common top-10 literal/token queries at `17-69ms` p95 after warmup across the sampled runs.
+- Wide tree fallback: `/Users/jonathanhaas/Documents/Projects`, common top-10 literal/token queries at `18-31ms` p95 after warmup across the sampled runs.
 - Local repo fallback: query `indexed search symbol filters`, top 10 at about `12.5ms` p95 after warmup.
 - Hot-path fallback has a `250ms` wall-clock timeout plus match caps; if the timeout fires it returns partial results instead of blocking the agent.
 - Local repo index build: about `0.25s`.
 - Local repo refresh after build: reuses unchanged files, reuses same-content renames by retargeting path-derived postings, and rebuilds postings from per-file term lists.
-- Local repo indexed search: query `indexed search symbol filters`, top 10 at about `0.57ms` p95 after warmup.
+- Local repo indexed search: query `indexed search symbol filters`, top 10 at about `0.75ms` p95 after warmup.
 
 ## Exit Conditions
 

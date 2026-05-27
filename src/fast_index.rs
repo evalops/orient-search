@@ -5,9 +5,9 @@ use crate::repo_index::{
     FileRange, QueryPlan, QueryPlanPosting, RankSignal, RelatedFile, RelatedSymbol, RepoBrief,
     RepoMap, SearchFilters, SearchResult, SnippetMode, Symbol, best_snippet_for_path,
     extract_symbols, file_range_from_text, finalize_results, is_entrypoint_path, is_ignored,
-    is_important_file, is_manifest_file, is_test_path, language_for, matches_filters,
-    normalize_token, repo_matches, result_matches_all_tokens, result_matches_symbol_filters,
-    round4, symbol_kind_rank, token_counts, tokenize,
+    is_important_file, is_manifest_file, is_test_path, known_commands_from_manifest_texts,
+    language_for, matches_filters, normalize_token, repo_matches, result_matches_all_tokens,
+    result_matches_symbol_filters, round4, symbol_kind_rank, token_counts, tokenize,
 };
 use anyhow::{Context, Result};
 use ignore::WalkBuilder;
@@ -1123,22 +1123,11 @@ fn counted_terms(counts: &HashMap<String, usize>) -> Vec<TermCount> {
 }
 
 fn known_commands_from_indexed_files(files: &[IndexedPath]) -> Vec<String> {
-    let has_file = |name: &str| files.iter().any(|file| file.path == name);
-    let mut commands = Vec::new();
-    if has_file("pyproject.toml") {
-        commands.push("pytest".to_string());
-    }
-    if has_file("Cargo.toml") {
-        commands.push("cargo test".to_string());
-    }
-    if has_file("package.json") {
-        commands.push("npm test".to_string());
-        commands.push("npm run lint".to_string());
-    }
-    if has_file("Makefile") {
-        commands.push("make test".to_string());
-    }
-    commands
+    known_commands_from_manifest_texts(
+        files
+            .iter()
+            .map(|file| (file.path.as_str(), file.content.as_str())),
+    )
 }
 
 fn line_offsets(text: &str) -> Vec<u32> {

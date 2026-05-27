@@ -981,21 +981,11 @@ impl RepoIndex {
     }
 
     fn known_commands(&self) -> Vec<String> {
-        let mut commands = Vec::new();
-        if self.files.contains_key("pyproject.toml") {
-            commands.push("pytest".to_string());
-        }
-        if self.files.contains_key("Cargo.toml") {
-            commands.push("cargo test".to_string());
-        }
-        if self.files.contains_key("package.json") {
-            commands.push("npm test".to_string());
-            commands.push("npm run lint".to_string());
-        }
-        if self.files.contains_key("Makefile") {
-            commands.push("make test".to_string());
-        }
-        commands
+        known_commands_from_manifest_texts(
+            self.files
+                .iter()
+                .map(|(path, file)| (path.as_str(), file.text.as_str())),
+        )
     }
 }
 
@@ -1082,11 +1072,91 @@ pub(crate) fn is_ignored(path: &Path) -> bool {
     })
 }
 
+pub(crate) fn known_commands_from_manifest_texts<'a>(
+    files: impl IntoIterator<Item = (&'a str, &'a str)>,
+) -> Vec<String> {
+    let mut files = files.into_iter().collect::<Vec<_>>();
+    files.sort_by(|left, right| left.0.cmp(right.0));
+    let has_file = |name: &str| {
+        files.iter().any(|(path, _)| {
+            Path::new(path).file_name().and_then(|value| value.to_str()) == Some(name)
+        })
+    };
+
+    let mut commands = Vec::new();
+    if has_file("Cargo.toml") {
+        commands.push("cargo test".to_string());
+    }
+    if has_file("pyproject.toml") {
+        commands.push("pytest".to_string());
+    }
+    for (_, package_json) in files.iter().filter(|(path, _)| {
+        Path::new(path).file_name().and_then(|value| value.to_str()) == Some("package.json")
+    }) {
+        commands.extend(package_json_commands(
+            package_json,
+            package_manager_command(&has_file),
+        ));
+    }
+    if has_file("go.mod") {
+        commands.push("go test ./...".to_string());
+    }
+    if has_file("Package.swift") {
+        commands.push("swift test".to_string());
+    }
+    if has_file("Makefile") {
+        commands.push("make test".to_string());
+    }
+    commands.sort();
+    commands.dedup();
+    commands
+}
+
+fn package_manager_command(has_file: &impl Fn(&str) -> bool) -> &'static str {
+    if has_file("pnpm-lock.yaml") {
+        "pnpm"
+    } else if has_file("yarn.lock") {
+        "yarn"
+    } else if has_file("bun.lock") || has_file("bun.lockb") {
+        "bun"
+    } else {
+        "npm"
+    }
+}
+
+fn package_json_commands(package_json: &str, package_manager: &str) -> Vec<String> {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(package_json) else {
+        return vec![format!("{package_manager} test")];
+    };
+    let Some(scripts) = value.get("scripts").and_then(|value| value.as_object()) else {
+        return vec![format!("{package_manager} test")];
+    };
+
+    ["test", "lint", "typecheck", "check", "build"]
+        .into_iter()
+        .filter(|script| scripts.contains_key(*script))
+        .map(|script| {
+            if script == "test" {
+                format!("{package_manager} test")
+            } else {
+                format!("{package_manager} run {script}")
+            }
+        })
+        .collect()
+}
+
 pub(crate) fn language_for(path: &Path) -> Option<String> {
     let file_name = path.file_name()?.to_string_lossy();
     if matches!(
         file_name.as_ref(),
-        "README" | "README.md" | "AGENTS.md" | "CLAUDE.md" | "Makefile"
+        "README"
+            | "README.md"
+            | "AGENTS.md"
+            | "CLAUDE.md"
+            | "Makefile"
+            | "yarn.lock"
+            | "bun.lock"
+            | "bun.lockb"
     ) {
         return Some("text".to_string());
     }

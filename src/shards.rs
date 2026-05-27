@@ -582,11 +582,25 @@ fn known_commands_for_manifest_paths(paths: &[String]) -> Vec<String> {
         commands.push("pytest".to_string());
     }
     if has_manifest("package.json") {
-        commands.push("npm test".to_string());
+        let package_manager = if has_manifest("pnpm-lock.yaml") {
+            "pnpm"
+        } else if has_manifest("yarn.lock") {
+            "yarn"
+        } else if has_manifest("bun.lock") || has_manifest("bun.lockb") {
+            "bun"
+        } else {
+            "npm"
+        };
+        commands.push(format!("{package_manager} test"));
     }
     if has_manifest("go.mod") {
         commands.push("go test ./...".to_string());
     }
+    if has_manifest("Package.swift") {
+        commands.push("swift test".to_string());
+    }
+    commands.sort();
+    commands.dedup();
     commands
 }
 

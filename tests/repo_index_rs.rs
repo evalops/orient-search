@@ -37,6 +37,14 @@ def test_issue_token_round_trip():
         &temp.path().join("pyproject.toml"),
         "[project]\nname='sample'\n",
     );
+    write(
+        &temp.path().join("package.json"),
+        r#"{"scripts":{"test":"vitest run","lint":"eslint .","typecheck":"tsc --noEmit"}}"#,
+    );
+    write(
+        &temp.path().join("pnpm-lock.yaml"),
+        "lockfileVersion: '9.0'\n",
+    );
 
     let index = RepoIndexer::new(temp.path()).build().unwrap();
 
@@ -70,6 +78,13 @@ def test_issue_token_round_trip():
     let brief = index.repo_brief();
     assert_eq!(brief.language_counts.get("python"), Some(&2));
     assert!(brief.known_commands.contains(&"pytest".to_string()));
+    assert!(brief.known_commands.contains(&"pnpm test".to_string()));
+    assert!(brief.known_commands.contains(&"pnpm run lint".to_string()));
+    assert!(
+        brief
+            .known_commands
+            .contains(&"pnpm run typecheck".to_string())
+    );
     assert!(brief.manifest_files.contains(&"pyproject.toml".to_string()));
     assert!(
         brief
