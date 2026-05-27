@@ -133,6 +133,15 @@ enum Commands {
         #[arg(long)]
         explain: bool,
     },
+    ReadIndexRange {
+        #[arg(long)]
+        index: PathBuf,
+        path: String,
+        #[arg(long, default_value_t = 1)]
+        start: usize,
+        #[arg(long, default_value_t = 80)]
+        lines: usize,
+    },
     Symbol {
         #[arg(long, default_value = ".")]
         repo: PathBuf,
@@ -372,6 +381,18 @@ fn main() -> Result<()> {
                         ..SearchFilters::default()
                     },
                 )?)?
+            );
+        }
+        Commands::ReadIndexRange {
+            index,
+            path,
+            start,
+            lines,
+        } => {
+            let index = FastIndex::load(index)?;
+            println!(
+                "{}",
+                serde_json::to_string(&read_file_range(index.root, &path, start, lines)?)?
             );
         }
         Commands::Symbol { repo, name, limit } => {

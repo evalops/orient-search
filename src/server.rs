@@ -106,6 +106,12 @@ pub fn tool_manifest() -> Value {
             "optional": SEARCH_OPTIONAL_ARGS
         },
         {
+            "name": "read_index_range",
+            "description": "Read a bounded line range from a persistent index result path.",
+            "required": ["index", "path"],
+            "optional": ["start", "lines"]
+        },
+        {
             "name": "index_shards",
             "description": "Build a local multi-repo shard directory.",
             "required": ["repos", "output_dir"],
@@ -197,6 +203,16 @@ fn dispatch_result(request: &ToolRequest) -> Result<Value> {
                 &search_filters(&request.arguments),
             )?)?)
         }
+        "read_index_range" => {
+            let index_path = path_arg(&request.arguments, "index")?;
+            let path = string_arg(&request.arguments, "path")?;
+            let start = usize_arg(&request.arguments, "start").unwrap_or(1);
+            let lines = usize_arg(&request.arguments, "lines").unwrap_or(80);
+            let index = FastIndex::load(index_path)?;
+            Ok(serde_json::to_value(read_file_range(
+                index.root, &path, start, lines,
+            )?)?)
+        }
         "index_shards" => {
             let repos = path_array_arg(&request.arguments, "repos")?;
             let output_dir = path_arg(&request.arguments, "output_dir")?;
@@ -261,6 +277,7 @@ fn dispatch_result(request: &ToolRequest) -> Result<Value> {
             "read_range",
             "search_code",
             "indexed_search_code",
+            "read_index_range",
             "index_shards",
             "refresh_shards",
             "search_shards",

@@ -38,6 +38,7 @@ cargo run -- indexed-search --index /tmp/orient.index "session token auth" \
   --extension rs \
   --require-all \
   --snippet symbol
+cargo run -- read-index-range --index /tmp/orient.index src/auth.rs --start 40 --lines 80
 
 # Build and search a local multi-repo shard directory.
 cargo run -- index-shards \
@@ -113,6 +114,7 @@ Supported tools:
 - `read_range`
 - `search_code`
 - `indexed_search_code`
+- `read_index_range`
 - `index_shards`
 - `refresh_shards`
 - `search_shards`
@@ -182,16 +184,16 @@ Product impact criteria for follow-up adoption:
 
 Current search baseline:
 
-- `orient bench-search --repo . "indexed search symbol filters"`: `7.442ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "session token auth"`: `15.986ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "browser session implementation"`: `25.424ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "postgres migration user"`: `36.655ms` p95 after warmup.
+- `orient bench-search --repo . "indexed search symbol filters"`: `8.464ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "session token auth"`: `17.470ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "browser session implementation"`: `42.720ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "postgres migration user"`: `35.028ms` p95 after warmup.
 - The `rg` hot path has a `250ms` wall-clock timeout plus a bounded match cap; timed-out searches return partial results rather than hanging.
 - `orient index --repo . --output /tmp/orient-self.index`: versioned binary index with file metadata, content token postings, path token postings, trigram postings, line offsets, and symbol boosts.
 - `orient index-shards --repo repo-a --repo repo-b --output-dir /tmp/orient-shards`: writes per-repo index shards plus a manifest for local multi-repo search.
 - `orient refresh-shards --index-dir /tmp/orient-shards`: refreshes each shard incrementally, reusing unchanged file metadata and postings per repo.
 - `orient refresh-index --repo . --index /tmp/orient-self.index`: reuses unchanged files and refreshes changed/deleted files.
-- `orient bench-search --repo . --index /tmp/orient-self.index "indexed search symbol filters"`: `0.174ms` p95 after warmup.
+- `orient bench-search --repo . --index /tmp/orient-self.index "indexed search symbol filters"`: `0.185ms` p95 after warmup.
 
 Benchmark methodology:
 

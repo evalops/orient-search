@@ -196,6 +196,23 @@ fn cli_builds_and_searches_persistent_index() {
         .stdout(predicate::str::contains("src/auth.rs"))
         .stdout(predicate::str::contains("indexed match"));
 
+    let mut read_index_range = Command::cargo_bin("orient").unwrap();
+    read_index_range
+        .args([
+            "read-index-range",
+            "--index",
+            index_path.to_str().unwrap(),
+            "src/auth.rs",
+            "--start",
+            "3",
+            "--lines",
+            "3",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"path\":\"src/auth.rs\""))
+        .stdout(predicate::str::contains("issue_token"));
+
     write(
         &repo.path().join("src/auth.rs"),
         r#"

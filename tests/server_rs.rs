@@ -41,6 +41,7 @@ fn server_reports_tool_manifest_for_agent_wrappers() {
     assert!(stdout.contains("\"name\":\"search_code\""));
     assert!(stdout.contains("\"required\":[\"repo\",\"query\"]"));
     assert!(stdout.contains("\"optional\""));
+    assert!(stdout.contains("read_index_range"));
     assert!(stdout.contains("read_shard_range"));
 }
 
@@ -133,7 +134,18 @@ fn server_handles_indexed_search_request() {
             "require_all": true
         }
     });
+    let read_request = serde_json::json!({
+        "id": "read-index-range",
+        "tool": "read_index_range",
+        "arguments": {
+            "index": index_path,
+            "path": "src/auth.rs",
+            "start": 1,
+            "lines": 2
+        }
+    });
     writeln!(child.stdin.as_mut().unwrap(), "{request}").unwrap();
+    writeln!(child.stdin.as_mut().unwrap(), "{read_request}").unwrap();
     drop(child.stdin.take());
 
     let output = child.wait_with_output().unwrap();
@@ -141,6 +153,9 @@ fn server_handles_indexed_search_request() {
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.contains("\"id\":2"));
     assert!(stdout.contains("src/auth.rs"));
+    assert!(stdout.contains("\"id\":\"read-index-range\""));
+    assert!(stdout.contains("\"path\":\"src/auth.rs\""));
+    assert!(stdout.contains("issue_token"));
 }
 
 #[test]
