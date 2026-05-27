@@ -591,6 +591,77 @@ fn cli_filters_shard_search_by_nested_repo_alias() {
 }
 
 #[test]
+fn cli_refresh_shards_updates_nested_repo_aliases() {
+    let workspace = tempfile::tempdir().unwrap();
+    let billing_repo = workspace.path().join("billing");
+    write(
+        &billing_repo.join("src/billing.rs"),
+        "pub fn invoice_total() -> usize { 42 }\n",
+    );
+    write(
+        &billing_repo.join("Cargo.toml"),
+        "[package]\nname='billing'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    let shard_dir = tempfile::tempdir().unwrap();
+
+    let mut build = Command::cargo_bin("orient").unwrap();
+    build
+        .args([
+            "index-shards",
+            "--repo",
+            workspace.path().to_str().unwrap(),
+            "--output-dir",
+            shard_dir.path().to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let auth_repo = workspace.path().join("auth");
+    write(
+        &auth_repo.join("src/auth.rs"),
+        "pub fn issue_token() -> String { \"token\".to_string() }\n",
+    );
+    write(
+        &auth_repo.join("Cargo.toml"),
+        "[package]\nname='auth'\nversion='0.1.0'\nedition='2024'\n",
+    );
+
+    let mut refresh = Command::cargo_bin("orient").unwrap();
+    refresh
+        .args([
+            "refresh-shards",
+            "--index-dir",
+            shard_dir.path().to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"refreshed_files\""));
+
+    let workspace_name = workspace
+        .path()
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+    let mut search = Command::cargo_bin("orient").unwrap();
+    search
+        .args([
+            "search-shards",
+            "--index-dir",
+            shard_dir.path().to_str().unwrap(),
+            "repo:auth issue token",
+            "--require-all",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(&format!(
+            "\"path\":\"{workspace_name}/auth/src/auth.rs\""
+        )))
+        .stdout(predicate::str::contains("issue_token"))
+        .stdout(predicate::str::contains("billing/src/billing.rs").not());
+}
+
+#[test]
 fn cli_reports_search_benchmarks() {
     let repo = sample_repo();
     let baseline_path = repo.path().join(".orient/fallback-bench.json");

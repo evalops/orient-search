@@ -50,15 +50,16 @@ Implemented now:
 - Direct symbol lookup across local shard directories, returning repo-prefixed paths that can be passed to `read-shard-range`.
 - Repo-map orientation from persistent indexes and shard directories, so agents can inspect entrypoints, manifests, tests, symbols, important files, and command hints without rebuilding a separate live repo index.
 - Shard manifests record aliases for nested repo-looking child directories, so broad dated worktree shards can still answer stable filters like `repo:maestro` and scope results to the matching child path.
+- Shard refresh recomputes nested repo aliases, so newly added child repos become filterable after `refresh-shards`.
 
 Measured on this machine:
 
-- Wide tree fallback: `/Users/jonathanhaas/Documents/Projects`, common top-10 literal/token queries at `20-62ms` p95 after warmup across the sampled runs.
-- Local repo fallback: query `indexed search symbol filters`, top 10 at about `12.8ms` p95 after warmup.
+- Wide tree fallback: `/Users/jonathanhaas/Documents/Projects`, common top-10 literal/token queries at `21-36ms` p95 after warmup across the sampled runs.
+- Local repo fallback: query `indexed search symbol filters`, top 10 at about `12.5ms` p95 after warmup.
 - Hot-path fallback has a `250ms` wall-clock timeout plus match caps; if the timeout fires it returns partial results instead of blocking the agent.
 - Local repo index build: about `0.25s`.
 - Local repo refresh after build: reuses unchanged files and rebuilds postings from per-file term lists.
-- Local repo indexed search: query `indexed search symbol filters`, top 10 at about `0.23ms` p95 after warmup.
+- Local repo indexed search: query `indexed search symbol filters`, top 10 at about `0.20ms` p95 after warmup.
 
 ## Exit Conditions
 

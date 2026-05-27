@@ -119,7 +119,7 @@ pub fn build_shards(repos: &[PathBuf], output_dir: impl AsRef<Path>) -> Result<S
 
 pub fn refresh_shards(index_dir: impl AsRef<Path>) -> Result<ShardRefreshStats> {
     let index_dir = index_dir.as_ref();
-    let manifest = load_manifest(index_dir)?;
+    let mut manifest = load_manifest(index_dir)?;
     let mut total = ShardRefreshStats {
         version: SHARD_MANIFEST_VERSION,
         output_dir: index_dir.to_path_buf(),
@@ -134,7 +134,7 @@ pub fn refresh_shards(index_dir: impl AsRef<Path>) -> Result<ShardRefreshStats> 
         deleted_files: 0,
     };
 
-    for shard in &manifest.shards {
+    for shard in &mut manifest.shards {
         let index_path = index_dir.join(&shard.index);
         let previous = if index_path.exists() {
             Some(
@@ -152,6 +152,12 @@ pub fn refresh_shards(index_dir: impl AsRef<Path>) -> Result<ShardRefreshStats> 
         total.reused_files += outcome.reused_files;
         total.refreshed_files += outcome.refreshed_files;
         total.deleted_files += outcome.deleted_files;
+        let base_name = shard
+            .root
+            .file_name()
+            .map(|value| value.to_string_lossy().to_string())
+            .unwrap_or_else(|| shard.name.clone());
+        shard.aliases = shard_aliases(&shard.root, &base_name)?;
     }
 
     save_manifest(index_dir, &manifest)?;

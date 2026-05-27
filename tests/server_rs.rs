@@ -335,6 +335,65 @@ fn runtime_filters_shard_search_by_nested_repo_alias() {
 }
 
 #[test]
+fn runtime_refresh_shards_updates_nested_repo_aliases() {
+    let workspace = tempfile::tempdir().unwrap();
+    let billing_repo = workspace.path().join("billing");
+    write(
+        &billing_repo.join("src/billing.rs"),
+        "pub fn invoice_total() -> usize { 42 }\n",
+    );
+    write(
+        &billing_repo.join("Cargo.toml"),
+        "[package]\nname='billing'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    let shard_dir = tempfile::tempdir().unwrap();
+    let mut runtime = ToolRuntime::default();
+    let build = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("build"),
+        tool: "index_shards".to_string(),
+        arguments: serde_json::json!({
+            "repos": [workspace.path()],
+            "output_dir": shard_dir.path()
+        }),
+    });
+    assert!(build.error.is_none(), "{:?}", build.error);
+
+    let auth_repo = workspace.path().join("auth");
+    write(
+        &auth_repo.join("src/auth.rs"),
+        "pub fn issue_token() -> String { \"token\".to_string() }\n",
+    );
+    write(
+        &auth_repo.join("Cargo.toml"),
+        "[package]\nname='auth'\nversion='0.1.0'\nedition='2024'\n",
+    );
+
+    let refresh = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("refresh"),
+        tool: "refresh_shards".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": shard_dir.path()
+        }),
+    });
+    assert!(refresh.error.is_none(), "{:?}", refresh.error);
+
+    let search = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("search"),
+        tool: "search_shards".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": shard_dir.path(),
+            "query": "repo:auth issue token",
+            "limit": 5,
+            "require_all": true
+        }),
+    });
+    assert!(search.error.is_none(), "{:?}", search.error);
+    let result = serde_json::to_string(&search.result).unwrap();
+    assert!(result.contains("auth/src/auth.rs"), "{result}");
+    assert!(!result.contains("billing/src/billing.rs"), "{result}");
+}
+
+#[test]
 fn tcp_daemon_serves_json_lines_requests() {
     let binary = assert_cmd::cargo::cargo_bin("orient");
     let mut child = Command::new(binary)
