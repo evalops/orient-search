@@ -54,8 +54,8 @@ pub fn serve_jsonl_with_runtime(
     Ok(())
 }
 
-pub fn serve_tcp(listener: TcpListener) -> Result<()> {
-    let runtime = Arc::new(Mutex::new(ToolRuntime::default()));
+pub fn serve_tcp(listener: TcpListener, runtime: ToolRuntime) -> Result<()> {
+    let runtime = Arc::new(Mutex::new(runtime));
     for stream in listener.incoming() {
         let stream = stream?;
         let runtime = Arc::clone(&runtime);
@@ -96,6 +96,29 @@ pub struct ToolRuntime {
 }
 
 impl ToolRuntime {
+    pub fn warm_index(&mut self, index_path: PathBuf) -> Result<PathBuf> {
+        let key = canonical_cache_key(&index_path);
+        if !self.indexes.contains_key(&key) {
+            let index = FastIndex::load(&index_path)?;
+            self.indexes.insert(key.clone(), index);
+        }
+        Ok(key)
+    }
+
+    pub fn warm_shards(&mut self, index_dir: PathBuf) -> Result<usize> {
+        let manifest = load_manifest(&index_dir)?;
+        let mut warmed = 0usize;
+        for shard in manifest.shards {
+            self.warm_index(index_dir.join(&shard.index))?;
+            warmed += 1;
+        }
+        Ok(warmed)
+    }
+
+    pub fn cached_index_count(&self) -> usize {
+        self.indexes.len()
+    }
+
     pub fn dispatch_line(&mut self, line: &str) -> ToolResponse {
         match serde_json::from_str::<ToolRequest>(line) {
             Ok(request) => self.dispatch(request),
@@ -141,6 +164,18 @@ pub fn tool_manifest() -> Value {
             "name": "daemon_status",
             "description": "Return local daemon runtime cache status for warm-index clients.",
             "required": [],
+            "optional": []
+        },
+        {
+            "name": "warm_index",
+            "description": "Load a persistent single-repo index into the daemon cache before searches need it.",
+            "required": ["index"],
+            "optional": []
+        },
+        {
+            "name": "warm_shards",
+            "description": "Load every shard index from a local shard directory into the daemon cache.",
+            "required": ["index_dir"],
             "optional": []
         },
         {
@@ -439,14 +474,33 @@ impl ToolRuntime {
                     limit,
                 ))?)
             }
+            "warm_index" => {
+                let index_path = path_arg(&request.arguments, "index")?;
+                let key = self.warm_index(index_path)?;
+                Ok(json!({
+                    "cached_indexes": self.indexes.len(),
+                    "index": key
+                }))
+            }
+            "warm_shards" => {
+                let index_dir = path_arg(&request.arguments, "index_dir")?;
+                let warmed_indexes = self.warm_shards(index_dir)?;
+                Ok(json!({
+                    "cached_indexes": self.indexes.len(),
+                    "warmed_indexes": warmed_indexes
+                }))
+            }
             "daemon_status" => Ok(json!({
-                "cached_indexes": self.indexes.len()
+                "cached_indexes": self.indexes.len(),
+                "cached_index_paths": self.cached_index_paths()
             })),
             "tool_manifest" => Ok(tool_manifest()),
             "list_tools" => Ok(json!([
                 "list_tools",
                 "tool_manifest",
                 "daemon_status",
+                "warm_index",
+                "warm_shards",
                 "repo_brief",
                 "repo_map",
                 "indexed_repo_map",
@@ -472,12 +526,18 @@ impl ToolRuntime {
     }
 
     fn cached_index(&mut self, index_path: PathBuf) -> Result<&FastIndex> {
-        let key = canonical_cache_key(&index_path);
-        if !self.indexes.contains_key(&key) {
-            let index = FastIndex::load(&index_path)?;
-            self.indexes.insert(key.clone(), index);
-        }
+        let key = self.warm_index(index_path)?;
         Ok(self.indexes.get(&key).expect("cached index inserted"))
+    }
+
+    fn cached_index_paths(&self) -> Vec<String> {
+        let mut paths = self
+            .indexes
+            .keys()
+            .map(|path| path.to_string_lossy().to_string())
+            .collect::<Vec<_>>();
+        paths.sort();
+        paths
     }
 
     fn search_shards_cached(

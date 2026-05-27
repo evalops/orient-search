@@ -4,7 +4,7 @@ use orient::fast_index::FastIndex;
 use orient::repo_index::{
     RepoIndexer, SearchFilters, SnippetMode, read_file_range, search_repo_fast_filtered,
 };
-use orient::server::{serve_jsonl, serve_tcp, tool_manifest};
+use orient::server::{ToolRuntime, serve_jsonl, serve_tcp, tool_manifest};
 use orient::shards::{
     build_shards, find_shard_symbol, read_shard_range, refresh_shards, search_shards,
     shard_repo_maps,
@@ -260,6 +260,10 @@ enum Commands {
     ServeTcp {
         #[arg(long, default_value = "127.0.0.1:8796")]
         addr: String,
+        #[arg(long = "index")]
+        indexes: Vec<PathBuf>,
+        #[arg(long = "index-dir")]
+        index_dirs: Vec<PathBuf>,
     },
     ClientJsonl {
         #[arg(long, default_value = "127.0.0.1:8796")]
@@ -637,16 +641,28 @@ fn main() -> Result<()> {
             let stdout = io::stdout();
             serve_jsonl(stdin.lock(), stdout.lock())?;
         }
-        Commands::ServeTcp { addr } => {
+        Commands::ServeTcp {
+            addr,
+            indexes,
+            index_dirs,
+        } => {
             let listener = TcpListener::bind(&addr)?;
+            let mut runtime = ToolRuntime::default();
+            for index in indexes {
+                runtime.warm_index(index)?;
+            }
+            for index_dir in index_dirs {
+                runtime.warm_shards(index_dir)?;
+            }
             println!(
                 "{}",
                 serde_json::to_string(&serde_json::json!({
-                    "addr": listener.local_addr()?.to_string()
+                    "addr": listener.local_addr()?.to_string(),
+                    "cached_indexes": runtime.cached_index_count()
                 }))?
             );
             io::stdout().flush()?;
-            serve_tcp(listener)?;
+            serve_tcp(listener, runtime)?;
         }
         Commands::ClientJsonl { addr } => {
             client_jsonl(&addr)?;

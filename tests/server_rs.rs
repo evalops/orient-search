@@ -54,6 +54,52 @@ fn server_reports_tool_manifest_for_agent_wrappers() {
     assert!(stdout.contains("shard_repo_map"));
     assert!(stdout.contains("find_shard_symbol"));
     assert!(stdout.contains("daemon_status"));
+    assert!(stdout.contains("warm_index"));
+    assert!(stdout.contains("warm_shards"));
+}
+
+#[test]
+fn runtime_warms_index_by_tool_request() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/auth.rs"),
+        "pub struct SessionManager;\npub fn issue_token() {}\n",
+    );
+    write(
+        &repo.path().join("Cargo.toml"),
+        "[package]\nname='sample'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    let index_path = repo.path().join(".orient/index");
+    FastIndex::build(repo.path())
+        .unwrap()
+        .save(&index_path)
+        .unwrap();
+
+    let mut runtime = ToolRuntime::default();
+    let warm = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("warm"),
+        tool: "warm_index".to_string(),
+        arguments: serde_json::json!({
+            "index": index_path
+        }),
+    });
+    assert!(warm.error.is_none(), "{:?}", warm.error);
+    assert_eq!(warm.result.unwrap()["cached_indexes"], serde_json::json!(1));
+
+    let status = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("status"),
+        tool: "daemon_status".to_string(),
+        arguments: serde_json::json!({}),
+    });
+    let result = status.result.unwrap();
+    assert_eq!(result["cached_indexes"], serde_json::json!(1));
+    assert!(
+        result["cached_index_paths"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|path| path.as_str().unwrap().ends_with(".orient/index"))
+    );
 }
 
 #[test]
@@ -188,6 +234,42 @@ fn runtime_reuses_cached_shard_index_after_initial_load() {
 }
 
 #[test]
+fn runtime_warms_shards_by_tool_request() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/billing.rs"),
+        "pub fn invoice_total() -> usize { 42 }\n",
+    );
+    write(
+        &repo.path().join("Cargo.toml"),
+        "[package]\nname='billing'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    let shard_dir = tempfile::tempdir().unwrap();
+    let mut runtime = ToolRuntime::default();
+    let build = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("build"),
+        tool: "index_shards".to_string(),
+        arguments: serde_json::json!({
+            "repos": [repo.path()],
+            "output_dir": shard_dir.path()
+        }),
+    });
+    assert!(build.error.is_none(), "{:?}", build.error);
+
+    let warm = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("warm-shards"),
+        tool: "warm_shards".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": shard_dir.path()
+        }),
+    });
+    assert!(warm.error.is_none(), "{:?}", warm.error);
+    let result = warm.result.unwrap();
+    assert_eq!(result["cached_indexes"], serde_json::json!(1));
+    assert_eq!(result["warmed_indexes"], serde_json::json!(1));
+}
+
+#[test]
 fn tcp_daemon_serves_json_lines_requests() {
     let binary = assert_cmd::cargo::cargo_bin("orient");
     let mut child = Command::new(binary)
@@ -219,6 +301,134 @@ fn tcp_daemon_serves_json_lines_requests() {
 
     assert!(response.contains("\"id\":\"status\""));
     assert!(response.contains("\"cached_indexes\":0"));
+}
+
+#[test]
+fn tcp_daemon_starts_with_warmed_index() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/auth.rs"),
+        "pub struct SessionManager;\npub fn issue_token() {}\n",
+    );
+    write(
+        &repo.path().join("Cargo.toml"),
+        "[package]\nname='sample'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    let index_path = repo.path().join(".orient/index");
+    FastIndex::build(repo.path())
+        .unwrap()
+        .save(&index_path)
+        .unwrap();
+
+    let binary = assert_cmd::cargo::cargo_bin("orient");
+    let mut child = Command::new(binary)
+        .args([
+            "serve-tcp",
+            "--addr",
+            "127.0.0.1:0",
+            "--index",
+            index_path.to_str().unwrap(),
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let stdout = child.stdout.take().unwrap();
+    let mut startup_reader = BufReader::new(stdout);
+    let mut startup = String::new();
+    startup_reader.read_line(&mut startup).unwrap();
+    let startup_json: serde_json::Value = serde_json::from_str(&startup).unwrap();
+    let addr = startup_json["addr"].as_str().unwrap();
+    assert_eq!(startup_json["cached_indexes"], serde_json::json!(1));
+
+    let mut stream = TcpStream::connect(addr).unwrap();
+    let mut reader = BufReader::new(stream.try_clone().unwrap());
+    let request = serde_json::json!({
+        "id": "search",
+        "tool": "indexed_search_code",
+        "arguments": {
+            "index": index_path,
+            "query": "issue token",
+            "limit": 3,
+            "require_all": true
+        }
+    });
+    writeln!(stream, "{request}").unwrap();
+    let mut response = String::new();
+    reader.read_line(&mut response).unwrap();
+
+    child.kill().unwrap();
+    let _ = child.wait();
+
+    assert!(response.contains("\"id\":\"search\""));
+    assert!(response.contains("src/auth.rs"));
+}
+
+#[test]
+fn tcp_daemon_starts_with_warmed_shards() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/billing.rs"),
+        "pub fn invoice_total() -> usize { 42 }\n",
+    );
+    write(
+        &repo.path().join("Cargo.toml"),
+        "[package]\nname='billing'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    let shard_dir = tempfile::tempdir().unwrap();
+    let mut runtime = ToolRuntime::default();
+    let build = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("build"),
+        tool: "index_shards".to_string(),
+        arguments: serde_json::json!({
+            "repos": [repo.path()],
+            "output_dir": shard_dir.path()
+        }),
+    });
+    assert!(build.error.is_none(), "{:?}", build.error);
+
+    let binary = assert_cmd::cargo::cargo_bin("orient");
+    let mut child = Command::new(binary)
+        .args([
+            "serve-tcp",
+            "--addr",
+            "127.0.0.1:0",
+            "--index-dir",
+            shard_dir.path().to_str().unwrap(),
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let stdout = child.stdout.take().unwrap();
+    let mut startup_reader = BufReader::new(stdout);
+    let mut startup = String::new();
+    startup_reader.read_line(&mut startup).unwrap();
+    let startup_json: serde_json::Value = serde_json::from_str(&startup).unwrap();
+    let addr = startup_json["addr"].as_str().unwrap();
+    assert_eq!(startup_json["cached_indexes"], serde_json::json!(1));
+
+    let mut stream = TcpStream::connect(addr).unwrap();
+    let mut reader = BufReader::new(stream.try_clone().unwrap());
+    let request = serde_json::json!({
+        "id": "search",
+        "tool": "search_shards",
+        "arguments": {
+            "index_dir": shard_dir.path(),
+            "query": "invoice total",
+            "limit": 3,
+            "require_all": true
+        }
+    });
+    writeln!(stream, "{request}").unwrap();
+    let mut response = String::new();
+    reader.read_line(&mut response).unwrap();
+
+    child.kill().unwrap();
+    let _ = child.wait();
+
+    assert!(response.contains("\"id\":\"search\""));
+    assert!(response.contains("src/billing.rs"));
 }
 
 #[test]

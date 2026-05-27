@@ -54,6 +54,8 @@ fn cli_outputs_tool_manifest() {
             "\"required\":[\"repo\",\"query\"]",
         ))
         .stdout(predicate::str::contains("daemon_status"))
+        .stdout(predicate::str::contains("warm_index"))
+        .stdout(predicate::str::contains("warm_shards"))
         .stdout(predicate::str::contains("read_shard_range"));
 }
 
