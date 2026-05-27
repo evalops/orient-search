@@ -1,10 +1,13 @@
 use crate::fast_index::FastIndex;
-use crate::query::{merge_filters, parse_query};
+use crate::query::{merge_filters, parse_query, query_text};
 use crate::repo_index::{
     RepoIndexer, SearchFilters, SearchResult, SnippetMode, Symbol, finalize_results,
-    normalize_token, read_file_range, repo_matches, search_repo_fast_filtered,
+    normalize_token, read_file_range, search_repo_fast_filtered,
 };
-use crate::shards::{ShardRepoMap, build_shards, load_manifest, read_shard_range, refresh_shards};
+use crate::shards::{
+    ShardRepoMap, build_shards, filters_for_shard_scope, load_manifest, read_shard_range,
+    refresh_shards, shard_search_scopes,
+};
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -550,16 +553,26 @@ impl ToolRuntime {
         let manifest = load_manifest(index_dir)?;
         let parsed = parse_query(query);
         let filters = merge_filters(filters.clone(), parsed.filters);
+        let shard_query = query_text(&parsed.terms, &filters);
         let mut results = Vec::new();
         for shard in manifest.shards {
-            if !repo_matches(&shard.root, &filters) {
+            let scopes = shard_search_scopes(&shard, &filters);
+            if scopes.is_empty() {
                 continue;
             }
             let index = self.cached_index(index_dir.join(&shard.index))?;
-            for mut result in index.search_filtered(query, limit, &filters)? {
-                result.path = format!("{}/{}", shard.name, result.path);
-                result.reason = format!("shard:{}; {}", shard.name, result.reason);
-                results.push(result);
+            for scope in scopes {
+                let scoped_filters = filters_for_shard_scope(&filters, scope.as_deref());
+                for mut result in index.search_filtered(&shard_query, limit, &scoped_filters)? {
+                    if let Some(prefix) = &scope {
+                        if !result.path.starts_with(prefix) {
+                            continue;
+                        }
+                    }
+                    result.path = format!("{}/{}", shard.name, result.path);
+                    result.reason = format!("shard:{}; {}", shard.name, result.reason);
+                    results.push(result);
+                }
             }
         }
         Ok(finalize_results(results, limit))
@@ -575,13 +588,18 @@ impl ToolRuntime {
         let manifest = load_manifest(index_dir)?;
         let mut maps = Vec::new();
         for shard in manifest.shards {
-            if !repo_matches(&shard.root, filters) {
+            if shard_search_scopes(&shard, filters).is_empty() {
                 continue;
             }
             let index = self.cached_index(index_dir.join(&shard.index))?;
             let mut map = index.repo_map(symbol_limit, test_limit);
             prefix_repo_map_paths(&mut map, &shard.name);
             maps.push(ShardRepoMap {
+                aliases: shard
+                    .aliases
+                    .iter()
+                    .map(|alias| alias.name.clone())
+                    .collect(),
                 name: shard.name,
                 root: shard.root,
                 map,
@@ -606,13 +624,21 @@ impl ToolRuntime {
         let manifest = load_manifest(index_dir)?;
         let mut symbols = Vec::new();
         for shard in manifest.shards {
-            if !repo_matches(&shard.root, filters) {
+            let scopes = shard_search_scopes(&shard, filters);
+            if scopes.is_empty() {
                 continue;
             }
             let index = self.cached_index(index_dir.join(&shard.index))?;
-            for mut symbol in index.find_symbol(name, limit) {
-                symbol.path = format!("{}/{}", shard.name, symbol.path);
-                symbols.push(symbol);
+            for scope in scopes {
+                for mut symbol in index.find_symbol(name, limit) {
+                    if let Some(prefix) = &scope {
+                        if !symbol.path.starts_with(prefix) {
+                            continue;
+                        }
+                    }
+                    symbol.path = format!("{}/{}", shard.name, symbol.path);
+                    symbols.push(symbol);
+                }
             }
         }
 

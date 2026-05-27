@@ -1,10 +1,10 @@
 //! Multi-repo shard manifests for local indexed search.
 
 use crate::fast_index::{FastIndex, IndexStats};
-use crate::query::{merge_filters, parse_query};
+use crate::query::{merge_filters, parse_query, query_text};
 use crate::repo_index::{
-    FileRange, RepoMap, SearchFilters, SearchResult, Symbol, finalize_results, normalize_token,
-    read_file_range, repo_matches,
+    FileRange, RepoMap, SearchFilters, SearchResult, Symbol, finalize_results, is_manifest_file,
+    normalize_token, read_file_range,
 };
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -25,6 +25,15 @@ pub struct ShardEntry {
     pub name: String,
     pub root: PathBuf,
     pub index: String,
+    #[serde(default)]
+    pub aliases: Vec<ShardAlias>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShardAlias {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path_prefix: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -58,6 +67,7 @@ pub struct ShardRefreshStats {
 pub struct ShardRepoMap {
     pub name: String,
     pub root: PathBuf,
+    pub aliases: Vec<String>,
     pub map: RepoMap,
 }
 
@@ -95,6 +105,7 @@ pub fn build_shards(repos: &[PathBuf], output_dir: impl AsRef<Path>) -> Result<S
         let stats = index.stats();
         add_stats(&mut total, &stats);
         manifest.shards.push(ShardEntry {
+            aliases: shard_aliases(&root, &base_name)?,
             name,
             root,
             index: index_name,
@@ -157,17 +168,27 @@ pub fn search_shards(
     let manifest = load_manifest(index_dir)?;
     let parsed = parse_query(query);
     let filters = merge_filters(filters.clone(), parsed.filters);
+    let shard_query = query_text(&parsed.terms, &filters);
     let mut results = Vec::new();
     for shard in manifest.shards {
-        if !repo_matches(&shard.root, &filters) {
+        let scopes = shard_search_scopes(&shard, &filters);
+        if scopes.is_empty() {
             continue;
         }
         let index = FastIndex::load(index_dir.join(&shard.index))
             .with_context(|| format!("load shard {}", shard.index))?;
-        for mut result in index.search_filtered(query, limit, &filters)? {
-            result.path = format!("{}/{}", shard.name, result.path);
-            result.reason = format!("shard:{}; {}", shard.name, result.reason);
-            results.push(result);
+        for scope in scopes {
+            let scoped_filters = filters_for_shard_scope(&filters, scope.as_deref());
+            for mut result in index.search_filtered(&shard_query, limit, &scoped_filters)? {
+                if let Some(prefix) = &scope {
+                    if !result.path.starts_with(prefix) {
+                        continue;
+                    }
+                }
+                result.path = format!("{}/{}", shard.name, result.path);
+                result.reason = format!("shard:{}; {}", shard.name, result.reason);
+                results.push(result);
+            }
         }
     }
     Ok(finalize_results(results, limit))
@@ -188,14 +209,22 @@ pub fn find_shard_symbol(
     let manifest = load_manifest(index_dir)?;
     let mut symbols = Vec::new();
     for shard in manifest.shards {
-        if !repo_matches(&shard.root, filters) {
+        let scopes = shard_search_scopes(&shard, filters);
+        if scopes.is_empty() {
             continue;
         }
         let index = FastIndex::load(index_dir.join(&shard.index))
             .with_context(|| format!("load shard {}", shard.index))?;
-        for mut symbol in index.find_symbol(name, limit) {
-            symbol.path = format!("{}/{}", shard.name, symbol.path);
-            symbols.push(symbol);
+        for scope in scopes {
+            for mut symbol in index.find_symbol(name, limit) {
+                if let Some(prefix) = &scope {
+                    if !symbol.path.starts_with(prefix) {
+                        continue;
+                    }
+                }
+                symbol.path = format!("{}/{}", shard.name, symbol.path);
+                symbols.push(symbol);
+            }
         }
     }
 
@@ -220,7 +249,7 @@ pub fn shard_repo_maps(
     let manifest = load_manifest(index_dir)?;
     let mut maps = Vec::new();
     for shard in manifest.shards {
-        if !repo_matches(&shard.root, filters) {
+        if shard_search_scopes(&shard, filters).is_empty() {
             continue;
         }
         let index = FastIndex::load(index_dir.join(&shard.index))
@@ -228,6 +257,11 @@ pub fn shard_repo_maps(
         let mut map = index.repo_map(symbol_limit, test_limit);
         prefix_repo_map_paths(&mut map, &shard.name);
         maps.push(ShardRepoMap {
+            aliases: shard
+                .aliases
+                .iter()
+                .map(|alias| alias.name.clone())
+                .collect(),
             name: shard.name,
             root: shard.root,
             map,
@@ -300,12 +334,146 @@ pub(crate) fn load_manifest(index_dir: &Path) -> Result<ShardManifest> {
     Ok(manifest)
 }
 
+pub(crate) fn shard_search_scopes(
+    shard: &ShardEntry,
+    filters: &SearchFilters,
+) -> Vec<Option<String>> {
+    if filters.exclude_repo.iter().any(|filter| {
+        shard_identity_matches(shard, filter)
+            || shard
+                .aliases
+                .iter()
+                .any(|alias| alias_matches(alias, filter))
+    }) {
+        return Vec::new();
+    }
+
+    let Some(filter) = &filters.repo else {
+        return vec![None];
+    };
+
+    let mut scopes = Vec::<Option<String>>::new();
+    if shard_identity_matches(shard, filter) {
+        scopes.push(None);
+    }
+    for alias in &shard.aliases {
+        if alias_matches(alias, filter) {
+            scopes.push(alias.path_prefix.clone());
+        }
+    }
+    scopes.sort();
+    scopes.dedup();
+    scopes
+}
+
+pub(crate) fn filters_for_shard_scope(
+    filters: &SearchFilters,
+    path_prefix: Option<&str>,
+) -> SearchFilters {
+    let mut filters = filters.clone();
+    filters.repo = None;
+    filters.exclude_repo.clear();
+    if let Some(prefix) = path_prefix {
+        if filters.path.is_none() {
+            filters.path = Some(prefix.trim_end_matches('/').to_string());
+        }
+    }
+    filters
+}
+
 fn save_manifest(index_dir: &Path, manifest: &ShardManifest) -> Result<()> {
     fs::write(
         index_dir.join("manifest.json"),
         serde_json::to_vec_pretty(manifest)?,
     )
     .with_context(|| format!("write shard manifest {}", index_dir.display()))
+}
+
+fn shard_aliases(root: &Path, base_name: &str) -> Result<Vec<ShardAlias>> {
+    let mut aliases = Vec::new();
+    let mut seen = HashSet::new();
+    push_alias(&mut aliases, &mut seen, base_name, None);
+
+    for entry in fs::read_dir(root)? {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        if !file_type.is_dir() {
+            continue;
+        }
+        let path = entry.path();
+        if !directory_has_manifest(&path)? {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().to_string();
+        push_alias(&mut aliases, &mut seen, &name, Some(format!("{name}/")));
+    }
+
+    aliases.sort_by(|left, right| {
+        left.name
+            .cmp(&right.name)
+            .then_with(|| left.path_prefix.cmp(&right.path_prefix))
+    });
+    Ok(aliases)
+}
+
+fn directory_has_manifest(path: &Path) -> Result<bool> {
+    for entry in fs::read_dir(path)? {
+        let entry = entry?;
+        if !entry.file_type()?.is_file() {
+            continue;
+        }
+        let file_name = entry.file_name().to_string_lossy().to_string();
+        if is_manifest_file(&file_name) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn push_alias(
+    aliases: &mut Vec<ShardAlias>,
+    seen: &mut HashSet<(String, Option<String>)>,
+    name: &str,
+    path_prefix: Option<String>,
+) {
+    let name = name.trim();
+    if name.is_empty() {
+        return;
+    }
+    let key = (name.to_ascii_lowercase(), path_prefix.clone());
+    if seen.insert(key) {
+        aliases.push(ShardAlias {
+            name: name.to_string(),
+            path_prefix,
+        });
+    }
+}
+
+fn shard_identity_matches(shard: &ShardEntry, filter: &str) -> bool {
+    let filter = filter.to_ascii_lowercase();
+    shard.name.to_ascii_lowercase().contains(&filter)
+        || shard
+            .root
+            .file_name()
+            .map(|value| {
+                value
+                    .to_string_lossy()
+                    .to_ascii_lowercase()
+                    .contains(&filter)
+            })
+            .unwrap_or(false)
+        || shard
+            .root
+            .to_string_lossy()
+            .to_ascii_lowercase()
+            .contains(&filter)
+}
+
+fn alias_matches(alias: &ShardAlias, filter: &str) -> bool {
+    alias
+        .name
+        .to_ascii_lowercase()
+        .contains(&filter.to_ascii_lowercase())
 }
 
 fn add_stats(total: &mut ShardBuildStats, stats: &IndexStats) {
