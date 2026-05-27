@@ -56,6 +56,8 @@ cargo run -- symbol --repo /path/to/repo SessionManager
 # Find related tests/files.
 cargo run -- related --repo /path/to/repo src/auth.py
 cargo run -- related-symbols --repo /path/to/repo --path src/auth.py --query "session token"
+cargo run -- related-index --index /tmp/orient.index src/auth.py
+cargo run -- related-index-symbols --index /tmp/orient.index --path src/auth.py --query "session token"
 
 # Read a bounded, line-numbered file range.
 cargo run -- read-range --repo /path/to/repo src/auth.py --start 40 --lines 80
@@ -121,7 +123,9 @@ Supported tools:
 - `read_shard_range`
 - `find_symbol`
 - `related_files`
+- `related_index_files`
 - `related_symbols`
+- `related_index_symbols`
 
 `tool_manifest` returns the same tool list with descriptions plus required and optional argument names, so a wrapper can bootstrap the JSON-lines surface without scraping this README.
 For indexed or shard JSON search arguments, use `repo` or `repo_filter` to restrict by repository name. For `search_code`, `repo` is the repository root path, so use `repo_filter` for name filtering.
@@ -185,16 +189,16 @@ Product impact criteria for follow-up adoption:
 
 Current search baseline:
 
-- `orient bench-search --repo . "indexed search symbol filters"`: `8.884ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "session token auth"`: `20.522ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "browser session implementation"`: `19.932ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "postgres migration user"`: `31.583ms` p95 after warmup.
+- `orient bench-search --repo . "indexed search symbol filters"`: `9.214ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "session token auth"`: `17.189ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "browser session implementation"`: `17.098ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "postgres migration user"`: `36.696ms` p95 after warmup.
 - The `rg` hot path has a `250ms` wall-clock timeout plus a bounded match cap; timed-out searches return partial results rather than hanging.
 - `orient index --repo . --output /tmp/orient-self.index`: versioned binary index with file metadata, content token postings, path token postings, trigram postings, line offsets, and symbol boosts.
 - `orient index-shards --repo repo-a --repo repo-b --output-dir /tmp/orient-shards`: writes per-repo index shards plus a manifest for local multi-repo search.
 - `orient refresh-shards --index-dir /tmp/orient-shards`: refreshes each shard incrementally, reusing unchanged file metadata and postings per repo.
 - `orient refresh-index --repo . --index /tmp/orient-self.index`: reuses unchanged files and refreshes changed/deleted files.
-- `orient bench-search --repo . --index /tmp/orient-self.index "indexed search symbol filters"`: `0.317ms` p95 after warmup.
+- `orient bench-search --repo . --index /tmp/orient-self.index "indexed search symbol filters"`: `0.174ms` p95 after warmup.
 
 Benchmark methodology:
 

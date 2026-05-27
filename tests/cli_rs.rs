@@ -159,6 +159,10 @@ fn cli_searches_symbols_and_related_files() {
 #[test]
 fn cli_builds_and_searches_persistent_index() {
     let repo = sample_repo();
+    write(
+        &repo.path().join("tests/auth_test.rs"),
+        "use sample::SessionManager;\n#[test]\nfn issue_token_round_trip() {}\n",
+    );
     let index_path = repo.path().join(".orient/index");
 
     let mut index = Command::cargo_bin("orient").unwrap();
@@ -212,6 +216,34 @@ fn cli_builds_and_searches_persistent_index() {
         .success()
         .stdout(predicate::str::contains("\"path\":\"src/auth.rs\""))
         .stdout(predicate::str::contains("issue_token"));
+
+    let mut related_index = Command::cargo_bin("orient").unwrap();
+    related_index
+        .args([
+            "related-index",
+            "--index",
+            index_path.to_str().unwrap(),
+            "src/auth.rs",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("tests/auth_test.rs"));
+
+    let mut related_index_symbols = Command::cargo_bin("orient").unwrap();
+    related_index_symbols
+        .args([
+            "related-index-symbols",
+            "--index",
+            index_path.to_str().unwrap(),
+            "--path",
+            "src/auth.rs",
+            "--query",
+            "SessionManager",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("SessionManager"))
+        .stdout(predicate::str::contains("same file"));
 
     write(
         &repo.path().join("src/auth.rs"),

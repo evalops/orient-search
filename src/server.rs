@@ -148,9 +148,21 @@ pub fn tool_manifest() -> Value {
             "optional": ["limit"]
         },
         {
+            "name": "related_index_files",
+            "description": "Find nearby source/test files related to an indexed result path.",
+            "required": ["index", "path"],
+            "optional": ["limit"]
+        },
+        {
             "name": "related_symbols",
             "description": "Find symbols related to a path and optional query.",
             "required": ["repo"],
+            "optional": ["path", "query", "limit"]
+        },
+        {
+            "name": "related_index_symbols",
+            "description": "Find symbols related to an indexed path and optional query.",
+            "required": ["index"],
             "optional": ["path", "query", "limit"]
         }
     ])
@@ -256,12 +268,33 @@ fn dispatch_result(request: &ToolRequest) -> Result<Value> {
             let index = RepoIndexer::new(repo).build()?;
             Ok(serde_json::to_value(index.related_files(&path, limit))?)
         }
+        "related_index_files" => {
+            let index_path = path_arg(&request.arguments, "index")?;
+            let path = string_arg(&request.arguments, "path")?;
+            let limit = usize_arg(&request.arguments, "limit").unwrap_or(10);
+            let fast_index = FastIndex::load(index_path)?;
+            let index = RepoIndexer::new(fast_index.root).build()?;
+            Ok(serde_json::to_value(index.related_files(&path, limit))?)
+        }
         "related_symbols" => {
             let repo = path_arg(&request.arguments, "repo")?;
             let path = optional_string_arg(&request.arguments, "path");
             let query = optional_string_arg(&request.arguments, "query");
             let limit = usize_arg(&request.arguments, "limit").unwrap_or(10);
             let index = RepoIndexer::new(repo).build()?;
+            Ok(serde_json::to_value(index.related_symbols(
+                path.as_deref(),
+                query.as_deref(),
+                limit,
+            ))?)
+        }
+        "related_index_symbols" => {
+            let index_path = path_arg(&request.arguments, "index")?;
+            let path = optional_string_arg(&request.arguments, "path");
+            let query = optional_string_arg(&request.arguments, "query");
+            let limit = usize_arg(&request.arguments, "limit").unwrap_or(10);
+            let fast_index = FastIndex::load(index_path)?;
+            let index = RepoIndexer::new(fast_index.root).build()?;
             Ok(serde_json::to_value(index.related_symbols(
                 path.as_deref(),
                 query.as_deref(),
@@ -284,7 +317,9 @@ fn dispatch_result(request: &ToolRequest) -> Result<Value> {
             "read_shard_range",
             "find_symbol",
             "related_files",
-            "related_symbols"
+            "related_index_files",
+            "related_symbols",
+            "related_index_symbols"
         ])),
         other => Err(anyhow!("unknown tool: {other}")),
     }

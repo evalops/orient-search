@@ -156,9 +156,26 @@ enum Commands {
         #[arg(long, default_value_t = 10)]
         limit: usize,
     },
+    RelatedIndex {
+        #[arg(long)]
+        index: PathBuf,
+        path: String,
+        #[arg(long, default_value_t = 10)]
+        limit: usize,
+    },
     RelatedSymbols {
         #[arg(long, default_value = ".")]
         repo: PathBuf,
+        #[arg(long)]
+        path: Option<String>,
+        #[arg(long)]
+        query: Option<String>,
+        #[arg(long, default_value_t = 10)]
+        limit: usize,
+    },
+    RelatedIndexSymbols {
+        #[arg(long)]
+        index: PathBuf,
         #[arg(long)]
         path: Option<String>,
         #[arg(long)]
@@ -409,6 +426,14 @@ fn main() -> Result<()> {
                 serde_json::to_string(&index.related_files(&path, limit))?
             );
         }
+        Commands::RelatedIndex { index, path, limit } => {
+            let fast_index = FastIndex::load(index)?;
+            let index = RepoIndexer::new(fast_index.root).build()?;
+            println!(
+                "{}",
+                serde_json::to_string(&index.related_files(&path, limit))?
+            );
+        }
         Commands::RelatedSymbols {
             repo,
             path,
@@ -416,6 +441,23 @@ fn main() -> Result<()> {
             limit,
         } => {
             let index = RepoIndexer::new(repo).build()?;
+            println!(
+                "{}",
+                serde_json::to_string(&index.related_symbols(
+                    path.as_deref(),
+                    query.as_deref(),
+                    limit,
+                ))?
+            );
+        }
+        Commands::RelatedIndexSymbols {
+            index,
+            path,
+            query,
+            limit,
+        } => {
+            let fast_index = FastIndex::load(index)?;
+            let index = RepoIndexer::new(fast_index.root).build()?;
             println!(
                 "{}",
                 serde_json::to_string(&index.related_symbols(
