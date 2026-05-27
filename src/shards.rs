@@ -61,6 +61,7 @@ pub struct ShardRefreshStats {
     pub path_terms: usize,
     pub trigrams: usize,
     pub symbols: usize,
+    pub removed_shards: usize,
     pub reused_files: usize,
     pub renamed_files: usize,
     pub refreshed_files: usize,
@@ -74,6 +75,7 @@ pub struct ShardEnsureStats {
     pub action: String,
     pub shards: usize,
     pub added_shards: usize,
+    pub removed_shards: usize,
     pub files: usize,
     pub terms: usize,
     pub path_terms: usize,
@@ -159,9 +161,10 @@ pub fn ensure_shards(repos: &[PathBuf], output_dir: impl AsRef<Path>) -> Result<
         let mut total = ShardEnsureStats {
             version: stats.version,
             output_dir: stats.output_dir,
-            action: "refresh".to_string(),
+            action: ensure_action(stats.removed_shards, 0),
             shards: stats.shards,
             added_shards: 0,
+            removed_shards: stats.removed_shards,
             files: stats.files,
             terms: stats.terms,
             path_terms: stats.path_terms,
@@ -173,9 +176,7 @@ pub fn ensure_shards(repos: &[PathBuf], output_dir: impl AsRef<Path>) -> Result<
             deleted_files: stats.deleted_files,
         };
         let added = add_missing_shards(repos, output_dir, &mut total)?;
-        if added > 0 {
-            total.action = "refresh+add".to_string();
-        }
+        total.action = ensure_action(total.removed_shards, added);
         return Ok(total);
     }
 
@@ -190,6 +191,7 @@ pub fn ensure_shards(repos: &[PathBuf], output_dir: impl AsRef<Path>) -> Result<
         action: "build".to_string(),
         shards: stats.shards,
         added_shards: stats.shards,
+        removed_shards: 0,
         files: stats.files,
         terms: stats.terms,
         path_terms: stats.path_terms,
@@ -214,13 +216,20 @@ pub fn refresh_shards(index_dir: impl AsRef<Path>) -> Result<ShardRefreshStats> 
         path_terms: 0,
         trigrams: 0,
         symbols: 0,
+        removed_shards: 0,
         reused_files: 0,
         renamed_files: 0,
         refreshed_files: 0,
         deleted_files: 0,
     };
 
-    for shard in &mut manifest.shards {
+    let mut kept_shards = Vec::with_capacity(manifest.shards.len());
+    for mut shard in manifest.shards {
+        if !shard.root.exists() {
+            let _ = fs::remove_file(index_dir.join(&shard.index));
+            total.removed_shards += 1;
+            continue;
+        }
         let index_path = index_dir.join(&shard.index);
         let previous = if index_path.exists() {
             Some(
@@ -246,10 +255,23 @@ pub fn refresh_shards(index_dir: impl AsRef<Path>) -> Result<ShardRefreshStats> 
             .unwrap_or_else(|| shard.name.clone());
         shard.aliases = shard_aliases(&shard.root, &base_name)?;
         shard.git = shard_git_metadata(&shard.root);
+        kept_shards.push(shard);
     }
 
+    manifest.shards = kept_shards;
+    total.shards = manifest.shards.len();
     save_manifest(index_dir, &manifest)?;
     Ok(total)
+}
+
+fn ensure_action(removed: usize, added: usize) -> String {
+    match (removed > 0, added > 0) {
+        (true, true) => "refresh+prune+add",
+        (true, false) => "refresh+prune",
+        (false, true) => "refresh+add",
+        (false, false) => "refresh",
+    }
+    .to_string()
 }
 
 fn add_missing_shards(

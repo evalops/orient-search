@@ -1432,6 +1432,67 @@ fn runtime_refresh_shards_updates_nested_repo_aliases() {
 }
 
 #[test]
+fn runtime_refresh_shards_prunes_missing_repo_roots() {
+    let workspace = tempfile::tempdir().unwrap();
+    let auth_repo = workspace.path().join("auth");
+    write(
+        &auth_repo.join("src/auth.rs"),
+        "pub fn issue_token() -> &'static str { \"token\" }\n",
+    );
+    write(
+        &auth_repo.join("Cargo.toml"),
+        "[package]\nname='auth'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    let billing_repo = workspace.path().join("billing");
+    write(
+        &billing_repo.join("src/billing.rs"),
+        "pub fn invoice_total() -> usize { 42 }\n",
+    );
+    write(
+        &billing_repo.join("Cargo.toml"),
+        "[package]\nname='billing'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    let shard_dir = tempfile::tempdir().unwrap();
+    let runtime = ToolRuntime::default();
+    let build = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("build"),
+        tool: "index_shards".to_string(),
+        arguments: serde_json::json!({
+            "repos": [auth_repo, billing_repo],
+            "output_dir": shard_dir.path()
+        }),
+    });
+    assert!(build.error.is_none(), "{:?}", build.error);
+    assert_eq!(build.result.unwrap()["shards"], serde_json::json!(2));
+
+    fs::remove_dir_all(workspace.path().join("billing")).unwrap();
+
+    let refresh = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("refresh"),
+        tool: "refresh_shards".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": shard_dir.path()
+        }),
+    });
+    assert!(refresh.error.is_none(), "{:?}", refresh.error);
+    let result = refresh.result.unwrap();
+    assert_eq!(result["removed_shards"], serde_json::json!(1));
+    assert_eq!(result["shards"], serde_json::json!(1));
+
+    let search = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("search"),
+        tool: "search_shards".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": shard_dir.path(),
+            "query": "issue_token"
+        }),
+    });
+    assert!(search.error.is_none(), "{:?}", search.error);
+    let result = serde_json::to_string(&search.result).unwrap();
+    assert!(result.contains("auth/src/auth.rs"), "{result}");
+}
+
+#[test]
 fn tcp_daemon_serves_json_lines_requests() {
     let binary = assert_cmd::cargo::cargo_bin("orient");
     let mut child = Command::new(binary)

@@ -1641,6 +1641,71 @@ fn cli_refresh_shards_updates_nested_repo_aliases() {
 }
 
 #[test]
+fn cli_refresh_shards_prunes_missing_repo_roots() {
+    let workspace = tempfile::tempdir().unwrap();
+    let auth_repo = workspace.path().join("auth");
+    write(
+        &auth_repo.join("src/auth.rs"),
+        "pub fn issue_token() -> &'static str { \"token\" }\n",
+    );
+    write(
+        &auth_repo.join("Cargo.toml"),
+        "[package]\nname='auth'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    let billing_repo = workspace.path().join("billing");
+    write(
+        &billing_repo.join("src/billing.rs"),
+        "pub fn invoice_total() -> usize { 42 }\n",
+    );
+    write(
+        &billing_repo.join("Cargo.toml"),
+        "[package]\nname='billing'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    let shard_dir = tempfile::tempdir().unwrap();
+
+    let mut build = Command::cargo_bin("orient").unwrap();
+    build
+        .args([
+            "index-shards",
+            "--repo",
+            auth_repo.to_str().unwrap(),
+            "--repo",
+            billing_repo.to_str().unwrap(),
+            "--output-dir",
+            shard_dir.path().to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"shards\":2"));
+
+    fs::remove_dir_all(&billing_repo).unwrap();
+
+    let mut refresh = Command::cargo_bin("orient").unwrap();
+    refresh
+        .args([
+            "refresh-shards",
+            "--index-dir",
+            shard_dir.path().to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"removed_shards\":1"))
+        .stdout(predicate::str::contains("\"shards\":1"));
+
+    let mut search = Command::cargo_bin("orient").unwrap();
+    search
+        .args([
+            "search-shards",
+            "--index-dir",
+            shard_dir.path().to_str().unwrap(),
+            "issue_token",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("auth/src/auth.rs"));
+}
+
+#[test]
 fn cli_reports_search_benchmarks() {
     let repo = sample_repo();
     let baseline_path = repo.path().join(".orient/fallback-bench.json");
