@@ -1,8 +1,6 @@
 # Agent Orientation Layer
 
-Rust-first local orientation layer for coding agents. It gives Codex, Claude, and similar agents a cheap way to answer “where is the relevant thing?” before they burn tool calls on repeated `rg`, `find`, `cat`, and failed path probes.
-
-The repo also includes the original Streamlit JSONL explorer for inspecting Codex and Claude session logs.
+Local orientation layer for coding agents, implemented in Rust. It gives Codex, Claude, and similar agents a cheap way to answer “where is the relevant thing?” before they burn tool calls on repeated `rg`, `find`, `cat`, and failed path probes.
 
 ## What It Does
 
@@ -71,7 +69,7 @@ The build is useful when it can:
 - Answer repo brief/search/symbol/related-file questions through Rust CLI and JSON-lines server.
 - Parse recent Codex/Claude logs and report total calls, failed calls, action-kind counts, and orientation share.
 - Establish a baseline for search/read behavior so future agent runs can be compared.
-- Pass the Rust test suite and keep the Streamlit explorer usable.
+- Pass the Rust test suite.
 
 Current interactive baseline on Jonathan's recent logs, using `--max-files 100 --max-file-mb 20`:
 
@@ -87,28 +85,9 @@ Product impact criteria for follow-up adoption:
 - Fewer calls before first edit.
 - No task-quality regression.
 
-## Dashboard
-
-```bash
-cd /Users/jonathanhaas/agent-jsonl-explorer
-python3 -m venv .venv
-. .venv/bin/activate
-pip install -r requirements.txt
-cargo build
-streamlit run app.py
-```
-
-The dashboard scans these default roots:
-
-- `/Users/jonathanhaas/.codex`
-- `/Users/jonathanhaas/.claude`
-
-Use the sidebar to limit files, date ranges, sources, tools, and whether raw text snippets are retained. If `target/debug/orient` exists, the dashboard also displays Rust-core metrics.
-
 ## Architecture
 
 - `src-rs/repo_index.rs`: repo indexing, symbol extraction, code search, related-file lookup.
 - `src-rs/session_metrics.rs`: Codex/Claude JSONL tool-call parsing and action classification.
 - `src-rs/server.rs`: JSON-lines tool dispatch.
 - `src-rs/main.rs`: CLI.
-- `agent_logs.py` and `app.py`: exploratory Python dashboard.
