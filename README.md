@@ -35,9 +35,11 @@ cargo run -- related --repo /path/to/repo src/auth.py
 cargo run -- metrics \
   --root /Users/jonathanhaas/.codex \
   --root /Users/jonathanhaas/.claude \
-  --max-files 500 \
-  --max-file-mb 50
+  --max-files 100 \
+  --max-file-mb 20
 ```
+
+Use `--max-files 500 --max-file-mb 50` for a wider offline scan; current dense Codex logs can make that too slow for interactive use.
 
 ## JSON-Lines Server
 
@@ -70,6 +72,13 @@ The build is useful when it can:
 - Parse recent Codex/Claude logs and report total calls, failed calls, action-kind counts, and orientation share.
 - Establish a baseline for search/read behavior so future agent runs can be compared.
 - Pass the Rust test suite and keep the Streamlit explorer usable.
+
+Current interactive baseline on Jonathan's recent logs, using `--max-files 100 --max-file-mb 20`:
+
+- `17,707` tool calls.
+- `864` failed calls.
+- `5,742` search/read orientation calls.
+- `32.4%` orientation share.
 
 Product impact criteria for follow-up adoption:
 

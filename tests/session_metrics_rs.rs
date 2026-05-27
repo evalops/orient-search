@@ -54,3 +54,41 @@ fn scans_codex_and_claude_tool_calls_into_metrics() {
     );
     assert!(metrics.orientation_share() > 0.6);
 }
+
+#[test]
+fn counts_duplicate_call_ids_in_different_files_and_multiple_claude_tool_uses() {
+    let temp = tempfile::tempdir().unwrap();
+    write(
+        &temp.path().join(".codex/a.jsonl"),
+        r#"{"type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"rg auth src\"}","call_id":"same"}}"#,
+    );
+    write(
+        &temp.path().join(".codex/b.jsonl"),
+        r#"{"type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"rg token src\"}","call_id":"same"}}"#,
+    );
+    write(
+        &temp.path().join(".claude/session.jsonl"),
+        r#"{"type":"assistant","sessionId":"s1","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Read","input":{"file_path":"a"}},{"type":"tool_use","id":"t2","name":"Grep","input":{"pattern":"token"}}]}}"#,
+    );
+
+    let metrics = scan_jsonl_roots(ScanOptions {
+        roots: vec![temp.path().to_path_buf()],
+        max_files: None,
+        max_file_bytes: None,
+    })
+    .unwrap();
+
+    assert_eq!(metrics.total_calls, 4);
+    assert_eq!(
+        metrics
+            .by_kind
+            .get(&ActionKind::SearchDiscovery)
+            .unwrap()
+            .calls,
+        3
+    );
+    assert_eq!(
+        metrics.by_kind.get(&ActionKind::ReadFetch).unwrap().calls,
+        1
+    );
+}
