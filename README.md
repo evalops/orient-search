@@ -264,7 +264,7 @@ Search commands and JSON-lines tools accept `--explain` or JSON `"explain":true`
 - `symbol_exact` or `symbol_overlap`: symbol matching contributed to score.
 - `line_phrase`, `content_phrase`, or `path_phrase`: an exact quoted phrase contributed to score.
 
-Indexed searches also include a `query_plan` object in explain mode. It reports the planner strategy, normalized query tokens, exact phrases, trigrams, the rarest planned posting lists with posting counts, missing terms/trigrams, whether AND semantics are required, and candidate counts through each stage: planned postings, path/language/test filters, phrase/scoring verification, and final matching. `orient index-plan`, `orient shard-plan`, and the `indexed_query_plan` / `shard_query_plan` JSON-lines tools return plans even when search returns zero hits, so wrappers can distinguish missing postings, overly tight filters, and exact-phrase misses.
+Indexed searches also include a `query_plan` object in explain mode. It reports the planner strategy, normalized query tokens, exact phrases, trigrams, the rarest planned posting lists with posting counts, missing terms/trigrams, whether AND semantics are required, and candidate counts through each stage: planned postings, path/language/test filters, phrase/scoring verification, and final matching. Zero-hit plans include `repair_hints` such as `drop_missing_terms`, `relax_filters`, `relax_phrase`, or `relax_and`, often with a `suggested_query` an agent wrapper can retry. `orient index-plan`, `orient shard-plan`, and the `indexed_query_plan` / `shard_query_plan` JSON-lines tools return plans even when search returns zero hits, so wrappers can distinguish missing postings, overly tight filters, exact-phrase misses, and final AND rejections.
 
 When repeated worktrees or manifest copies produce equivalent hits, the top result can include a compact `duplicate_group` with a normalized `canonical_path`, a suppressed duplicate count, and up to eight hidden duplicate paths. This keeps result lists short while still showing agents when a match exists in multiple local copies.
 
@@ -291,10 +291,10 @@ Product impact criteria for follow-up adoption:
 
 Current search baseline:
 
-- `orient bench-search --repo . --index /tmp/orient-self.index "indexed search symbol filters"`: `0.913ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "session token auth"`: `23.201ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "browser session implementation"`: `25.070ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "postgres migration user"`: `49.100ms` p95 after warmup.
+- `orient bench-search --repo . --index /tmp/orient-self.index "indexed search symbol filters"`: `0.905ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "session token auth"`: `18.528ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "browser session implementation"`: `18.186ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "postgres migration user"`: `26.311ms` p95 after warmup.
 - The `rg` hot path has a `250ms` wall-clock timeout plus a bounded match cap; timed-out searches return partial results rather than hanging.
 - `orient index --repo . --output /tmp/orient-self.index`: versioned binary index with file metadata, content token postings, path token postings, trigram postings, line offsets, token-to-line tables, bounded source snapshots, and symbol boosts.
 - `orient discover-repos --root /Users/jonathanhaas/Documents/Projects --max-depth 2 --limit 500`: found 369 git or manifest-backed repo roots after scanning 2,889 directories, while skipping dependency/build directories and prioritizing visible canonical repos ahead of dated split, temp, and worktree folders when limits are small.

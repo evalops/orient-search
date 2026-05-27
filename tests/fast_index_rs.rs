@@ -276,6 +276,10 @@ fn indexed_query_plan_reports_missing_terms_without_results() {
     assert_eq!(plan.filtered_candidate_count, 0);
     assert_eq!(plan.scored_candidate_count, 0);
     assert_eq!(plan.final_match_count, 0);
+    assert!(plan.repair_hints.iter().any(|hint| {
+        hint.kind == "drop_missing_terms"
+            && hint.suggested_query.as_deref() == Some("session manager")
+    }));
     assert!(
         plan.planned_postings
             .iter()
@@ -296,6 +300,7 @@ fn indexed_query_plan_reports_missing_terms_without_results() {
     assert_eq!(filter_plan.filtered_candidate_count, 1);
     assert_eq!(filter_plan.scored_candidate_count, 1);
     assert_eq!(filter_plan.final_match_count, 1);
+    assert!(filter_plan.repair_hints.is_empty());
     assert!(filter_plan.missing_terms.is_empty());
 }
 
@@ -321,6 +326,9 @@ fn indexed_query_plan_counts_filter_and_phrase_rejections() {
     assert_eq!(filter_rejected.filtered_candidate_count, 0);
     assert_eq!(filter_rejected.scored_candidate_count, 0);
     assert_eq!(filter_rejected.final_match_count, 0);
+    assert!(filter_rejected.repair_hints.iter().any(|hint| {
+        hint.kind == "relax_filters" && hint.suggested_query.as_deref() == Some("session manager")
+    }));
 
     let phrase_rejected = index
         .query_plan(
@@ -335,6 +343,9 @@ fn indexed_query_plan_counts_filter_and_phrase_rejections() {
     assert_eq!(phrase_rejected.filtered_candidate_count, 1);
     assert_eq!(phrase_rejected.scored_candidate_count, 0);
     assert_eq!(phrase_rejected.final_match_count, 0);
+    assert!(phrase_rejected.repair_hints.iter().any(|hint| {
+        hint.kind == "relax_phrase" && hint.suggested_query.as_deref() == Some("session token")
+    }));
 }
 
 #[test]

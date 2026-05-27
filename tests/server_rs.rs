@@ -1714,6 +1714,8 @@ fn server_handles_indexed_search_request() {
     assert!(stdout.contains("missing"));
     assert!(stdout.contains("\"filtered_candidate_count\":0"));
     assert!(stdout.contains("\"final_match_count\":0"));
+    assert!(stdout.contains("\"repair_hints\""));
+    assert!(stdout.contains("drop_missing_terms"));
 }
 
 #[test]
@@ -1887,6 +1889,8 @@ fn server_handles_shard_index_search_and_read_requests() {
     assert!(stdout.contains("missingterm"));
     assert!(stdout.contains("\"filtered_candidate_count\":0"));
     assert!(stdout.contains("\"final_match_count\":0"));
+    assert!(stdout.contains("\"repair_hints\""));
+    assert!(stdout.contains("drop_missing_terms"));
 }
 
 #[test]

@@ -87,6 +87,8 @@ pub struct QueryPlan {
     pub scored_candidate_count: usize,
     #[serde(default)]
     pub final_match_count: usize,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub repair_hints: Vec<QueryPlanRepairHint>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -94,6 +96,14 @@ pub struct QueryPlanPosting {
     pub kind: String,
     pub value: String,
     pub postings: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QueryPlanRepairHint {
+    pub kind: String,
+    pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suggested_query: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -2,14 +2,14 @@
 
 use crate::query::{merge_filters, normalize_phrase_text, parse_query, query_phrases, query_text};
 use crate::repo_index::{
-    FileRange, QueryPlan, QueryPlanPosting, RankSignal, RelatedFile, RelatedSymbol, RepoBrief,
-    RepoMap, SearchFilters, SearchResult, SnippetMode, Symbol, apply_phrase_matches,
-    best_snippet_for_path, extract_symbols, file_range_from_text, filter_only_query,
-    filter_only_search_result, finalize_results, is_entrypoint_path, is_ignored, is_important_file,
-    is_manifest_file, is_test_path, known_commands_from_manifest_texts, language_for,
-    matches_filters, normalize_token, regular_file_metadata, repo_map_seed_paths, repo_matches,
-    result_matches_all_tokens, result_matches_symbol_filters, round4, score_filter_only_path,
-    symbol_kind_rank, token_counts, tokenize,
+    FileRange, QueryPlan, QueryPlanPosting, QueryPlanRepairHint, RankSignal, RelatedFile,
+    RelatedSymbol, RepoBrief, RepoMap, SearchFilters, SearchResult, SnippetMode, Symbol,
+    apply_phrase_matches, best_snippet_for_path, extract_symbols, file_range_from_text,
+    filter_only_query, filter_only_search_result, finalize_results, is_entrypoint_path, is_ignored,
+    is_important_file, is_manifest_file, is_test_path, known_commands_from_manifest_texts,
+    language_for, matches_filters, normalize_token, regular_file_metadata, repo_map_seed_paths,
+    repo_matches, result_matches_all_tokens, result_matches_symbol_filters, round4,
+    score_filter_only_path, symbol_kind_rank, token_counts, tokenize,
 };
 use anyhow::{Context, Result};
 use ignore::WalkBuilder;
@@ -955,6 +955,11 @@ impl FastIndex {
                 filtered_candidate_count: 0,
                 scored_candidate_count: 0,
                 final_match_count: 0,
+                repair_hints: vec![repair_hint(
+                    "repo_filter_mismatch",
+                    "The repo: filter does not match this index root. Relax repo: or choose a matching shard/index.",
+                    None,
+                )],
             });
         }
         let query = query_text(&parsed.terms, &filters);
@@ -983,6 +988,7 @@ impl FastIndex {
                     filtered_candidate_count: candidate_count,
                     scored_candidate_count: candidate_count,
                     final_match_count: candidate_count,
+                    repair_hints: filter_scan_repair_hints(candidate_count),
                 });
             }
             return Ok(QueryPlan {
@@ -998,6 +1004,11 @@ impl FastIndex {
                 filtered_candidate_count: 0,
                 scored_candidate_count: 0,
                 final_match_count: 0,
+                repair_hints: vec![repair_hint(
+                    "empty_query",
+                    "Add a content term, quoted literal, symbol:, or positive file/path/lang/ext/test filter.",
+                    None,
+                )],
             });
         }
 
@@ -1196,6 +1207,7 @@ impl FastIndex {
                 filtered_candidate_count: candidate_count,
                 scored_candidate_count: candidate_count,
                 final_match_count: candidate_count,
+                repair_hints: filter_scan_repair_hints(candidate_count),
             };
             for result in &mut results {
                 result.query_plan = Some(query_plan.clone());
@@ -1386,7 +1398,130 @@ fn indexed_query_plan(
         filtered_candidate_count,
         scored_candidate_count,
         final_match_count,
+        repair_hints: query_plan_repair_hints(
+            query_tokens,
+            query_phrases,
+            missing_terms,
+            missing_trigrams,
+            require_all,
+            candidate_count,
+            filtered_candidate_count,
+            scored_candidate_count,
+            final_match_count,
+        ),
     }
+}
+
+fn query_plan_repair_hints(
+    query_tokens: &[String],
+    query_phrases: &[String],
+    missing_terms: &[String],
+    missing_trigrams: &[String],
+    require_all: bool,
+    candidate_count: usize,
+    filtered_candidate_count: usize,
+    scored_candidate_count: usize,
+    final_match_count: usize,
+) -> Vec<QueryPlanRepairHint> {
+    if final_match_count > 0 {
+        return Vec::new();
+    }
+
+    let mut hints = Vec::new();
+    if !missing_terms.is_empty() {
+        hints.push(repair_hint(
+            "drop_missing_terms",
+            format!(
+                "Required terms have no content or path postings: {}. Drop or replace them before retrying.",
+                missing_terms.join(", ")
+            ),
+            relaxed_query_without_terms(query_tokens, missing_terms),
+        ));
+    }
+    if missing_terms.is_empty() && candidate_count == 0 && !missing_trigrams.is_empty() {
+        hints.push(repair_hint(
+            "shorten_substring",
+            "The literal's trigrams are not present. Try a shorter substring, a symbol: filter, or separate identifier tokens.",
+            None,
+        ));
+    }
+    if candidate_count > 0 && filtered_candidate_count == 0 {
+        hints.push(repair_hint(
+            "relax_filters",
+            "Posting candidates exist, but file/path/language/extension/test filters rejected all of them.",
+            suggested_token_query(query_tokens),
+        ));
+    }
+    if filtered_candidate_count > 0 && scored_candidate_count == 0 && !query_phrases.is_empty() {
+        hints.push(repair_hint(
+            "relax_phrase",
+            "Filtered candidates exist, but exact quoted phrase verification rejected them. Try the phrase as separate tokens.",
+            suggested_token_query(query_tokens),
+        ));
+    }
+    if scored_candidate_count > 0 && final_match_count == 0 && require_all {
+        hints.push(repair_hint(
+            "relax_and",
+            "Candidates scored, but final AND or symbol checks rejected them. Try fewer terms or remove --require-all.",
+            suggested_token_query(query_tokens),
+        ));
+    }
+    if hints.is_empty() {
+        hints.push(repair_hint(
+            "broaden_query",
+            "No final matches were produced. Try fewer terms, looser filters, or inspect planned_postings for the rarest surviving term.",
+            suggested_token_query(query_tokens),
+        ));
+    }
+    hints
+}
+
+fn filter_scan_repair_hints(candidate_count: usize) -> Vec<QueryPlanRepairHint> {
+    if candidate_count == 0 {
+        vec![repair_hint(
+            "relax_filters",
+            "No files matched the filter-only query. Relax file/path/language/extension/test filters.",
+            None,
+        )]
+    } else {
+        Vec::new()
+    }
+}
+
+fn repair_hint(
+    kind: impl Into<String>,
+    message: impl Into<String>,
+    suggested_query: Option<String>,
+) -> QueryPlanRepairHint {
+    QueryPlanRepairHint {
+        kind: kind.into(),
+        message: message.into(),
+        suggested_query,
+    }
+}
+
+fn relaxed_query_without_terms(
+    query_tokens: &[String],
+    missing_terms: &[String],
+) -> Option<String> {
+    let missing = missing_terms
+        .iter()
+        .map(String::as_str)
+        .collect::<HashSet<_>>();
+    let remaining = query_tokens
+        .iter()
+        .filter(|token| !missing.contains(token.as_str()))
+        .cloned()
+        .collect::<Vec<_>>();
+    suggested_query_from_tokens(&remaining)
+}
+
+fn suggested_token_query(query_tokens: &[String]) -> Option<String> {
+    suggested_query_from_tokens(query_tokens)
+}
+
+fn suggested_query_from_tokens(query_tokens: &[String]) -> Option<String> {
+    (!query_tokens.is_empty()).then(|| query_tokens.join(" "))
 }
 
 fn missing_query_terms(

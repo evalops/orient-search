@@ -593,7 +593,9 @@ fn cli_search_surfaces_accept_structured_filters() {
         .stdout(predicate::str::contains("\"candidate_count\":0"))
         .stdout(predicate::str::contains("\"filtered_candidate_count\":0"))
         .stdout(predicate::str::contains("\"scored_candidate_count\":0"))
-        .stdout(predicate::str::contains("\"final_match_count\":0"));
+        .stdout(predicate::str::contains("\"final_match_count\":0"))
+        .stdout(predicate::str::contains("\"repair_hints\""))
+        .stdout(predicate::str::contains("drop_missing_terms"));
 
     let shard_dir = tempfile::tempdir().unwrap();
     let mut build_shards = Command::cargo_bin("orient").unwrap();
@@ -1226,6 +1228,8 @@ fn cli_filters_shard_search_by_nested_repo_alias() {
         .stdout(predicate::str::contains("\"candidate_count\":0"))
         .stdout(predicate::str::contains("\"filtered_candidate_count\":0"))
         .stdout(predicate::str::contains("\"final_match_count\":0"))
+        .stdout(predicate::str::contains("\"repair_hints\""))
+        .stdout(predicate::str::contains("drop_missing_terms"))
         .stdout(predicate::str::contains("\"name\":\"auth\"").not());
 
     let mut shard_symbol = Command::cargo_bin("orient").unwrap();
