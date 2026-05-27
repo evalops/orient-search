@@ -7,8 +7,8 @@ use orient::repo_index::{
 };
 use orient::server::{ToolRuntime, serve_jsonl, serve_tcp, tool_manifest};
 use orient::shards::{
-    build_shards, find_shard_symbol, read_shard_range, refresh_shards, search_shards,
-    shard_repo_maps,
+    build_shards, find_shard_symbol, read_shard_range, refresh_shards, related_shard_files,
+    related_shard_symbols, search_shards, shard_repo_maps,
 };
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -216,11 +216,27 @@ enum Commands {
         #[arg(long, default_value_t = 10)]
         limit: usize,
     },
+    RelatedShard {
+        #[arg(long)]
+        index_dir: PathBuf,
+        path: String,
+        #[arg(long, default_value_t = 10)]
+        limit: usize,
+    },
     RelatedSymbols {
         #[arg(long, default_value = ".")]
         repo: PathBuf,
         #[arg(long)]
         path: Option<String>,
+        #[arg(long)]
+        query: Option<String>,
+        #[arg(long, default_value_t = 10)]
+        limit: usize,
+    },
+    RelatedShardSymbols {
+        #[arg(long)]
+        index_dir: PathBuf,
+        path: String,
         #[arg(long)]
         query: Option<String>,
         #[arg(long, default_value_t = 10)]
@@ -575,6 +591,16 @@ fn main() -> Result<()> {
                 serde_json::to_string(&index.related_files(&path, limit))?
             );
         }
+        Commands::RelatedShard {
+            index_dir,
+            path,
+            limit,
+        } => {
+            println!(
+                "{}",
+                serde_json::to_string(&related_shard_files(index_dir, &path, limit)?)?
+            );
+        }
         Commands::RelatedSymbols {
             repo,
             path,
@@ -606,6 +632,22 @@ fn main() -> Result<()> {
                     query.as_deref(),
                     limit,
                 ))?
+            );
+        }
+        Commands::RelatedShardSymbols {
+            index_dir,
+            path,
+            query,
+            limit,
+        } => {
+            println!(
+                "{}",
+                serde_json::to_string(&related_shard_symbols(
+                    index_dir,
+                    &path,
+                    query.as_deref(),
+                    limit,
+                )?)?
             );
         }
         Commands::BenchSearch {

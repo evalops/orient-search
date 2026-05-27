@@ -7,7 +7,8 @@ use crate::repo_index::{
 };
 use crate::shards::{
     ShardRepoMap, build_shards, filter_repo_map_by_prefix, filters_for_shard_scope, load_manifest,
-    read_shard_range, refresh_shards, shard_search_scopes,
+    read_shard_range, refresh_shards, related_shard_files, related_shard_symbols,
+    shard_search_scopes,
 };
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
@@ -291,6 +292,12 @@ pub fn tool_manifest() -> Value {
             "optional": ["limit"]
         },
         {
+            "name": "related_shard_files",
+            "description": "Find nearby source/test files related to a shard result path.",
+            "required": ["index_dir", "path"],
+            "optional": ["limit"]
+        },
+        {
             "name": "related_symbols",
             "description": "Find symbols related to a path and optional query.",
             "required": ["repo"],
@@ -301,6 +308,12 @@ pub fn tool_manifest() -> Value {
             "description": "Find symbols related to an indexed path and optional query.",
             "required": ["index"],
             "optional": ["path", "query", "limit"]
+        },
+        {
+            "name": "related_shard_symbols",
+            "description": "Find symbols related to a shard result path and optional query.",
+            "required": ["index_dir", "path"],
+            "optional": ["query", "limit"]
         }
     ])
 }
@@ -468,6 +481,14 @@ impl ToolRuntime {
                 let index = RepoIndexer::new(&fast_index.root).build()?;
                 Ok(serde_json::to_value(index.related_files(&path, limit))?)
             }
+            "related_shard_files" => {
+                let index_dir = path_arg(&request.arguments, "index_dir")?;
+                let path = string_arg(&request.arguments, "path")?;
+                let limit = usize_arg(&request.arguments, "limit").unwrap_or(10);
+                Ok(serde_json::to_value(related_shard_files(
+                    index_dir, &path, limit,
+                )?)?)
+            }
             "related_symbols" => {
                 let repo = path_arg(&request.arguments, "repo")?;
                 let path = optional_string_arg(&request.arguments, "path");
@@ -479,6 +500,18 @@ impl ToolRuntime {
                     query.as_deref(),
                     limit,
                 ))?)
+            }
+            "related_shard_symbols" => {
+                let index_dir = path_arg(&request.arguments, "index_dir")?;
+                let path = string_arg(&request.arguments, "path")?;
+                let query = optional_string_arg(&request.arguments, "query");
+                let limit = usize_arg(&request.arguments, "limit").unwrap_or(10);
+                Ok(serde_json::to_value(related_shard_symbols(
+                    index_dir,
+                    &path,
+                    query.as_deref(),
+                    limit,
+                )?)?)
             }
             "related_index_symbols" => {
                 let index_path = path_arg(&request.arguments, "index")?;
@@ -538,8 +571,10 @@ impl ToolRuntime {
                 "find_index_symbol",
                 "related_files",
                 "related_index_files",
+                "related_shard_files",
                 "related_symbols",
-                "related_index_symbols"
+                "related_index_symbols",
+                "related_shard_symbols"
             ])),
             other => Err(anyhow!("unknown tool: {other}")),
         }

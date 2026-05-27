@@ -57,7 +57,9 @@ fn cli_outputs_tool_manifest() {
         .stdout(predicate::str::contains("daemon_status"))
         .stdout(predicate::str::contains("warm_index"))
         .stdout(predicate::str::contains("warm_shards"))
-        .stdout(predicate::str::contains("read_shard_range"));
+        .stdout(predicate::str::contains("read_shard_range"))
+        .stdout(predicate::str::contains("related_shard_files"))
+        .stdout(predicate::str::contains("related_shard_symbols"));
 }
 
 #[test]
@@ -617,6 +619,10 @@ fn cli_filters_shard_search_by_nested_repo_alias() {
         "pub fn invoice_total() -> usize { 42 }\n",
     );
     write(
+        &billing_repo.join("tests/billing_test.rs"),
+        "use billing::invoice_total;\n#[test]\nfn totals_invoice() {}\n",
+    );
+    write(
         &billing_repo.join("Cargo.toml"),
         "[package]\nname='billing'\nversion='0.1.0'\nedition='2024'\n",
     );
@@ -710,6 +716,36 @@ fn cli_filters_shard_search_by_nested_repo_alias() {
         "\"path\":\"billing/src/billing.rs\"",
     ))
     .stdout(predicate::str::contains("invoice_total"));
+
+    let mut related = Command::cargo_bin("orient").unwrap();
+    related
+        .args([
+            "related-shard",
+            "--index-dir",
+            shard_dir.path().to_str().unwrap(),
+            "billing/src/billing.rs",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("billing/tests/billing_test.rs"))
+        .stdout(predicate::str::contains("auth/src/auth.rs").not());
+
+    let mut related_symbols = Command::cargo_bin("orient").unwrap();
+    related_symbols
+        .args([
+            "related-shard-symbols",
+            "--index-dir",
+            shard_dir.path().to_str().unwrap(),
+            "billing/src/billing.rs",
+            "--query",
+            "invoice total",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "\"path\":\"billing/src/billing.rs\"",
+        ))
+        .stdout(predicate::str::contains("invoice_total"));
 }
 
 #[test]

@@ -36,9 +36,9 @@ Implemented now:
 - `orient discover-repos`: bounded local repo discovery for broad workspaces and repeated worktree layouts.
 - `orient index-shards`, `orient refresh-shards`, `orient search-shards`, and `orient read-shard-range`: local multi-repo shard manifest with one versioned index file per repo, optional discovery from a workspace root, incremental shard refresh, and bounded range reads from prefixed shard paths.
 - `orient bench-search`: built-in p50/p95/max latency reporting for fallback and indexed search, with `--fail-p95-ms`, `--write-baseline`, and `--baseline` for regression gates.
-- JSON-lines tools: `tool_manifest`, `daemon_status`, `warm_index`, `warm_shards`, `discover_repos`, `search_code`, `indexed_search_code`, `indexed_repo_map`, `read_index_range`, `find_index_symbol`, `shard_repo_map`, `find_shard_symbol`, `related_index_files`, `related_index_symbols`, `index_shards`, `refresh_shards`, `search_shards`, `read_shard_range`, `repo_map`, `read_range`, and `related_symbols`.
+- JSON-lines tools: `tool_manifest`, `daemon_status`, `warm_index`, `warm_shards`, `discover_repos`, `search_code`, `indexed_search_code`, `indexed_repo_map`, `read_index_range`, `find_index_symbol`, `shard_repo_map`, `find_shard_symbol`, `related_index_files`, `related_index_symbols`, `related_shard_files`, `related_shard_symbols`, `index_shards`, `refresh_shards`, `search_shards`, `read_shard_range`, `repo_map`, `read_range`, and `related_symbols`.
 - Local TCP daemon/client mode for sharing one warm JSON-lines runtime across many local agents working in the same repeated worktree layout, with startup prewarming via `--index` and `--index-dir`.
-- CLI tools: `repo-map`, `index-map`, `shard-map`, `read-range`, `read-index-range`, `index-symbol`, `shard-symbol`, `related-index`, `related-index-symbols`, and `related-symbols`, so agents can inspect entrypoints/tests/top symbols, open bounded file context, and jump to nearby definitions after a search hit.
+- CLI tools: `repo-map`, `index-map`, `shard-map`, `read-range`, `read-index-range`, `index-symbol`, `shard-symbol`, `related-index`, `related-index-symbols`, `related-shard`, `related-shard-symbols`, and `related-symbols`, so agents can inspect entrypoints/tests/top symbols, open bounded file context, and jump to nearby definitions after a search hit.
 - `orient tool-manifest`: emits descriptions plus required/optional argument metadata for JSON-lines wrappers.
 - Search snippet modes: `short`, `medium`, `block`, and `symbol`.
 - Path, file, repo, extension, language, and symbol filters match case-insensitively across fallback, indexed, and shard search surfaces.
@@ -53,6 +53,7 @@ Implemented now:
 - Repo-map orientation from persistent indexes and shard directories, so agents can inspect entrypoints, manifests, tests, symbols, important files, and command hints without rebuilding a separate live repo index.
 - Shard manifests record aliases for nested repo-looking child directories, so broad dated worktree shards can still answer stable filters like `repo:maestro` and scope results to the matching child path.
 - Alias-scoped shard search, symbol lookup, and repo maps emit stable alias-prefixed paths, so search hits like `maestro/src/foo.rs` can be opened without knowing the enclosing worktree shard name.
+- Shard related-file and related-symbol tools accept alias-prefixed search-hit paths and keep returned context inside the same alias scope.
 - Shard refresh recomputes nested repo aliases, so newly added child repos become filterable after `refresh-shards`.
 - `read-shard-range` resolves alias-prefixed paths, so agents can read `maestro/src/foo.rs` even when `maestro` lives inside a broader dated worktree shard.
 

@@ -51,6 +51,8 @@ fn server_reports_tool_manifest_for_agent_wrappers() {
     assert!(stdout.contains("related_index_files"));
     assert!(stdout.contains("related_index_symbols"));
     assert!(stdout.contains("read_shard_range"));
+    assert!(stdout.contains("related_shard_files"));
+    assert!(stdout.contains("related_shard_symbols"));
     assert!(stdout.contains("shard_repo_map"));
     assert!(stdout.contains("find_shard_symbol"));
     assert!(stdout.contains("daemon_status"));
@@ -363,6 +365,10 @@ fn runtime_filters_shard_search_by_nested_repo_alias() {
         "pub fn invoice_total() -> usize { 42 }\n",
     );
     write(
+        &billing_repo.join("tests/billing_test.rs"),
+        "use billing::invoice_total;\n#[test]\nfn totals_invoice() {}\n",
+    );
+    write(
         &billing_repo.join("Cargo.toml"),
         "[package]\nname='billing'\nversion='0.1.0'\nedition='2024'\n",
     );
@@ -445,6 +451,42 @@ fn runtime_filters_shard_search_by_nested_repo_alias() {
     });
     assert!(range.error.is_none(), "{:?}", range.error);
     let result = serde_json::to_string(&range.result).unwrap();
+    assert!(
+        result.contains("\"path\":\"billing/src/billing.rs\""),
+        "{result}"
+    );
+    assert!(result.contains("invoice_total"), "{result}");
+
+    let related = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("related"),
+        tool: "related_shard_files".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": shard_dir.path(),
+            "path": "billing/src/billing.rs",
+            "limit": 5
+        }),
+    });
+    assert!(related.error.is_none(), "{:?}", related.error);
+    let result = serde_json::to_string(&related.result).unwrap();
+    assert!(result.contains("billing/tests/billing_test.rs"), "{result}");
+    assert!(!result.contains("auth/src/auth.rs"), "{result}");
+
+    let related_symbols = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("related-symbols"),
+        tool: "related_shard_symbols".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": shard_dir.path(),
+            "path": "billing/src/billing.rs",
+            "query": "invoice total",
+            "limit": 5
+        }),
+    });
+    assert!(
+        related_symbols.error.is_none(),
+        "{:?}",
+        related_symbols.error
+    );
+    let result = serde_json::to_string(&related_symbols.result).unwrap();
     assert!(
         result.contains("\"path\":\"billing/src/billing.rs\""),
         "{result}"
@@ -867,6 +909,10 @@ fn server_handles_shard_index_search_and_read_requests() {
         "pub fn legacy_invoice() -> usize { 1 }\n",
     );
     write(
+        &billing_repo.join("tests/billing_test.rs"),
+        "use billing::invoice_total;\n#[test]\nfn totals_invoice() {}\n",
+    );
+    write(
         &billing_repo.join("Cargo.toml"),
         "[package]\nname='billing'\nversion='0.1.0'\nedition='2024'\n",
     );
@@ -930,11 +976,32 @@ fn server_handles_shard_index_search_and_read_requests() {
             "tests": 5
         }
     });
+    let related_request = serde_json::json!({
+        "id": "related-shard-files",
+        "tool": "related_shard_files",
+        "arguments": {
+            "index_dir": parent.path().join(".orient-shards"),
+            "path": "billing/src/billing.rs",
+            "limit": 5
+        }
+    });
+    let related_symbols_request = serde_json::json!({
+        "id": "related-shard-symbols",
+        "tool": "related_shard_symbols",
+        "arguments": {
+            "index_dir": parent.path().join(".orient-shards"),
+            "path": "billing/src/billing.rs",
+            "query": "invoice total",
+            "limit": 5
+        }
+    });
     writeln!(child.stdin.as_mut().unwrap(), "{index_request}").unwrap();
     writeln!(child.stdin.as_mut().unwrap(), "{search_request}").unwrap();
     writeln!(child.stdin.as_mut().unwrap(), "{symbol_request}").unwrap();
     writeln!(child.stdin.as_mut().unwrap(), "{map_request}").unwrap();
     writeln!(child.stdin.as_mut().unwrap(), "{read_request}").unwrap();
+    writeln!(child.stdin.as_mut().unwrap(), "{related_request}").unwrap();
+    writeln!(child.stdin.as_mut().unwrap(), "{related_symbols_request}").unwrap();
     drop(child.stdin.take());
 
     let output = child.wait_with_output().unwrap();
@@ -955,6 +1022,10 @@ fn server_handles_shard_index_search_and_read_requests() {
     assert!(stdout.contains("\"id\":\"read-shard-range\""));
     assert!(stdout.contains("\"path\":\"billing/src/billing.rs\""));
     assert!(stdout.contains("invoice_total"));
+    assert!(stdout.contains("\"id\":\"related-shard-files\""));
+    assert!(stdout.contains("billing/tests/billing_test.rs"));
+    assert!(stdout.contains("\"id\":\"related-shard-symbols\""));
+    assert!(stdout.contains("\"path\":\"billing/src/billing.rs\""));
 }
 
 #[test]

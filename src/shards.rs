@@ -3,8 +3,8 @@
 use crate::fast_index::{FastIndex, IndexStats};
 use crate::query::{merge_filters, parse_query, query_text};
 use crate::repo_index::{
-    FileRange, RepoMap, SearchFilters, SearchResult, Symbol, finalize_results, is_manifest_file,
-    language_for, normalize_token, read_file_range,
+    FileRange, RelatedFile, RelatedSymbol, RepoIndexer, RepoMap, SearchFilters, SearchResult,
+    Symbol, finalize_results, is_manifest_file, language_for, normalize_token, read_file_range,
 };
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -305,10 +305,80 @@ pub fn read_shard_range(
     Ok(range)
 }
 
+pub fn related_shard_files(
+    index_dir: impl AsRef<Path>,
+    shard_path: &str,
+    limit: usize,
+) -> Result<Vec<RelatedFile>> {
+    let resolved = resolve_shard_path(index_dir.as_ref(), shard_path)?;
+    let index = RepoIndexer::new(&resolved.root).build()?;
+    let mut related = index.related_files(&resolved.relative_path, limit.saturating_mul(4).max(10));
+    related.retain(|file| resolved.contains_actual_path(&file.path));
+    for file in &mut related {
+        file.path = resolved.output_path(&file.path);
+    }
+    related.truncate(limit);
+    Ok(related)
+}
+
+pub fn related_shard_symbols(
+    index_dir: impl AsRef<Path>,
+    shard_path: &str,
+    query: Option<&str>,
+    limit: usize,
+) -> Result<Vec<RelatedSymbol>> {
+    let resolved = resolve_shard_path(index_dir.as_ref(), shard_path)?;
+    let index = RepoIndexer::new(&resolved.root).build()?;
+    let mut related = index.related_symbols(
+        Some(&resolved.relative_path),
+        query,
+        limit.saturating_mul(4).max(10),
+    );
+    related.retain(|symbol| resolved.contains_actual_path(&symbol.symbol.path));
+    for symbol in &mut related {
+        symbol.symbol.path = resolved.output_path(&symbol.symbol.path);
+    }
+    related.truncate(limit);
+    Ok(related)
+}
+
 struct ResolvedShardRead {
     root: PathBuf,
     relative_path: String,
     output_prefix: String,
+    path_prefix: Option<String>,
+}
+
+impl ResolvedShardRead {
+    fn contains_actual_path(&self, path: &str) -> bool {
+        self.path_prefix
+            .as_deref()
+            .map(|prefix| path == prefix.trim_end_matches('/') || path.starts_with(prefix))
+            .unwrap_or(true)
+    }
+
+    fn output_path(&self, path: &str) -> String {
+        let trimmed = self
+            .path_prefix
+            .as_deref()
+            .and_then(|prefix| path.strip_prefix(prefix))
+            .unwrap_or(path)
+            .trim_start_matches('/');
+        if trimmed.is_empty() {
+            self.output_prefix.clone()
+        } else {
+            format!("{}/{}", self.output_prefix, trimmed)
+        }
+    }
+}
+
+fn resolve_shard_path(index_dir: &Path, shard_path: &str) -> Result<ResolvedShardRead> {
+    let manifest = load_manifest(index_dir)?;
+    let (prefix, relative_path) = shard_path
+        .split_once('/')
+        .ok_or_else(|| anyhow::anyhow!("shard path must be '<repo>/<path>'"))?;
+    resolve_shard_read_path(&manifest, prefix, relative_path)
+        .ok_or_else(|| anyhow::anyhow!("unknown shard or alias: {prefix}"))
 }
 
 fn resolve_shard_read_path(
@@ -321,6 +391,7 @@ fn resolve_shard_read_path(
             root: shard.root.clone(),
             relative_path: relative_path.to_string(),
             output_prefix: shard.name.clone(),
+            path_prefix: None,
         });
     }
 
@@ -337,6 +408,7 @@ fn resolve_shard_read_path(
             root: shard.root.clone(),
             relative_path,
             output_prefix: alias.name.clone(),
+            path_prefix: alias.path_prefix.clone(),
         });
     }
 
