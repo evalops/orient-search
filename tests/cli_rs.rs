@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::Path;
+use std::process::Command as ProcessCommand;
 
 use assert_cmd::Command;
 use predicates::prelude::*;
@@ -7,6 +8,16 @@ use predicates::prelude::*;
 fn write(path: &Path, text: &str) {
     fs::create_dir_all(path.parent().unwrap()).unwrap();
     fs::write(path, text).unwrap();
+}
+
+fn git(repo: &Path, args: &[&str]) {
+    let status = ProcessCommand::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(args)
+        .status()
+        .unwrap();
+    assert!(status.success(), "git {:?} failed", args);
 }
 
 fn sample_repo() -> tempfile::TempDir {
@@ -149,6 +160,75 @@ fn cli_discovery_prioritizes_visible_repos_before_temp_roots() {
     .stdout(predicate::str::contains("\"name\":\"platform\""))
     .stdout(predicate::str::contains("platform-feature-split").not())
     .stdout(predicate::str::contains(".tmp-platform").not());
+}
+
+#[test]
+fn cli_discovery_can_group_git_worktree_families() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("workspace/project");
+    write(
+        &repo.join("Cargo.toml"),
+        "[package]\nname='project'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    git(&repo, &["init", "-b", "main"]);
+    git(
+        &repo,
+        &[
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/evalops/project.git",
+        ],
+    );
+    git(&repo, &["add", "Cargo.toml"]);
+    git(
+        &repo,
+        &[
+            "-c",
+            "user.name=Orient Tests",
+            "-c",
+            "user.email=orient@example.com",
+            "commit",
+            "-m",
+            "init",
+        ],
+    );
+    git(
+        &repo,
+        &[
+            "worktree",
+            "add",
+            "-b",
+            "feature/search",
+            "../project-feature",
+        ],
+    );
+
+    let mut cmd = Command::cargo_bin("orient").unwrap();
+    cmd.args([
+        "discover-repos",
+        "--root",
+        root.path().to_str().unwrap(),
+        "--max-depth",
+        "2",
+        "--limit",
+        "10",
+        "--git-metadata",
+        "--tracked-files",
+    ])
+    .assert()
+    .success()
+    .stdout(predicate::str::contains("\"repos_found\":2"))
+    .stdout(predicate::str::contains("\"families\""))
+    .stdout(predicate::str::contains("\"checkouts\":2"))
+    .stdout(predicate::str::contains("\"worktrees\":1"))
+    .stdout(predicate::str::contains("\"clones\":1"))
+    .stdout(predicate::str::contains("\"tracked_files\":2"))
+    .stdout(predicate::str::contains(
+        "https://github.com/evalops/project.git",
+    ))
+    .stdout(predicate::str::contains("\"git_kind\":\"worktree\""))
+    .stdout(predicate::str::contains("\"branch\":\"feature/search\""));
 }
 
 #[test]

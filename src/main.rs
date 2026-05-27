@@ -35,6 +35,10 @@ enum Commands {
         max_depth: usize,
         #[arg(long, default_value_t = 500)]
         limit: usize,
+        #[arg(long)]
+        git_metadata: bool,
+        #[arg(long)]
+        tracked_files: bool,
     },
     Index {
         #[arg(long, default_value = ".")]
@@ -413,12 +417,19 @@ fn main() -> Result<()> {
             root,
             max_depth,
             limit,
+            git_metadata,
+            tracked_files,
         } => {
             println!(
                 "{}",
                 serde_json::to_string(&discover_repos(
                     root,
-                    &DiscoverOptions { max_depth, limit },
+                    &DiscoverOptions {
+                        max_depth,
+                        limit,
+                        git_metadata,
+                        tracked_files,
+                    },
                 )?)?
             );
         }
@@ -860,6 +871,7 @@ fn shard_repos_from_args(
             &DiscoverOptions {
                 max_depth,
                 limit: discover_limit,
+                ..DiscoverOptions::default()
             },
         )?;
         repos.extend(discovered.repos.into_iter().map(|repo| repo.path));

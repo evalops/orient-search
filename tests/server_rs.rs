@@ -14,6 +14,16 @@ fn write(path: &Path, text: &str) {
     fs::write(path, text).unwrap();
 }
 
+fn git(repo: &Path, args: &[&str]) {
+    let status = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(args)
+        .status()
+        .unwrap();
+    assert!(status.success(), "git {:?} failed", args);
+}
+
 fn tcp_tool_request(addr: &str, request: serde_json::Value) -> String {
     let mut stream = TcpStream::connect(addr).unwrap();
     let mut reader = BufReader::new(stream.try_clone().unwrap());
@@ -53,6 +63,14 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
     assert_eq!(
         discover["input_schema"]["properties"]["limit"]["default"],
         500
+    );
+    assert_eq!(
+        discover["input_schema"]["properties"]["git_metadata"]["type"],
+        "boolean"
+    );
+    assert_eq!(
+        discover["input_schema"]["properties"]["tracked_files"]["default"],
+        false
     );
     assert_eq!(
         read_ranges["input_schema"]["properties"]["ranges"]["items"]["properties"]["lines"]["default"],
@@ -214,6 +232,72 @@ fn runtime_discovers_repos_by_tool_request() {
     assert!(result.contains("\"name\":\"auth\""), "{result}");
     assert!(result.contains("\"name\":\"billing\""), "{result}");
     assert!(!result.contains("node_modules"), "{result}");
+}
+
+#[test]
+fn runtime_discovers_repo_families_with_git_metadata() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("workspace/project");
+    write(
+        &repo.join("Cargo.toml"),
+        "[package]\nname='project'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    git(&repo, &["init", "-b", "main"]);
+    git(
+        &repo,
+        &[
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/evalops/project.git",
+        ],
+    );
+    git(&repo, &["add", "Cargo.toml"]);
+    git(
+        &repo,
+        &[
+            "-c",
+            "user.name=Orient Tests",
+            "-c",
+            "user.email=orient@example.com",
+            "commit",
+            "-m",
+            "init",
+        ],
+    );
+    git(
+        &repo,
+        &[
+            "worktree",
+            "add",
+            "-b",
+            "feature/search",
+            "../project-feature",
+        ],
+    );
+
+    let runtime = ToolRuntime::default();
+    let response = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("discover"),
+        tool: "discover_repos".to_string(),
+        arguments: serde_json::json!({
+            "root": root.path(),
+            "max_depth": 2,
+            "limit": 10,
+            "git_metadata": true,
+            "tracked_files": true
+        }),
+    });
+    assert!(response.error.is_none(), "{:?}", response.error);
+    let result = serde_json::to_string(&response.result).unwrap();
+    assert!(result.contains("\"repos_found\":2"), "{result}");
+    assert!(result.contains("\"families\""), "{result}");
+    assert!(result.contains("\"checkouts\":2"), "{result}");
+    assert!(result.contains("\"worktrees\":1"), "{result}");
+    assert!(result.contains("\"clones\":1"), "{result}");
+    assert!(result.contains("\"tracked_files\":2"), "{result}");
+    assert!(result.contains("\"git_kind\":\"worktree\""), "{result}");
+    assert!(result.contains("\"branch\":\"feature/search\""), "{result}");
 }
 
 #[test]

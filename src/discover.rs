@@ -3,14 +3,21 @@
 use crate::repo_index::{is_ignored, is_manifest_file};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Output, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
+
+const GIT_METADATA_TIMEOUT: Duration = Duration::from_millis(250);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiscoverOptions {
     pub max_depth: usize,
     pub limit: usize,
+    pub git_metadata: bool,
+    pub tracked_files: bool,
 }
 
 impl Default for DiscoverOptions {
@@ -18,6 +25,8 @@ impl Default for DiscoverOptions {
         Self {
             max_depth: 4,
             limit: 500,
+            git_metadata: false,
+            tracked_files: false,
         }
     }
 }
@@ -30,6 +39,8 @@ pub struct DiscoverReport {
     pub dirs_scanned: usize,
     pub repos_found: usize,
     pub repos: Vec<DiscoveredRepo>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub families: Vec<DiscoveredRepoFamily>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -39,6 +50,31 @@ pub struct DiscoveredRepo {
     pub depth: usize,
     pub git: bool,
     pub manifests: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_common_dir: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tracked_files: Option<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DiscoveredRepoFamily {
+    pub name: String,
+    pub checkouts: usize,
+    pub worktrees: usize,
+    pub clones: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_common_dir: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tracked_files: Option<usize>,
+    pub paths: Vec<PathBuf>,
 }
 
 pub fn discover_repos(root: impl AsRef<Path>, options: &DiscoverOptions) -> Result<DiscoverReport> {
@@ -64,7 +100,7 @@ pub fn discover_repos(root: impl AsRef<Path>, options: &DiscoverOptions) -> Resu
         }
         dirs_scanned += 1;
 
-        let candidate = inspect_candidate_repo(&dir, &root, depth)?;
+        let candidate = inspect_candidate_repo(&dir, &root, depth, options)?;
         if let Some(repo) = candidate {
             let repo_key = canonical_or_self(&repo.path);
             if seen_repos.insert(repo_key) {
@@ -98,11 +134,17 @@ pub fn discover_repos(root: impl AsRef<Path>, options: &DiscoverOptions) -> Resu
         limit,
         dirs_scanned,
         repos_found: repos.len(),
+        families: repo_families(&repos),
         repos,
     })
 }
 
-fn inspect_candidate_repo(dir: &Path, root: &Path, depth: usize) -> Result<Option<DiscoveredRepo>> {
+fn inspect_candidate_repo(
+    dir: &Path,
+    root: &Path,
+    depth: usize,
+    options: &DiscoverOptions,
+) -> Result<Option<DiscoveredRepo>> {
     let git = dir.join(".git").exists();
     let manifests = direct_manifest_files(dir)?;
     if !git && manifests.is_empty() {
@@ -122,13 +164,209 @@ fn inspect_candidate_repo(dir: &Path, root: &Path, depth: usize) -> Result<Optio
                 .to_string()
         });
 
+    let metadata = if git && options.git_metadata {
+        git_metadata_for_repo(&path, options.tracked_files)
+    } else {
+        GitMetadata::default()
+    };
+
     Ok(Some(DiscoveredRepo {
         name,
         path,
         depth,
         git,
         manifests,
+        git_kind: metadata.git_kind,
+        branch: metadata.branch,
+        origin: metadata.origin,
+        git_common_dir: metadata.git_common_dir,
+        tracked_files: metadata.tracked_files,
     }))
+}
+
+#[derive(Debug, Default)]
+struct GitMetadata {
+    git_kind: Option<String>,
+    branch: Option<String>,
+    origin: Option<String>,
+    git_common_dir: Option<PathBuf>,
+    tracked_files: Option<usize>,
+}
+
+fn git_metadata_for_repo(repo: &Path, include_tracked_files: bool) -> GitMetadata {
+    let Some(common_dir) = git_stdout(
+        repo,
+        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+    )
+    .map(PathBuf::from) else {
+        return GitMetadata::default();
+    };
+    let git_kind = if repo.join(".git").is_file() {
+        "worktree"
+    } else {
+        "clone"
+    };
+    GitMetadata {
+        git_kind: Some(git_kind.to_string()),
+        branch: git_stdout(repo, &["branch", "--show-current"]),
+        origin: git_stdout(repo, &["remote", "get-url", "origin"]),
+        git_common_dir: Some(common_dir),
+        tracked_files: include_tracked_files
+            .then(|| git_tracked_file_count(repo))
+            .flatten(),
+    }
+}
+
+fn git_stdout(repo: &Path, args: &[&str]) -> Option<String> {
+    let output = git_output(repo, args)?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8(output.stdout).ok()?;
+    let trimmed = text.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
+}
+
+fn git_tracked_file_count(repo: &Path) -> Option<usize> {
+    let output = git_output(repo, &["ls-files"])?;
+    if !output.status.success() {
+        return None;
+    }
+    Some(output.stdout.iter().filter(|byte| **byte == b'\n').count())
+}
+
+fn git_output(repo: &Path, args: &[&str]) -> Option<Output> {
+    let mut child = Command::new("git")
+        .arg("-c")
+        .arg("core.fsmonitor=false")
+        .arg("-C")
+        .arg(repo)
+        .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let started = Instant::now();
+    loop {
+        match child.try_wait().ok()? {
+            Some(_) => return child.wait_with_output().ok(),
+            None if started.elapsed() >= GIT_METADATA_TIMEOUT => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+            None => thread::sleep(Duration::from_millis(10)),
+        }
+    }
+}
+
+fn repo_families(repos: &[DiscoveredRepo]) -> Vec<DiscoveredRepoFamily> {
+    let mut builders: HashMap<String, DiscoveredRepoFamilyBuilder> = HashMap::new();
+    for repo in repos {
+        if repo.origin.is_none() && repo.git_common_dir.is_none() {
+            continue;
+        }
+        let key = repo
+            .origin
+            .clone()
+            .or_else(|| {
+                repo.git_common_dir
+                    .as_ref()
+                    .map(|path| path.to_string_lossy().to_string())
+            })
+            .unwrap_or_else(|| repo.name.clone());
+        let builder = builders.entry(key).or_insert_with(|| {
+            DiscoveredRepoFamilyBuilder::new(
+                repo_family_name(repo),
+                repo.origin.clone(),
+                repo.git_common_dir.clone(),
+            )
+        });
+        builder.checkouts += 1;
+        match repo.git_kind.as_deref() {
+            Some("worktree") => builder.worktrees += 1,
+            Some("clone") => builder.clones += 1,
+            _ => {}
+        }
+        if let Some(count) = repo.tracked_files {
+            *builder.tracked_files.get_or_insert(0) += count;
+        }
+        builder.paths.push(repo.path.clone());
+    }
+
+    let mut families = builders
+        .into_values()
+        .map(DiscoveredRepoFamilyBuilder::finish)
+        .collect::<Vec<_>>();
+    families.sort_by(|left, right| {
+        right
+            .checkouts
+            .cmp(&left.checkouts)
+            .then_with(|| right.tracked_files.cmp(&left.tracked_files))
+            .then_with(|| left.name.cmp(&right.name))
+    });
+    families
+}
+
+struct DiscoveredRepoFamilyBuilder {
+    name: String,
+    checkouts: usize,
+    worktrees: usize,
+    clones: usize,
+    origin: Option<String>,
+    git_common_dir: Option<PathBuf>,
+    tracked_files: Option<usize>,
+    paths: Vec<PathBuf>,
+}
+
+impl DiscoveredRepoFamilyBuilder {
+    fn new(name: String, origin: Option<String>, git_common_dir: Option<PathBuf>) -> Self {
+        Self {
+            name,
+            checkouts: 0,
+            worktrees: 0,
+            clones: 0,
+            origin,
+            git_common_dir,
+            tracked_files: None,
+            paths: Vec::new(),
+        }
+    }
+
+    fn finish(mut self) -> DiscoveredRepoFamily {
+        self.paths.sort();
+        self.paths.dedup();
+        DiscoveredRepoFamily {
+            name: self.name,
+            checkouts: self.checkouts,
+            worktrees: self.worktrees,
+            clones: self.clones,
+            origin: self.origin,
+            git_common_dir: self.git_common_dir,
+            tracked_files: self.tracked_files,
+            paths: self.paths,
+        }
+    }
+}
+
+fn repo_family_name(repo: &DiscoveredRepo) -> String {
+    repo.origin
+        .as_deref()
+        .and_then(origin_repo_name)
+        .or_else(|| {
+            repo.git_common_dir
+                .as_ref()
+                .and_then(|path| path.parent())
+                .and_then(|path| path.file_name())
+                .map(|name| name.to_string_lossy().to_string())
+        })
+        .unwrap_or_else(|| repo.name.clone())
+}
+
+fn origin_repo_name(origin: &str) -> Option<String> {
+    let trimmed = origin.trim_end_matches(".git");
+    let tail = trimmed.rsplit(['/', ':']).next()?;
+    (!tail.is_empty()).then(|| tail.to_string())
 }
 
 fn direct_manifest_files(dir: &Path) -> Result<Vec<String>> {

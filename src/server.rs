@@ -221,7 +221,7 @@ pub fn tool_manifest() -> Value {
             "discover_repos",
             "Discover local repo roots under a broad workspace for shard setup.",
             &["root"],
-            &["max_depth", "limit"],
+            &["max_depth", "limit", "git_metadata", "tracked_files"],
         ),
         tool_entry(
             "repo_brief",
@@ -459,7 +459,7 @@ fn argument_schema(tool_name: &str, name: &str) -> Value {
             schema.insert("type".to_string(), json!("array"));
             schema.insert("items".to_string(), json!({"type": "string"}));
         }
-        "test" | "explain" | "require_all" => {
+        "test" | "explain" | "require_all" | "git_metadata" | "tracked_files" => {
             schema.insert("type".to_string(), json!("boolean"));
         }
         "limit" | "max_depth" | "discover_limit" | "symbols" | "start" | "lines" | "tests"
@@ -488,7 +488,7 @@ fn argument_type(name: &str) -> &'static str {
     match name {
         "limit" | "max_depth" | "discover_limit" | "symbols" | "start" | "lines" | "tests"
         | "context_lines" => "integer",
-        "test" | "explain" | "require_all" => "boolean",
+        "test" | "explain" | "require_all" | "git_metadata" | "tracked_files" => "boolean",
         "exclude_file" | "exclude_path" | "exclude_language" | "exclude_extension"
         | "exclude_symbol" | "exclude_repo" => "string|string[]",
         "ranges" => "range[]",
@@ -510,7 +510,7 @@ fn argument_default(tool_name: &str, name: &str) -> Option<Value> {
         (_, "lines") => Some(json!(80)),
         (_, "snippet") => Some(json!("medium")),
         (_, "context_lines") => Some(json!(0)),
-        (_, "explain" | "require_all") => Some(json!(false)),
+        (_, "explain" | "require_all" | "git_metadata" | "tracked_files") => Some(json!(false)),
         _ => None,
     }
 }
@@ -553,6 +553,12 @@ fn argument_description(name: &str) -> &'static str {
         "repos" => "Explicit repository roots to add to a shard directory.",
         "max_depth" => "Maximum directory depth for repository discovery.",
         "discover_limit" => "Maximum discovered repositories to add when building shards.",
+        "git_metadata" => {
+            "Include git origin, branch, common git dir, clone/worktree kind, and repo-family groups in discovery results."
+        }
+        "tracked_files" => {
+            "Include git tracked-file counts in discovery metadata and repo-family groups."
+        }
         "symbols" => "Maximum top symbols to include in repo maps.",
         "tests" => "Maximum test files to include in repo maps.",
         "start" => "One-based start line for range reads.",
@@ -569,9 +575,24 @@ impl ToolRuntime {
                 let root = path_arg(&request.arguments, "root")?;
                 let max_depth = usize_arg(&request.arguments, "max_depth").unwrap_or(4);
                 let limit = usize_arg(&request.arguments, "limit").unwrap_or(500);
+                let git_metadata = request
+                    .arguments
+                    .get("git_metadata")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+                let tracked_files = request
+                    .arguments
+                    .get("tracked_files")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
                 Ok(serde_json::to_value(discover_repos(
                     root,
-                    &DiscoverOptions { max_depth, limit },
+                    &DiscoverOptions {
+                        max_depth,
+                        limit,
+                        git_metadata,
+                        tracked_files,
+                    },
                 )?)?)
             }
             "repo_brief" => {
@@ -1463,10 +1484,17 @@ fn shard_repos_from_arguments(arguments: &Value) -> Result<Vec<PathBuf>> {
             .unwrap_or(500);
         for root in discover_roots {
             repos.extend(
-                discover_repos(root, &DiscoverOptions { max_depth, limit })?
-                    .repos
-                    .into_iter()
-                    .map(|repo| repo.path),
+                discover_repos(
+                    root,
+                    &DiscoverOptions {
+                        max_depth,
+                        limit,
+                        ..DiscoverOptions::default()
+                    },
+                )?
+                .repos
+                .into_iter()
+                .map(|repo| repo.path),
             );
         }
     }
