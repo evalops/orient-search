@@ -17,6 +17,7 @@ use std::time::{Duration, Instant};
 
 const MAX_FILE_BYTES: u64 = 512_000;
 const MAX_ATTACHED_CONTEXT_LINES: usize = 500;
+const DEFAULT_RESULT_READ_LINES: usize = 80;
 const RIPGREP_TIMEOUT: Duration = Duration::from_millis(250);
 const RIPGREP_POLL_INTERVAL: Duration = Duration::from_millis(5);
 static TOKEN_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[A-Za-z][A-Za-z0-9_]*").unwrap());
@@ -53,6 +54,15 @@ pub struct SearchResult {
     pub duplicate_group: Option<DuplicateGroup>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context: Option<FileRange>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub read_range: Option<ResultReadRange>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResultReadRange {
+    pub path: String,
+    pub start: usize,
+    pub lines: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -768,6 +778,7 @@ fn merge_match_result(
             query_plan: None,
             duplicate_group: None,
             context: None,
+            read_range: None,
         });
 }
 
@@ -913,6 +924,7 @@ impl RepoIndex {
                     query_plan: None,
                     duplicate_group: None,
                     context: None,
+                    read_range: None,
                 });
             }
         }
@@ -1665,6 +1677,7 @@ fn score_text_file(
         query_plan: None,
         duplicate_group: None,
         context: None,
+        read_range: None,
     })
 }
 
@@ -2031,6 +2044,7 @@ pub(crate) fn finalize_results(mut results: Vec<SearchResult>, limit: usize) -> 
             result.line_range = line_range_from_snippet(&result.snippet);
         }
         compact_match_lines(&mut result.match_lines);
+        result.read_range = Some(result_read_range(result));
     }
 
     results.sort_by(|a, b| {
@@ -2052,6 +2066,14 @@ pub(crate) fn finalize_results(mut results: Vec<SearchResult>, limit: usize) -> 
         }
     }
     deduped
+}
+
+fn result_read_range(result: &SearchResult) -> ResultReadRange {
+    ResultReadRange {
+        path: result.path.clone(),
+        start: context_start_line(result, DEFAULT_RESULT_READ_LINES),
+        lines: DEFAULT_RESULT_READ_LINES,
+    }
 }
 
 pub(crate) fn match_lines_from_text(
@@ -2362,6 +2384,7 @@ pub(crate) fn filter_only_search_result(
         query_plan: None,
         duplicate_group: None,
         context: None,
+        read_range: None,
     }
 }
 

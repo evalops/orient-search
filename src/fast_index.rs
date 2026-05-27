@@ -1366,6 +1366,7 @@ impl FastIndex {
             query_plan: query_plan.cloned(),
             duplicate_group: None,
             context: None,
+            read_range: None,
         })
     }
 }

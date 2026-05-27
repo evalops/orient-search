@@ -739,6 +739,10 @@ fn indexed_search_supports_line_offsets_and_snippet_modes() {
     assert_eq!(short[0].line_range.as_ref().unwrap().start_line, 4);
     assert_eq!(short[0].line_range.as_ref().unwrap().end_line, 4);
     assert_eq!(short[0].match_lines, vec![4, 5]);
+    let read_range = short[0].read_range.as_ref().unwrap();
+    assert_eq!(read_range.path, "src/auth.rs");
+    assert_eq!(read_range.start, 1);
+    assert_eq!(read_range.lines, 80);
 
     let block = index
         .search_filtered(

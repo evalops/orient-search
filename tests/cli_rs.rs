@@ -675,6 +675,8 @@ fn cli_searches_symbols_and_related_files() {
         .stdout(predicate::str::contains("src/auth.rs"))
         .stdout(predicate::str::contains("SessionManager"))
         .stdout(predicate::str::contains("\"line_range\""))
+        .stdout(predicate::str::contains("\"read_range\""))
+        .stdout(predicate::str::contains("\"lines\":80"))
         .stdout(predicate::str::contains("\"explanation\""))
         .stdout(predicate::str::contains("\"context\""))
         .stdout(predicate::str::contains("\"total_lines\""));
@@ -988,6 +990,7 @@ fn cli_builds_and_searches_persistent_index() {
         .stdout(predicate::str::contains("src/auth.rs"))
         .stdout(predicate::str::contains("indexed match"))
         .stdout(predicate::str::contains("\"match_lines\""))
+        .stdout(predicate::str::contains("\"read_range\""))
         .stdout(predicate::str::contains("\"query_plan\""))
         .stdout(predicate::str::contains("\"planned_postings\""))
         .stdout(predicate::str::contains("\"context\""));
