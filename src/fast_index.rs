@@ -5,9 +5,9 @@ use crate::repo_index::{
     FileRange, QueryPlan, QueryPlanPosting, RankSignal, RelatedFile, RelatedSymbol, RepoBrief,
     RepoMap, SearchFilters, SearchResult, SnippetMode, Symbol, best_snippet_for_path,
     extract_symbols, file_range_from_text, finalize_results, is_entrypoint_path, is_ignored,
-    is_important_file, is_manifest_file, is_test_path, language_for, matches_filters,
-    normalize_token, repo_matches, result_matches_all_tokens, result_matches_symbol_filters,
-    round4, symbol_kind_rank, token_counts, tokenize,
+    is_important_file, is_manifest_file, is_test_path, language_for, match_lines_from_text,
+    matches_filters, normalize_token, repo_matches, result_matches_all_tokens,
+    result_matches_symbol_filters, round4, symbol_kind_rank, token_counts, tokenize,
 };
 use anyhow::{Context, Result};
 use ignore::WalkBuilder;
@@ -895,6 +895,7 @@ impl FastIndex {
         }
 
         let snippet = indexed_snippet(&self.root, file, query_tokens, snippet_mode);
+        let match_lines = match_lines_from_text(&file.content, query_tokens, 16);
 
         Some(SearchResult {
             path: file.path.clone(),
@@ -902,6 +903,7 @@ impl FastIndex {
             reason: format!("indexed match {}", reasons.join(", ")),
             snippet,
             line_range: None,
+            match_lines,
             explanation: explain.then_some(signals),
             query_plan: query_plan.cloned(),
             duplicate_group: None,

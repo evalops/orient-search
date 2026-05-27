@@ -43,6 +43,8 @@ pub struct SearchResult {
     pub snippet: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub line_range: Option<ResultLineRange>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub match_lines: Vec<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub explanation: Option<Vec<RankSignal>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -499,6 +501,12 @@ fn merge_match_result(
     let mut score = 0.0;
     let mut reasons = Vec::new();
     let mut signals = Vec::new();
+    let match_lines =
+        if line_number > 0 && query_tokens.iter().any(|token| line_lower.contains(token)) {
+            vec![line_number as usize]
+        } else {
+            Vec::new()
+        };
 
     for token in query_tokens {
         let mut token_score = 0.0;
@@ -564,6 +572,7 @@ fn merge_match_result(
                     .get_or_insert_with(Vec::new)
                     .extend(signals.clone());
             }
+            result.match_lines.extend(match_lines.iter().copied());
             if !matches!(snippet_mode, SnippetMode::Block | SnippetMode::Symbol)
                 && result.snippet.len() < snippet_mode.max_chars()
                 && !result.snippet.contains(snippet_line)
@@ -593,6 +602,7 @@ fn merge_match_result(
             reason: format!("matched {}", reasons.join(", ")),
             snippet,
             line_range: None,
+            match_lines,
             explanation: explain.then_some(signals),
             query_plan: None,
             duplicate_group: None,
@@ -737,6 +747,7 @@ impl RepoIndex {
                     reason: format!("matched {}", reasons.join(", ")),
                     snippet: best_snippet(&file.text, &query_tokens),
                     line_range: None,
+                    match_lines: match_lines_from_text(&file.text, &query_tokens, 16),
                     explanation: None,
                     query_plan: None,
                     duplicate_group: None,
@@ -1222,6 +1233,7 @@ fn score_text_file(
         reason: format!("matched {}", reasons.join(", ")),
         snippet: best_snippet_for_path(path, text, query_tokens, snippet_mode),
         line_range: None,
+        match_lines: match_lines_from_text(text, query_tokens, 16),
         explanation: explain.then_some(signals),
         query_plan: None,
         duplicate_group: None,
@@ -1428,6 +1440,7 @@ pub(crate) fn finalize_results(mut results: Vec<SearchResult>, limit: usize) -> 
         if result.line_range.is_none() {
             result.line_range = line_range_from_snippet(&result.snippet);
         }
+        compact_match_lines(&mut result.match_lines);
     }
 
     results.sort_by(|a, b| {
@@ -1449,6 +1462,33 @@ pub(crate) fn finalize_results(mut results: Vec<SearchResult>, limit: usize) -> 
         }
     }
     deduped
+}
+
+pub(crate) fn match_lines_from_text(
+    text: &str,
+    query_tokens: &[String],
+    limit: usize,
+) -> Vec<usize> {
+    if query_tokens.is_empty() || limit == 0 {
+        return Vec::new();
+    }
+    let mut lines = Vec::new();
+    for (index, line) in text.lines().enumerate() {
+        let line_lower = line.to_lowercase();
+        if query_tokens.iter().any(|token| line_lower.contains(token)) {
+            lines.push(index + 1);
+            if lines.len() >= limit {
+                break;
+            }
+        }
+    }
+    lines
+}
+
+fn compact_match_lines(lines: &mut Vec<usize>) {
+    lines.sort_unstable();
+    lines.dedup();
+    lines.truncate(16);
 }
 
 fn record_duplicate(result: &mut SearchResult, path: String) {

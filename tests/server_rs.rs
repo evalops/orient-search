@@ -1146,6 +1146,7 @@ fn server_handles_indexed_search_request() {
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.contains("\"id\":2"));
     assert!(stdout.contains("src/auth.rs"));
+    assert!(stdout.contains("\"match_lines\""));
     assert!(stdout.contains("\"id\":\"read-index-range\""));
     assert!(stdout.contains("\"path\":\"src/auth.rs\""));
     assert!(stdout.contains("issue_token"));

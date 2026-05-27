@@ -355,6 +355,7 @@ fn indexed_search_supports_line_offsets_and_snippet_modes() {
     assert!(short[0].snippet.contains("4:"));
     assert_eq!(short[0].line_range.as_ref().unwrap().start_line, 4);
     assert_eq!(short[0].line_range.as_ref().unwrap().end_line, 4);
+    assert_eq!(short[0].match_lines, vec![4, 5]);
 
     let block = index
         .search_filtered(
@@ -508,6 +509,7 @@ fn search_explain_mode_returns_structured_rank_signals() {
     );
     assert_eq!(fallback[0].line_range.as_ref().unwrap().start_line, 1);
     assert_eq!(fallback[0].line_range.as_ref().unwrap().end_line, 1);
+    assert_eq!(fallback[0].match_lines, vec![1]);
 
     let index = FastIndex::build(repo.path()).unwrap();
     let indexed = index
@@ -528,6 +530,7 @@ fn search_explain_mode_returns_structured_rank_signals() {
     );
     assert_eq!(indexed[0].line_range.as_ref().unwrap().start_line, 1);
     assert_eq!(indexed[0].line_range.as_ref().unwrap().end_line, 2);
+    assert_eq!(indexed[0].match_lines, vec![1]);
     let plan = indexed[0].query_plan.as_ref().unwrap();
     assert_eq!(plan.strategy, "posting_intersection");
     assert_eq!(plan.query_tokens, vec!["session", "manager"]);

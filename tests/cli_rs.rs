@@ -406,6 +406,7 @@ fn cli_builds_and_searches_persistent_index() {
         .success()
         .stdout(predicate::str::contains("src/auth.rs"))
         .stdout(predicate::str::contains("indexed match"))
+        .stdout(predicate::str::contains("\"match_lines\""))
         .stdout(predicate::str::contains("\"query_plan\""))
         .stdout(predicate::str::contains("\"planned_postings\""));
 
