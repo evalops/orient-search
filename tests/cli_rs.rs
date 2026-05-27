@@ -372,6 +372,174 @@ fn cli_searches_symbols_and_related_files() {
 }
 
 #[test]
+fn cli_search_surfaces_accept_structured_filters() {
+    let repo = sample_repo();
+    write(
+        &repo.path().join("src/generated.rs"),
+        "pub struct GeneratedSession;\npub fn issue_token() -> &'static str { \"generated\" }\n",
+    );
+    write(
+        &repo.path().join("tests/auth_test.rs"),
+        "use sample::SessionManager;\n#[test]\nfn issue_token_test() {}\n",
+    );
+    write(&repo.path().join("docs/auth.md"), "issue token docs\n");
+
+    let mut fallback = Command::cargo_bin("orient").unwrap();
+    fallback
+        .args([
+            "search",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "issue token",
+            "--file",
+            "auth.rs",
+            "--symbol",
+            "SessionManager",
+            "--test",
+            "false",
+            "--exclude-file",
+            "generated",
+            "--exclude-path",
+            "tests",
+            "--exclude-language",
+            "markdown",
+            "--exclude-extension",
+            ".md",
+            "--exclude-symbol",
+            "GeneratedSession",
+            "--exclude-repo",
+            "other-repo",
+            "--require-all",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("src/auth.rs"))
+        .stdout(predicate::str::contains("generated").not())
+        .stdout(predicate::str::contains("tests/auth_test.rs").not())
+        .stdout(predicate::str::contains("docs/auth.md").not());
+
+    let index_path = repo.path().join(".orient/index");
+    let mut index = Command::cargo_bin("orient").unwrap();
+    index
+        .args([
+            "index",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--output",
+            index_path.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let mut indexed = Command::cargo_bin("orient").unwrap();
+    indexed
+        .args([
+            "indexed-search",
+            "--index",
+            index_path.to_str().unwrap(),
+            "issue token",
+            "--file",
+            "auth.rs",
+            "--symbol",
+            "SessionManager",
+            "--test",
+            "false",
+            "--exclude-file",
+            "generated",
+            "--exclude-path",
+            "tests",
+            "--exclude-language",
+            "markdown",
+            "--exclude-extension",
+            ".md",
+            "--exclude-symbol",
+            "GeneratedSession",
+            "--exclude-repo",
+            "other-repo",
+            "--require-all",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("src/auth.rs"))
+        .stdout(predicate::str::contains("generated").not())
+        .stdout(predicate::str::contains("tests/auth_test.rs").not())
+        .stdout(predicate::str::contains("docs/auth.md").not());
+
+    let shard_dir = tempfile::tempdir().unwrap();
+    let mut build_shards = Command::cargo_bin("orient").unwrap();
+    build_shards
+        .args([
+            "index-shards",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--output-dir",
+            shard_dir.path().to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let mut shard_search = Command::cargo_bin("orient").unwrap();
+    shard_search
+        .args([
+            "search-shards",
+            "--index-dir",
+            shard_dir.path().to_str().unwrap(),
+            "issue token",
+            "--file",
+            "auth.rs",
+            "--symbol",
+            "SessionManager",
+            "--test",
+            "false",
+            "--exclude-file",
+            "generated",
+            "--exclude-path",
+            "tests",
+            "--exclude-language",
+            "markdown",
+            "--exclude-extension",
+            ".md",
+            "--exclude-symbol",
+            "GeneratedSession",
+            "--exclude-repo",
+            "other-repo",
+            "--require-all",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("src/auth.rs"))
+        .stdout(predicate::str::contains("generated").not())
+        .stdout(predicate::str::contains("tests/auth_test.rs").not())
+        .stdout(predicate::str::contains("docs/auth.md").not());
+
+    let mut bench = Command::cargo_bin("orient").unwrap();
+    bench
+        .args([
+            "bench-search",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--index",
+            index_path.to_str().unwrap(),
+            "--runs",
+            "1",
+            "--warmup",
+            "0",
+            "--file",
+            "auth.rs",
+            "--symbol",
+            "SessionManager",
+            "--test",
+            "false",
+            "--exclude-file",
+            "generated",
+            "issue token",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"result_count\":1"));
+}
+
+#[test]
 fn cli_builds_and_searches_persistent_index() {
     let repo = sample_repo();
     write(

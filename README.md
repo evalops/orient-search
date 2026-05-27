@@ -196,6 +196,18 @@ Use `discover_repos`, or `index_shards` with `discover_root`, when a local machi
 For indexed or shard JSON search arguments, use `repo` or `repo_filter` to restrict by repository name. Shard search also records aliases for immediate child directories that look like repos, so a shard rooted at a dated worktree can still answer filters like `repo:maestro` or `repo:platform`. Alias-scoped shard search, symbol lookup, repo maps, and related-context tools return alias-prefixed paths such as `maestro/src/app.rs`, and `read-shard-range` accepts those paths directly. For `search_code`, `repo` is the repository root path, so use `repo_filter` for name filtering.
 JSON search tools also accept structured negative filters: `exclude_file`, `exclude_path`, `exclude_language`, `exclude_extension`, `exclude_symbol`, and `exclude_repo`. Each may be a string or an array of strings, so wrappers can pass excludes without rewriting the query string.
 
+## Local Multi-Agent Layout
+
+A quick inventory of Jonathan's current machine on May 27, 2026 found roughly 458 repo checkouts across the usual work roots, including 271 git worktree checkouts, 101 distinct origins, and about 1,000,107 tracked files. The hot shape is not "one agent, one repo"; it is many agents sharing a few families of repos:
+
+- `maestro-internal`: 145 observed checkouts across SSH/HTTPS origins, with one common git dir backing 120 worktrees.
+- `deploy`: 73 observed checkouts, split across multiple common git dirs.
+- `maestro`: 36 observed checkouts.
+- `platform`: 30 observed checkouts, with about 225k tracked files across repeated copies.
+- `conductor`, `browser-use-rs`, `ensemble`, `nimbus`, `cerebro`, and `.github` form the next tier.
+
+That layout makes a localhost client/server mode valuable for current sessions. A shared `orient serve-tcp` daemon can keep shard manifests and index objects hot once, while each Codex/Claude/Amp process sends tiny search/read requests instead of walking the same duplicated worktree forests. Discovery should prefer explicit roots such as `/Users/jonathanhaas/Documents/Projects`, `/Users/jonathanhaas/repos`, and `/Users/jonathanhaas/.codex-worktrees`, then group results by origin/common git dir and expose stable repo aliases for branch/worktree-specific paths.
+
 ## Query Language
 
 Search queries support agent-friendly filters inline with normal terms:
@@ -267,13 +279,13 @@ Product impact criteria for follow-up adoption:
 
 Current search baseline:
 
-- `orient bench-search --repo . "indexed search symbol filters"`: `9.413ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "session token auth"`: `20.193ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "browser session implementation"`: `23.334ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "postgres migration user"`: `35.068ms` p95 after warmup.
+- `orient bench-search --repo . --index /tmp/orient-self.index "indexed search symbol filters"`: `1.215ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "session token auth"`: `23.425ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "browser session implementation"`: `24.756ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "postgres migration user"`: `41.923ms` p95 after warmup.
 - The `rg` hot path has a `250ms` wall-clock timeout plus a bounded match cap; timed-out searches return partial results rather than hanging.
 - `orient index --repo . --output /tmp/orient-self.index`: versioned binary index with file metadata, content token postings, path token postings, trigram postings, line offsets, token-to-line tables, bounded source snapshots, and symbol boosts.
-- `orient discover-repos --root /Users/jonathanhaas/Documents/Projects --max-depth 4 --limit 200`: finds git or manifest-backed repo roots while skipping dependency/build directories and prioritizing visible canonical repos ahead of dated split, temp, and worktree folders when limits are small.
+- `orient discover-repos --root /Users/jonathanhaas/Documents/Projects --max-depth 2 --limit 500`: found 369 git or manifest-backed repo roots after scanning 2,889 directories, while skipping dependency/build directories and prioritizing visible canonical repos ahead of dated split, temp, and worktree folders when limits are small.
 - `orient index-shards --repo repo-a --repo repo-b --output-dir /tmp/orient-shards`: writes per-repo index shards plus a manifest for local multi-repo search, including stable aliases for nested repo directories.
 - `orient index-shards --discover-root /Users/jonathanhaas/Documents/Projects --discover-root /Users/jonathanhaas/repos --output-dir /tmp/orient-shards`: discovers repos from several local workspace roots and writes shard indexes in one step.
 - `orient ensure-shards --discover-root /Users/jonathanhaas/Documents/Projects --discover-root /Users/jonathanhaas/repos --output-dir /tmp/orient-shards`: builds missing shard directories or refreshes existing ones, which is the easiest bootstrap for a shared local daemon.

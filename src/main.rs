@@ -1,5 +1,5 @@
 use anyhow::{Result, bail};
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 use orient::discover::{DiscoverOptions, discover_repos};
 use orient::fast_index::FastIndex;
 use orient::repo_index::{
@@ -82,20 +82,10 @@ enum Commands {
         query: String,
         #[arg(long, default_value_t = 10)]
         limit: usize,
-        #[arg(long)]
-        path: Option<String>,
-        #[arg(long)]
-        language: Option<String>,
-        #[arg(long)]
-        extension: Option<String>,
         #[arg(long = "repo")]
         repo: Option<String>,
-        #[arg(long)]
-        require_all: bool,
-        #[arg(long, default_value = "medium")]
-        snippet: String,
-        #[arg(long)]
-        explain: bool,
+        #[command(flatten)]
+        filters: CommonSearchArgs,
         #[arg(long, default_value_t = 0)]
         context_lines: usize,
     },
@@ -182,18 +172,10 @@ enum Commands {
         query: String,
         #[arg(long, default_value_t = 10)]
         limit: usize,
-        #[arg(long)]
-        path: Option<String>,
-        #[arg(long)]
-        language: Option<String>,
-        #[arg(long)]
-        extension: Option<String>,
-        #[arg(long)]
-        require_all: bool,
-        #[arg(long, default_value = "medium")]
-        snippet: String,
-        #[arg(long)]
-        explain: bool,
+        #[arg(long = "repo-filter")]
+        repo_filter: Option<String>,
+        #[command(flatten)]
+        filters: CommonSearchArgs,
         #[arg(long, default_value_t = 0)]
         context_lines: usize,
     },
@@ -203,18 +185,10 @@ enum Commands {
         query: String,
         #[arg(long, default_value_t = 10)]
         limit: usize,
-        #[arg(long)]
-        path: Option<String>,
-        #[arg(long)]
-        language: Option<String>,
-        #[arg(long)]
-        extension: Option<String>,
-        #[arg(long)]
-        require_all: bool,
-        #[arg(long, default_value = "medium")]
-        snippet: String,
-        #[arg(long)]
-        explain: bool,
+        #[arg(long = "repo-filter")]
+        repo_filter: Option<String>,
+        #[command(flatten)]
+        filters: CommonSearchArgs,
         #[arg(long, default_value_t = 0)]
         context_lines: usize,
     },
@@ -312,18 +286,10 @@ enum Commands {
         warmup: usize,
         #[arg(long, default_value_t = 10)]
         limit: usize,
-        #[arg(long)]
-        path: Option<String>,
-        #[arg(long)]
-        language: Option<String>,
-        #[arg(long)]
-        extension: Option<String>,
-        #[arg(long)]
-        require_all: bool,
-        #[arg(long, default_value = "medium")]
-        snippet: String,
-        #[arg(long)]
-        explain: bool,
+        #[arg(long = "repo-filter")]
+        repo_filter: Option<String>,
+        #[command(flatten)]
+        filters: CommonSearchArgs,
         #[arg(long)]
         fail_p95_ms: Option<f64>,
         #[arg(long)]
@@ -349,6 +315,75 @@ enum Commands {
         #[arg(long, default_value = "127.0.0.1:8796")]
         addr: String,
     },
+}
+
+#[derive(Debug, Clone, Args)]
+struct CommonSearchArgs {
+    #[arg(long)]
+    path: Option<String>,
+    #[arg(long)]
+    language: Option<String>,
+    #[arg(long)]
+    extension: Option<String>,
+    #[arg(long)]
+    file: Option<String>,
+    #[arg(long)]
+    symbol: Option<String>,
+    #[arg(long)]
+    test: Option<bool>,
+    #[arg(long)]
+    require_all: bool,
+    #[arg(long, default_value = "medium")]
+    snippet: String,
+    #[arg(long)]
+    explain: bool,
+    #[arg(long = "exclude-file")]
+    exclude_file: Vec<String>,
+    #[arg(long = "exclude-path")]
+    exclude_path: Vec<String>,
+    #[arg(long = "exclude-language")]
+    exclude_language: Vec<String>,
+    #[arg(long = "exclude-extension")]
+    exclude_extension: Vec<String>,
+    #[arg(long = "exclude-symbol")]
+    exclude_symbol: Vec<String>,
+    #[arg(long = "exclude-repo")]
+    exclude_repo: Vec<String>,
+}
+
+fn search_filters_from_args(
+    args: &CommonSearchArgs,
+    repo: Option<String>,
+) -> Result<SearchFilters> {
+    Ok(SearchFilters {
+        file: args.file.clone(),
+        path: args.path.clone(),
+        language: args.language.as_ref().map(|value| normalize_filter(value)),
+        extension: args
+            .extension
+            .as_ref()
+            .map(|value| normalize_extension(value)),
+        symbol: args.symbol.clone(),
+        repo,
+        test: args.test,
+        require_all: args.require_all,
+        snippet: snippet_mode_arg(&args.snippet)?,
+        explain: args.explain,
+        exclude_file: args.exclude_file.clone(),
+        exclude_path: args.exclude_path.clone(),
+        exclude_language: args
+            .exclude_language
+            .iter()
+            .map(|value| normalize_filter(value))
+            .collect(),
+        exclude_extension: args
+            .exclude_extension
+            .iter()
+            .map(|value| normalize_extension(value))
+            .collect(),
+        exclude_symbol: args.exclude_symbol.clone(),
+        exclude_repo: args.exclude_repo.clone(),
+    })
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -439,31 +474,12 @@ fn main() -> Result<()> {
             index_dir,
             query,
             limit,
-            path,
-            language,
-            extension,
             repo,
-            require_all,
-            snippet,
-            explain,
+            filters,
             context_lines,
         } => {
-            let snippet = snippet_mode_arg(&snippet)?;
-            let mut results = search_shards(
-                &index_dir,
-                &query,
-                limit,
-                &SearchFilters {
-                    path,
-                    language,
-                    extension,
-                    repo,
-                    require_all,
-                    snippet,
-                    explain,
-                    ..SearchFilters::default()
-                },
-            )?;
+            let filters = search_filters_from_args(&filters, repo)?;
+            let mut results = search_shards(&index_dir, &query, limit, &filters)?;
             attach_result_context(&mut results, context_lines, |path, start, lines| {
                 read_shard_range(&index_dir, path, start, lines)
             })?;
@@ -583,29 +599,12 @@ fn main() -> Result<()> {
             repo,
             query,
             limit,
-            path,
-            language,
-            extension,
-            require_all,
-            snippet,
-            explain,
+            repo_filter,
+            filters,
             context_lines,
         } => {
-            let snippet = snippet_mode_arg(&snippet)?;
-            let mut results = search_repo_fast_filtered(
-                &repo,
-                &query,
-                limit,
-                &SearchFilters {
-                    path,
-                    language,
-                    extension,
-                    require_all,
-                    snippet,
-                    explain,
-                    ..SearchFilters::default()
-                },
-            )?;
+            let filters = search_filters_from_args(&filters, repo_filter)?;
+            let mut results = search_repo_fast_filtered(&repo, &query, limit, &filters)?;
             attach_result_context(&mut results, context_lines, |path, start, lines| {
                 read_file_range(&repo, path, start, lines)
             })?;
@@ -615,29 +614,13 @@ fn main() -> Result<()> {
             index,
             query,
             limit,
-            path,
-            language,
-            extension,
-            require_all,
-            snippet,
-            explain,
+            repo_filter,
+            filters,
             context_lines,
         } => {
-            let snippet = snippet_mode_arg(&snippet)?;
             let index = FastIndex::load(index)?;
-            let mut results = index.search_filtered(
-                &query,
-                limit,
-                &SearchFilters {
-                    path,
-                    language,
-                    extension,
-                    require_all,
-                    snippet,
-                    explain,
-                    ..SearchFilters::default()
-                },
-            )?;
+            let filters = search_filters_from_args(&filters, repo_filter)?;
+            let mut results = index.search_filtered(&query, limit, &filters)?;
             attach_result_context(&mut results, context_lines, |path, start, lines| {
                 index.read_range(path, start, lines)
             })?;
@@ -760,28 +743,15 @@ fn main() -> Result<()> {
             runs,
             warmup,
             limit,
-            path,
-            language,
-            extension,
-            require_all,
-            snippet,
-            explain,
+            repo_filter,
+            filters,
             fail_p95_ms,
             baseline,
             write_baseline,
             max_p95_regression,
             queries,
         } => {
-            let snippet = snippet_mode_arg(&snippet)?;
-            let filters = SearchFilters {
-                path,
-                language,
-                extension,
-                require_all,
-                snippet,
-                explain,
-                ..SearchFilters::default()
-            };
+            let filters = search_filters_from_args(&filters, repo_filter)?;
             let report = bench_search(BenchConfig {
                 repo,
                 index,
@@ -1062,4 +1032,12 @@ fn compare_bench_baseline(
 fn snippet_mode_arg(value: &str) -> Result<SnippetMode> {
     SnippetMode::parse(value)
         .ok_or_else(|| anyhow::anyhow!("snippet must be one of: short, medium, block, symbol"))
+}
+
+fn normalize_filter(value: &str) -> String {
+    value.to_ascii_lowercase()
+}
+
+fn normalize_extension(value: &str) -> String {
+    value.trim_start_matches('.').to_ascii_lowercase()
 }
