@@ -639,7 +639,7 @@ fn main() -> Result<()> {
             let index = FastIndex::load(index)?;
             println!(
                 "{}",
-                serde_json::to_string(&read_file_range(index.root, &path, start, lines)?)?
+                serde_json::to_string(&index.read_range(&path, start, lines)?)?
             );
         }
         Commands::ReadIndexRanges {
@@ -651,7 +651,7 @@ fn main() -> Result<()> {
             let index = FastIndex::load(index)?;
             let mut ranges = Vec::new();
             for path in paths {
-                ranges.push(read_file_range(&index.root, &path, start, lines)?);
+                ranges.push(index.read_range(&path, start, lines)?);
             }
             println!("{}", serde_json::to_string(&ranges)?);
         }

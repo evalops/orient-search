@@ -2,12 +2,12 @@
 
 use crate::query::{merge_filters, parse_query, query_text};
 use crate::repo_index::{
-    QueryPlan, QueryPlanPosting, RankSignal, RelatedFile, RelatedSymbol, RepoBrief, RepoMap,
-    SearchFilters, SearchResult, SnippetMode, Symbol, best_snippet_for_path, extract_symbols,
-    finalize_results, is_entrypoint_path, is_ignored, is_important_file, is_manifest_file,
-    is_test_path, language_for, matches_filters, normalize_token, repo_matches,
-    result_matches_all_tokens, result_matches_symbol_filters, round4, symbol_kind_rank,
-    token_counts, tokenize,
+    FileRange, QueryPlan, QueryPlanPosting, RankSignal, RelatedFile, RelatedSymbol, RepoBrief,
+    RepoMap, SearchFilters, SearchResult, SnippetMode, Symbol, best_snippet_for_path,
+    extract_symbols, file_range_from_text, finalize_results, is_entrypoint_path, is_ignored,
+    is_important_file, is_manifest_file, is_test_path, language_for, matches_filters,
+    normalize_token, repo_matches, result_matches_all_tokens, result_matches_symbol_filters,
+    round4, symbol_kind_rank, token_counts, tokenize,
 };
 use anyhow::{Context, Result};
 use ignore::WalkBuilder;
@@ -18,7 +18,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const INDEX_VERSION: u32 = 7;
+const INDEX_VERSION: u32 = 8;
 const MAX_FILE_BYTES: u64 = 512_000;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -44,6 +44,8 @@ pub struct IndexedPath {
     pub trigrams: Vec<TermCount>,
     pub symbols: Vec<IndexedSymbol>,
     pub line_offsets: Vec<u32>,
+    #[serde(default)]
+    pub content: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -421,6 +423,38 @@ impl FastIndex {
             .take(limit)
             .map(|(_, symbol)| symbol)
             .collect()
+    }
+
+    pub fn read_range(
+        &self,
+        path: &str,
+        start_line: usize,
+        line_count: usize,
+    ) -> Result<FileRange> {
+        let requested = Path::new(path);
+        anyhow::ensure!(
+            requested.is_relative()
+                && !requested
+                    .components()
+                    .any(|component| matches!(component, std::path::Component::ParentDir)),
+            "path must be index-relative"
+        );
+        let normalized = requested.to_string_lossy().replace('\\', "/");
+        anyhow::ensure!(
+            !normalized.starts_with('/') && !normalized.split('/').any(|part| part == ".."),
+            "path must be index-relative"
+        );
+        let file = self
+            .files
+            .iter()
+            .find(|file| file.path == normalized)
+            .ok_or_else(|| anyhow::anyhow!("path is not present in index: {normalized}"))?;
+        Ok(file_range_from_text(
+            file.path.clone(),
+            &file.content,
+            start_line,
+            line_count,
+        ))
     }
 
     pub fn related_files(&self, path: &str, limit: usize) -> Vec<RelatedFile> {
@@ -1001,6 +1035,7 @@ fn index_file(
         trigrams,
         symbols,
         line_offsets,
+        content: text,
     })
 }
 
@@ -1017,6 +1052,7 @@ fn retarget_indexed_file(
     previous.modified_nanos = candidate.modified_nanos;
     previous.path_terms = counted_terms(&token_counts(&candidate.rel));
     previous.trigrams = counted_terms(&trigram_counts(&format!("{}\n{text}", candidate.rel)));
+    previous.content = text.to_string();
     previous
 }
 
@@ -1076,10 +1112,12 @@ fn indexed_snippet(
     query_tokens: &[String],
     mode: SnippetMode,
 ) -> String {
-    let path = root.join(&file.path);
-    let Ok(bytes) = fs::read(&path) else {
-        return String::new();
-    };
+    let live_bytes = fs::read(root.join(&file.path)).ok().filter(|bytes| {
+        bytes.len() as u64 == file.size && content_hash(bytes) == file.content_hash
+    });
+    let bytes = live_bytes
+        .as_deref()
+        .unwrap_or_else(|| file.content.as_bytes());
     if bytes.is_empty() || file.line_offsets.is_empty() {
         return String::new();
     }

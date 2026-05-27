@@ -436,12 +436,9 @@ impl ToolRuntime {
                 let start = usize_arg(&request.arguments, "start").unwrap_or(1);
                 let lines = usize_arg(&request.arguments, "lines").unwrap_or(80);
                 let index = self.cached_index(index_path)?;
-                Ok(serde_json::to_value(read_file_range(
-                    &index.root,
-                    &path,
-                    start,
-                    lines,
-                )?)?)
+                Ok(serde_json::to_value(
+                    index.read_range(&path, start, lines)?,
+                )?)
             }
             "read_index_ranges" => {
                 let index_path = path_arg(&request.arguments, "index")?;
@@ -449,12 +446,7 @@ impl ToolRuntime {
                 let index = self.cached_index(index_path)?;
                 let mut results = Vec::new();
                 for range in ranges {
-                    results.push(read_file_range(
-                        &index.root,
-                        &range.path,
-                        range.start,
-                        range.lines,
-                    )?);
+                    results.push(index.read_range(&range.path, range.start, range.lines)?);
                 }
                 Ok(serde_json::to_value(results)?)
             }

@@ -409,6 +409,8 @@ fn cli_builds_and_searches_persistent_index() {
         .stdout(predicate::str::contains("\"query_plan\""))
         .stdout(predicate::str::contains("\"planned_postings\""));
 
+    fs::remove_file(repo.path().join("src/auth.rs")).unwrap();
+
     let mut read_index_range = Command::cargo_bin("orient").unwrap();
     read_index_range
         .args([

@@ -989,6 +989,7 @@ fn server_handles_indexed_search_request() {
         .status()
         .unwrap();
     assert!(status.success());
+    fs::remove_file(repo.path().join("src/auth.rs")).unwrap();
 
     let mut child = Command::new(binary)
         .arg("serve-jsonl")

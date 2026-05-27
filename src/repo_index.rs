@@ -1017,6 +1017,20 @@ pub fn read_file_range(
     let text = fs::read_to_string(&absolute)?;
     anyhow::ensure!(!text.contains('\0'), "file appears to be binary");
 
+    let rel = absolute
+        .strip_prefix(&root)?
+        .to_string_lossy()
+        .replace('\\', "/");
+
+    Ok(file_range_from_text(rel, &text, start_line, line_count))
+}
+
+pub(crate) fn file_range_from_text(
+    path: impl Into<String>,
+    text: &str,
+    start_line: usize,
+    line_count: usize,
+) -> FileRange {
     let lines = text.lines().collect::<Vec<_>>();
     let total_lines = lines.len();
     let start = start_line.max(1).min(total_lines.max(1));
@@ -1027,18 +1041,14 @@ pub fn read_file_range(
     } else {
         format_numbered_lines(&lines, start - 1, end)
     };
-    let rel = absolute
-        .strip_prefix(&root)?
-        .to_string_lossy()
-        .replace('\\', "/");
 
-    Ok(FileRange {
-        path: rel,
+    FileRange {
+        path: path.into(),
         start_line: start,
         end_line: end,
         total_lines,
         text: range_text,
-    })
+    }
 }
 
 pub(crate) fn is_ignored(path: &Path) -> bool {

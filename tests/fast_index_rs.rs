@@ -78,6 +78,43 @@ fn refresh_reuses_renamed_files_by_content_fingerprint() {
 }
 
 #[test]
+fn indexed_search_and_read_range_use_persisted_snapshot_text() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/auth.rs"),
+        "pub struct SessionManager;\nimpl SessionManager {\n    pub fn issue_token(&self) -> String {\n        \"token\".to_string()\n    }\n}\n",
+    );
+    let index_path = repo.path().join(".orient/auth.index");
+    let index = FastIndex::build(repo.path()).unwrap();
+    index.save(&index_path).unwrap();
+    fs::remove_file(repo.path().join("src/auth.rs")).unwrap();
+
+    let loaded = FastIndex::load(&index_path).unwrap();
+    let results = loaded
+        .search_filtered(
+            "issue_token",
+            10,
+            &SearchFilters {
+                snippet: SnippetMode::Block,
+                ..SearchFilters::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(results[0].path, "src/auth.rs");
+    assert!(results[0].snippet.contains("3:     pub fn issue_token"));
+    assert_eq!(results[0].line_range.as_ref().unwrap().start_line, 1);
+
+    let range = loaded.read_range("src/auth.rs", 2, 3).unwrap();
+    assert_eq!(range.start_line, 2);
+    assert_eq!(range.end_line, 4);
+    assert!(range.text.contains("2: impl SessionManager"));
+    assert!(range.text.contains("3:     pub fn issue_token"));
+    assert!(loaded.read_range("../src/auth.rs", 1, 1).is_err());
+    assert!(loaded.read_range("src/../auth.rs", 1, 1).is_err());
+    assert!(loaded.read_range("src\\..\\auth.rs", 1, 1).is_err());
+}
+
+#[test]
 fn indexed_search_supports_filters_require_all_and_symbol_boosting() {
     let repo = tempfile::tempdir().unwrap();
     write(

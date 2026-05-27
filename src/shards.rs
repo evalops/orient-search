@@ -4,7 +4,7 @@ use crate::fast_index::{FastIndex, IndexStats};
 use crate::query::{merge_filters, parse_query, query_text};
 use crate::repo_index::{
     FileRange, RelatedFile, RelatedSymbol, RepoMap, SearchFilters, SearchResult, Symbol,
-    finalize_results, is_manifest_file, language_for, normalize_token, read_file_range,
+    finalize_results, is_manifest_file, language_for, normalize_token,
 };
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -363,7 +363,9 @@ pub fn read_shard_range(
         .ok_or_else(|| anyhow::anyhow!("shard path must be '<repo>/<path>'"))?;
     let resolved = resolve_shard_read_path(&manifest, prefix, relative_path)
         .ok_or_else(|| anyhow::anyhow!("unknown shard or alias: {prefix}"))?;
-    let mut range = read_file_range(&resolved.root, &resolved.relative_path, start, lines)?;
+    let index = FastIndex::load(index_dir.as_ref().join(&resolved.index))
+        .with_context(|| format!("load shard {}", resolved.index))?;
+    let mut range = index.read_range(&resolved.relative_path, start, lines)?;
     range.path = format!("{}/{}", resolved.output_prefix, relative_path);
     Ok(range)
 }
@@ -408,7 +410,6 @@ pub fn related_shard_symbols(
 }
 
 struct ResolvedShardRead {
-    root: PathBuf,
     index: String,
     relative_path: String,
     output_prefix: String,
@@ -454,7 +455,6 @@ fn resolve_shard_read_path(
 ) -> Option<ResolvedShardRead> {
     if let Some(shard) = manifest.shards.iter().find(|shard| shard.name == prefix) {
         return Some(ResolvedShardRead {
-            root: shard.root.clone(),
             index: shard.index.clone(),
             relative_path: relative_path.to_string(),
             output_prefix: shard.name.clone(),
@@ -472,7 +472,6 @@ fn resolve_shard_read_path(
             .map(|path_prefix| format!("{}{}", path_prefix, relative_path))
             .unwrap_or_else(|| relative_path.to_string());
         return Some(ResolvedShardRead {
-            root: shard.root.clone(),
             index: shard.index.clone(),
             relative_path,
             output_prefix: alias.name.clone(),
