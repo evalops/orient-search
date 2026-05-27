@@ -4,7 +4,7 @@ use orient::fast_index::FastIndex;
 use orient::repo_index::{
     RepoIndexer, SearchFilters, SnippetMode, read_file_range, search_repo_fast_filtered,
 };
-use orient::server::serve_jsonl;
+use orient::server::{serve_jsonl, tool_manifest};
 use orient::shards::{build_shards, read_shard_range, refresh_shards, search_shards};
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -191,6 +191,7 @@ enum Commands {
         #[arg(required = true)]
         queries: Vec<String>,
     },
+    ToolManifest,
     ServeJsonl,
 }
 
@@ -462,6 +463,9 @@ fn main() -> Result<()> {
                     );
                 }
             }
+        }
+        Commands::ToolManifest => {
+            println!("{}", serde_json::to_string(&tool_manifest())?);
         }
         Commands::ServeJsonl => {
             let stdin = io::stdin();

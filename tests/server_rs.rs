@@ -9,6 +9,42 @@ fn write(path: &Path, text: &str) {
 }
 
 #[test]
+fn server_reports_tool_manifest_for_agent_wrappers() {
+    let binary = assert_cmd::cargo::cargo_bin("orient");
+    let mut child = Command::new(binary)
+        .arg("serve-jsonl")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+
+    let list_request = serde_json::json!({
+        "id": "list",
+        "tool": "list_tools",
+        "arguments": {}
+    });
+    let manifest_request = serde_json::json!({
+        "id": "manifest",
+        "tool": "tool_manifest",
+        "arguments": {}
+    });
+    writeln!(child.stdin.as_mut().unwrap(), "{list_request}").unwrap();
+    writeln!(child.stdin.as_mut().unwrap(), "{manifest_request}").unwrap();
+    drop(child.stdin.take());
+
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("\"id\":\"list\""));
+    assert!(stdout.contains("tool_manifest"));
+    assert!(stdout.contains("\"id\":\"manifest\""));
+    assert!(stdout.contains("\"name\":\"search_code\""));
+    assert!(stdout.contains("\"required\":[\"repo\",\"query\"]"));
+    assert!(stdout.contains("\"optional\""));
+    assert!(stdout.contains("read_shard_range"));
+}
+
+#[test]
 fn server_handles_json_lines_tool_request() {
     let repo = tempfile::tempdir().unwrap();
     write(

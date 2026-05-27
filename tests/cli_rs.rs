@@ -43,6 +43,19 @@ fn cli_outputs_repo_brief_as_json() {
 }
 
 #[test]
+fn cli_outputs_tool_manifest() {
+    let mut cmd = Command::cargo_bin("orient").unwrap();
+    cmd.arg("tool-manifest")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"name\":\"search_code\""))
+        .stdout(predicate::str::contains(
+            "\"required\":[\"repo\",\"query\"]",
+        ))
+        .stdout(predicate::str::contains("read_shard_range"));
+}
+
+#[test]
 fn cli_outputs_repo_map_and_reads_ranges() {
     let repo = sample_repo();
     write(

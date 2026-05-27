@@ -61,6 +61,95 @@ pub fn dispatch(request: ToolRequest) -> ToolResponse {
     }
 }
 
+pub fn tool_manifest() -> Value {
+    json!([
+        {
+            "name": "list_tools",
+            "description": "Return the available JSON-lines tool names.",
+            "required": [],
+            "optional": []
+        },
+        {
+            "name": "tool_manifest",
+            "description": "Return tool descriptions and argument metadata for agent wrappers.",
+            "required": [],
+            "optional": []
+        },
+        {
+            "name": "repo_brief",
+            "description": "Summarize a local repository with language counts, important files, and known commands.",
+            "required": ["repo"],
+            "optional": []
+        },
+        {
+            "name": "repo_map",
+            "description": "Return entrypoints, tests, top symbols, known commands, and important files for a local repository.",
+            "required": ["repo"],
+            "optional": ["symbols", "tests"]
+        },
+        {
+            "name": "read_range",
+            "description": "Read a bounded line range from a repository-relative path.",
+            "required": ["repo", "path"],
+            "optional": ["start", "lines"]
+        },
+        {
+            "name": "search_code",
+            "description": "Search a local repository with the fast fallback path and return ranked snippets.",
+            "required": ["repo", "query"],
+            "optional": SEARCH_OPTIONAL_ARGS
+        },
+        {
+            "name": "indexed_search_code",
+            "description": "Search a persistent single-repo index and return ranked snippets.",
+            "required": ["index", "query"],
+            "optional": SEARCH_OPTIONAL_ARGS
+        },
+        {
+            "name": "index_shards",
+            "description": "Build a local multi-repo shard directory.",
+            "required": ["repos", "output_dir"],
+            "optional": []
+        },
+        {
+            "name": "refresh_shards",
+            "description": "Refresh every repo index in a local shard directory incrementally.",
+            "required": ["index_dir"],
+            "optional": []
+        },
+        {
+            "name": "search_shards",
+            "description": "Search a local multi-repo shard directory and return repo-prefixed ranked snippets.",
+            "required": ["index_dir", "query"],
+            "optional": SEARCH_OPTIONAL_ARGS
+        },
+        {
+            "name": "read_shard_range",
+            "description": "Read a bounded line range from a repo-prefixed shard search result path.",
+            "required": ["index_dir", "path"],
+            "optional": ["start", "lines"]
+        },
+        {
+            "name": "find_symbol",
+            "description": "Find symbol definitions in a local repository.",
+            "required": ["repo", "name"],
+            "optional": ["limit"]
+        },
+        {
+            "name": "related_files",
+            "description": "Find nearby source/test files related to a repository-relative path.",
+            "required": ["repo", "path"],
+            "optional": ["limit"]
+        },
+        {
+            "name": "related_symbols",
+            "description": "Find symbols related to a path and optional query.",
+            "required": ["repo"],
+            "optional": ["path", "query", "limit"]
+        }
+    ])
+}
+
 fn dispatch_result(request: &ToolRequest) -> Result<Value> {
     match request.tool.as_str() {
         "repo_brief" => {
@@ -163,7 +252,10 @@ fn dispatch_result(request: &ToolRequest) -> Result<Value> {
                 limit,
             ))?)
         }
+        "tool_manifest" => Ok(tool_manifest()),
         "list_tools" => Ok(json!([
+            "list_tools",
+            "tool_manifest",
             "repo_brief",
             "repo_map",
             "read_range",
@@ -180,6 +272,20 @@ fn dispatch_result(request: &ToolRequest) -> Result<Value> {
         other => Err(anyhow!("unknown tool: {other}")),
     }
 }
+
+const SEARCH_OPTIONAL_ARGS: &[&str] = &[
+    "limit",
+    "path",
+    "language",
+    "extension",
+    "symbol",
+    "file",
+    "repo_filter",
+    "test",
+    "snippet",
+    "explain",
+    "require_all",
+];
 
 fn string_arg(arguments: &Value, name: &str) -> Result<String> {
     arguments

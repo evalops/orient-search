@@ -59,6 +59,9 @@ cargo run -- related-symbols --repo /path/to/repo --path src/auth.py --query "se
 # Read a bounded, line-numbered file range.
 cargo run -- read-range --repo /path/to/repo src/auth.py --start 40 --lines 80
 
+# Print the agent tool manifest used by JSON-lines wrappers.
+cargo run -- tool-manifest
+
 # Measure p50/p95/max search latency with the same code paths agents use.
 cargo run --release -- bench-search \
   --repo /Users/jonathanhaas/Documents/Projects \
@@ -104,6 +107,7 @@ Shard request:
 Supported tools:
 
 - `list_tools`
+- `tool_manifest`
 - `repo_brief`
 - `repo_map`
 - `read_range`
@@ -116,6 +120,8 @@ Supported tools:
 - `find_symbol`
 - `related_files`
 - `related_symbols`
+
+`tool_manifest` returns the same tool list with descriptions plus required and optional argument names, so a wrapper can bootstrap the JSON-lines surface without scraping this README.
 
 ## Query Language
 
@@ -176,16 +182,16 @@ Product impact criteria for follow-up adoption:
 
 Current search baseline:
 
-- `orient bench-search --repo . "indexed search symbol filters"`: `7.753ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "session token auth"`: `17.398ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "browser session implementation"`: `28.423ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "postgres migration user"`: `32.244ms` p95 after warmup.
+- `orient bench-search --repo . "indexed search symbol filters"`: `7.442ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "session token auth"`: `15.986ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "browser session implementation"`: `25.424ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "postgres migration user"`: `36.655ms` p95 after warmup.
 - The `rg` hot path has a `250ms` wall-clock timeout plus a bounded match cap; timed-out searches return partial results rather than hanging.
 - `orient index --repo . --output /tmp/orient-self.index`: versioned binary index with file metadata, content token postings, path token postings, trigram postings, line offsets, and symbol boosts.
 - `orient index-shards --repo repo-a --repo repo-b --output-dir /tmp/orient-shards`: writes per-repo index shards plus a manifest for local multi-repo search.
 - `orient refresh-shards --index-dir /tmp/orient-shards`: refreshes each shard incrementally, reusing unchanged file metadata and postings per repo.
 - `orient refresh-index --repo . --index /tmp/orient-self.index`: reuses unchanged files and refreshes changed/deleted files.
-- `orient bench-search --repo . --index /tmp/orient-self.index "indexed search symbol filters"`: `0.192ms` p95 after warmup.
+- `orient bench-search --repo . --index /tmp/orient-self.index "indexed search symbol filters"`: `0.174ms` p95 after warmup.
 
 Benchmark methodology:
 
