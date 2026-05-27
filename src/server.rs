@@ -4,9 +4,9 @@ use crate::discover::{
 use crate::fast_index::{FastIndex, RefreshStats};
 use crate::query::{merge_filters, parse_query, query_text};
 use crate::repo_index::{
-    QueryPlan, RepoIndexer, SearchFilters, SearchResult, SnippetMode, Symbol,
-    attach_result_context, finalize_results, normalize_token, read_file_range,
-    search_repo_fast_filtered,
+    MAX_ATTACHED_CONTEXT_LINES, MAX_READ_RANGE_LINES, QueryPlan, RepoIndexer, SearchFilters,
+    SearchResult, SnippetMode, Symbol, attach_result_context, finalize_results, normalize_token,
+    read_file_range, search_repo_fast_filtered,
 };
 use crate::shards::{
     ShardEntry, ShardManifest, ShardQueryPlan, ShardRepoMap, ShardSearchScope, build_shards,
@@ -559,6 +559,9 @@ fn argument_metadata_entry(tool_name: &str, name: &str, required: bool) -> Value
     if let Some(default) = argument_default(tool_name, name) {
         entry.insert("default".to_string(), default);
     }
+    if let Some(maximum) = argument_maximum(name) {
+        entry.insert("maximum".to_string(), json!(maximum));
+    }
     if let Some(values) = argument_enum(name) {
         entry.insert("enum".to_string(), json!(values));
     }
@@ -604,7 +607,7 @@ fn argument_schema(tool_name: &str, name: &str) -> Value {
                     "properties": {
                         "path": {"type": "string"},
                         "start": {"type": "integer", "minimum": 1, "default": 1},
-                        "lines": {"type": "integer", "minimum": 1, "default": 80}
+                        "lines": {"type": "integer", "minimum": 1, "maximum": MAX_READ_RANGE_LINES, "default": 80}
                     }
                 }),
             );
@@ -628,6 +631,9 @@ fn argument_schema(tool_name: &str, name: &str) -> Value {
                     1
                 }),
             );
+            if let Some(maximum) = argument_maximum(name) {
+                schema.insert("maximum".to_string(), json!(maximum));
+            }
         }
         _ => {
             schema.insert("type".to_string(), json!("string"));
@@ -748,6 +754,14 @@ fn argument_enum(name: &str) -> Option<&'static [&'static str]> {
     }
 }
 
+fn argument_maximum(name: &str) -> Option<usize> {
+    match name {
+        "lines" => Some(MAX_READ_RANGE_LINES),
+        "context_lines" => Some(MAX_ATTACHED_CONTEXT_LINES),
+        _ => None,
+    }
+}
+
 fn argument_description(name: &str) -> &'static str {
     match name {
         "repo" => "Local repository root or shard repo filter, depending on the tool.",
@@ -802,7 +816,7 @@ fn argument_description(name: &str) -> &'static str {
         "symbols" => "Maximum top symbols to include in repo maps.",
         "tests" => "Maximum test files to include in repo maps.",
         "start" => "One-based start line for range reads.",
-        "lines" => "Number of lines to read.",
+        "lines" => "Number of lines to read, capped to the maximum bounded range size.",
         "name" => "Symbol name or search-like symbol query.",
         _ => "Tool argument.",
     }

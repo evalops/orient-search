@@ -5,8 +5,8 @@ use std::time::{Duration, Instant};
 
 use orient::fast_index::FastIndex;
 use orient::repo_index::{
-    SearchFilters, SnippetMode, attach_result_context, search_repo_fast_filtered,
-    search_repo_fast_filtered_with_timeout,
+    MAX_READ_RANGE_LINES, SearchFilters, SnippetMode, attach_result_context,
+    search_repo_fast_filtered, search_repo_fast_filtered_with_timeout,
 };
 
 fn write(path: &Path, text: &str) {
@@ -121,6 +121,10 @@ fn indexed_search_and_read_range_use_persisted_snapshot_text() {
         &repo.path().join("src/auth.rs"),
         "pub struct SessionManager;\nimpl SessionManager {\n    pub fn issue_token(&self) -> String {\n        \"token\".to_string()\n    }\n}\n",
     );
+    let long_text = (1..=MAX_READ_RANGE_LINES + 10)
+        .map(|line| format!("pub fn line_{line}() {{}}\n"))
+        .collect::<String>();
+    write(&repo.path().join("src/long.rs"), &long_text);
     let index_path = repo.path().join(".orient/auth.index");
     let index = FastIndex::build(repo.path()).unwrap();
     index.save(&index_path).unwrap();
@@ -156,6 +160,16 @@ fn indexed_search_and_read_range_use_persisted_snapshot_text() {
     let dot_range = loaded.read_range("./src/auth.rs", 2, 1).unwrap();
     assert_eq!(dot_range.path, "src/auth.rs");
     assert!(dot_range.text.contains("2: impl SessionManager"));
+    let capped = loaded
+        .read_range("src/long.rs", 1, MAX_READ_RANGE_LINES + 10)
+        .unwrap();
+    assert_eq!(capped.end_line, MAX_READ_RANGE_LINES);
+    assert_eq!(capped.total_lines, MAX_READ_RANGE_LINES + 10);
+    assert!(!capped.text.contains(&format!(
+        "{}: pub fn line_{}",
+        MAX_READ_RANGE_LINES + 1,
+        MAX_READ_RANGE_LINES + 1
+    )));
     assert!(loaded.read_range("../src/auth.rs", 1, 1).is_err());
     assert!(loaded.read_range("src/../auth.rs", 1, 1).is_err());
     assert!(loaded.read_range("src\\..\\auth.rs", 1, 1).is_err());

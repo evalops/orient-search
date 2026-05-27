@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::thread;
 
 use orient::fast_index::FastIndex;
+use orient::repo_index::{MAX_ATTACHED_CONTEXT_LINES, MAX_READ_RANGE_LINES};
 use orient::server::{ToolRequest, ToolRuntime, tool_manifest};
 
 fn write(path: &Path, text: &str) {
@@ -179,7 +180,24 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         read_ranges["input_schema"]["properties"]["ranges"]["items"]["properties"]["lines"]["default"],
         80
     );
+    assert_eq!(
+        read_ranges["input_schema"]["properties"]["ranges"]["items"]["properties"]["lines"]["maximum"],
+        serde_json::json!(MAX_READ_RANGE_LINES)
+    );
     assert_eq!(read_ranges["arguments"][1]["type"], "range[]");
+    assert_eq!(
+        search["input_schema"]["properties"]["context_lines"]["maximum"],
+        serde_json::json!(MAX_ATTACHED_CONTEXT_LINES)
+    );
+    assert_eq!(
+        search["arguments"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|argument| argument["name"] == "context_lines")
+            .unwrap()["maximum"],
+        serde_json::json!(MAX_ATTACHED_CONTEXT_LINES)
+    );
 }
 
 #[test]

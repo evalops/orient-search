@@ -84,6 +84,8 @@ target/release/orient read-index-ranges --index /tmp/orient.index --range src/au
 target/release/orient read-shard-ranges --index-dir /tmp/orient-shards --range platform/src/auth.rs:40:80
 ```
 
+Range reads are capped by the manifest `lines.maximum` so a mistaken large request cannot dump an unbounded file.
+
 ## Orientation And Repair
 
 Use `repo_map`, `indexed_repo_map`, or `shard_repo_map` before editing unfamiliar code. They return entrypoints, manifests, tests, important files, top symbols, related files/symbols, and command hints.

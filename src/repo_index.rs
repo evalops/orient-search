@@ -16,7 +16,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 const MAX_FILE_BYTES: u64 = 512_000;
-const MAX_ATTACHED_CONTEXT_LINES: usize = 500;
+pub const MAX_ATTACHED_CONTEXT_LINES: usize = 500;
+pub const MAX_READ_RANGE_LINES: usize = 1_000;
 const DEFAULT_RESULT_READ_LINES: usize = 80;
 const RIPGREP_TIMEOUT: Duration = Duration::from_millis(250);
 const RIPGREP_POLL_INTERVAL: Duration = Duration::from_millis(5);
@@ -1339,7 +1340,7 @@ pub(crate) fn file_range_from_text(
     let lines = text.lines().collect::<Vec<_>>();
     let total_lines = lines.len();
     let start = start_line.max(1).min(total_lines.max(1));
-    let count = line_count.max(1);
+    let count = line_count.max(1).min(MAX_READ_RANGE_LINES);
     let end = (start + count - 1).min(total_lines);
     let range_text = if total_lines == 0 {
         String::new()

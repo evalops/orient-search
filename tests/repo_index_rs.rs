@@ -2,7 +2,7 @@ use std::fs;
 use std::path::Path;
 
 use orient::fast_index::FastIndex;
-use orient::repo_index::{RepoIndexer, read_file_range};
+use orient::repo_index::{MAX_READ_RANGE_LINES, RepoIndexer, read_file_range};
 
 fn write(path: &Path, text: &str) {
     fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -150,6 +150,19 @@ fn read_file_range_rejects_paths_outside_repo() {
     let range = read_file_range(repo.path(), "src/auth.rs", 1, 10).unwrap();
     assert_eq!(range.start_line, 1);
     assert!(range.text.contains("issue_token"));
+
+    let long_text = (1..=MAX_READ_RANGE_LINES + 10)
+        .map(|line| format!("line_{line}\n"))
+        .collect::<String>();
+    write(&repo.path().join("src/long.rs"), &long_text);
+    let capped = read_file_range(repo.path(), "src/long.rs", 1, MAX_READ_RANGE_LINES + 10).unwrap();
+    assert_eq!(capped.start_line, 1);
+    assert_eq!(capped.end_line, MAX_READ_RANGE_LINES);
+    assert!(!capped.text.contains(&format!(
+        "{}: line_{}",
+        MAX_READ_RANGE_LINES + 1,
+        MAX_READ_RANGE_LINES + 1
+    )));
 
     let error = read_file_range(repo.path(), "../outside.rs", 1, 1)
         .unwrap_err()
