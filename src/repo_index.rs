@@ -43,7 +43,44 @@ pub struct SearchResult {
     pub snippet: String,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, Default, PartialEq, Eq)]
+pub enum SnippetMode {
+    Short,
+    #[default]
+    Medium,
+    Block,
+    Symbol,
+}
+
+impl SnippetMode {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.to_ascii_lowercase().as_str() {
+            "short" => Some(Self::Short),
+            "medium" => Some(Self::Medium),
+            "block" => Some(Self::Block),
+            "symbol" => Some(Self::Symbol),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn window(self) -> (usize, usize) {
+        match self {
+            Self::Short => (0, 0),
+            Self::Medium | Self::Symbol => (1, 2),
+            Self::Block => (3, 8),
+        }
+    }
+
+    pub(crate) fn max_chars(self) -> usize {
+        match self {
+            Self::Short => 240,
+            Self::Medium | Self::Symbol => 700,
+            Self::Block => 2_000,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SearchFilters {
     pub file: Option<String>,
     pub path: Option<String>,
@@ -53,12 +90,35 @@ pub struct SearchFilters {
     pub repo: Option<String>,
     pub test: Option<bool>,
     pub require_all: bool,
+    pub snippet: SnippetMode,
     pub exclude_file: Vec<String>,
     pub exclude_path: Vec<String>,
     pub exclude_language: Vec<String>,
     pub exclude_extension: Vec<String>,
     pub exclude_symbol: Vec<String>,
     pub exclude_repo: Vec<String>,
+}
+
+impl Default for SearchFilters {
+    fn default() -> Self {
+        Self {
+            file: None,
+            path: None,
+            language: None,
+            extension: None,
+            symbol: None,
+            repo: None,
+            test: None,
+            require_all: false,
+            snippet: SnippetMode::Medium,
+            exclude_file: Vec::new(),
+            exclude_path: Vec::new(),
+            exclude_language: Vec::new(),
+            exclude_extension: Vec::new(),
+            exclude_symbol: Vec::new(),
+            exclude_repo: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -288,7 +348,16 @@ fn search_repo_ripgrep(
             .get("line_number")
             .and_then(|line| line.as_u64())
             .unwrap_or_default();
-        merge_match_result(&mut scored, &path, text, line_number, query_tokens, true);
+        merge_match_result(
+            &mut scored,
+            &root,
+            &path,
+            text,
+            line_number,
+            query_tokens,
+            true,
+            filters.snippet,
+        );
         match_count += 1;
         if match_count >= max_matches {
             let _ = child.kill();
@@ -338,7 +407,7 @@ fn search_repo_streaming(
         if !matches_filters(&rel, filters) {
             continue;
         }
-        if let Some(result) = score_text_file(&rel, &text, &query_tokens, true) {
+        if let Some(result) = score_text_file(&rel, &text, &query_tokens, true, filters.snippet) {
             results.push(result);
         }
     }
@@ -352,11 +421,13 @@ fn search_repo_streaming(
 
 fn merge_match_result(
     scored: &mut HashMap<String, SearchResult>,
+    root: &Path,
     path: &str,
     line: &str,
     line_number: u64,
     query_tokens: &[String],
     parse_symbols: bool,
+    snippet_mode: SnippetMode,
 ) {
     let path_lower = path.to_lowercase();
     let line_lower = line.to_lowercase();
@@ -394,17 +465,35 @@ fn merge_match_result(
     }
 
     let snippet_line = line.trim_end();
-    let snippet = if line_number > 0 {
+    let snippet = if matches!(snippet_mode, SnippetMode::Block | SnippetMode::Symbol) {
+        fs::read_to_string(root.join(path))
+            .ok()
+            .map(|text| best_snippet_for_path(path, &text, query_tokens, snippet_mode))
+            .filter(|snippet| !snippet.is_empty())
+            .unwrap_or_else(|| {
+                if line_number > 0 {
+                    format!("{line_number}: {snippet_line}")
+                } else {
+                    snippet_line.to_string()
+                }
+            })
+    } else if line_number > 0 {
         format!("{line_number}: {snippet_line}")
     } else {
         snippet_line.to_string()
-    };
+    }
+    .chars()
+    .take(snippet_mode.max_chars())
+    .collect::<String>();
 
     scored
         .entry(path.to_string())
         .and_modify(|result| {
             result.score = round4(result.score + score);
-            if result.snippet.len() < 700 && !result.snippet.contains(snippet_line) {
+            if !matches!(snippet_mode, SnippetMode::Block | SnippetMode::Symbol)
+                && result.snippet.len() < snippet_mode.max_chars()
+                && !result.snippet.contains(snippet_line)
+            {
                 result.snippet.push('\n');
                 result
                     .snippet
@@ -886,6 +975,7 @@ fn score_text_file(
     text: &str,
     query_tokens: &[String],
     parse_symbols: bool,
+    snippet_mode: SnippetMode,
 ) -> Option<SearchResult> {
     let path_lower = path.to_lowercase();
     let text_lower = text.to_lowercase();
@@ -929,7 +1019,7 @@ fn score_text_file(
         path: path.to_string(),
         score: round4(score),
         reason: format!("matched {}", reasons.join(", ")),
-        snippet: best_snippet(text, query_tokens),
+        snippet: best_snippet_for_path(path, text, query_tokens, snippet_mode),
     })
 }
 
@@ -986,19 +1076,53 @@ pub(crate) fn normalize_token(text: &str) -> String {
 }
 
 pub(crate) fn best_snippet(text: &str, query_tokens: &[String]) -> String {
+    best_snippet_for_path("", text, query_tokens, SnippetMode::Medium)
+}
+
+pub(crate) fn best_snippet_for_path(
+    path: &str,
+    text: &str,
+    query_tokens: &[String],
+    mode: SnippetMode,
+) -> String {
     let lines = text.lines().collect::<Vec<_>>();
+    if matches!(mode, SnippetMode::Symbol) {
+        let language = language_for(Path::new(path)).unwrap_or_else(|| "text".to_string());
+        if let Some(symbol_line) = extract_symbols(path, text, &language)
+            .into_iter()
+            .find(|symbol| {
+                let normalized = normalize_token(&symbol.name);
+                normalized == query_tokens.join("")
+                    || tokenize(&symbol.name)
+                        .into_iter()
+                        .any(|token| query_tokens.contains(&token))
+            })
+            .map(|symbol| symbol.line)
+        {
+            return format_snippet_window(&lines, symbol_line.saturating_sub(1), mode);
+        }
+    }
     for (idx, line) in lines.iter().enumerate() {
         let lowered = line.to_lowercase();
         if query_tokens.iter().any(|token| lowered.contains(token)) {
-            let start = idx.saturating_sub(1);
-            let end = (idx + 3).min(lines.len());
-            return format_numbered_lines(&lines, start, end)
-                .chars()
-                .take(700)
-                .collect();
+            return format_snippet_window(&lines, idx, mode);
         }
     }
-    format_numbered_lines(&lines, 0, lines.len().min(6))
+    let (_, after) = mode.window();
+    format_numbered_lines(&lines, 0, lines.len().min(after + 1))
+        .chars()
+        .take(mode.max_chars())
+        .collect()
+}
+
+fn format_snippet_window(lines: &[&str], center: usize, mode: SnippetMode) -> String {
+    let (before, after) = mode.window();
+    let start = center.saturating_sub(before);
+    let end = (center + after + 1).min(lines.len());
+    format_numbered_lines(lines, start, end)
+        .chars()
+        .take(mode.max_chars())
+        .collect()
 }
 
 fn is_test_path(path: &str) -> bool {

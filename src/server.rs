@@ -1,5 +1,7 @@
 use crate::fast_index::FastIndex;
-use crate::repo_index::{RepoIndexer, SearchFilters, read_file_range, search_repo_fast_filtered};
+use crate::repo_index::{
+    RepoIndexer, SearchFilters, SnippetMode, read_file_range, search_repo_fast_filtered,
+};
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -167,6 +169,10 @@ fn search_filters(arguments: &Value) -> SearchFilters {
         file: optional_string_arg(arguments, "file"),
         repo: optional_string_arg(arguments, "repo_filter"),
         test: arguments.get("test").and_then(Value::as_bool),
+        snippet: optional_string_arg(arguments, "snippet")
+            .as_deref()
+            .and_then(SnippetMode::parse)
+            .unwrap_or_default(),
         require_all: arguments
             .get("require_all")
             .and_then(Value::as_bool)

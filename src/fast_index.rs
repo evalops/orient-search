@@ -2,9 +2,9 @@
 
 use crate::query::{merge_filters, parse_query, query_text};
 use crate::repo_index::{
-    SearchFilters, SearchResult, best_snippet, extract_symbols, finalize_results, is_ignored,
-    language_for, matches_filters, normalize_token, repo_matches, result_matches_all_tokens,
-    result_matches_symbol_filters, round4, token_counts, tokenize,
+    SearchFilters, SearchResult, SnippetMode, best_snippet_for_path, extract_symbols,
+    finalize_results, is_ignored, language_for, matches_filters, normalize_token, repo_matches,
+    result_matches_all_tokens, result_matches_symbol_filters, round4, token_counts, tokenize,
 };
 use anyhow::{Context, Result};
 use ignore::WalkBuilder;
@@ -14,7 +14,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const INDEX_VERSION: u32 = 3;
+const INDEX_VERSION: u32 = 4;
 const MAX_FILE_BYTES: u64 = 512_000;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -34,6 +34,7 @@ pub struct IndexedPath {
     pub modified_nanos: u32,
     pub terms: Vec<TermCount>,
     pub symbols: Vec<IndexedSymbol>,
+    pub line_offsets: Vec<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -294,7 +295,9 @@ impl FastIndex {
                     .get(*file_id as usize)
                     .is_some_and(|file| matches_filters(&file.path, &filters))
             })
-            .filter_map(|file_id| self.score_file(file_id, &query_tokens, &posting_maps))
+            .filter_map(|file_id| {
+                self.score_file(file_id, &query_tokens, &posting_maps, filters.snippet)
+            })
             .collect::<Vec<_>>();
 
         let mut results = results;
@@ -310,6 +313,7 @@ impl FastIndex {
         file_id: u32,
         query_tokens: &[String],
         posting_maps: &[(String, HashMap<u32, u16>)],
+        snippet_mode: SnippetMode,
     ) -> Option<SearchResult> {
         let file = self.files.get(file_id as usize)?;
         let path_lower = file.path.to_lowercase();
@@ -351,12 +355,7 @@ impl FastIndex {
             return None;
         }
 
-        let text = fs::read_to_string(self.root.join(&file.path)).unwrap_or_default();
-        let snippet = if text.is_empty() {
-            String::new()
-        } else {
-            best_snippet(&text, query_tokens)
-        };
+        let snippet = indexed_snippet(&self.root, file, query_tokens, snippet_mode);
 
         Some(SearchResult {
             path: file.path.clone(),
@@ -379,6 +378,7 @@ fn index_file(
     if text.contains('\0') {
         return None;
     }
+    let line_offsets = line_offsets(&text);
     let mut terms = token_counts(&format!("{rel}\n{text}"))
         .into_iter()
         .map(|(term, count)| TermCount {
@@ -406,7 +406,101 @@ fn index_file(
         modified_nanos,
         terms,
         symbols,
+        line_offsets,
     })
+}
+
+fn line_offsets(text: &str) -> Vec<u32> {
+    let mut offsets = vec![0];
+    for (index, byte) in text.bytes().enumerate() {
+        if byte == b'\n' && index + 1 < text.len() {
+            offsets.push((index + 1).min(u32::MAX as usize) as u32);
+        }
+    }
+    offsets
+}
+
+fn indexed_snippet(
+    root: &Path,
+    file: &IndexedPath,
+    query_tokens: &[String],
+    mode: SnippetMode,
+) -> String {
+    let path = root.join(&file.path);
+    let Ok(bytes) = fs::read(&path) else {
+        return String::new();
+    };
+    if bytes.is_empty() || file.line_offsets.is_empty() {
+        return String::new();
+    }
+
+    if matches!(mode, SnippetMode::Symbol) {
+        let query_name = query_tokens.join("");
+        if let Some(line) = file
+            .symbols
+            .iter()
+            .find(|symbol| {
+                symbol.normalized == query_name
+                    || symbol
+                        .tokens
+                        .iter()
+                        .any(|token| query_tokens.contains(token))
+            })
+            .map(|symbol| symbol.line)
+        {
+            return render_indexed_window(&bytes, &file.line_offsets, line, mode);
+        }
+    }
+
+    if let Some(line) = first_matching_line(&bytes, &file.line_offsets, query_tokens) {
+        return render_indexed_window(&bytes, &file.line_offsets, line, mode);
+    }
+
+    let text = String::from_utf8_lossy(&bytes);
+    best_snippet_for_path(&file.path, &text, query_tokens, mode)
+}
+
+fn first_matching_line(bytes: &[u8], offsets: &[u32], query_tokens: &[String]) -> Option<usize> {
+    offsets.iter().enumerate().find_map(|(index, offset)| {
+        let start = *offset as usize;
+        let end = line_end(bytes, offsets, index);
+        let lowered = String::from_utf8_lossy(&bytes[start..end]).to_lowercase();
+        query_tokens
+            .iter()
+            .any(|token| lowered.contains(token))
+            .then_some(index + 1)
+    })
+}
+
+fn render_indexed_window(
+    bytes: &[u8],
+    offsets: &[u32],
+    center_line: usize,
+    mode: SnippetMode,
+) -> String {
+    let (before, after) = mode.window();
+    let line_count = offsets.len();
+    let center = center_line.max(1).min(line_count);
+    let start_line = center.saturating_sub(before).max(1);
+    let end_line = (center + after).min(line_count);
+    let mut rendered = Vec::new();
+
+    for line in start_line..=end_line {
+        let index = line - 1;
+        let start = offsets[index] as usize;
+        let end = line_end(bytes, offsets, index);
+        let text = String::from_utf8_lossy(&bytes[start..end]);
+        rendered.push(format!("{line}: {}", text.trim_end_matches(['\r', '\n'])));
+    }
+
+    rendered.join("\n").chars().take(mode.max_chars()).collect()
+}
+
+fn line_end(bytes: &[u8], offsets: &[u32], index: usize) -> usize {
+    offsets
+        .get(index + 1)
+        .map(|offset| *offset as usize)
+        .unwrap_or(bytes.len())
 }
 
 fn rebuild_postings(files: &[IndexedPath]) -> HashMap<String, Vec<Posting>> {

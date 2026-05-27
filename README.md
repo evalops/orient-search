@@ -25,7 +25,8 @@ cargo run -- repo-map --repo /path/to/repo --symbols 50 --tests 50
 
 # Search code.
 cargo run -- search --repo /path/to/repo "session token auth"
-cargo run -- search --repo /path/to/repo 'symbol:SessionManager lang:rust -path:docs "issue token"'
+cargo run -- search --repo /path/to/repo 'symbol:SessionManager lang:rust -path:docs "issue token"' \
+  --snippet block
 
 # Build and query a persistent local index.
 cargo run -- index --repo /path/to/repo --output /tmp/orient.index
@@ -34,7 +35,8 @@ cargo run -- indexed-search --index /tmp/orient.index "session token auth" \
   --path src/ \
   --language rust \
   --extension rs \
-  --require-all
+  --require-all \
+  --snippet symbol
 
 # Find a symbol.
 cargo run -- symbol --repo /path/to/repo SessionManager
@@ -67,7 +69,7 @@ cargo run -- serve-jsonl
 Example request:
 
 ```json
-{"id":1,"tool":"search_code","arguments":{"repo":"/path/to/repo","query":"issue token","limit":5,"extension":"rs","require_all":true}}
+{"id":1,"tool":"search_code","arguments":{"repo":"/path/to/repo","query":"issue token","limit":5,"extension":"rs","require_all":true,"snippet":"block"}}
 ```
 
 Supported tools:
@@ -97,6 +99,17 @@ Search queries support agent-friendly filters inline with normal terms:
 
 Multiple positive terms use AND behavior by default, so `session token auth` means all three terms should be represented in the returned result.
 
+## Snippet Modes
+
+Search tools and CLI commands accept `--snippet <mode>` or JSON `"snippet":"<mode>"`:
+
+- `short`: one matching line.
+- `medium`: a compact default context window.
+- `block`: a larger context block for deciding whether to edit.
+- `symbol`: prefer the matching symbol definition when a symbol signal is available.
+
+Indexed search persists line-offset tables in the binary index and uses them to render bounded snippets without reparsing the file into an in-memory repo index.
+
 ## Success Criteria
 
 The build is useful when it can:
@@ -119,14 +132,14 @@ Product impact criteria for follow-up adoption:
 
 Current search baseline:
 
-- `orient bench-search --repo . "indexed search symbol filters"`: `12.055ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "session token auth"`: `16.409ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "browser session implementation"`: `17.226ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "postgres migration user"`: `75.542ms` p95 after warmup.
+- `orient bench-search --repo . "indexed search symbol filters"`: `13.951ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "session token auth"`: `18.402ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "browser session implementation"`: `25.162ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "postgres migration user"`: `40.737ms` p95 after warmup.
 - The `rg` hot path has a `250ms` wall-clock timeout plus a bounded match cap; timed-out searches return partial results rather than hanging.
 - `orient index --repo . --output /tmp/orient-self.index`: versioned binary index with file metadata, terms, and symbol boosts.
 - `orient refresh-index --repo . --index /tmp/orient-self.index`: reuses unchanged files and refreshes changed/deleted files.
-- `orient bench-search --repo . --index /tmp/orient-self.index "indexed search symbol filters"`: `0.655ms` p95 after warmup.
+- `orient bench-search --repo . --index /tmp/orient-self.index "indexed search symbol filters"`: `0.141ms` p95 after warmup.
 
 Benchmark methodology:
 
@@ -141,7 +154,7 @@ See [docs/fast-search-roadmap.md](docs/fast-search-roadmap.md) for the Zoekt/Sou
 ## Architecture
 
 - `src/fast_index.rs`: experimental persistent token index and indexed search.
-- `src/repo_index.rs`: repo indexing, symbol extraction, code search, related-file lookup.
+- `src/repo_index.rs`: repo indexing, symbol extraction, snippet rendering, code search, related-file lookup.
 - `src/query.rs`: inline query-language parsing and filter merging.
 - `src/server.rs`: JSON-lines tool dispatch.
 - `src/main.rs`: CLI.

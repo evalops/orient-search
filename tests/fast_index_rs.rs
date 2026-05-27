@@ -1,10 +1,11 @@
 use std::fs;
 use std::path::Path;
+use std::process::Command;
 use std::time::{Duration, Instant};
 
 use orient::fast_index::FastIndex;
 use orient::repo_index::{
-    SearchFilters, search_repo_fast_filtered, search_repo_fast_filtered_with_timeout,
+    SearchFilters, SnippetMode, search_repo_fast_filtered, search_repo_fast_filtered_with_timeout,
 };
 
 fn write(path: &Path, text: &str) {
@@ -139,6 +140,147 @@ fn query_language_filters_fallback_and_indexed_search() {
     .unwrap();
     assert_eq!(test_results.len(), 1);
     assert_eq!(test_results[0].path, "tests/auth_test.rs");
+}
+
+#[test]
+fn indexed_search_supports_line_offsets_and_snippet_modes() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/auth.rs"),
+        "pub struct SessionManager;\n\
+         impl SessionManager {\n\
+         fn helper() {}\n\
+         pub fn issue_token() {\n\
+         let token = \"session\";\n\
+         }\n\
+         }\n",
+    );
+
+    let index = FastIndex::build(repo.path()).unwrap();
+    let auth = index
+        .files
+        .iter()
+        .find(|file| file.path == "src/auth.rs")
+        .unwrap();
+    assert!(auth.line_offsets.len() >= 7);
+
+    let short = index
+        .search_filtered(
+            "issue token",
+            10,
+            &SearchFilters {
+                snippet: SnippetMode::Short,
+                ..SearchFilters::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(short[0].path, "src/auth.rs");
+    assert_eq!(short[0].snippet.lines().count(), 1);
+    assert!(short[0].snippet.contains("4:"));
+
+    let block = index
+        .search_filtered(
+            "issue token",
+            10,
+            &SearchFilters {
+                snippet: SnippetMode::Block,
+                ..SearchFilters::default()
+            },
+        )
+        .unwrap();
+    assert!(block[0].snippet.contains("1: pub struct SessionManager;"));
+    assert!(block[0].snippet.contains("7: }"));
+
+    let symbol = index
+        .search_filtered(
+            "SessionManager",
+            10,
+            &SearchFilters {
+                snippet: SnippetMode::Symbol,
+                ..SearchFilters::default()
+            },
+        )
+        .unwrap();
+    assert!(
+        symbol[0]
+            .snippet
+            .starts_with("1: pub struct SessionManager;")
+    );
+}
+
+#[test]
+fn loading_corrupt_index_returns_error() {
+    let repo = tempfile::tempdir().unwrap();
+    let path = repo.path().join("corrupt.index");
+    fs::write(&path, b"not a bincode orient index").unwrap();
+
+    let error = FastIndex::load(&path).unwrap_err().to_string();
+    assert!(error.contains("parse index"));
+}
+
+#[test]
+fn fallback_search_matches_rg_for_golden_corpus() {
+    if Command::new("rg").arg("--version").output().is_err() {
+        return;
+    }
+
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/auth.rs"),
+        "pub fn issue_token() { let token = \"session\"; }\n",
+    );
+    write(
+        &repo.path().join("src/billing.rs"),
+        "pub fn invoice_total() -> usize { 42 }\n",
+    );
+    write(
+        &repo.path().join("README.md"),
+        "The auth module issues session tokens.\n",
+    );
+
+    let rg_output = Command::new("rg")
+        .current_dir(repo.path())
+        .args(["--files-with-matches", "issue|token"])
+        .output()
+        .unwrap();
+    assert!(rg_output.status.success());
+    let rg_paths = String::from_utf8(rg_output.stdout).unwrap();
+
+    let results =
+        search_repo_fast_filtered(repo.path(), "issue token", 10, &SearchFilters::default())
+            .unwrap();
+    assert!(rg_paths.contains("src/auth.rs"));
+    assert!(results.iter().any(|result| result.path == "src/auth.rs"));
+    assert!(!results.iter().any(|result| result.path == "src/billing.rs"));
+}
+
+#[test]
+fn fallback_block_snippets_do_not_append_overlapping_blocks() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/auth.rs"),
+        "pub struct SessionManager;\n\
+         impl SessionManager {\n\
+         pub fn issue_token() {\n\
+         let token = \"session\";\n\
+         let backup_token = \"backup\";\n\
+         }\n\
+         }\n",
+    );
+
+    let results = search_repo_fast_filtered(
+        repo.path(),
+        "token",
+        10,
+        &SearchFilters {
+            snippet: SnippetMode::Block,
+            ..SearchFilters::default()
+        },
+    )
+    .unwrap();
+
+    let snippet = &results[0].snippet;
+    assert_eq!(snippet.matches("1: pub struct SessionManager;").count(), 1);
 }
 
 #[test]

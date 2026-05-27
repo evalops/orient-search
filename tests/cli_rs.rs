@@ -104,10 +104,13 @@ fn cli_searches_symbols_and_related_files() {
             "--extension",
             "rs",
             "--require-all",
+            "--snippet",
+            "block",
         ])
         .assert()
         .success()
-        .stdout(predicate::str::contains("src/auth.rs"));
+        .stdout(predicate::str::contains("src/auth.rs"))
+        .stdout(predicate::str::contains("SessionManager"));
 
     let mut symbol = Command::cargo_bin("orient").unwrap();
     symbol
@@ -154,6 +157,8 @@ fn cli_builds_and_searches_persistent_index() {
             "--extension",
             "rs",
             "--require-all",
+            "--snippet",
+            "symbol",
         ])
         .assert()
         .success()

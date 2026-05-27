@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::Path;
 
-use orient::repo_index::RepoIndexer;
+use orient::repo_index::{RepoIndexer, read_file_range};
 
 fn write(path: &Path, text: &str) {
     fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -58,4 +58,22 @@ def test_issue_token_round_trip():
     let brief = index.repo_brief();
     assert_eq!(brief.language_counts.get("python"), Some(&2));
     assert!(brief.known_commands.contains(&"pytest".to_string()));
+}
+
+#[test]
+fn read_file_range_rejects_paths_outside_repo() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/auth.rs"),
+        "pub fn issue_token() {}\n",
+    );
+
+    let range = read_file_range(repo.path(), "src/auth.rs", 1, 10).unwrap();
+    assert_eq!(range.start_line, 1);
+    assert!(range.text.contains("issue_token"));
+
+    let error = read_file_range(repo.path(), "../outside.rs", 1, 1)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("repo-relative"));
 }

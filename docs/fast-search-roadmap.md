@@ -36,17 +36,19 @@ Implemented now:
 - `orient bench-search`: built-in p50/p95/max latency reporting for fallback and indexed search, with `--fail-p95-ms` for regression gates.
 - JSON-lines tools: `search_code`, `indexed_search_code`, `repo_map`, and `read_range`.
 - CLI tools: `repo-map` and `read-range`, so agents can inspect entrypoints/tests/top symbols and open bounded file context after a search hit.
+- Search snippet modes: `short`, `medium`, `block`, and `symbol`.
+- Indexed files persist line-offset tables for bounded snippet rendering.
 - Result de-duping for repeated worktree copies where practical.
 - Exact symbol definition boosting in both fallback and indexed search.
 
 Measured on this machine:
 
-- Wide tree fallback: `/Users/jonathanhaas/Documents/Projects`, common top-10 literal/token queries at `16-76ms` p95 after warmup across the sampled runs.
-- Local repo fallback: query `indexed search symbol filters`, top 10 at about `12ms` p95 after warmup.
+- Wide tree fallback: `/Users/jonathanhaas/Documents/Projects`, common top-10 literal/token queries at `18-41ms` p95 after warmup across the sampled runs.
+- Local repo fallback: query `indexed search symbol filters`, top 10 at about `14ms` p95 after warmup.
 - Hot-path fallback has a `250ms` wall-clock timeout plus match caps; if the timeout fires it returns partial results instead of blocking the agent.
 - Local repo index build: about `0.25s`.
 - Local repo refresh after build: reuses unchanged files and rebuilds postings from per-file term lists.
-- Local repo indexed search: query `indexed search symbol filters`, top 10 at about `0.7ms` p95 after warmup.
+- Local repo indexed search: query `indexed search symbol filters`, top 10 at about `0.2ms` p95 after warmup.
 
 ## Exit Conditions
 
@@ -67,8 +69,9 @@ Search quality definition:
 Engineering definition:
 
 - Persistent index has a versioned on-disk format.
+- Persistent indexed files include line-offset tables for snippet retrieval.
 - Incremental refresh exists.
-- Tests cover fallback search, indexed search, incremental refresh, filters, ranking, duplicate suppression, and JSON-lines server calls.
+- Tests cover fallback search, indexed search, incremental refresh, filters, ranking, duplicate suppression, JSON-lines server calls, corrupt index errors, path safety, snippet modes, and a guarded `rg` differential check.
 - Every release claim is backed by `cargo fmt --check`, `cargo test`, `cargo build --release`, and `orient bench-search` or equivalent timed searches.
 
 ## Architecture Direction
@@ -85,7 +88,7 @@ Zoekt-inspired indexed mode:
 - Move from token postings to trigram postings for substring and regex-like queries.
 - Store the index in versioned shards, one shard per repo or repo slice.
 - Use mmap-friendly binary layout rather than JSON once the schema stabilizes.
-- Store compact file metadata, path postings, content postings, and line offset tables.
+- Store compact file metadata, path postings, content postings, and richer line/term offset tables.
 - Keep snippets source-backed when files are present, but allow shard-backed snippets when searching detached snapshots.
 - Add query planning: choose the rarest required posting lists first, then verify candidates.
 
@@ -93,5 +96,5 @@ Agent-specific differences from Zoekt:
 
 - Return compact JSON objects built for tool use, not web UI rendering.
 - Prefer de-duped, high-diversity top results over exhaustive match lists.
-- Track which search results led to reads/edits so ranking can learn from current sessions.
-- Treat repeated failed searches as product feedback and recommend index/filter improvements.
+- Keep ranking local and deterministic; do not add session analytics or telemetry.
+- Treat failed searches as an offline test-corpus signal when the user explicitly captures examples.

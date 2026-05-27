@@ -1,7 +1,9 @@
 use anyhow::{Result, bail};
 use clap::{Parser, Subcommand};
 use orient::fast_index::FastIndex;
-use orient::repo_index::{RepoIndexer, SearchFilters, read_file_range, search_repo_fast_filtered};
+use orient::repo_index::{
+    RepoIndexer, SearchFilters, SnippetMode, read_file_range, search_repo_fast_filtered,
+};
 use orient::server::serve_jsonl;
 use serde::Serialize;
 use std::io;
@@ -65,6 +67,8 @@ enum Commands {
         extension: Option<String>,
         #[arg(long)]
         require_all: bool,
+        #[arg(long, default_value = "medium")]
+        snippet: String,
     },
     IndexedSearch {
         #[arg(long)]
@@ -80,6 +84,8 @@ enum Commands {
         extension: Option<String>,
         #[arg(long)]
         require_all: bool,
+        #[arg(long, default_value = "medium")]
+        snippet: String,
     },
     Symbol {
         #[arg(long, default_value = ".")]
@@ -114,6 +120,8 @@ enum Commands {
         extension: Option<String>,
         #[arg(long)]
         require_all: bool,
+        #[arg(long, default_value = "medium")]
+        snippet: String,
         #[arg(long)]
         fail_p95_ms: Option<f64>,
         #[arg(required = true)]
@@ -197,7 +205,9 @@ fn main() -> Result<()> {
             language,
             extension,
             require_all,
+            snippet,
         } => {
+            let snippet = snippet_mode_arg(&snippet)?;
             println!(
                 "{}",
                 serde_json::to_string(&search_repo_fast_filtered(
@@ -209,6 +219,7 @@ fn main() -> Result<()> {
                         language,
                         extension,
                         require_all,
+                        snippet,
                         ..SearchFilters::default()
                     },
                 )?)?
@@ -222,7 +233,9 @@ fn main() -> Result<()> {
             language,
             extension,
             require_all,
+            snippet,
         } => {
+            let snippet = snippet_mode_arg(&snippet)?;
             let index = FastIndex::load(index)?;
             println!(
                 "{}",
@@ -234,6 +247,7 @@ fn main() -> Result<()> {
                         language,
                         extension,
                         require_all,
+                        snippet,
                         ..SearchFilters::default()
                     },
                 )?)?
@@ -263,14 +277,17 @@ fn main() -> Result<()> {
             language,
             extension,
             require_all,
+            snippet,
             fail_p95_ms,
             queries,
         } => {
+            let snippet = snippet_mode_arg(&snippet)?;
             let filters = SearchFilters {
                 path,
                 language,
                 extension,
                 require_all,
+                snippet,
                 ..SearchFilters::default()
             };
             let report = bench_search(BenchConfig {
@@ -408,4 +425,9 @@ fn percentile(sorted: &[f64], quantile: f64) -> f64 {
 
 fn round_ms(value: f64) -> f64 {
     (value * 1_000.0).round() / 1_000.0
+}
+
+fn snippet_mode_arg(value: &str) -> Result<SnippetMode> {
+    SnippetMode::parse(value)
+        .ok_or_else(|| anyhow::anyhow!("snippet must be one of: short, medium, block, symbol"))
 }
