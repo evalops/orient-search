@@ -9,7 +9,7 @@ use std::thread;
 use orient::fast_index::FastIndex;
 use orient::repo_index::{MAX_ATTACHED_CONTEXT_LINES, MAX_READ_RANGE_LINES, MAX_SEARCH_RESULTS};
 use orient::server::{
-    MAX_BATCH_QUERIES, MAX_BATCH_RANGES, ToolRequest, ToolRuntime, tool_manifest,
+    MAX_BATCH_QUERIES, MAX_BATCH_RANGES, ToolRequest, ToolRuntime, mcp_tool_manifest, tool_manifest,
 };
 
 fn write(path: &Path, text: &str) {
@@ -267,6 +267,7 @@ fn server_reports_tool_manifest_for_agent_wrappers() {
     assert!(stdout.contains("tool_manifest"));
     assert!(stdout.contains("\"id\":\"manifest\""));
     assert!(stdout.contains("\"name\":\"search_code\""));
+    assert!(stdout.contains("\"name\":\"mcp_manifest\""));
     assert!(stdout.contains("\"required\":[\"repo\",\"query\"]"));
     assert!(stdout.contains("\"optional\""));
     assert!(stdout.contains("\"arguments\""));
@@ -304,6 +305,38 @@ fn server_reports_tool_manifest_for_agent_wrappers() {
     assert!(stdout.contains("shard_status"));
     assert!(stdout.contains("search_shards_batch"));
     assert!(stdout.contains("discover_repos"));
+}
+
+#[test]
+fn mcp_manifest_exposes_input_schema_for_adapter_wrappers() {
+    let manifest = mcp_tool_manifest();
+    let tools = manifest["tools"].as_array().unwrap();
+    let search = tools
+        .iter()
+        .find(|tool| tool["name"] == "search_code")
+        .unwrap();
+    let mcp_manifest = tools
+        .iter()
+        .find(|tool| tool["name"] == "mcp_manifest")
+        .unwrap();
+
+    assert_eq!(
+        search["description"],
+        "Search a local repository with the fast fallback path and return ranked snippets."
+    );
+    assert_eq!(
+        search["inputSchema"]["required"],
+        serde_json::json!(["repo", "query"])
+    );
+    assert_eq!(
+        search["inputSchema"]["properties"]["limit"]["maximum"],
+        serde_json::json!(MAX_SEARCH_RESULTS)
+    );
+    assert!(search.get("input_schema").is_none());
+    assert_eq!(
+        mcp_manifest["inputSchema"]["properties"],
+        serde_json::json!({})
+    );
 }
 
 #[test]

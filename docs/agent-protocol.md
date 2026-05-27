@@ -20,6 +20,7 @@ Each request is one JSON object per line:
 ```
 
 Responses preserve `id` and return either `result` or `error`. Use `tool_manifest` for the complete tool list, argument metadata, daemon-default hints, defaults, enums, and JSON-schema-like input schemas.
+Adapters that want MCP-shaped definitions can call `mcp_manifest` or `orient mcp-manifest`; it returns `tools` entries with `name`, `description`, and `inputSchema`.
 
 ## Bootstrap
 

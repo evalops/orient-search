@@ -9,7 +9,8 @@ use orient::repo_index::{
     read_file_range, search_repo_fast_filtered,
 };
 use orient::server::{
-    MAX_BATCH_QUERIES, MAX_BATCH_RANGES, ToolRuntime, serve_jsonl, serve_tcp, tool_manifest,
+    MAX_BATCH_QUERIES, MAX_BATCH_RANGES, ToolRuntime, mcp_tool_manifest, serve_jsonl, serve_tcp,
+    tool_manifest,
 };
 use orient::shards::{
     ShardQueryPlan, build_shards, ensure_shards, find_shard_symbol, read_shard_range,
@@ -464,6 +465,7 @@ enum Commands {
         queries: Vec<String>,
     },
     ToolManifest,
+    McpManifest,
     ServeJsonl,
     ServeTcp {
         #[arg(long, default_value = "127.0.0.1:8796")]
@@ -1187,6 +1189,9 @@ fn main() -> Result<()> {
         }
         Commands::ToolManifest => {
             println!("{}", serde_json::to_string(&tool_manifest())?);
+        }
+        Commands::McpManifest => {
+            println!("{}", serde_json::to_string(&mcp_tool_manifest())?);
         }
         Commands::ServeJsonl => {
             let stdin = io::stdin();

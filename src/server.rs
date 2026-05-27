@@ -272,6 +272,12 @@ pub fn tool_manifest() -> Value {
             &[],
         ),
         tool_entry(
+            "mcp_manifest",
+            "Return MCP-shaped tool definitions with inputSchema for adapter wrappers.",
+            &[],
+            &[],
+        ),
+        tool_entry(
             "daemon_status",
             "Return local daemon runtime cache status for warm-index clients.",
             &[],
@@ -519,6 +525,28 @@ pub fn tool_manifest() -> Value {
             &["query", "limit"],
         ),
     ])
+}
+
+pub fn mcp_tool_manifest() -> Value {
+    let tools = match tool_manifest() {
+        Value::Array(tools) => tools
+            .into_iter()
+            .filter_map(|tool| {
+                let name = tool.get("name")?.clone();
+                let description = tool.get("description")?.clone();
+                let input_schema = tool.get("input_schema")?.clone();
+                Some(json!({
+                    "name": name,
+                    "description": description,
+                    "inputSchema": input_schema
+                }))
+            })
+            .collect::<Vec<_>>(),
+        _ => Vec::new(),
+    };
+    json!({
+        "tools": tools
+    })
 }
 
 fn tool_entry(name: &str, description: &str, required: &[&str], optional: &[&str]) -> Value {
@@ -1287,9 +1315,11 @@ impl ToolRuntime {
             }
             "daemon_status" => Ok(self.daemon_status()),
             "tool_manifest" => Ok(tool_manifest()),
+            "mcp_manifest" => Ok(mcp_tool_manifest()),
             "list_tools" => Ok(json!([
                 "list_tools",
                 "tool_manifest",
+                "mcp_manifest",
                 "daemon_status",
                 "warm_index",
                 "ensure_index",

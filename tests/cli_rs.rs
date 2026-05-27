@@ -63,6 +63,7 @@ fn cli_outputs_tool_manifest() {
         .success()
         .stdout(predicate::str::contains("\"name\":\"discover_repos\""))
         .stdout(predicate::str::contains("\"name\":\"search_code\""))
+        .stdout(predicate::str::contains("\"name\":\"mcp_manifest\""))
         .stdout(predicate::str::contains(
             "\"required\":[\"repo\",\"query\"]",
         ))
@@ -91,6 +92,21 @@ fn cli_outputs_tool_manifest() {
         .stdout(predicate::str::contains("\"maxItems\":32"))
         .stdout(predicate::str::contains("\"maxItems\":64"))
         .stdout(predicate::str::contains("\"type\":\"range[]\""));
+}
+
+#[test]
+fn cli_outputs_mcp_manifest() {
+    let mut cmd = Command::cargo_bin("orient").unwrap();
+    cmd.arg("mcp-manifest")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"tools\""))
+        .stdout(predicate::str::contains("\"name\":\"search_code\""))
+        .stdout(predicate::str::contains("\"inputSchema\""))
+        .stdout(predicate::str::contains(
+            "\"required\":[\"repo\",\"query\"]",
+        ))
+        .stdout(predicate::str::contains("\"input_schema\"").not());
 }
 
 #[test]
