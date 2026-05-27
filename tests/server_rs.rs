@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::thread;
 
 use orient::fast_index::FastIndex;
-use orient::repo_index::{MAX_ATTACHED_CONTEXT_LINES, MAX_READ_RANGE_LINES};
+use orient::repo_index::{MAX_ATTACHED_CONTEXT_LINES, MAX_READ_RANGE_LINES, MAX_SEARCH_RESULTS};
 use orient::server::{ToolRequest, ToolRuntime, tool_manifest};
 
 fn write(path: &Path, text: &str) {
@@ -82,6 +82,19 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
     assert_eq!(search["required"], serde_json::json!(["repo", "query"]));
     assert_eq!(search["input_schema"]["properties"]["limit"]["default"], 10);
     assert_eq!(
+        search["input_schema"]["properties"]["limit"]["maximum"],
+        serde_json::json!(MAX_SEARCH_RESULTS)
+    );
+    assert_eq!(
+        search["arguments"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|argument| argument["name"] == "limit")
+            .unwrap()["maximum"],
+        serde_json::json!(MAX_SEARCH_RESULTS)
+    );
+    assert_eq!(
         search["input_schema"]["properties"]["snippet"]["enum"],
         serde_json::json!(["short", "medium", "block", "symbol"])
     );
@@ -149,6 +162,11 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
     assert_eq!(
         discover["input_schema"]["properties"]["limit"]["default"],
         500
+    );
+    assert!(
+        discover["input_schema"]["properties"]["limit"]
+            .get("maximum")
+            .is_none()
     );
     assert_eq!(
         discover["input_schema"]["properties"]["git_metadata"]["type"],

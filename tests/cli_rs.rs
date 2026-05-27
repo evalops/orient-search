@@ -85,6 +85,7 @@ fn cli_outputs_tool_manifest() {
         .stdout(predicate::str::contains("\"arguments\""))
         .stdout(predicate::str::contains("\"input_schema\""))
         .stdout(predicate::str::contains("\"default\":10"))
+        .stdout(predicate::str::contains("\"maximum\":100"))
         .stdout(predicate::str::contains("\"maximum\":1000"))
         .stdout(predicate::str::contains("\"type\":\"range[]\""));
 }

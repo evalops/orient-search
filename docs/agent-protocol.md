@@ -62,6 +62,8 @@ Search results include:
 - `context`: optional attached file context when `context_lines` is set.
 - `explanation` and `query_plan` when `explain` is set.
 
+Search result counts are capped by the manifest `limit.maximum` so broad queries stay bounded even when callers request more.
+
 ## Read Next
 
 For most agents, the handoff is:

@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use orient::fast_index::FastIndex;
 use orient::repo_index::{
-    MAX_READ_RANGE_LINES, SearchFilters, SnippetMode, attach_result_context,
+    MAX_READ_RANGE_LINES, MAX_SEARCH_RESULTS, SearchFilters, SnippetMode, attach_result_context,
     search_repo_fast_filtered, search_repo_fast_filtered_with_timeout,
 };
 
@@ -173,6 +173,36 @@ fn indexed_search_and_read_range_use_persisted_snapshot_text() {
     assert!(loaded.read_range("../src/auth.rs", 1, 1).is_err());
     assert!(loaded.read_range("src/../auth.rs", 1, 1).is_err());
     assert!(loaded.read_range("src\\..\\auth.rs", 1, 1).is_err());
+}
+
+#[test]
+fn search_result_limits_are_capped() {
+    let repo = tempfile::tempdir().unwrap();
+    for index in 0..MAX_SEARCH_RESULTS + 25 {
+        write(
+            &repo.path().join(format!("src/file_{index:03}.rs")),
+            "pub fn shared_cap_token() {}\n",
+        );
+    }
+
+    let fallback = search_repo_fast_filtered(
+        repo.path(),
+        "shared cap token",
+        MAX_SEARCH_RESULTS + 25,
+        &SearchFilters::default(),
+    )
+    .unwrap();
+    assert_eq!(fallback.len(), MAX_SEARCH_RESULTS);
+
+    let index = FastIndex::build(repo.path()).unwrap();
+    let indexed = index
+        .search_filtered(
+            "shared cap token",
+            MAX_SEARCH_RESULTS + 25,
+            &SearchFilters::default(),
+        )
+        .unwrap();
+    assert_eq!(indexed.len(), MAX_SEARCH_RESULTS);
 }
 
 #[test]

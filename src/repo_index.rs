@@ -18,6 +18,7 @@ use std::time::{Duration, Instant};
 const MAX_FILE_BYTES: u64 = 512_000;
 pub const MAX_ATTACHED_CONTEXT_LINES: usize = 500;
 pub const MAX_READ_RANGE_LINES: usize = 1_000;
+pub const MAX_SEARCH_RESULTS: usize = 100;
 const DEFAULT_RESULT_READ_LINES: usize = 80;
 const RIPGREP_TIMEOUT: Duration = Duration::from_millis(250);
 const RIPGREP_POLL_INTERVAL: Duration = Duration::from_millis(5);
@@ -329,6 +330,7 @@ pub fn search_repo_fast_filtered_with_timeout(
     filters: &SearchFilters,
     timeout: Duration,
 ) -> Result<Vec<SearchResult>> {
+    let limit = capped_search_limit(limit);
     let root = root.as_ref().canonicalize()?;
     let parsed = parse_query(query);
     let query_phrases = query_phrases(&parsed.terms);
@@ -2036,7 +2038,12 @@ pub(crate) fn round4(value: f64) -> f64 {
     (value * 10_000.0).round() / 10_000.0
 }
 
+pub fn capped_search_limit(limit: usize) -> usize {
+    limit.min(MAX_SEARCH_RESULTS)
+}
+
 pub(crate) fn finalize_results(mut results: Vec<SearchResult>, limit: usize) -> Vec<SearchResult> {
+    let limit = capped_search_limit(limit);
     for result in &mut results {
         if let Some(signals) = result.explanation.take() {
             result.explanation = Some(compact_rank_signals(signals));

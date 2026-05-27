@@ -4,11 +4,11 @@ use crate::query::{merge_filters, normalize_phrase_text, parse_query, query_phra
 use crate::repo_index::{
     FileRange, QueryPlan, QueryPlanPosting, QueryPlanRepairHint, RankSignal, RelatedFile,
     RelatedSymbol, RepoBrief, RepoMap, SearchFilters, SearchResult, SnippetMode, Symbol,
-    apply_phrase_matches, best_snippet_for_path, command_hints_from_manifest_texts,
-    extract_symbols, file_range_from_text, filter_only_query, filter_only_search_result,
-    finalize_results, is_entrypoint_path, is_ignored, is_important_file, is_manifest_file,
-    is_test_path, known_commands_from_hints, language_for, matches_filters, normalize_token,
-    regular_file_metadata, related_stem_terms, repo_map_seed_paths, repo_matches,
+    apply_phrase_matches, best_snippet_for_path, capped_search_limit,
+    command_hints_from_manifest_texts, extract_symbols, file_range_from_text, filter_only_query,
+    filter_only_search_result, finalize_results, is_entrypoint_path, is_ignored, is_important_file,
+    is_manifest_file, is_test_path, known_commands_from_hints, language_for, matches_filters,
+    normalize_token, regular_file_metadata, related_stem_terms, repo_map_seed_paths, repo_matches,
     result_matches_all_tokens, result_matches_symbol_filters, round4, score_filter_only_path,
     symbol_kind_rank, token_counts, tokenize,
 };
@@ -852,6 +852,7 @@ impl FastIndex {
         limit: usize,
         filters: &SearchFilters,
     ) -> Result<Vec<SearchResult>> {
+        let limit = capped_search_limit(limit);
         let parsed = parse_query(query);
         let query_phrases = query_phrases(&parsed.terms);
         let mut filters = merge_filters(filters.clone(), parsed.filters);
