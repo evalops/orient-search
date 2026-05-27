@@ -45,6 +45,10 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         .iter()
         .find(|tool| tool["name"] == "discover_repos")
         .unwrap();
+    let refresh_index = tools
+        .iter()
+        .find(|tool| tool["name"] == "refresh_index")
+        .unwrap();
     let read_ranges = tools
         .iter()
         .find(|tool| tool["name"] == "read_ranges")
@@ -79,6 +83,10 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
     assert_eq!(
         discover["input_schema"]["properties"]["nested_manifests"]["default"],
         false
+    );
+    assert_eq!(
+        refresh_index["required"],
+        serde_json::json!(["repo", "index"])
     );
     assert_eq!(
         read_ranges["input_schema"]["properties"]["ranges"]["items"]["properties"]["lines"]["default"],
@@ -826,6 +834,87 @@ fn runtime_reuses_cached_index_after_initial_load() {
     assert_eq!(
         status.result.unwrap()["cached_indexes"],
         serde_json::json!(1)
+    );
+}
+
+#[test]
+fn runtime_refresh_index_updates_cached_single_repo_index() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/auth.rs"),
+        "pub struct SessionManager;\npub fn issue_token() {}\n",
+    );
+    write(
+        &repo.path().join("Cargo.toml"),
+        "[package]\nname='sample'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    let index_path = repo.path().join(".orient/index");
+    FastIndex::build(repo.path())
+        .unwrap()
+        .save(&index_path)
+        .unwrap();
+
+    let runtime = ToolRuntime::default();
+    let first = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("first"),
+        tool: "indexed_search_code".to_string(),
+        arguments: serde_json::json!({
+            "index": index_path,
+            "query": "rotate secret",
+            "limit": 3,
+            "require_all": true
+        }),
+    });
+    assert!(first.error.is_none(), "{:?}", first.error);
+    assert_eq!(first.result.unwrap(), serde_json::json!([]));
+
+    write(
+        &repo.path().join("src/auth.rs"),
+        "pub struct SessionManager;\npub fn issue_token() {}\npub fn rotate_secret() {}\n",
+    );
+    let refresh = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("refresh"),
+        tool: "refresh_index".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "index": index_path
+        }),
+    });
+    assert!(refresh.error.is_none(), "{:?}", refresh.error);
+    assert_eq!(refresh.result.as_ref().unwrap()["refreshed_files"], 1);
+    assert_eq!(refresh.result.as_ref().unwrap()["files"], 2);
+
+    let second = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("second"),
+        tool: "indexed_search_code".to_string(),
+        arguments: serde_json::json!({
+            "index": index_path,
+            "query": "rotate secret",
+            "limit": 3,
+            "require_all": true
+        }),
+    });
+    assert!(second.error.is_none(), "{:?}", second.error);
+    let result = serde_json::to_string(&second.result).unwrap();
+    assert!(result.contains("rotate_secret"), "{result}");
+
+    let range = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("range"),
+        tool: "read_index_range".to_string(),
+        arguments: serde_json::json!({
+            "index": index_path,
+            "path": "src/auth.rs",
+            "start": 3,
+            "lines": 1
+        }),
+    });
+    assert!(range.error.is_none(), "{:?}", range.error);
+    assert!(
+        serde_json::to_string(&range.result)
+            .unwrap()
+            .contains("rotate_secret"),
+        "{:?}",
+        range.result
     );
 }
 

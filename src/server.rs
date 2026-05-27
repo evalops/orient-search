@@ -1,7 +1,7 @@
 use crate::discover::{
     DiscoverOptions, DiscoverySelectionSummary, discover_repos, discovery_selection_summary,
 };
-use crate::fast_index::FastIndex;
+use crate::fast_index::{FastIndex, RefreshStats};
 use crate::query::{merge_filters, parse_query, query_text};
 use crate::repo_index::{
     RepoIndexer, SearchFilters, SearchResult, SnippetMode, Symbol, attach_result_context,
@@ -122,6 +122,13 @@ impl IndexCacheEntry {
         }
     }
 
+    fn ready(index: Arc<FastIndex>) -> Self {
+        Self {
+            state: Mutex::new(IndexCacheState::Ready(index)),
+            ready: Condvar::new(),
+        }
+    }
+
     fn is_ready(&self) -> bool {
         self.state
             .lock()
@@ -134,6 +141,19 @@ impl ToolRuntime {
     pub fn warm_index(&self, index_path: PathBuf) -> Result<PathBuf> {
         let (key, _) = self.cached_index_with_key(index_path)?;
         Ok(key)
+    }
+
+    pub fn refresh_index(&self, repo: PathBuf, index_path: PathBuf) -> Result<RefreshStats> {
+        let previous = if index_path.exists() {
+            Some(self.cached_index(index_path.clone())?)
+        } else {
+            None
+        };
+        let outcome = FastIndex::refresh(repo, previous.as_deref())?;
+        let stats = outcome.index.refresh_stats(&outcome);
+        outcome.index.save(&index_path)?;
+        self.replace_cached_index(index_path, Arc::new(outcome.index))?;
+        Ok(stats)
     }
 
     pub fn warm_shards(&self, index_dir: PathBuf) -> Result<usize> {
@@ -231,6 +251,12 @@ pub fn tool_manifest() -> Value {
             "warm_index",
             "Load a persistent single-repo index into the daemon cache before searches need it.",
             &["index"],
+            &[],
+        ),
+        tool_entry(
+            "refresh_index",
+            "Refresh a persistent single-repo index from its live repository and replace the daemon cache entry.",
+            &["repo", "index"],
             &[],
         ),
         tool_entry(
@@ -767,6 +793,11 @@ impl ToolRuntime {
                 }
                 Ok(serde_json::to_value(results)?)
             }
+            "refresh_index" => {
+                let repo = path_arg(&request.arguments, "repo")?;
+                let index_path = path_arg(&request.arguments, "index")?;
+                Ok(serde_json::to_value(self.refresh_index(repo, index_path)?)?)
+            }
             "index_shards" => {
                 let selection = shard_repos_from_arguments_required(&request.arguments)?;
                 let output_dir = path_arg(&request.arguments, "output_dir")?;
@@ -956,6 +987,7 @@ impl ToolRuntime {
                 "tool_manifest",
                 "daemon_status",
                 "warm_index",
+                "refresh_index",
                 "warm_shards",
                 "discover_repos",
                 "repo_brief",
@@ -992,6 +1024,15 @@ impl ToolRuntime {
 
     fn cached_index(&self, index_path: PathBuf) -> Result<Arc<FastIndex>> {
         Ok(self.cached_index_with_key(index_path)?.1)
+    }
+
+    fn replace_cached_index(&self, index_path: PathBuf, index: Arc<FastIndex>) -> Result<PathBuf> {
+        let key = canonical_cache_key(&index_path);
+        self.indexes
+            .lock()
+            .map_err(|_| anyhow!("index cache lock poisoned"))?
+            .insert(key.clone(), Arc::new(IndexCacheEntry::ready(index)));
+        Ok(key)
     }
 
     fn cached_index_with_key(&self, index_path: PathBuf) -> Result<(PathBuf, Arc<FastIndex>)> {
