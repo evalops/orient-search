@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::Path;
 
+use orient::fast_index::FastIndex;
 use orient::repo_index::{RepoIndexer, read_file_range};
 
 fn write(path: &Path, text: &str) {
@@ -145,4 +146,38 @@ fn read_file_range_rejects_symlink_escape() {
         .unwrap_err()
         .to_string();
     assert!(error.contains("inside repository"));
+}
+
+#[cfg(unix)]
+#[test]
+fn repo_and_persistent_indexes_ignore_symlinked_files() {
+    let repo = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/lib.rs"),
+        "pub fn visible_symbol() {}\n",
+    );
+    write(
+        &outside.path().join("secrets.rs"),
+        "pub fn leaked_secret() {}\n",
+    );
+    std::os::unix::fs::symlink(
+        outside.path().join("secrets.rs"),
+        repo.path().join("src/leaked.rs"),
+    )
+    .unwrap();
+
+    let live = RepoIndexer::new(repo.path()).build().unwrap();
+    assert!(live.search_code("visible symbol", 10)[0].path == "src/lib.rs");
+    assert!(live.search_code("leaked secret", 10).is_empty());
+
+    let persistent = FastIndex::build(repo.path()).unwrap();
+    assert!(persistent.search("visible symbol", 10).unwrap()[0].path == "src/lib.rs");
+    assert!(persistent.search("leaked secret", 10).unwrap().is_empty());
+    assert!(
+        !persistent
+            .files
+            .iter()
+            .any(|file| file.path == "src/leaked.rs")
+    );
 }

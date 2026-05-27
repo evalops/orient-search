@@ -7,8 +7,8 @@ use crate::repo_index::{
     best_snippet_for_path, extract_symbols, file_range_from_text, finalize_results,
     is_entrypoint_path, is_ignored, is_important_file, is_manifest_file, is_test_path,
     known_commands_from_manifest_texts, language_for, matches_filters, normalize_token,
-    repo_matches, result_matches_all_tokens, result_matches_symbol_filters, round4,
-    symbol_kind_rank, token_counts, tokenize,
+    regular_file_metadata, repo_matches, result_matches_all_tokens, result_matches_symbol_filters,
+    round4, symbol_kind_rank, token_counts, tokenize,
 };
 use anyhow::{Context, Result};
 use ignore::WalkBuilder;
@@ -149,10 +149,9 @@ impl FastIndex {
         {
             let entry = entry?;
             let path = entry.path();
-            if !path.is_file() {
+            let Some(metadata) = regular_file_metadata(path) else {
                 continue;
-            }
-            let metadata = entry.metadata()?;
+            };
             if metadata.len() > MAX_FILE_BYTES {
                 continue;
             }

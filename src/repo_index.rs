@@ -467,10 +467,9 @@ fn search_repo_streaming(
     {
         let entry = entry?;
         let path = entry.path();
-        if !path.is_file() {
+        let Some(metadata) = regular_file_metadata(path) else {
             continue;
-        }
-        let metadata = entry.metadata()?;
+        };
         if metadata.len() > MAX_FILE_BYTES || language_for(path).is_none() {
             continue;
         }
@@ -664,10 +663,9 @@ impl RepoIndexer {
         {
             let entry = entry?;
             let path = entry.path();
-            if !path.is_file() {
+            let Some(metadata) = regular_file_metadata(path) else {
                 continue;
-            }
-            let metadata = entry.metadata()?;
+            };
             if metadata.len() > MAX_FILE_BYTES {
                 continue;
             }
@@ -1108,6 +1106,11 @@ pub(crate) fn is_ignored(path: &Path) -> bool {
                 | "target"
         )
     })
+}
+
+pub(crate) fn regular_file_metadata(path: &Path) -> Option<fs::Metadata> {
+    let metadata = fs::symlink_metadata(path).ok()?;
+    metadata.file_type().is_file().then_some(metadata)
 }
 
 pub(crate) fn known_commands_from_manifest_texts<'a>(
