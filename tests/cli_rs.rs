@@ -1511,6 +1511,26 @@ fn cli_reports_search_benchmarks() {
         .success()
         .stdout(predicate::str::contains("\"mode\":\"shards\""))
         .stdout(predicate::str::contains("\"p95_ms\""));
+
+    let mut cached_shard_bench = Command::cargo_bin("orient").unwrap();
+    cached_shard_bench
+        .args([
+            "bench-shards",
+            "--index-dir",
+            shard_dir.path().to_str().unwrap(),
+            "--cached",
+            "--runs",
+            "2",
+            "--warmup",
+            "1",
+            "--fail-p95-ms",
+            "1000",
+            "issue token",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"mode\":\"shards_cached\""))
+        .stdout(predicate::str::contains("\"p95_ms\""));
 }
 
 #[test]

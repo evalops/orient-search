@@ -144,6 +144,16 @@ impl ToolRuntime {
         Ok(warmed)
     }
 
+    pub fn search_warm_shards(
+        &self,
+        index_dir: &Path,
+        query: &str,
+        limit: usize,
+        filters: &SearchFilters,
+    ) -> Result<Vec<SearchResult>> {
+        self.search_shards_cached(index_dir, query, limit, filters, 0)
+    }
+
     pub fn cached_index_count(&self) -> usize {
         self.indexes
             .lock()

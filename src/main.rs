@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::{self, BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 #[derive(Debug, Parser)]
@@ -326,6 +326,8 @@ enum Commands {
     BenchShards {
         #[arg(long)]
         index_dir: PathBuf,
+        #[arg(long)]
+        cached: bool,
         #[arg(long, default_value_t = 10)]
         runs: usize,
         #[arg(long, default_value_t = 3)]
@@ -856,6 +858,7 @@ fn main() -> Result<()> {
         }
         Commands::BenchShards {
             index_dir,
+            cached,
             runs,
             warmup,
             limit,
@@ -870,6 +873,7 @@ fn main() -> Result<()> {
             let filters = search_filters_from_args(&filters, repo)?;
             let report = bench_shards(ShardBenchConfig {
                 index_dir,
+                cached,
                 runs,
                 warmup,
                 limit,
@@ -999,6 +1003,7 @@ struct BenchConfig {
 
 struct ShardBenchConfig {
     index_dir: PathBuf,
+    cached: bool,
     runs: usize,
     warmup: usize,
     limit: usize,
@@ -1055,18 +1060,34 @@ fn bench_search(config: BenchConfig) -> Result<BenchReport> {
 
 fn bench_shards(config: ShardBenchConfig) -> Result<BenchReport> {
     let runs = config.runs.max(1);
+    let runtime = config.cached.then(ToolRuntime::default);
+    if let Some(runtime) = &runtime {
+        runtime.warm_shards(config.index_dir.clone())?;
+    }
     let mut query_reports = Vec::new();
 
     for query in &config.queries {
         for _ in 0..config.warmup {
-            let _ = search_shards(&config.index_dir, query, config.limit, &config.filters)?;
+            let _ = run_shard_search_once(
+                &config.index_dir,
+                runtime.as_ref(),
+                query,
+                config.limit,
+                &config.filters,
+            )?;
         }
 
         let mut samples_ms = Vec::with_capacity(runs);
         let mut result_count = 0usize;
         for _ in 0..runs {
             let started = Instant::now();
-            let results = search_shards(&config.index_dir, query, config.limit, &config.filters)?;
+            let results = run_shard_search_once(
+                &config.index_dir,
+                runtime.as_ref(),
+                query,
+                config.limit,
+                &config.filters,
+            )?;
             samples_ms.push(started.elapsed().as_secs_f64() * 1_000.0);
             result_count = results.len();
         }
@@ -1074,12 +1095,30 @@ fn bench_shards(config: ShardBenchConfig) -> Result<BenchReport> {
     }
 
     Ok(BenchReport {
-        mode: "shards".to_string(),
+        mode: if config.cached {
+            "shards_cached".to_string()
+        } else {
+            "shards".to_string()
+        },
         runs,
         warmup: config.warmup,
         limit: config.limit,
         queries: query_reports,
     })
+}
+
+fn run_shard_search_once(
+    index_dir: &Path,
+    runtime: Option<&ToolRuntime>,
+    query: &str,
+    limit: usize,
+    filters: &SearchFilters,
+) -> Result<Vec<orient::repo_index::SearchResult>> {
+    if let Some(runtime) = runtime {
+        runtime.search_warm_shards(index_dir, query, limit, filters)
+    } else {
+        search_shards(index_dir, query, limit, filters)
+    }
 }
 
 fn run_search_once(
