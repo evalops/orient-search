@@ -173,6 +173,10 @@ fn search_filters(arguments: &Value) -> SearchFilters {
             .as_deref()
             .and_then(SnippetMode::parse)
             .unwrap_or_default(),
+        explain: arguments
+            .get("explain")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
         require_all: arguments
             .get("require_all")
             .and_then(Value::as_bool)

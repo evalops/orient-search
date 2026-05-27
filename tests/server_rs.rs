@@ -36,7 +36,8 @@ fn server_handles_json_lines_tool_request() {
             "query": "issue token",
             "limit": 3,
             "extension": "rs",
-            "require_all": true
+            "require_all": true,
+            "explain": true
         }
     });
     writeln!(child.stdin.as_mut().unwrap(), "{request}").unwrap();
@@ -47,6 +48,8 @@ fn server_handles_json_lines_tool_request() {
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.contains("\"id\":1"));
     assert!(stdout.contains("src/auth.rs"));
+    assert!(stdout.contains("\"explanation\""));
+    assert!(stdout.contains("symbol_exact"));
 }
 
 #[test]

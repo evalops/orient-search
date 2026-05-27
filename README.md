@@ -26,7 +26,8 @@ cargo run -- repo-map --repo /path/to/repo --symbols 50 --tests 50
 # Search code.
 cargo run -- search --repo /path/to/repo "session token auth"
 cargo run -- search --repo /path/to/repo 'symbol:SessionManager lang:rust -path:docs "issue token"' \
-  --snippet block
+  --snippet block \
+  --explain
 
 # Build and query a persistent local index.
 cargo run -- index --repo /path/to/repo --output /tmp/orient.index
@@ -69,7 +70,7 @@ cargo run -- serve-jsonl
 Example request:
 
 ```json
-{"id":1,"tool":"search_code","arguments":{"repo":"/path/to/repo","query":"issue token","limit":5,"extension":"rs","require_all":true,"snippet":"block"}}
+{"id":1,"tool":"search_code","arguments":{"repo":"/path/to/repo","query":"issue token","limit":5,"extension":"rs","require_all":true,"snippet":"block","explain":true}}
 ```
 
 Supported tools:
@@ -110,6 +111,15 @@ Search tools and CLI commands accept `--snippet <mode>` or JSON `"snippet":"<mod
 
 Indexed search persists line-offset tables in the binary index and uses them to render bounded snippets without reparsing the file into an in-memory repo index.
 
+## Ranking Explanations
+
+Search commands and JSON-lines tools accept `--explain` or JSON `"explain":true`. Normal output stays compact; explain mode adds an `explanation` array to each result with structured ranking signals such as:
+
+- `path_match`: query token appeared in the path.
+- `line_match` or `content_match`: query token appeared in matched content.
+- `term_frequency`: indexed term frequency contributed to score.
+- `symbol_exact` or `symbol_overlap`: symbol matching contributed to score.
+
 ## Success Criteria
 
 The build is useful when it can:
@@ -132,14 +142,14 @@ Product impact criteria for follow-up adoption:
 
 Current search baseline:
 
-- `orient bench-search --repo . "indexed search symbol filters"`: `13.951ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "session token auth"`: `18.402ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "browser session implementation"`: `25.162ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "postgres migration user"`: `40.737ms` p95 after warmup.
+- `orient bench-search --repo . "indexed search symbol filters"`: `14.700ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "session token auth"`: `17.294ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "browser session implementation"`: `22.004ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "postgres migration user"`: `30.600ms` p95 after warmup.
 - The `rg` hot path has a `250ms` wall-clock timeout plus a bounded match cap; timed-out searches return partial results rather than hanging.
 - `orient index --repo . --output /tmp/orient-self.index`: versioned binary index with file metadata, terms, and symbol boosts.
 - `orient refresh-index --repo . --index /tmp/orient-self.index`: reuses unchanged files and refreshes changed/deleted files.
-- `orient bench-search --repo . --index /tmp/orient-self.index "indexed search symbol filters"`: `0.141ms` p95 after warmup.
+- `orient bench-search --repo . --index /tmp/orient-self.index "indexed search symbol filters"`: `0.163ms` p95 after warmup.
 
 Benchmark methodology:
 

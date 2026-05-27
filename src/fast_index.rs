@@ -2,7 +2,7 @@
 
 use crate::query::{merge_filters, parse_query, query_text};
 use crate::repo_index::{
-    SearchFilters, SearchResult, SnippetMode, best_snippet_for_path, extract_symbols,
+    RankSignal, SearchFilters, SearchResult, SnippetMode, best_snippet_for_path, extract_symbols,
     finalize_results, is_ignored, language_for, matches_filters, normalize_token, repo_matches,
     result_matches_all_tokens, result_matches_symbol_filters, round4, token_counts, tokenize,
 };
@@ -296,7 +296,13 @@ impl FastIndex {
                     .is_some_and(|file| matches_filters(&file.path, &filters))
             })
             .filter_map(|file_id| {
-                self.score_file(file_id, &query_tokens, &posting_maps, filters.snippet)
+                self.score_file(
+                    file_id,
+                    &query_tokens,
+                    &posting_maps,
+                    filters.snippet,
+                    filters.explain,
+                )
             })
             .collect::<Vec<_>>();
 
@@ -314,21 +320,26 @@ impl FastIndex {
         query_tokens: &[String],
         posting_maps: &[(String, HashMap<u32, u16>)],
         snippet_mode: SnippetMode,
+        explain: bool,
     ) -> Option<SearchResult> {
         let file = self.files.get(file_id as usize)?;
         let path_lower = file.path.to_lowercase();
         let query_name = query_tokens.join("");
         let mut score = 0.0;
         let mut reasons = Vec::new();
+        let mut signals = Vec::new();
 
         for (token, postings) in posting_maps {
             let count = postings.get(&file_id).copied().unwrap_or_default();
             let mut token_score = 0.0;
             if count > 0 {
-                token_score += 1.0 + (count as f64).ln();
+                let amount = 1.0 + (count as f64).ln();
+                token_score += amount;
+                signals.push(rank_signal("term_frequency", token, amount));
             }
             if path_lower.contains(token) {
                 token_score += 8.0;
+                signals.push(rank_signal("path_match", token, 8.0));
             }
             if token_score > 0.0 {
                 score += token_score;
@@ -339,6 +350,7 @@ impl FastIndex {
             if symbol.normalized == query_name {
                 score += 25.0;
                 reasons.push(format!("symbol:{}", symbol.name));
+                signals.push(rank_signal("symbol_exact", &symbol.name, 25.0));
             } else {
                 let overlap = symbol
                     .tokens
@@ -346,8 +358,10 @@ impl FastIndex {
                     .filter(|token| query_tokens.contains(token))
                     .count();
                 if overlap > 0 {
-                    score += 4.0 * overlap as f64;
+                    let amount = 4.0 * overlap as f64;
+                    score += amount;
                     reasons.push(format!("symbol:{}", symbol.name));
+                    signals.push(rank_signal("symbol_overlap", &symbol.name, amount));
                 }
             }
         }
@@ -362,7 +376,16 @@ impl FastIndex {
             score: round4(score),
             reason: format!("indexed match {}", reasons.join(", ")),
             snippet,
+            explanation: explain.then_some(signals),
         })
+    }
+}
+
+fn rank_signal(kind: &str, value: &str, score: f64) -> RankSignal {
+    RankSignal {
+        kind: kind.to_string(),
+        value: value.to_string(),
+        score: round4(score),
     }
 }
 

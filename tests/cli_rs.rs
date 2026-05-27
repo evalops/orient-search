@@ -106,11 +106,13 @@ fn cli_searches_symbols_and_related_files() {
             "--require-all",
             "--snippet",
             "block",
+            "--explain",
         ])
         .assert()
         .success()
         .stdout(predicate::str::contains("src/auth.rs"))
-        .stdout(predicate::str::contains("SessionManager"));
+        .stdout(predicate::str::contains("SessionManager"))
+        .stdout(predicate::str::contains("\"explanation\""));
 
     let mut symbol = Command::cargo_bin("orient").unwrap();
     symbol

@@ -69,6 +69,8 @@ enum Commands {
         require_all: bool,
         #[arg(long, default_value = "medium")]
         snippet: String,
+        #[arg(long)]
+        explain: bool,
     },
     IndexedSearch {
         #[arg(long)]
@@ -86,6 +88,8 @@ enum Commands {
         require_all: bool,
         #[arg(long, default_value = "medium")]
         snippet: String,
+        #[arg(long)]
+        explain: bool,
     },
     Symbol {
         #[arg(long, default_value = ".")]
@@ -122,6 +126,8 @@ enum Commands {
         require_all: bool,
         #[arg(long, default_value = "medium")]
         snippet: String,
+        #[arg(long)]
+        explain: bool,
         #[arg(long)]
         fail_p95_ms: Option<f64>,
         #[arg(required = true)]
@@ -206,6 +212,7 @@ fn main() -> Result<()> {
             extension,
             require_all,
             snippet,
+            explain,
         } => {
             let snippet = snippet_mode_arg(&snippet)?;
             println!(
@@ -220,6 +227,7 @@ fn main() -> Result<()> {
                         extension,
                         require_all,
                         snippet,
+                        explain,
                         ..SearchFilters::default()
                     },
                 )?)?
@@ -234,6 +242,7 @@ fn main() -> Result<()> {
             extension,
             require_all,
             snippet,
+            explain,
         } => {
             let snippet = snippet_mode_arg(&snippet)?;
             let index = FastIndex::load(index)?;
@@ -248,6 +257,7 @@ fn main() -> Result<()> {
                         extension,
                         require_all,
                         snippet,
+                        explain,
                         ..SearchFilters::default()
                     },
                 )?)?
@@ -278,6 +288,7 @@ fn main() -> Result<()> {
             extension,
             require_all,
             snippet,
+            explain,
             fail_p95_ms,
             queries,
         } => {
@@ -288,6 +299,7 @@ fn main() -> Result<()> {
                 extension,
                 require_all,
                 snippet,
+                explain,
                 ..SearchFilters::default()
             };
             let report = bench_search(BenchConfig {

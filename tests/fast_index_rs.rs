@@ -209,6 +209,55 @@ fn indexed_search_supports_line_offsets_and_snippet_modes() {
 }
 
 #[test]
+fn search_explain_mode_returns_structured_rank_signals() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/auth.rs"),
+        "pub struct SessionManager;\npub fn issue_token() {}\n",
+    );
+
+    let fallback = search_repo_fast_filtered(
+        repo.path(),
+        "SessionManager",
+        10,
+        &SearchFilters {
+            explain: true,
+            ..SearchFilters::default()
+        },
+    )
+    .unwrap();
+    let fallback_signals = fallback[0].explanation.as_ref().unwrap();
+    assert!(
+        fallback_signals
+            .iter()
+            .any(|signal| signal.kind == "symbol_exact" && signal.value == "SessionManager")
+    );
+
+    let index = FastIndex::build(repo.path()).unwrap();
+    let indexed = index
+        .search_filtered(
+            "SessionManager",
+            10,
+            &SearchFilters {
+                explain: true,
+                ..SearchFilters::default()
+            },
+        )
+        .unwrap();
+    let indexed_signals = indexed[0].explanation.as_ref().unwrap();
+    assert!(
+        indexed_signals
+            .iter()
+            .any(|signal| signal.kind == "symbol_exact" && signal.value == "SessionManager")
+    );
+
+    let compact =
+        search_repo_fast_filtered(repo.path(), "SessionManager", 10, &SearchFilters::default())
+            .unwrap();
+    assert!(compact[0].explanation.is_none());
+}
+
+#[test]
 fn loading_corrupt_index_returns_error() {
     let repo = tempfile::tempdir().unwrap();
     let path = repo.path().join("corrupt.index");

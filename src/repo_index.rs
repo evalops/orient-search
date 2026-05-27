@@ -41,6 +41,15 @@ pub struct SearchResult {
     pub score: f64,
     pub reason: String,
     pub snippet: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub explanation: Option<Vec<RankSignal>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RankSignal {
+    pub kind: String,
+    pub value: String,
+    pub score: f64,
 }
 
 #[derive(Debug, Copy, Clone, Default, PartialEq, Eq)]
@@ -91,6 +100,7 @@ pub struct SearchFilters {
     pub test: Option<bool>,
     pub require_all: bool,
     pub snippet: SnippetMode,
+    pub explain: bool,
     pub exclude_file: Vec<String>,
     pub exclude_path: Vec<String>,
     pub exclude_language: Vec<String>,
@@ -111,6 +121,7 @@ impl Default for SearchFilters {
             test: None,
             require_all: false,
             snippet: SnippetMode::Medium,
+            explain: false,
             exclude_file: Vec::new(),
             exclude_path: Vec::new(),
             exclude_language: Vec::new(),
@@ -357,6 +368,7 @@ fn search_repo_ripgrep(
             query_tokens,
             true,
             filters.snippet,
+            filters.explain,
         );
         match_count += 1;
         if match_count >= max_matches {
@@ -407,7 +419,14 @@ fn search_repo_streaming(
         if !matches_filters(&rel, filters) {
             continue;
         }
-        if let Some(result) = score_text_file(&rel, &text, &query_tokens, true, filters.snippet) {
+        if let Some(result) = score_text_file(
+            &rel,
+            &text,
+            &query_tokens,
+            true,
+            filters.snippet,
+            filters.explain,
+        ) {
             results.push(result);
         }
     }
@@ -428,20 +447,24 @@ fn merge_match_result(
     query_tokens: &[String],
     parse_symbols: bool,
     snippet_mode: SnippetMode,
+    explain: bool,
 ) {
     let path_lower = path.to_lowercase();
     let line_lower = line.to_lowercase();
     let query_name = query_tokens.join("");
     let mut score = 0.0;
     let mut reasons = Vec::new();
+    let mut signals = Vec::new();
 
     for token in query_tokens {
         let mut token_score = 0.0;
         if path_lower.contains(token) {
             token_score += 6.0;
+            signals.push(rank_signal("path_match", token, 6.0));
         }
         if line_lower.contains(token) {
             token_score += 2.0;
+            signals.push(rank_signal("line_match", token, 2.0));
         }
         if token_score > 0.0 {
             score += token_score;
@@ -457,6 +480,7 @@ fn merge_match_result(
             &query_name,
             &mut score,
             &mut reasons,
+            &mut signals,
         );
     }
 
@@ -490,6 +514,12 @@ fn merge_match_result(
         .entry(path.to_string())
         .and_modify(|result| {
             result.score = round4(result.score + score);
+            if explain {
+                result
+                    .explanation
+                    .get_or_insert_with(Vec::new)
+                    .extend(signals.clone());
+            }
             if !matches!(snippet_mode, SnippetMode::Block | SnippetMode::Symbol)
                 && result.snippet.len() < snippet_mode.max_chars()
                 && !result.snippet.contains(snippet_line)
@@ -518,6 +548,7 @@ fn merge_match_result(
             score: round4(score),
             reason: format!("matched {}", reasons.join(", ")),
             snippet,
+            explanation: explain.then_some(signals),
         });
 }
 
@@ -654,6 +685,7 @@ impl RepoIndex {
                     score: round4(score),
                     reason: format!("matched {}", reasons.join(", ")),
                     snippet: best_snippet(&file.text, &query_tokens),
+                    explanation: None,
                 });
             }
         }
@@ -976,21 +1008,26 @@ fn score_text_file(
     query_tokens: &[String],
     parse_symbols: bool,
     snippet_mode: SnippetMode,
+    explain: bool,
 ) -> Option<SearchResult> {
     let path_lower = path.to_lowercase();
     let text_lower = text.to_lowercase();
     let query_name = query_tokens.join("");
     let mut score = 0.0;
     let mut reasons = Vec::new();
+    let mut signals = Vec::new();
 
     for token in query_tokens {
         let mut token_score = 0.0;
         if path_lower.contains(token) {
             token_score += 6.0;
+            signals.push(rank_signal("path_match", token, 6.0));
         }
         let occurrences = text_lower.matches(token).take(12).count();
         if occurrences > 0 {
-            token_score += 1.0 + (occurrences as f64).ln();
+            let amount = 1.0 + (occurrences as f64).ln();
+            token_score += amount;
+            signals.push(rank_signal("content_match", token, amount));
         }
         if token_score > 0.0 {
             score += token_score;
@@ -1007,6 +1044,7 @@ fn score_text_file(
                 &query_name,
                 &mut score,
                 &mut reasons,
+                &mut signals,
             );
         }
     }
@@ -1020,6 +1058,7 @@ fn score_text_file(
         score: round4(score),
         reason: format!("matched {}", reasons.join(", ")),
         snippet: best_snippet_for_path(path, text, query_tokens, snippet_mode),
+        explanation: explain.then_some(signals),
     })
 }
 
@@ -1030,12 +1069,20 @@ fn apply_symbol_boost(
     query_name: &str,
     score: &mut f64,
     reasons: &mut Vec<String>,
+    signals: &mut Vec<RankSignal>,
 ) {
     let Some(language) = language_for(Path::new(path)) else {
         return;
     };
     for symbol in extract_symbols(path, line, &language) {
-        apply_symbol_match(&symbol.name, query_tokens, query_name, score, reasons);
+        apply_symbol_match(
+            &symbol.name,
+            query_tokens,
+            query_name,
+            score,
+            reasons,
+            signals,
+        );
     }
 }
 
@@ -1045,11 +1092,13 @@ fn apply_symbol_match(
     query_name: &str,
     score: &mut f64,
     reasons: &mut Vec<String>,
+    signals: &mut Vec<RankSignal>,
 ) {
     let normalized = normalize_token(symbol_name);
     if normalized == query_name {
         *score += 25.0;
         reasons.push(format!("symbol:{symbol_name}"));
+        signals.push(rank_signal("symbol_exact", symbol_name, 25.0));
         return;
     }
     let overlap = tokenize(symbol_name)
@@ -1057,8 +1106,18 @@ fn apply_symbol_match(
         .filter(|token| query_tokens.contains(token))
         .count();
     if overlap > 0 {
-        *score += 4.0 * overlap as f64;
+        let amount = 4.0 * overlap as f64;
+        *score += amount;
         reasons.push(format!("symbol:{symbol_name}"));
+        signals.push(rank_signal("symbol_overlap", symbol_name, amount));
+    }
+}
+
+fn rank_signal(kind: &str, value: &str, score: f64) -> RankSignal {
+    RankSignal {
+        kind: kind.to_string(),
+        value: value.to_string(),
+        score: round4(score),
     }
 }
 
@@ -1167,6 +1226,12 @@ pub(crate) fn round4(value: f64) -> f64 {
 }
 
 pub(crate) fn finalize_results(mut results: Vec<SearchResult>, limit: usize) -> Vec<SearchResult> {
+    for result in &mut results {
+        if let Some(signals) = result.explanation.take() {
+            result.explanation = Some(compact_rank_signals(signals));
+        }
+    }
+
     results.sort_by(|a, b| {
         b.score
             .partial_cmp(&a.score)
@@ -1185,6 +1250,31 @@ pub(crate) fn finalize_results(mut results: Vec<SearchResult>, limit: usize) -> 
         }
     }
     deduped
+}
+
+fn compact_rank_signals(signals: Vec<RankSignal>) -> Vec<RankSignal> {
+    let mut grouped = HashMap::<(String, String), f64>::new();
+    for signal in signals {
+        *grouped.entry((signal.kind, signal.value)).or_default() += signal.score;
+    }
+    let mut signals = grouped
+        .into_iter()
+        .map(|((kind, value), score)| RankSignal {
+            kind,
+            value,
+            score: round4(score),
+        })
+        .collect::<Vec<_>>();
+    signals.sort_by(|left, right| {
+        right
+            .score
+            .partial_cmp(&left.score)
+            .unwrap_or(Ordering::Equal)
+            .then_with(|| left.kind.cmp(&right.kind))
+            .then_with(|| left.value.cmp(&right.value))
+    });
+    signals.truncate(16);
+    signals
 }
 
 pub(crate) fn matches_filters(path: &str, filters: &SearchFilters) -> bool {
