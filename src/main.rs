@@ -820,7 +820,8 @@ fn main() -> Result<()> {
                 "{}",
                 serde_json::to_string(&serde_json::json!({
                     "addr": listener.local_addr()?.to_string(),
-                    "cached_indexes": runtime.cached_index_count()
+                    "cached_indexes": runtime.cached_index_count(),
+                    "daemon_status": runtime.daemon_status()
                 }))?
             );
             io::stdout().flush()?;

@@ -907,6 +907,22 @@ fn runtime_reuses_cached_shard_manifest_after_initial_load() {
             .iter()
             .any(|path| path.as_str().unwrap() == shard_dir_canonical.to_str().unwrap())
     );
+    assert_eq!(
+        result["cached_shard_manifest_details"][0]["index_dir"],
+        serde_json::json!(shard_dir_canonical.to_str().unwrap())
+    );
+    assert_eq!(
+        result["cached_shard_manifest_details"][0]["shards"],
+        serde_json::json!(1)
+    );
+    assert_eq!(
+        result["cached_shard_manifest_details"][0]["repos"][0]["name"],
+        serde_json::json!(shard_name)
+    );
+    assert_eq!(
+        result["cached_shard_manifest_details"][0]["repos"][0]["aliases"][0],
+        serde_json::json!(shard_name)
+    );
 }
 
 #[test]
@@ -943,6 +959,11 @@ fn runtime_warms_shards_by_tool_request() {
     let result = warm.result.unwrap();
     assert_eq!(result["cached_indexes"], serde_json::json!(1));
     assert_eq!(result["warmed_indexes"], serde_json::json!(1));
+    assert_eq!(result["warmed_shards"]["shards"], serde_json::json!(1));
+    assert_eq!(
+        result["warmed_shards"]["repos"][0]["aliases"][0],
+        result["warmed_shards"]["repos"][0]["name"]
+    );
 }
 
 #[test]
@@ -1274,6 +1295,14 @@ fn tcp_daemon_starts_with_warmed_index() {
     let startup_json: serde_json::Value = serde_json::from_str(&startup).unwrap();
     let addr = startup_json["addr"].as_str().unwrap();
     assert_eq!(startup_json["cached_indexes"], serde_json::json!(1));
+    assert_eq!(
+        startup_json["daemon_status"]["cached_indexes"],
+        serde_json::json!(1)
+    );
+    assert_eq!(
+        startup_json["daemon_status"]["cached_shard_manifests"],
+        serde_json::json!(0)
+    );
 
     let mut stream = TcpStream::connect(addr).unwrap();
     let mut reader = BufReader::new(stream.try_clone().unwrap());
@@ -1424,6 +1453,18 @@ fn tcp_daemon_starts_with_warmed_shards() {
     let startup_json: serde_json::Value = serde_json::from_str(&startup).unwrap();
     let addr = startup_json["addr"].as_str().unwrap();
     assert_eq!(startup_json["cached_indexes"], serde_json::json!(1));
+    assert_eq!(
+        startup_json["daemon_status"]["cached_shard_manifests"],
+        serde_json::json!(1)
+    );
+    assert_eq!(
+        startup_json["daemon_status"]["cached_shard_manifest_details"][0]["shards"],
+        serde_json::json!(1)
+    );
+    assert_eq!(
+        startup_json["daemon_status"]["cached_shard_manifest_details"][0]["repos"][0]["aliases"][0],
+        startup_json["daemon_status"]["cached_shard_manifest_details"][0]["repos"][0]["name"]
+    );
 
     let mut stream = TcpStream::connect(addr).unwrap();
     let mut reader = BufReader::new(stream.try_clone().unwrap());

@@ -16,7 +16,7 @@ use serde_json::{Map, Value, json};
 use std::collections::HashMap;
 use std::io::{BufRead, Write};
 use std::net::{TcpListener, TcpStream};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 
@@ -156,6 +156,16 @@ impl ToolRuntime {
             .lock()
             .map(|manifests| manifests.len())
             .unwrap_or(0)
+    }
+
+    pub fn daemon_status(&self) -> Value {
+        json!({
+            "cached_indexes": self.cached_index_count(),
+            "cached_index_paths": self.cached_index_paths(),
+            "cached_shard_manifests": self.cached_shard_manifest_count(),
+            "cached_shard_manifest_paths": self.cached_shard_manifest_paths(),
+            "cached_shard_manifest_details": self.cached_shard_manifest_details()
+        })
     }
 
     pub fn dispatch_line(&self, line: &str) -> ToolResponse {
@@ -858,18 +868,15 @@ impl ToolRuntime {
             }
             "warm_shards" => {
                 let index_dir = path_arg(&request.arguments, "index_dir")?;
-                let warmed_indexes = self.warm_shards(index_dir)?;
+                let index_dir = canonical_cache_key(&index_dir);
+                let warmed_indexes = self.warm_shards(index_dir.clone())?;
                 Ok(json!({
                     "cached_indexes": self.cached_index_count(),
-                    "warmed_indexes": warmed_indexes
+                    "warmed_indexes": warmed_indexes,
+                    "warmed_shards": self.shard_manifest_detail(&index_dir)
                 }))
             }
-            "daemon_status" => Ok(json!({
-                "cached_indexes": self.cached_index_count(),
-                "cached_index_paths": self.cached_index_paths(),
-                "cached_shard_manifests": self.cached_shard_manifest_count(),
-                "cached_shard_manifest_paths": self.cached_shard_manifest_paths()
-            })),
+            "daemon_status" => Ok(self.daemon_status()),
             "tool_manifest" => Ok(tool_manifest()),
             "list_tools" => Ok(json!([
                 "list_tools",
@@ -1000,7 +1007,7 @@ impl ToolRuntime {
         paths
     }
 
-    fn cached_shard_manifest(&self, index_dir: &std::path::Path) -> Result<Arc<ShardManifest>> {
+    fn cached_shard_manifest(&self, index_dir: &Path) -> Result<Arc<ShardManifest>> {
         let key = canonical_cache_key(index_dir);
         if let Some(manifest) = self
             .shard_manifests
@@ -1036,9 +1043,44 @@ impl ToolRuntime {
         paths
     }
 
+    fn cached_shard_manifest_details(&self) -> Vec<Value> {
+        let mut details = self
+            .shard_manifests
+            .lock()
+            .map(|manifests| {
+                manifests
+                    .iter()
+                    .map(|(path, manifest)| shard_manifest_detail(path, manifest))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        details.sort_by(|left, right| {
+            left.get("index_dir")
+                .and_then(Value::as_str)
+                .cmp(&right.get("index_dir").and_then(Value::as_str))
+        });
+        details
+    }
+
+    fn shard_manifest_detail(&self, index_dir: &Path) -> Value {
+        let key = canonical_cache_key(index_dir);
+        self.shard_manifests
+            .lock()
+            .ok()
+            .and_then(|manifests| manifests.get(&key).cloned())
+            .map(|manifest| shard_manifest_detail(&key, &manifest))
+            .unwrap_or_else(|| {
+                json!({
+                    "index_dir": key.to_string_lossy(),
+                    "shards": 0,
+                    "repos": []
+                })
+            })
+    }
+
     fn resolve_shard_path_cached(
         &self,
-        index_dir: &std::path::Path,
+        index_dir: &Path,
         path: &str,
     ) -> Result<crate::shards::ResolvedShardRead> {
         let manifest = self.cached_shard_manifest(index_dir)?;
@@ -1304,7 +1346,32 @@ impl ToolRuntime {
     }
 }
 
-fn canonical_cache_key(path: &std::path::Path) -> PathBuf {
+fn shard_manifest_detail(index_dir: &Path, manifest: &ShardManifest) -> Value {
+    let repos = manifest
+        .shards
+        .iter()
+        .map(|shard| {
+            json!({
+                "name": shard.name,
+                "root": shard.root,
+                "index": shard.index,
+                "aliases": shard
+                    .aliases
+                    .iter()
+                    .map(|alias| alias.name.clone())
+                    .collect::<Vec<_>>(),
+                "git": shard.git
+            })
+        })
+        .collect::<Vec<_>>();
+    json!({
+        "index_dir": index_dir.to_string_lossy().to_string(),
+        "shards": manifest.shards.len(),
+        "repos": repos
+    })
+}
+
+fn canonical_cache_key(path: &Path) -> PathBuf {
     if let Ok(canonical) = path.canonicalize() {
         return canonical;
     }
