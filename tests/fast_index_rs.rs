@@ -343,6 +343,72 @@ fn query_language_filters_fallback_and_indexed_search() {
 }
 
 #[test]
+fn filter_only_queries_discover_files_without_content_terms() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/auth.rs"),
+        "pub struct SessionManager;\npub fn issue_token() {}\n",
+    );
+    write(
+        &repo.path().join("src/lib.rs"),
+        "pub mod auth;\npub fn boot() {}\n",
+    );
+    write(
+        &repo.path().join("tests/auth_test.rs"),
+        "use sample::SessionManager;\n#[test]\nfn issue_token_round_trip() {}\n",
+    );
+    write(&repo.path().join("docs/auth.md"), "issue token docs\n");
+
+    let fallback = search_repo_fast_filtered(
+        repo.path(),
+        "file:AUTH.RS",
+        10,
+        &SearchFilters {
+            explain: true,
+            ..SearchFilters::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(fallback.len(), 1);
+    assert_eq!(fallback[0].path, "src/auth.rs");
+    assert!(fallback[0].reason.contains("file_filter:AUTH.RS"));
+    assert_eq!(fallback[0].line_range.as_ref().unwrap().start_line, 1);
+    assert!(
+        fallback[0]
+            .explanation
+            .as_ref()
+            .unwrap()
+            .iter()
+            .any(|signal| signal.kind == "file_filter")
+    );
+
+    let index = FastIndex::build(repo.path()).unwrap();
+    let indexed = index
+        .search_filtered(
+            "lang:rust test:true",
+            10,
+            &SearchFilters {
+                explain: true,
+                ..SearchFilters::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(indexed.len(), 1);
+    assert_eq!(indexed[0].path, "tests/auth_test.rs");
+    assert!(indexed[0].reason.contains("language_filter:rust"));
+    assert!(indexed[0].reason.contains("test_filter:true"));
+    let plan = indexed[0].query_plan.as_ref().unwrap();
+    assert_eq!(plan.strategy, "filter_scan");
+    assert_eq!(plan.candidate_count, 1);
+    assert!(plan.planned_postings.is_empty());
+
+    let negative_only = index
+        .search_filtered("-path:docs", 10, &SearchFilters::default())
+        .unwrap();
+    assert!(negative_only.is_empty());
+}
+
+#[test]
 fn quoted_phrases_require_exact_matches_and_explain_phrase_signals() {
     let repo = tempfile::tempdir().unwrap();
     write(

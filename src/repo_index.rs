@@ -150,6 +150,13 @@ pub struct SearchFilters {
     pub exclude_repo: Vec<String>,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct FilterOnlyMatch {
+    pub score: f64,
+    pub reasons: Vec<String>,
+    pub signals: Vec<RankSignal>,
+}
+
 impl Default for SearchFilters {
     fn default() -> Self {
         Self {
@@ -269,8 +276,15 @@ pub fn search_repo_fast_filtered_with_timeout(
     }
     let query = query_text(&parsed.terms, &filters);
     let query_tokens = tokenize(&query);
-    if query_tokens.is_empty() || limit == 0 {
+    if limit == 0 {
         return Ok(Vec::new());
+    }
+    if query_tokens.is_empty() && query_phrases.is_empty() {
+        return if filter_only_query(&filters) {
+            search_repo_filter_only(&root, limit, &filters)
+        } else {
+            Ok(Vec::new())
+        };
     }
     if query_tokens.len() > 1 {
         filters.require_all = true;
@@ -288,6 +302,67 @@ pub fn search_repo_fast_filtered_with_timeout(
     }
 
     search_repo_streaming(&root, &query_tokens, &query_phrases, limit, &filters)
+}
+
+fn search_repo_filter_only(
+    root: &Path,
+    limit: usize,
+    filters: &SearchFilters,
+) -> Result<Vec<SearchResult>> {
+    let mut candidates = Vec::new();
+    let candidate_cap = (limit.max(1) * 100).clamp(100, 5_000);
+
+    for entry in WalkBuilder::new(&root)
+        .hidden(false)
+        .filter_entry(|entry| !is_ignored(entry.path()))
+        .build()
+    {
+        let entry = entry?;
+        let path = entry.path();
+        let Some(metadata) = regular_file_metadata(path) else {
+            continue;
+        };
+        if metadata.len() > MAX_FILE_BYTES || language_for(path).is_none() {
+            continue;
+        }
+        let rel = path
+            .strip_prefix(root)?
+            .to_string_lossy()
+            .replace('\\', "/");
+        let Some(matched) = score_filter_only_path(&rel, filters, filters.explain) else {
+            continue;
+        };
+        candidates.push((rel, matched));
+        if candidates.len() >= candidate_cap {
+            break;
+        }
+    }
+
+    candidates.sort_by(|(left_path, left), (right_path, right)| {
+        right
+            .score
+            .partial_cmp(&left.score)
+            .unwrap_or(Ordering::Equal)
+            .then_with(|| left_path.cmp(right_path))
+    });
+    candidates.truncate(limit.max(1) * 20);
+
+    let mut results = Vec::new();
+    for (path, matched) in candidates {
+        let text = fs::read_to_string(root.join(&path)).unwrap_or_default();
+        if text.contains('\0') {
+            continue;
+        }
+        results.push(filter_only_search_result(
+            &path,
+            &text,
+            matched,
+            filters.snippet,
+            filters.explain,
+        ));
+    }
+
+    Ok(finalize_results(results, limit))
 }
 
 fn search_repo_ripgrep(
@@ -1894,6 +1969,153 @@ pub(crate) fn matches_filters(path: &str, filters: &SearchFilters) -> bool {
         }
     }
     true
+}
+
+pub(crate) fn filter_only_query(filters: &SearchFilters) -> bool {
+    filters.file.is_some()
+        || filters.path.is_some()
+        || filters.language.is_some()
+        || filters.extension.is_some()
+        || filters.repo.is_some()
+        || filters.test.is_some()
+}
+
+pub(crate) fn score_filter_only_path(
+    path: &str,
+    filters: &SearchFilters,
+    explain: bool,
+) -> Option<FilterOnlyMatch> {
+    if !filter_only_query(filters) || !matches_filters(path, filters) {
+        return None;
+    }
+
+    let mut score = 0.0;
+    let mut reasons = Vec::new();
+    let mut signals = Vec::new();
+
+    if let Some(file) = &filters.file {
+        add_filter_signal(
+            "file_filter",
+            file,
+            14.0,
+            explain,
+            &mut score,
+            &mut reasons,
+            &mut signals,
+        );
+    }
+    if let Some(path_filter) = &filters.path {
+        add_filter_signal(
+            "path_filter",
+            path_filter,
+            10.0,
+            explain,
+            &mut score,
+            &mut reasons,
+            &mut signals,
+        );
+    }
+    if let Some(language) = &filters.language {
+        add_filter_signal(
+            "language_filter",
+            language,
+            6.0,
+            explain,
+            &mut score,
+            &mut reasons,
+            &mut signals,
+        );
+    }
+    if let Some(extension) = &filters.extension {
+        add_filter_signal(
+            "extension_filter",
+            extension,
+            6.0,
+            explain,
+            &mut score,
+            &mut reasons,
+            &mut signals,
+        );
+    }
+    if let Some(test) = filters.test {
+        add_filter_signal(
+            "test_filter",
+            if test { "true" } else { "false" },
+            5.0,
+            explain,
+            &mut score,
+            &mut reasons,
+            &mut signals,
+        );
+    }
+    if let Some(repo) = &filters.repo {
+        add_filter_signal(
+            "repo_filter",
+            repo,
+            2.0,
+            explain,
+            &mut score,
+            &mut reasons,
+            &mut signals,
+        );
+    }
+    if is_important_file(path) {
+        score += 1.5;
+        reasons.push("important_file".to_string());
+        if explain {
+            signals.push(rank_signal("important_file", path, 1.5));
+        }
+    }
+    if is_entrypoint_path(path) {
+        score += 1.0;
+        reasons.push("entrypoint".to_string());
+        if explain {
+            signals.push(rank_signal("entrypoint", path, 1.0));
+        }
+    }
+
+    Some(FilterOnlyMatch {
+        score: round4(score),
+        reasons,
+        signals,
+    })
+}
+
+pub(crate) fn filter_only_search_result(
+    path: &str,
+    text: &str,
+    matched: FilterOnlyMatch,
+    snippet_mode: SnippetMode,
+    explain: bool,
+) -> SearchResult {
+    SearchResult {
+        path: path.to_string(),
+        score: matched.score,
+        reason: format!("filter match {}", matched.reasons.join(", ")),
+        snippet: best_snippet_for_path(path, text, &[], snippet_mode),
+        line_range: None,
+        match_lines: Vec::new(),
+        explanation: explain.then_some(matched.signals),
+        query_plan: None,
+        duplicate_group: None,
+        context: None,
+    }
+}
+
+fn add_filter_signal(
+    kind: &str,
+    value: &str,
+    amount: f64,
+    explain: bool,
+    score: &mut f64,
+    reasons: &mut Vec<String>,
+    signals: &mut Vec<RankSignal>,
+) {
+    *score += amount;
+    reasons.push(format!("{kind}:{value}"));
+    if explain {
+        signals.push(rank_signal(kind, value, amount));
+    }
 }
 
 pub(crate) fn repo_matches(root: &Path, filters: &SearchFilters) -> bool {

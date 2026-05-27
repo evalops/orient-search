@@ -4,11 +4,12 @@ use crate::query::{merge_filters, normalize_phrase_text, parse_query, query_phra
 use crate::repo_index::{
     FileRange, QueryPlan, QueryPlanPosting, RankSignal, RelatedFile, RelatedSymbol, RepoBrief,
     RepoMap, SearchFilters, SearchResult, SnippetMode, Symbol, apply_phrase_matches,
-    best_snippet_for_path, extract_symbols, file_range_from_text, finalize_results,
-    is_entrypoint_path, is_ignored, is_important_file, is_manifest_file, is_test_path,
-    known_commands_from_manifest_texts, language_for, matches_filters, normalize_token,
-    regular_file_metadata, repo_matches, result_matches_all_tokens, result_matches_symbol_filters,
-    round4, symbol_kind_rank, token_counts, tokenize,
+    best_snippet_for_path, extract_symbols, file_range_from_text, filter_only_query,
+    filter_only_search_result, finalize_results, is_entrypoint_path, is_ignored, is_important_file,
+    is_manifest_file, is_test_path, known_commands_from_manifest_texts, language_for,
+    matches_filters, normalize_token, regular_file_metadata, repo_matches,
+    result_matches_all_tokens, result_matches_symbol_filters, round4, score_filter_only_path,
+    symbol_kind_rank, token_counts, tokenize,
 };
 use anyhow::{Context, Result};
 use ignore::WalkBuilder;
@@ -658,8 +659,15 @@ impl FastIndex {
         let query = query_text(&parsed.terms, &filters);
         let query_tokens = tokenize(&query);
         let query_trigrams = query_trigrams(&query);
-        if (query_tokens.is_empty() && query_trigrams.is_empty()) || limit == 0 {
+        if limit == 0 {
             return Ok(Vec::new());
+        }
+        if query_tokens.is_empty() && query_trigrams.is_empty() {
+            return if filter_only_query(&filters) {
+                Ok(self.search_filter_only(limit, &filters))
+            } else {
+                Ok(Vec::new())
+            };
         }
         if query_tokens.len() > 1 {
             filters.require_all = true;
@@ -819,6 +827,39 @@ impl FastIndex {
         }
         results.retain(|result| result_matches_symbol_filters(result, &filters));
         Ok(finalize_results(results, limit))
+    }
+
+    fn search_filter_only(&self, limit: usize, filters: &SearchFilters) -> Vec<SearchResult> {
+        let mut results = self
+            .files
+            .iter()
+            .filter_map(|file| {
+                let matched = score_filter_only_path(&file.path, filters, filters.explain)?;
+                Some(filter_only_search_result(
+                    &file.path,
+                    &file.content,
+                    matched,
+                    filters.snippet,
+                    filters.explain,
+                ))
+            })
+            .collect::<Vec<_>>();
+        let candidate_count = results.len();
+        if filters.explain {
+            let query_plan = QueryPlan {
+                strategy: "filter_scan".to_string(),
+                require_all: filters.require_all,
+                query_tokens: Vec::new(),
+                query_phrases: Vec::new(),
+                query_trigrams: Vec::new(),
+                planned_postings: Vec::new(),
+                candidate_count,
+            };
+            for result in &mut results {
+                result.query_plan = Some(query_plan.clone());
+            }
+        }
+        finalize_results(results, limit)
     }
 
     fn score_file(

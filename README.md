@@ -231,6 +231,7 @@ Search queries support agent-friendly filters inline with normal terms:
 
 Multiple positive terms use AND behavior by default, so `session token auth` means all three terms should be represented in the returned result.
 Path, file, repo, extension, language, and symbol filters are matched case-insensitively, so agents do not need to guess exact repository casing before searching.
+Filter-only discovery queries such as `file:Cargo.toml`, `path:src ext:rs`, or `lang:rust test:true` return bounded matching files even without a content term. Indexed explain output marks these as `filter_scan` plans.
 Quoted multi-word literals are also matched case-insensitively, but they stay exact phrases rather than becoming loose token bags. Phrase matching normalizes punctuation and identifier separators, so `"issue token"` can match `issue_token` while still rejecting scattered `issue` and `token` references. This is useful for error strings, log messages, UI labels, symbols, and other text where word order matters.
 The JSON-lines search tools expose the same exclude behavior as structured `exclude_*` arguments for agent wrappers.
 
@@ -286,10 +287,10 @@ Product impact criteria for follow-up adoption:
 
 Current search baseline:
 
-- `orient bench-search --repo . --index /tmp/orient-self.index "indexed search symbol filters"`: `0.743ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "session token auth"`: `20.182ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "browser session implementation"`: `24.596ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "postgres migration user"`: `46.953ms` p95 after warmup.
+- `orient bench-search --repo . --index /tmp/orient-self.index "indexed search symbol filters"`: `0.758ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "session token auth"`: `20.227ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "browser session implementation"`: `21.794ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "postgres migration user"`: `91.380ms` p95 after warmup.
 - The `rg` hot path has a `250ms` wall-clock timeout plus a bounded match cap; timed-out searches return partial results rather than hanging.
 - `orient index --repo . --output /tmp/orient-self.index`: versioned binary index with file metadata, content token postings, path token postings, trigram postings, line offsets, token-to-line tables, bounded source snapshots, and symbol boosts.
 - `orient discover-repos --root /Users/jonathanhaas/Documents/Projects --max-depth 2 --limit 500`: found 369 git or manifest-backed repo roots after scanning 2,889 directories, while skipping dependency/build directories and prioritizing visible canonical repos ahead of dated split, temp, and worktree folders when limits are small.

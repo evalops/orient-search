@@ -196,6 +196,22 @@ fn runtime_accepts_structured_negative_search_filters() {
     assert!(result.contains("src/auth.rs"), "{result}");
     assert!(!result.contains("generated/auth.rs"), "{result}");
     assert!(!result.contains("src/generated_symbol.rs"), "{result}");
+
+    let filter_only = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("filter-only"),
+        tool: "indexed_search_code".to_string(),
+        arguments: serde_json::json!({
+            "index": index_path,
+            "query": "file:auth.rs",
+            "limit": 10,
+            "explain": true
+        }),
+    });
+    assert!(filter_only.error.is_none(), "{:?}", filter_only.error);
+    let result = serde_json::to_string(&filter_only.result).unwrap();
+    assert!(result.contains("src/auth.rs"), "{result}");
+    assert!(result.contains("filter_scan"), "{result}");
+    assert!(result.contains("file_filter"), "{result}");
 }
 
 #[test]

@@ -545,6 +545,36 @@ fn cli_search_surfaces_accept_structured_filters() {
         .stdout(predicate::str::contains("tests/auth_test.rs").not())
         .stdout(predicate::str::contains("docs/auth.md").not());
 
+    let mut fallback_filter_only = Command::cargo_bin("orient").unwrap();
+    fallback_filter_only
+        .args([
+            "search",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "file:auth.rs",
+            "--explain",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("src/auth.rs"))
+        .stdout(predicate::str::contains("file_filter"));
+
+    let mut indexed_filter_only = Command::cargo_bin("orient").unwrap();
+    indexed_filter_only
+        .args([
+            "indexed-search",
+            "--index",
+            index_path.to_str().unwrap(),
+            "lang:rust",
+            "--test",
+            "true",
+            "--explain",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("tests/auth_test.rs"))
+        .stdout(predicate::str::contains("filter_scan"));
+
     let shard_dir = tempfile::tempdir().unwrap();
     let mut build_shards = Command::cargo_bin("orient").unwrap();
     build_shards
@@ -591,6 +621,20 @@ fn cli_search_surfaces_accept_structured_filters() {
         .stdout(predicate::str::contains("generated").not())
         .stdout(predicate::str::contains("tests/auth_test.rs").not())
         .stdout(predicate::str::contains("docs/auth.md").not());
+
+    let mut shard_filter_only = Command::cargo_bin("orient").unwrap();
+    shard_filter_only
+        .args([
+            "search-shards",
+            "--index-dir",
+            shard_dir.path().to_str().unwrap(),
+            "file:auth.rs",
+            "--explain",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("src/auth.rs"))
+        .stdout(predicate::str::contains("file_filter"));
 
     let mut bench = Command::cargo_bin("orient").unwrap();
     bench
