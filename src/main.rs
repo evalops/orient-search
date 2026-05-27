@@ -323,6 +323,30 @@ enum Commands {
         #[arg(required = true)]
         queries: Vec<String>,
     },
+    BenchShards {
+        #[arg(long)]
+        index_dir: PathBuf,
+        #[arg(long, default_value_t = 10)]
+        runs: usize,
+        #[arg(long, default_value_t = 3)]
+        warmup: usize,
+        #[arg(long, default_value_t = 10)]
+        limit: usize,
+        #[arg(long = "repo")]
+        repo: Option<String>,
+        #[command(flatten)]
+        filters: CommonSearchArgs,
+        #[arg(long)]
+        fail_p95_ms: Option<f64>,
+        #[arg(long)]
+        baseline: Option<PathBuf>,
+        #[arg(long)]
+        write_baseline: Option<PathBuf>,
+        #[arg(long, default_value_t = 0.25)]
+        max_p95_regression: f64,
+        #[arg(required = true)]
+        queries: Vec<String>,
+    },
     ToolManifest,
     ServeJsonl,
     ServeTcp {
@@ -827,19 +851,40 @@ fn main() -> Result<()> {
                 compare_bench_baseline(&path, &report, max_p95_regression)?;
             }
             if let Some(threshold) = fail_p95_ms {
-                if let Some(slowest) = report
-                    .queries
-                    .iter()
-                    .filter(|query| query.p95_ms > threshold)
-                    .max_by(|left, right| left.p95_ms.total_cmp(&right.p95_ms))
-                {
-                    bail!(
-                        "p95 {:.3}ms for query {:?} exceeded threshold {:.3}ms",
-                        slowest.p95_ms,
-                        slowest.query,
-                        threshold
-                    );
-                }
+                fail_slow_bench_queries(&report, threshold)?;
+            }
+        }
+        Commands::BenchShards {
+            index_dir,
+            runs,
+            warmup,
+            limit,
+            repo,
+            filters,
+            fail_p95_ms,
+            baseline,
+            write_baseline,
+            max_p95_regression,
+            queries,
+        } => {
+            let filters = search_filters_from_args(&filters, repo)?;
+            let report = bench_shards(ShardBenchConfig {
+                index_dir,
+                runs,
+                warmup,
+                limit,
+                filters,
+                queries,
+            })?;
+            println!("{}", serde_json::to_string(&report)?);
+            if let Some(path) = write_baseline {
+                write_bench_baseline(&path, &report)?;
+            }
+            if let Some(path) = baseline {
+                compare_bench_baseline(&path, &report, max_p95_regression)?;
+            }
+            if let Some(threshold) = fail_p95_ms {
+                fail_slow_bench_queries(&report, threshold)?;
             }
         }
         Commands::ToolManifest => {
@@ -952,6 +997,15 @@ struct BenchConfig {
     queries: Vec<String>,
 }
 
+struct ShardBenchConfig {
+    index_dir: PathBuf,
+    runs: usize,
+    warmup: usize,
+    limit: usize,
+    filters: SearchFilters,
+    queries: Vec<String>,
+}
+
 fn bench_search(config: BenchConfig) -> Result<BenchReport> {
     let runs = config.runs.max(1);
     let indexed = config.index.as_ref().map(FastIndex::load).transpose()?;
@@ -992,6 +1046,35 @@ fn bench_search(config: BenchConfig) -> Result<BenchReport> {
 
     Ok(BenchReport {
         mode,
+        runs,
+        warmup: config.warmup,
+        limit: config.limit,
+        queries: query_reports,
+    })
+}
+
+fn bench_shards(config: ShardBenchConfig) -> Result<BenchReport> {
+    let runs = config.runs.max(1);
+    let mut query_reports = Vec::new();
+
+    for query in &config.queries {
+        for _ in 0..config.warmup {
+            let _ = search_shards(&config.index_dir, query, config.limit, &config.filters)?;
+        }
+
+        let mut samples_ms = Vec::with_capacity(runs);
+        let mut result_count = 0usize;
+        for _ in 0..runs {
+            let started = Instant::now();
+            let results = search_shards(&config.index_dir, query, config.limit, &config.filters)?;
+            samples_ms.push(started.elapsed().as_secs_f64() * 1_000.0);
+            result_count = results.len();
+        }
+        query_reports.push(summarize_query(query, result_count, samples_ms));
+    }
+
+    Ok(BenchReport {
+        mode: "shards".to_string(),
         runs,
         warmup: config.warmup,
         limit: config.limit,
@@ -1086,6 +1169,23 @@ fn compare_bench_baseline(
         }
     }
 
+    Ok(())
+}
+
+fn fail_slow_bench_queries(report: &BenchReport, threshold: f64) -> Result<()> {
+    if let Some(slowest) = report
+        .queries
+        .iter()
+        .filter(|query| query.p95_ms > threshold)
+        .max_by(|left, right| left.p95_ms.total_cmp(&right.p95_ms))
+    {
+        bail!(
+            "p95 {:.3}ms for query {:?} exceeded threshold {:.3}ms",
+            slowest.p95_ms,
+            slowest.query,
+            threshold
+        );
+    }
     Ok(())
 }
 

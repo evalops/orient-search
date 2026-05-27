@@ -1479,6 +1479,38 @@ fn cli_reports_search_benchmarks() {
         .success()
         .stdout(predicate::str::contains("\"mode\":\"indexed\""))
         .stdout(predicate::str::contains("\"p95_ms\""));
+
+    let shard_dir = tempfile::tempdir().unwrap();
+    let mut build_shards = Command::cargo_bin("orient").unwrap();
+    build_shards
+        .args([
+            "index-shards",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--output-dir",
+            shard_dir.path().to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let mut shard_bench = Command::cargo_bin("orient").unwrap();
+    shard_bench
+        .args([
+            "bench-shards",
+            "--index-dir",
+            shard_dir.path().to_str().unwrap(),
+            "--runs",
+            "2",
+            "--warmup",
+            "1",
+            "--fail-p95-ms",
+            "1000",
+            "issue token",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"mode\":\"shards\""))
+        .stdout(predicate::str::contains("\"p95_ms\""));
 }
 
 #[test]
@@ -1501,6 +1533,37 @@ fn cli_benchmark_can_fail_on_p95_threshold() {
     .assert()
     .failure()
     .stderr(predicate::str::contains("exceeded threshold"));
+
+    let shard_dir = tempfile::tempdir().unwrap();
+    let mut build_shards = Command::cargo_bin("orient").unwrap();
+    build_shards
+        .args([
+            "index-shards",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--output-dir",
+            shard_dir.path().to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let mut shard_cmd = Command::cargo_bin("orient").unwrap();
+    shard_cmd
+        .args([
+            "bench-shards",
+            "--index-dir",
+            shard_dir.path().to_str().unwrap(),
+            "--runs",
+            "1",
+            "--warmup",
+            "0",
+            "--fail-p95-ms",
+            "0",
+            "issue token",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("exceeded threshold"));
 }
 
 #[test]

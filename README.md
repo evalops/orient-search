@@ -121,6 +121,14 @@ cargo run --release -- bench-search \
   "session token auth" \
   "browser session implementation" \
   "postgres migration user"
+
+cargo run --release -- bench-shards \
+  --index-dir /tmp/orient-shards \
+  --runs 10 \
+  --warmup 3 \
+  --fail-p95-ms 100 \
+  "repo:maestro app server" \
+  "repo:platform postgres migration user"
 ```
 
 ## JSON-Lines Server
@@ -291,10 +299,11 @@ Product impact criteria for follow-up adoption:
 
 Current search baseline:
 
-- `orient bench-search --repo . --index /tmp/orient-self.index "indexed search symbol filters"`: `0.905ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "session token auth"`: `18.528ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "browser session implementation"`: `18.186ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "postgres migration user"`: `26.311ms` p95 after warmup.
+- `orient bench-search --repo . --index /tmp/orient-self.index "indexed search symbol filters"`: `0.829ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "session token auth"`: `20.636ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "browser session implementation"`: `32.930ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "postgres migration user"`: `38.288ms` p95 after warmup.
+- `orient bench-shards --index-dir /tmp/orient-self-shards "repo:agent-jsonl-explorer indexed search symbol filters"`: `2.181ms` p95 after warmup.
 - The `rg` hot path has a `250ms` wall-clock timeout plus a bounded match cap; timed-out searches return partial results rather than hanging.
 - `orient index --repo . --output /tmp/orient-self.index`: versioned binary index with file metadata, content token postings, path token postings, trigram postings, line offsets, token-to-line tables, bounded source snapshots, and symbol boosts.
 - `orient discover-repos --root /Users/jonathanhaas/Documents/Projects --max-depth 2 --limit 500`: found 369 git or manifest-backed repo roots after scanning 2,889 directories, while skipping dependency/build directories and prioritizing visible canonical repos ahead of dated split, temp, and worktree folders when limits are small.
@@ -318,10 +327,10 @@ Current search baseline:
 
 Benchmark methodology:
 
-- Use `cargo build --release`, then run `orient bench-search`.
+- Use `cargo build --release`, then run `orient bench-search` or `orient bench-shards`.
 - Warm up each query before collecting samples.
 - Report `p95_ms` and `max_ms` from repeated searches, not one-off timings.
-- Benchmark the fallback path without `--index`; benchmark the persistent indexed path with `--index /tmp/orient-self.index`.
+- Benchmark the fallback path without `--index`; benchmark the persistent indexed path with `--index /tmp/orient-self.index`; benchmark multi-repo shard directories with `bench-shards --index-dir /tmp/orient-shards`.
 - Use `--fail-p95-ms <milliseconds>` in CI or local regression checks when you want slow queries to fail the command.
 - Use `--write-baseline <path>` to save a benchmark report and `--baseline <path> --max-p95-regression <ratio>` to fail later runs when matching query p95 latency regresses beyond that ratio.
 
