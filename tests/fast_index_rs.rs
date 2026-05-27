@@ -117,6 +117,9 @@ fn indexed_search_and_read_range_use_persisted_snapshot_text() {
     assert_eq!(range.end_line, 4);
     assert!(range.text.contains("2: impl SessionManager"));
     assert!(range.text.contains("3:     pub fn issue_token"));
+    let dot_range = loaded.read_range("./src/auth.rs", 2, 1).unwrap();
+    assert_eq!(dot_range.path, "src/auth.rs");
+    assert!(dot_range.text.contains("2: impl SessionManager"));
     assert!(loaded.read_range("../src/auth.rs", 1, 1).is_err());
     assert!(loaded.read_range("src/../auth.rs", 1, 1).is_err());
     assert!(loaded.read_range("src\\..\\auth.rs", 1, 1).is_err());

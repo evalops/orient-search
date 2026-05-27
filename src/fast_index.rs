@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const INDEX_VERSION: u32 = 9;
@@ -516,19 +516,7 @@ impl FastIndex {
         start_line: usize,
         line_count: usize,
     ) -> Result<FileRange> {
-        let requested = Path::new(path);
-        anyhow::ensure!(
-            requested.is_relative()
-                && !requested
-                    .components()
-                    .any(|component| matches!(component, std::path::Component::ParentDir)),
-            "path must be index-relative"
-        );
-        let normalized = requested.to_string_lossy().replace('\\', "/");
-        anyhow::ensure!(
-            !normalized.starts_with('/') && !normalized.split('/').any(|part| part == ".."),
-            "path must be index-relative"
-        );
+        let normalized = normalize_index_relative_path(path)?;
         let file = self
             .files
             .iter()
@@ -1380,6 +1368,28 @@ impl FastIndex {
             context: None,
         })
     }
+}
+
+fn normalize_index_relative_path(path: &str) -> Result<String> {
+    let normalized_separators = path.replace('\\', "/");
+    let requested = Path::new(&normalized_separators);
+    anyhow::ensure!(requested.is_relative(), "path must be index-relative");
+
+    let mut parts = Vec::new();
+    for component in requested.components() {
+        match component {
+            Component::Normal(part) => {
+                parts.push(part.to_string_lossy().to_string());
+            }
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                anyhow::bail!("path must be index-relative");
+            }
+        }
+    }
+    let normalized = parts.join("/");
+    anyhow::ensure!(!normalized.is_empty(), "path must be index-relative");
+    Ok(normalized)
 }
 
 fn rank_signal(kind: &str, value: &str, score: f64) -> RankSignal {

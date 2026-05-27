@@ -981,7 +981,7 @@ fn cli_builds_and_searches_persistent_index() {
             "read-index-range",
             "--index",
             index_path.to_str().unwrap(),
-            "src/auth.rs",
+            "./src/auth.rs",
             "--start",
             "3",
             "--lines",
@@ -1235,7 +1235,7 @@ fn cli_builds_and_searches_shard_directory() {
         "read-shard-range",
         "--index-dir",
         shard_dir.path().to_str().unwrap(),
-        &format!("{billing_name}/src/billing.rs"),
+        &format!("{billing_name}/./src/billing.rs"),
         "--start",
         "1",
         "--lines",
@@ -1243,7 +1243,9 @@ fn cli_builds_and_searches_shard_directory() {
     ])
     .assert()
     .success()
-    .stdout(predicate::str::contains("\"path\""))
+    .stdout(predicate::str::contains(&format!(
+        "\"path\":\"{billing_name}/src/billing.rs\""
+    )))
     .stdout(predicate::str::contains("invoice_total"));
 
     write(

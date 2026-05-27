@@ -624,7 +624,7 @@ pub fn read_shard_range(
     let index = FastIndex::load(index_dir.as_ref().join(&resolved.index))
         .with_context(|| format!("load shard {}", resolved.index))?;
     let mut range = index.read_range(&resolved.relative_path, start, lines)?;
-    range.path = format!("{}/{}", resolved.output_prefix, relative_path);
+    range.path = resolved.output_path(&range.path);
     Ok(range)
 }
 
