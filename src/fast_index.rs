@@ -5,9 +5,9 @@ use crate::repo_index::{
     FileRange, QueryPlan, QueryPlanPosting, RankSignal, RelatedFile, RelatedSymbol, RepoBrief,
     RepoMap, SearchFilters, SearchResult, SnippetMode, Symbol, best_snippet_for_path,
     extract_symbols, file_range_from_text, finalize_results, is_entrypoint_path, is_ignored,
-    is_important_file, is_manifest_file, is_test_path, language_for, match_lines_from_text,
-    matches_filters, normalize_token, repo_matches, result_matches_all_tokens,
-    result_matches_symbol_filters, round4, symbol_kind_rank, token_counts, tokenize,
+    is_important_file, is_manifest_file, is_test_path, language_for, matches_filters,
+    normalize_token, repo_matches, result_matches_all_tokens, result_matches_symbol_filters,
+    round4, symbol_kind_rank, token_counts, tokenize,
 };
 use anyhow::{Context, Result};
 use ignore::WalkBuilder;
@@ -18,8 +18,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const INDEX_VERSION: u32 = 8;
+const INDEX_VERSION: u32 = 9;
 const MAX_FILE_BYTES: u64 = 512_000;
+const MAX_TERM_LINES_PER_TERM: usize = 64;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FastIndex {
@@ -45,6 +46,8 @@ pub struct IndexedPath {
     pub symbols: Vec<IndexedSymbol>,
     pub line_offsets: Vec<u32>,
     #[serde(default)]
+    pub term_lines: Vec<IndexedTermLines>,
+    #[serde(default)]
     pub content: String,
 }
 
@@ -61,6 +64,12 @@ pub struct IndexedSymbol {
 pub struct TermCount {
     pub term: String,
     pub count: u16,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IndexedTermLines {
+    pub term: String,
+    pub lines: Vec<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -895,7 +904,7 @@ impl FastIndex {
         }
 
         let snippet = indexed_snippet(&self.root, file, query_tokens, snippet_mode);
-        let match_lines = match_lines_from_text(&file.content, query_tokens, 16);
+        let match_lines = indexed_match_lines(file, query_tokens, 16);
 
         Some(SearchResult {
             path: file.path.clone(),
@@ -990,6 +999,7 @@ fn index_file(
     }
     let content_hash = content_hash(text.as_bytes());
     let line_offsets = line_offsets(&text);
+    let term_lines = indexed_term_lines(&text);
     let mut terms = token_counts(&text)
         .into_iter()
         .map(|(term, count)| TermCount {
@@ -1037,6 +1047,7 @@ fn index_file(
         trigrams,
         symbols,
         line_offsets,
+        term_lines,
         content: text,
     })
 }
@@ -1054,8 +1065,49 @@ fn retarget_indexed_file(
     previous.modified_nanos = candidate.modified_nanos;
     previous.path_terms = counted_terms(&token_counts(&candidate.rel));
     previous.trigrams = counted_terms(&trigram_counts(&format!("{}\n{text}", candidate.rel)));
+    previous.term_lines = indexed_term_lines(text);
     previous.content = text.to_string();
     previous
+}
+
+fn indexed_term_lines(text: &str) -> Vec<IndexedTermLines> {
+    let mut lines_by_term = HashMap::<String, Vec<u32>>::new();
+    for (line_index, line) in text.lines().enumerate() {
+        let line_number = (line_index + 1).min(u32::MAX as usize) as u32;
+        for token in tokenize(line) {
+            let lines = lines_by_term.entry(token).or_default();
+            if lines.last().copied() != Some(line_number) && lines.len() < MAX_TERM_LINES_PER_TERM {
+                lines.push(line_number);
+            }
+        }
+    }
+    let mut term_lines = lines_by_term
+        .into_iter()
+        .map(|(term, lines)| IndexedTermLines { term, lines })
+        .collect::<Vec<_>>();
+    term_lines.sort_by(|left, right| left.term.cmp(&right.term));
+    term_lines
+}
+
+fn indexed_match_lines(file: &IndexedPath, query_tokens: &[String], limit: usize) -> Vec<usize> {
+    if query_tokens.is_empty() || limit == 0 {
+        return Vec::new();
+    }
+    let mut lines = query_tokens
+        .iter()
+        .filter_map(|token| {
+            file.term_lines
+                .binary_search_by(|entry| entry.term.as_str().cmp(token.as_str()))
+                .ok()
+                .map(|index| file.term_lines[index].lines.as_slice())
+        })
+        .flat_map(|lines| lines.iter().copied())
+        .map(|line| line as usize)
+        .collect::<Vec<_>>();
+    lines.sort_unstable();
+    lines.dedup();
+    lines.truncate(limit);
+    lines
 }
 
 fn counted_terms(counts: &HashMap<String, usize>) -> Vec<TermCount> {

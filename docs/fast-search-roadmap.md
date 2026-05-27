@@ -42,13 +42,13 @@ Implemented now:
 - CLI tools: `repo-map`, `index-map`, `shard-map`, `read-range`, `read-ranges`, `read-index-range`, `read-index-ranges`, `read-shard-ranges`, `index-symbol`, `shard-symbol`, `related-index`, `related-index-symbols`, `related-shard`, `related-shard-symbols`, and `related-symbols`, so agents can inspect entrypoints/tests/top symbols, open bounded file context, and jump to nearby definitions after a search hit.
 - `orient tool-manifest`: emits descriptions plus required/optional argument metadata for JSON-lines wrappers.
 - Search snippet modes: `short`, `medium`, `block`, and `symbol`.
-- Search results include structured `line_range` metadata derived from numbered snippets plus exact `match_lines` when available, allowing direct read-range and jump-to-line follow-up calls.
+- Search results include structured `line_range` metadata derived from numbered snippets plus exact `match_lines` from indexed token-to-line tables when available, allowing direct read-range and jump-to-line follow-up calls.
 - Persistent indexes store bounded source snapshots, so indexed snippets, `read-index-range`, `read-index-ranges`, and shard range reads can return context from the saved index even when the live workspace file is unavailable.
 - Path, file, repo, extension, language, and symbol filters match case-insensitively across fallback, indexed, and shard search surfaces.
 - Optional structured ranking explanations with path/content/term-frequency/symbol signals.
 - Indexed explain mode includes query-plan metadata: planner strategy, normalized tokens/trigrams, rarest planned posting lists, and candidate count.
 - Indexed search plans candidates from the rarest content/path token postings, falling back to rare trigram postings for substring queries.
-- Indexed files persist line-offset tables for bounded snippet rendering.
+- Indexed files persist line-offset and token-to-line tables for bounded snippet rendering and exact match-line metadata.
 - Result de-duping and grouping for repeated worktree copies using normalized path suffixes and snippet signatures, with compact duplicate metadata on the kept result.
 - Exact symbol definition boosting in both fallback and indexed search.
 - Direct symbol lookup and related-context lookup from persistent indexes, so agent wrappers can jump to definitions and nearby tests/files without rebuilding a repo index.
@@ -64,12 +64,12 @@ Implemented now:
 
 Measured on this machine:
 
-- Wide tree fallback: `/Users/jonathanhaas/Documents/Projects`, common top-10 literal/token queries at `18-34ms` p95 after warmup across the sampled runs.
+- Wide tree fallback: `/Users/jonathanhaas/Documents/Projects`, common top-10 literal/token queries at `18-38ms` p95 after warmup across the sampled runs.
 - Local repo fallback: query `indexed search symbol filters`, top 10 at about `12.5ms` p95 after warmup.
 - Hot-path fallback has a `250ms` wall-clock timeout plus match caps; if the timeout fires it returns partial results instead of blocking the agent.
 - Local repo index build: about `0.25s`.
 - Local repo refresh after build: reuses unchanged files, reuses same-content renames by retargeting path-derived postings, and rebuilds postings from per-file term lists.
-- Local repo indexed search: query `indexed search symbol filters`, top 10 at about `1.2ms` p95 after warmup.
+- Local repo indexed search: query `indexed search symbol filters`, top 10 at about `0.63ms` p95 after warmup.
 
 ## Exit Conditions
 
@@ -93,7 +93,7 @@ Engineering definition:
 - Persistent index has a versioned on-disk format.
 - Persistent index stores separate content-token, path-token, and trigram postings.
 - Multi-repo shard directories store a manifest plus one versioned index per repo, and can refresh those indexes incrementally.
-- Persistent indexed files include line-offset tables and bounded source snapshots for snippet and range retrieval.
+- Persistent indexed files include line-offset tables, token-to-line tables, and bounded source snapshots for snippet and range retrieval.
 - Incremental refresh covers add/edit/delete and same-content rename detection.
 - Tests cover fallback search, indexed search, shard search/read tools, incremental refresh, filters, query parser stress cases, ranking explanations, duplicate suppression, JSON-lines server calls, corrupt index errors, path safety including symlink escapes, snippet modes, and a guarded `rg` differential check.
 - Every release claim is backed by `cargo fmt --check`, `cargo test`, `cargo build --release`, and `orient bench-search` or equivalent timed searches, with saved baselines available for local or CI regression checks.

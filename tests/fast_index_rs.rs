@@ -339,6 +339,11 @@ fn indexed_search_supports_line_offsets_and_snippet_modes() {
         .find(|file| file.path == "src/auth.rs")
         .unwrap();
     assert!(auth.line_offsets.len() >= 7);
+    assert!(
+        auth.term_lines
+            .iter()
+            .any(|entry| entry.term == "token" && entry.lines == vec![4, 5])
+    );
 
     let short = index
         .search_filtered(
