@@ -582,7 +582,12 @@ fn cli_filters_shard_search_by_nested_repo_alias() {
         .assert()
         .success()
         .stdout(predicate::str::contains("\"aliases\""))
-        .stdout(predicate::str::contains("billing"));
+        .stdout(predicate::str::contains("billing"))
+        .stdout(predicate::str::contains("cargo test"))
+        .stdout(predicate::str::contains(&format!(
+            "{workspace_name}/billing/Cargo.toml"
+        )))
+        .stdout(predicate::str::contains("auth/src/auth.rs").not());
 }
 
 #[test]

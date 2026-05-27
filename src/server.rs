@@ -5,8 +5,8 @@ use crate::repo_index::{
     normalize_token, read_file_range, search_repo_fast_filtered,
 };
 use crate::shards::{
-    ShardRepoMap, build_shards, filters_for_shard_scope, load_manifest, read_shard_range,
-    refresh_shards, shard_search_scopes,
+    ShardRepoMap, build_shards, filter_repo_map_by_prefix, filters_for_shard_scope, load_manifest,
+    read_shard_range, refresh_shards, shard_search_scopes,
 };
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
@@ -588,22 +588,33 @@ impl ToolRuntime {
         let manifest = load_manifest(index_dir)?;
         let mut maps = Vec::new();
         for shard in manifest.shards {
-            if shard_search_scopes(&shard, filters).is_empty() {
+            let scopes = shard_search_scopes(&shard, filters);
+            if scopes.is_empty() {
                 continue;
             }
             let index = self.cached_index(index_dir.join(&shard.index))?;
-            let mut map = index.repo_map(symbol_limit, test_limit);
-            prefix_repo_map_paths(&mut map, &shard.name);
-            maps.push(ShardRepoMap {
-                aliases: shard
-                    .aliases
-                    .iter()
-                    .map(|alias| alias.name.clone())
-                    .collect(),
-                name: shard.name,
-                root: shard.root,
-                map,
-            });
+            let scoped = scopes.iter().any(Option::is_some);
+            let base_symbol_limit = if scoped { usize::MAX } else { symbol_limit };
+            let base_test_limit = if scoped { usize::MAX } else { test_limit };
+            for scope in scopes {
+                let mut map = index.repo_map(base_symbol_limit, base_test_limit);
+                if let Some(prefix) = scope.as_deref() {
+                    filter_repo_map_by_prefix(&mut map, prefix);
+                    map.test_files.truncate(test_limit);
+                    map.top_symbols.truncate(symbol_limit);
+                }
+                prefix_repo_map_paths(&mut map, &shard.name);
+                maps.push(ShardRepoMap {
+                    aliases: shard
+                        .aliases
+                        .iter()
+                        .map(|alias| alias.name.clone())
+                        .collect(),
+                    name: shard.name.clone(),
+                    root: shard.root.clone(),
+                    map,
+                });
+            }
         }
         maps.sort_by(|a, b| a.name.cmp(&b.name));
         Ok(maps)

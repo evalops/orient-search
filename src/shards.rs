@@ -4,11 +4,11 @@ use crate::fast_index::{FastIndex, IndexStats};
 use crate::query::{merge_filters, parse_query, query_text};
 use crate::repo_index::{
     FileRange, RepoMap, SearchFilters, SearchResult, Symbol, finalize_results, is_manifest_file,
-    normalize_token, read_file_range,
+    language_for, normalize_token, read_file_range,
 };
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -249,23 +249,34 @@ pub fn shard_repo_maps(
     let manifest = load_manifest(index_dir)?;
     let mut maps = Vec::new();
     for shard in manifest.shards {
-        if shard_search_scopes(&shard, filters).is_empty() {
+        let scopes = shard_search_scopes(&shard, filters);
+        if scopes.is_empty() {
             continue;
         }
         let index = FastIndex::load(index_dir.join(&shard.index))
             .with_context(|| format!("load shard {}", shard.index))?;
-        let mut map = index.repo_map(symbol_limit, test_limit);
-        prefix_repo_map_paths(&mut map, &shard.name);
-        maps.push(ShardRepoMap {
-            aliases: shard
-                .aliases
-                .iter()
-                .map(|alias| alias.name.clone())
-                .collect(),
-            name: shard.name,
-            root: shard.root,
-            map,
-        });
+        let scoped = scopes.iter().any(Option::is_some);
+        let base_symbol_limit = if scoped { usize::MAX } else { symbol_limit };
+        let base_test_limit = if scoped { usize::MAX } else { test_limit };
+        for scope in scopes {
+            let mut map = index.repo_map(base_symbol_limit, base_test_limit);
+            if let Some(prefix) = scope.as_deref() {
+                filter_repo_map_by_prefix(&mut map, prefix);
+                map.test_files.truncate(test_limit);
+                map.top_symbols.truncate(symbol_limit);
+            }
+            prefix_repo_map_paths(&mut map, &shard.name);
+            maps.push(ShardRepoMap {
+                aliases: shard
+                    .aliases
+                    .iter()
+                    .map(|alias| alias.name.clone())
+                    .collect(),
+                name: shard.name.clone(),
+                root: shard.root.clone(),
+                map,
+            });
+        }
     }
     maps.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(maps)
@@ -320,6 +331,69 @@ fn prefix_repo_map_paths(map: &mut RepoMap, shard_name: &str) {
     for symbol in &mut map.top_symbols {
         symbol.path = format!("{shard_name}/{}", symbol.path);
     }
+}
+
+pub(crate) fn filter_repo_map_by_prefix(map: &mut RepoMap, path_prefix: &str) {
+    let prefix = path_prefix.trim_end_matches('/');
+    let matches_prefix = |path: &str| path == prefix || path.starts_with(&format!("{prefix}/"));
+
+    map.brief.manifest_files.retain(|path| matches_prefix(path));
+    map.brief
+        .important_files
+        .retain(|path| matches_prefix(path));
+    map.entrypoints.retain(|path| matches_prefix(path));
+    map.test_files.retain(|path| matches_prefix(path));
+    map.top_symbols
+        .retain(|symbol| matches_prefix(&symbol.path));
+
+    let retained_paths = map
+        .brief
+        .manifest_files
+        .iter()
+        .chain(map.brief.important_files.iter())
+        .chain(map.entrypoints.iter())
+        .chain(map.test_files.iter())
+        .chain(map.top_symbols.iter().map(|symbol| &symbol.path))
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .cloned()
+        .collect::<Vec<_>>();
+
+    map.brief.file_count = retained_paths.len();
+    map.brief.language_counts = language_counts_for_paths(&retained_paths);
+    map.brief.known_commands = known_commands_for_manifest_paths(&map.brief.manifest_files);
+}
+
+fn language_counts_for_paths(paths: &[String]) -> HashMap<String, usize> {
+    let mut counts = HashMap::new();
+    for path in paths {
+        if let Some(language) = language_for(Path::new(path)) {
+            *counts.entry(language).or_insert(0) += 1;
+        }
+    }
+    counts
+}
+
+fn known_commands_for_manifest_paths(paths: &[String]) -> Vec<String> {
+    let has_manifest = |name: &str| {
+        paths
+            .iter()
+            .any(|path| Path::new(path).file_name().and_then(|value| value.to_str()) == Some(name))
+    };
+    let mut commands = Vec::new();
+    if has_manifest("Cargo.toml") {
+        commands.push("cargo test".to_string());
+    }
+    if has_manifest("pyproject.toml") {
+        commands.push("pytest".to_string());
+    }
+    if has_manifest("package.json") {
+        commands.push("npm test".to_string());
+    }
+    if has_manifest("go.mod") {
+        commands.push("go test ./...".to_string());
+    }
+    commands
 }
 
 pub(crate) fn load_manifest(index_dir: &Path) -> Result<ShardManifest> {

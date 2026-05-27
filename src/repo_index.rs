@@ -1325,8 +1325,12 @@ pub(crate) fn is_entrypoint_path(path: &str) -> bool {
 }
 
 pub(crate) fn is_manifest_file(path: &str) -> bool {
+    let file_name = Path::new(path)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or(path);
     matches!(
-        path,
+        file_name,
         "Cargo.toml"
             | "pyproject.toml"
             | "package.json"

@@ -316,6 +316,22 @@ fn runtime_filters_shard_search_by_nested_repo_alias() {
     let result = serde_json::to_string(&search.result).unwrap();
     assert!(result.contains("billing/src/billing.rs"), "{result}");
     assert!(!result.contains("auth/src/auth.rs"), "{result}");
+
+    let map = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("map"),
+        tool: "shard_repo_map".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": shard_dir.path(),
+            "repo": "billing",
+            "symbols": 10,
+            "tests": 10
+        }),
+    });
+    assert!(map.error.is_none(), "{:?}", map.error);
+    let result = serde_json::to_string(&map.result).unwrap();
+    assert!(result.contains("billing/Cargo.toml"), "{result}");
+    assert!(result.contains("cargo test"), "{result}");
+    assert!(!result.contains("auth/src/auth.rs"), "{result}");
 }
 
 #[test]
