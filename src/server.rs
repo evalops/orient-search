@@ -4,8 +4,9 @@ use crate::discover::{
 use crate::fast_index::{FastIndex, RefreshStats};
 use crate::query::{merge_filters, parse_query, query_text};
 use crate::repo_index::{
-    RepoIndexer, SearchFilters, SearchResult, SnippetMode, Symbol, attach_result_context,
-    finalize_results, normalize_token, read_file_range, search_repo_fast_filtered,
+    QueryPlan, RepoIndexer, SearchFilters, SearchResult, SnippetMode, Symbol,
+    attach_result_context, finalize_results, normalize_token, read_file_range,
+    search_repo_fast_filtered,
 };
 use crate::shards::{
     ShardEntry, ShardManifest, ShardQueryPlan, ShardRepoMap, ShardSearchScope, build_shards,
@@ -43,6 +44,18 @@ pub struct ToolResponse {
 struct SearchBatchResult {
     query: String,
     results: Vec<SearchResult>,
+}
+
+#[derive(Debug, Serialize)]
+struct IndexedQueryPlanBatchResult {
+    query: String,
+    plan: QueryPlan,
+}
+
+#[derive(Debug, Serialize)]
+struct ShardQueryPlanBatchResult {
+    query: String,
+    plans: Vec<ShardQueryPlan>,
 }
 
 pub fn serve_jsonl(reader: impl BufRead, mut writer: impl Write) -> Result<()> {
@@ -365,6 +378,12 @@ pub fn tool_manifest() -> Value {
             PLAN_INDEX_OPTIONAL_ARGS,
         ),
         tool_entry(
+            "indexed_query_plan_batch",
+            "Return query plans for several searches against one persistent index.",
+            &["index", "queries"],
+            PLAN_INDEX_OPTIONAL_ARGS,
+        ),
+        tool_entry(
             "read_index_range",
             "Read a bounded line range from a persistent index result path.",
             &["index", "path"],
@@ -416,6 +435,12 @@ pub fn tool_manifest() -> Value {
             "shard_query_plan",
             "Return indexed query plans for every matching shard repo or alias.",
             &["index_dir", "query"],
+            PLAN_INDEX_OPTIONAL_ARGS,
+        ),
+        tool_entry(
+            "shard_query_plan_batch",
+            "Return shard query plans for several searches against one local multi-repo shard directory.",
+            &["index_dir", "queries"],
             PLAN_INDEX_OPTIONAL_ARGS,
         ),
         tool_entry(
@@ -858,11 +883,25 @@ impl ToolRuntime {
             "indexed_query_plan" => {
                 let index_path = path_arg(&request.arguments, "index")?;
                 let query = string_arg(&request.arguments, "query")?;
-                let index = self.cached_index(index_path)?;
+                let refresh_if_stale = bool_arg(&request.arguments, "refresh_if_stale");
+                let index = self.cached_index_maybe_refresh(index_path, refresh_if_stale)?;
                 Ok(serde_json::to_value(index.query_plan(
                     &query,
                     &search_filters(&request.arguments, true)?,
                 )?)?)
+            }
+            "indexed_query_plan_batch" => {
+                let index_path = path_arg(&request.arguments, "index")?;
+                let queries = string_array_arg(&request.arguments, "queries")?;
+                let refresh_if_stale = bool_arg(&request.arguments, "refresh_if_stale");
+                let index = self.cached_index_maybe_refresh(index_path, refresh_if_stale)?;
+                let filters = search_filters(&request.arguments, true)?;
+                let mut batch = Vec::new();
+                for query in queries {
+                    let plan = index.query_plan(&query, &filters)?;
+                    batch.push(IndexedQueryPlanBatchResult { query, plan });
+                }
+                Ok(serde_json::to_value(batch)?)
             }
             "index_status" => {
                 let index_path = path_arg(&request.arguments, "index")?;
@@ -964,11 +1003,28 @@ impl ToolRuntime {
             "shard_query_plan" => {
                 let index_dir = path_arg(&request.arguments, "index_dir")?;
                 let query = string_arg(&request.arguments, "query")?;
+                if bool_arg(&request.arguments, "refresh_if_stale") {
+                    self.refresh_shards_if_stale(&index_dir)?;
+                }
                 Ok(serde_json::to_value(self.shard_query_plans_cached(
                     &index_dir,
                     &query,
                     &search_filters(&request.arguments, true)?,
                 )?)?)
+            }
+            "shard_query_plan_batch" => {
+                let index_dir = path_arg(&request.arguments, "index_dir")?;
+                let queries = string_array_arg(&request.arguments, "queries")?;
+                if bool_arg(&request.arguments, "refresh_if_stale") {
+                    self.refresh_shards_if_stale(&index_dir)?;
+                }
+                let filters = search_filters(&request.arguments, true)?;
+                let mut batch = Vec::new();
+                for query in queries {
+                    let plans = self.shard_query_plans_cached(&index_dir, &query, &filters)?;
+                    batch.push(ShardQueryPlanBatchResult { query, plans });
+                }
+                Ok(serde_json::to_value(batch)?)
             }
             "read_shard_range" => {
                 let index_dir = path_arg(&request.arguments, "index_dir")?;
@@ -1127,6 +1183,7 @@ impl ToolRuntime {
                 "indexed_search_code",
                 "indexed_search_batch",
                 "indexed_query_plan",
+                "indexed_query_plan_batch",
                 "read_index_range",
                 "read_index_ranges",
                 "index_shards",
@@ -1136,6 +1193,7 @@ impl ToolRuntime {
                 "search_shards",
                 "search_shards_batch",
                 "shard_query_plan",
+                "shard_query_plan_batch",
                 "read_shard_range",
                 "read_shard_ranges",
                 "shard_repo_map",
@@ -1892,6 +1950,7 @@ const PLAN_INDEX_OPTIONAL_ARGS: &[&str] = &[
     "repo_filter",
     "test",
     "require_all",
+    "refresh_if_stale",
     "exclude_file",
     "exclude_path",
     "exclude_language",

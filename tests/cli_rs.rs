@@ -72,8 +72,10 @@ fn cli_outputs_tool_manifest() {
         .stdout(predicate::str::contains("search_batch"))
         .stdout(predicate::str::contains("read_index_ranges"))
         .stdout(predicate::str::contains("indexed_search_batch"))
+        .stdout(predicate::str::contains("indexed_query_plan_batch"))
         .stdout(predicate::str::contains("read_shard_ranges"))
         .stdout(predicate::str::contains("search_shards_batch"))
+        .stdout(predicate::str::contains("shard_query_plan_batch"))
         .stdout(predicate::str::contains("read_shard_range"))
         .stdout(predicate::str::contains("related_shard_files"))
         .stdout(predicate::str::contains("related_shard_symbols"))
@@ -857,6 +859,26 @@ fn cli_search_surfaces_accept_structured_filters() {
         .stdout(predicate::str::contains("\"repair_hints\""))
         .stdout(predicate::str::contains("drop_missing_terms"));
 
+    let mut index_plan_batch = Command::cargo_bin("orient").unwrap();
+    index_plan_batch
+        .args([
+            "index-plan-batch",
+            "--index",
+            index_path.to_str().unwrap(),
+            "SessionManager definitely_missing",
+            "issue absentterm",
+            "--require-all",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "\"query\":\"SessionManager definitely_missing\"",
+        ))
+        .stdout(predicate::str::contains("\"query\":\"issue absentterm\""))
+        .stdout(predicate::str::contains("\"missing_terms\""))
+        .stdout(predicate::str::contains("absentterm"))
+        .stdout(predicate::str::contains("drop_missing_terms"));
+
     let shard_dir = tempfile::tempdir().unwrap();
     let mut build_shards = Command::cargo_bin("orient").unwrap();
     build_shards
@@ -1031,6 +1053,45 @@ fn cli_batches_searches_across_fallback_indexed_and_shards() {
         .success()
         .stdout(predicate::str::contains("src/auth.rs"))
         .stdout(predicate::str::contains("src/billing.rs"));
+
+    let mut index_plan_batch = Command::cargo_bin("orient").unwrap();
+    index_plan_batch
+        .args([
+            "index-plan-batch",
+            "--index",
+            index_path.to_str().unwrap(),
+            "SessionManager missingterm",
+            "invoice absentterm",
+            "--require-all",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "\"query\":\"SessionManager missingterm\"",
+        ))
+        .stdout(predicate::str::contains("\"query\":\"invoice absentterm\""))
+        .stdout(predicate::str::contains("\"missing_terms\""))
+        .stdout(predicate::str::contains("drop_missing_terms"));
+
+    let mut shard_plan_batch = Command::cargo_bin("orient").unwrap();
+    shard_plan_batch
+        .args([
+            "shard-plan-batch",
+            "--index-dir",
+            shard_dir.path().to_str().unwrap(),
+            "SessionManager missingterm",
+            "invoice absentterm",
+            "--require-all",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "\"query\":\"SessionManager missingterm\"",
+        ))
+        .stdout(predicate::str::contains("\"query\":\"invoice absentterm\""))
+        .stdout(predicate::str::contains("\"plans\""))
+        .stdout(predicate::str::contains("\"missing_terms\""))
+        .stdout(predicate::str::contains("drop_missing_terms"));
 }
 
 #[test]

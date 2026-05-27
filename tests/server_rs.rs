@@ -69,6 +69,14 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         .iter()
         .find(|tool| tool["name"] == "search_batch")
         .unwrap();
+    let indexed_plan_batch = tools
+        .iter()
+        .find(|tool| tool["name"] == "indexed_query_plan_batch")
+        .unwrap();
+    let shard_plan_batch = tools
+        .iter()
+        .find(|tool| tool["name"] == "shard_query_plan_batch")
+        .unwrap();
 
     assert_eq!(search["required"], serde_json::json!(["repo", "query"]));
     assert_eq!(search["input_schema"]["properties"]["limit"]["default"], 10);
@@ -95,6 +103,18 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
     assert_eq!(
         search_batch["input_schema"]["properties"]["queries"]["items"]["type"],
         "string"
+    );
+    assert_eq!(
+        indexed_plan_batch["required"],
+        serde_json::json!(["index", "queries"])
+    );
+    assert_eq!(
+        indexed_plan_batch["input_schema"]["properties"]["refresh_if_stale"]["default"],
+        false
+    );
+    assert_eq!(
+        shard_plan_batch["required"],
+        serde_json::json!(["index_dir", "queries"])
     );
     assert_eq!(
         discover["input_schema"]["properties"]["limit"]["default"],
@@ -182,8 +202,10 @@ fn server_reports_tool_manifest_for_agent_wrappers() {
     assert!(stdout.contains("read_index_range"));
     assert!(stdout.contains("index_status"));
     assert!(stdout.contains("indexed_query_plan"));
+    assert!(stdout.contains("indexed_query_plan_batch"));
     assert!(stdout.contains("indexed_repo_map"));
     assert!(stdout.contains("shard_query_plan"));
+    assert!(stdout.contains("shard_query_plan_batch"));
     assert!(stdout.contains("find_index_symbol"));
     assert!(stdout.contains("related_index_files"));
     assert!(stdout.contains("related_index_symbols"));
@@ -202,7 +224,7 @@ fn server_reports_tool_manifest_for_agent_wrappers() {
 }
 
 #[test]
-fn runtime_batches_searches_against_repo_index_and_shards() {
+fn runtime_batches_searches_and_query_plans_against_repo_index_and_shards() {
     let repo = tempfile::tempdir().unwrap();
     write(
         &repo.path().join("src/auth.rs"),
@@ -251,6 +273,30 @@ fn runtime_batches_searches_against_repo_index_and_shards() {
     assert!(result.contains("src/auth.rs"), "{result}");
     assert!(result.contains("src/billing.rs"), "{result}");
 
+    let indexed_plans = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("indexed-plan-batch"),
+        tool: "indexed_query_plan_batch".to_string(),
+        arguments: serde_json::json!({
+            "index": index_path,
+            "queries": ["SessionManager missingterm", "invoice absentterm"],
+            "require_all": true
+        }),
+    });
+    assert!(indexed_plans.error.is_none(), "{:?}", indexed_plans.error);
+    let result = serde_json::to_string(&indexed_plans.result).unwrap();
+    assert!(
+        result.contains("\"query\":\"SessionManager missingterm\""),
+        "{result}"
+    );
+    assert!(
+        result.contains("\"query\":\"invoice absentterm\""),
+        "{result}"
+    );
+    assert!(result.contains("\"missing_terms\""), "{result}");
+    assert!(result.contains("missingterm"), "{result}");
+    assert!(result.contains("absentterm"), "{result}");
+    assert!(result.contains("drop_missing_terms"), "{result}");
+
     let shard_dir = tempfile::tempdir().unwrap();
     let build = runtime.dispatch(ToolRequest {
         id: serde_json::json!("build-shards"),
@@ -275,6 +321,31 @@ fn runtime_batches_searches_against_repo_index_and_shards() {
     let result = serde_json::to_string(&shards.result).unwrap();
     assert!(result.contains("src/auth.rs"), "{result}");
     assert!(result.contains("src/billing.rs"), "{result}");
+
+    let shard_plans = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("shard-plan-batch"),
+        tool: "shard_query_plan_batch".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": shard_dir.path(),
+            "queries": ["SessionManager missingterm", "invoice absentterm"],
+            "require_all": true
+        }),
+    });
+    assert!(shard_plans.error.is_none(), "{:?}", shard_plans.error);
+    let result = serde_json::to_string(&shard_plans.result).unwrap();
+    assert!(
+        result.contains("\"query\":\"SessionManager missingterm\""),
+        "{result}"
+    );
+    assert!(
+        result.contains("\"query\":\"invoice absentterm\""),
+        "{result}"
+    );
+    assert!(result.contains("\"plans\""), "{result}");
+    assert!(result.contains("\"missing_terms\""), "{result}");
+    assert!(result.contains("missingterm"), "{result}");
+    assert!(result.contains("absentterm"), "{result}");
+    assert!(result.contains("drop_missing_terms"), "{result}");
 }
 
 #[test]

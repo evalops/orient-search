@@ -5,14 +5,14 @@ use orient::discover::{
 };
 use orient::fast_index::{FastIndex, RefreshStats};
 use orient::repo_index::{
-    RepoIndexer, SearchFilters, SearchResult, SnippetMode, attach_result_context, read_file_range,
-    search_repo_fast_filtered,
+    QueryPlan, RepoIndexer, SearchFilters, SearchResult, SnippetMode, attach_result_context,
+    read_file_range, search_repo_fast_filtered,
 };
 use orient::server::{ToolRuntime, serve_jsonl, serve_tcp, tool_manifest};
 use orient::shards::{
-    build_shards, ensure_shards, find_shard_symbol, read_shard_range, refresh_shards,
-    related_shard_files, related_shard_symbols, search_shards, shard_query_plans, shard_repo_maps,
-    shard_status,
+    ShardQueryPlan, build_shards, ensure_shards, find_shard_symbol, read_shard_range,
+    refresh_shards, related_shard_files, related_shard_symbols, search_shards, shard_query_plans,
+    shard_repo_maps, shard_status,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -150,6 +150,20 @@ enum Commands {
         repo: Option<String>,
         #[command(flatten)]
         filters: CommonSearchArgs,
+        #[arg(long)]
+        refresh_if_stale: bool,
+    },
+    ShardPlanBatch {
+        #[arg(long)]
+        index_dir: PathBuf,
+        #[arg(required = true)]
+        queries: Vec<String>,
+        #[arg(long = "repo")]
+        repo: Option<String>,
+        #[command(flatten)]
+        filters: CommonSearchArgs,
+        #[arg(long)]
+        refresh_if_stale: bool,
     },
     ReadShardRange {
         #[arg(long)]
@@ -218,6 +232,20 @@ enum Commands {
         repo_filter: Option<String>,
         #[command(flatten)]
         filters: CommonSearchArgs,
+        #[arg(long)]
+        refresh_if_stale: bool,
+    },
+    IndexPlanBatch {
+        #[arg(long)]
+        index: PathBuf,
+        #[arg(required = true)]
+        queries: Vec<String>,
+        #[arg(long = "repo-filter")]
+        repo_filter: Option<String>,
+        #[command(flatten)]
+        filters: CommonSearchArgs,
+        #[arg(long)]
+        refresh_if_stale: bool,
     },
     ReadRange {
         #[arg(long, default_value = ".")]
@@ -558,6 +586,18 @@ struct SearchBatchResult {
     results: Vec<SearchResult>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct IndexedQueryPlanBatchResult {
+    query: String,
+    plan: QueryPlan,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ShardQueryPlanBatchResult {
+    query: String,
+    plans: Vec<ShardQueryPlan>,
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
@@ -699,7 +739,11 @@ fn main() -> Result<()> {
             query,
             repo,
             filters,
+            refresh_if_stale,
         } => {
+            if refresh_if_stale && shard_status(&index_dir)?.stale {
+                refresh_shards(&index_dir)?;
+            }
             println!(
                 "{}",
                 serde_json::to_string(&shard_query_plans(
@@ -708,6 +752,24 @@ fn main() -> Result<()> {
                     &search_filters_from_args(&filters, repo)?,
                 )?)?
             );
+        }
+        Commands::ShardPlanBatch {
+            index_dir,
+            queries,
+            repo,
+            filters,
+            refresh_if_stale,
+        } => {
+            if refresh_if_stale && shard_status(&index_dir)?.stale {
+                refresh_shards(&index_dir)?;
+            }
+            let filters = search_filters_from_args(&filters, repo)?;
+            let mut batch = Vec::new();
+            for query in queries {
+                let plans = shard_query_plans(&index_dir, &query, &filters)?;
+                batch.push(ShardQueryPlanBatchResult { query, plans });
+            }
+            println!("{}", serde_json::to_string(&batch)?);
         }
         Commands::ReadShardRange {
             index_dir,
@@ -807,14 +869,31 @@ fn main() -> Result<()> {
             query,
             repo_filter,
             filters,
+            refresh_if_stale,
         } => {
-            let index = FastIndex::load(index)?;
+            let index = load_index_for_search(index, refresh_if_stale)?;
             println!(
                 "{}",
                 serde_json::to_string(
                     &index.query_plan(&query, &search_filters_from_args(&filters, repo_filter)?,)?
                 )?
             );
+        }
+        Commands::IndexPlanBatch {
+            index,
+            queries,
+            repo_filter,
+            filters,
+            refresh_if_stale,
+        } => {
+            let index = load_index_for_search(index, refresh_if_stale)?;
+            let filters = search_filters_from_args(&filters, repo_filter)?;
+            let mut batch = Vec::new();
+            for query in queries {
+                let plan = index.query_plan(&query, &filters)?;
+                batch.push(IndexedQueryPlanBatchResult { query, plan });
+            }
+            println!("{}", serde_json::to_string(&batch)?);
         }
         Commands::ReadRange {
             repo,
