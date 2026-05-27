@@ -1473,6 +1473,9 @@ fn cli_filters_shard_search_by_nested_repo_alias() {
         .stdout(predicate::str::contains(
             "\"path\":\"billing/src/billing.rs\"",
         ))
+        .stdout(predicate::str::contains(
+            "\"read_range\":{\"path\":\"billing/src/billing.rs\"",
+        ))
         .stdout(predicate::str::contains("invoice_total"))
         .stdout(predicate::str::contains("auth.rs").not());
 

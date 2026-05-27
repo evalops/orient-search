@@ -1507,6 +1507,11 @@ fn runtime_filters_shard_search_by_nested_repo_alias() {
         }),
     });
     assert!(search.error.is_none(), "{:?}", search.error);
+    let search_result = search.result.as_ref().unwrap().as_array().unwrap();
+    assert_eq!(
+        search_result[0]["read_range"]["path"],
+        serde_json::json!("billing/src/billing.rs")
+    );
     let result = serde_json::to_string(&search.result).unwrap();
     assert!(result.contains("billing/src/billing.rs"), "{result}");
     assert!(!result.contains("auth/src/auth.rs"), "{result}");
