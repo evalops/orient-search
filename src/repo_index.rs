@@ -204,12 +204,30 @@ pub struct RepoBrief {
     pub important_files: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RepoMap {
     pub brief: RepoBrief,
     pub entrypoints: Vec<String>,
     pub test_files: Vec<String>,
     pub top_symbols: Vec<Symbol>,
+    pub related_files: Vec<RepoMapRelatedFile>,
+    pub related_symbols: Vec<RepoMapRelatedSymbol>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RepoMapRelatedFile {
+    pub source_path: String,
+    pub path: String,
+    pub reason: String,
+    pub score: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RepoMapRelatedSymbol {
+    pub source_path: String,
+    pub symbol: Symbol,
+    pub reason: String,
+    pub score: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -879,8 +897,18 @@ impl RepoIndex {
             .parent()
             .map(|value| value.to_string_lossy().to_string())
             .unwrap_or_default();
+        let source_symbols = self
+            .files
+            .get(&normalized)
+            .map(|file| {
+                file.symbols
+                    .iter()
+                    .map(|symbol| symbol.name.clone())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
         let mut related = Vec::new();
-        for file_path in self.files.keys() {
+        for (file_path, file) in &self.files {
             if file_path == &normalized {
                 continue;
             }
@@ -905,6 +933,14 @@ impl RepoIndex {
             if !directory.is_empty() && file_dir == directory {
                 score += 1.0;
                 reasons.push("same directory".to_string());
+            }
+            let text_lower = file.text.to_ascii_lowercase();
+            for symbol in &source_symbols {
+                if text_lower.contains(&symbol.to_ascii_lowercase()) {
+                    score += 6.0;
+                    reasons.push(format!("references symbol {symbol}"));
+                    break;
+                }
             }
             if score > 0.0 {
                 related.push(RelatedFile {
@@ -1083,12 +1119,82 @@ impl RepoIndex {
         });
         top_symbols.truncate(symbol_limit);
 
+        let brief = self.repo_brief();
+        let mut related_file_seeds = brief.important_files.clone();
+        related_file_seeds.extend(top_symbols.iter().map(|symbol| symbol.path.clone()));
+        let related_files =
+            self.repo_map_related_files(&entrypoints, &test_files, &related_file_seeds, 12);
+        let related_symbols =
+            self.repo_map_related_symbols(&entrypoints, &test_files, &top_symbols, 12);
+
         RepoMap {
-            brief: self.repo_brief(),
+            brief,
             entrypoints,
             test_files,
             top_symbols,
+            related_files,
+            related_symbols,
         }
+    }
+
+    fn repo_map_related_files(
+        &self,
+        entrypoints: &[String],
+        test_files: &[String],
+        important_files: &[String],
+        limit: usize,
+    ) -> Vec<RepoMapRelatedFile> {
+        let mut seen = HashSet::new();
+        let mut related = Vec::new();
+        for source_path in repo_map_seed_paths(entrypoints, test_files, important_files) {
+            for item in self.related_files(&source_path, 3) {
+                if seen.insert((source_path.clone(), item.path.clone())) {
+                    related.push(RepoMapRelatedFile {
+                        source_path: source_path.clone(),
+                        path: item.path,
+                        reason: item.reason,
+                        score: item.score,
+                    });
+                }
+            }
+        }
+        related.truncate(limit);
+        related
+    }
+
+    fn repo_map_related_symbols(
+        &self,
+        entrypoints: &[String],
+        test_files: &[String],
+        top_symbols: &[Symbol],
+        limit: usize,
+    ) -> Vec<RepoMapRelatedSymbol> {
+        let important_files = top_symbols
+            .iter()
+            .map(|symbol| symbol.path.clone())
+            .collect::<Vec<_>>();
+        let mut seen = HashSet::new();
+        let mut related = Vec::new();
+        for source_path in repo_map_seed_paths(entrypoints, test_files, &important_files) {
+            for item in self.related_symbols(Some(&source_path), None, 3) {
+                let key = (
+                    source_path.clone(),
+                    item.symbol.path.clone(),
+                    item.symbol.line,
+                    item.symbol.name.clone(),
+                );
+                if seen.insert(key) {
+                    related.push(RepoMapRelatedSymbol {
+                        source_path: source_path.clone(),
+                        symbol: item.symbol,
+                        reason: item.reason,
+                        score: item.score,
+                    });
+                }
+            }
+        }
+        related.truncate(limit);
+        related
     }
 
     fn known_commands(&self) -> Vec<String> {
@@ -1098,6 +1204,27 @@ impl RepoIndex {
                 .map(|(path, file)| (path.as_str(), file.text.as_str())),
         )
     }
+}
+
+pub(crate) fn repo_map_seed_paths(
+    entrypoints: &[String],
+    test_files: &[String],
+    important_files: &[String],
+) -> Vec<String> {
+    let mut seeds = Vec::new();
+    for path in entrypoints
+        .iter()
+        .chain(test_files.iter())
+        .chain(important_files.iter())
+    {
+        if !seeds.contains(path) {
+            seeds.push(path.clone());
+        }
+        if seeds.len() >= 12 {
+            break;
+        }
+    }
+    seeds
 }
 
 pub fn read_file_range(

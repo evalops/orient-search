@@ -92,6 +92,24 @@ def test_issue_token_round_trip():
             .important_files
             .contains(&"pyproject.toml".to_string())
     );
+
+    let map = index.repo_map(10, 10);
+    assert!(
+        map.related_files.iter().any(|related| {
+            related.source_path == "src/auth.py" && related.path == "tests/test_auth.py"
+        }),
+        "{:?}",
+        map.related_files
+    );
+    assert!(
+        map.related_symbols.iter().any(|related| {
+            related.source_path == "src/auth.py"
+                && related.symbol.name == "SessionManager"
+                && related.reason.contains("same file")
+        }),
+        "{:?}",
+        map.related_symbols
+    );
 }
 
 #[test]

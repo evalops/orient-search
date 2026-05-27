@@ -229,6 +229,20 @@ fn indexed_repo_map_returns_orientation_from_persisted_metadata() {
             .contains(&"yarn run build".to_string())
     );
     assert_eq!(map.top_symbols[0].name, "SessionManager");
+    assert!(
+        map.related_files.iter().any(|related| {
+            related.source_path == "src/lib.rs" && related.path == "tests/auth_test.rs"
+        }),
+        "{:?}",
+        map.related_files
+    );
+    assert!(
+        map.related_symbols.iter().any(|related| {
+            related.source_path == "src/lib.rs" && related.symbol.name == "SessionManager"
+        }),
+        "{:?}",
+        map.related_symbols
+    );
 }
 
 #[test]

@@ -1429,6 +1429,14 @@ fn prefix_repo_map_paths(
     for symbol in &mut map.top_symbols {
         symbol.path = scoped_output_path(scope, &symbol.path);
     }
+    for related in &mut map.related_files {
+        related.source_path = scoped_output_path(scope, &related.source_path);
+        related.path = scoped_output_path(scope, &related.path);
+    }
+    for related in &mut map.related_symbols {
+        related.source_path = scoped_output_path(scope, &related.source_path);
+        related.symbol.path = scoped_output_path(scope, &related.symbol.path);
+    }
 }
 
 const SEARCH_OPTIONAL_ARGS: &[&str] = &[

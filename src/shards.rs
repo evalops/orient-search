@@ -533,6 +533,14 @@ fn prefix_repo_map_paths(map: &mut RepoMap, scope: &ShardSearchScope) {
     for symbol in &mut map.top_symbols {
         symbol.path = scoped_output_path(scope, &symbol.path);
     }
+    for related in &mut map.related_files {
+        related.source_path = scoped_output_path(scope, &related.source_path);
+        related.path = scoped_output_path(scope, &related.path);
+    }
+    for related in &mut map.related_symbols {
+        related.source_path = scoped_output_path(scope, &related.source_path);
+        related.symbol.path = scoped_output_path(scope, &related.symbol.path);
+    }
 }
 
 pub(crate) fn filter_repo_map_by_prefix(map: &mut RepoMap, path_prefix: &str) {
@@ -547,6 +555,11 @@ pub(crate) fn filter_repo_map_by_prefix(map: &mut RepoMap, path_prefix: &str) {
     map.test_files.retain(|path| matches_prefix(path));
     map.top_symbols
         .retain(|symbol| matches_prefix(&symbol.path));
+    map.related_files
+        .retain(|related| matches_prefix(&related.source_path) && matches_prefix(&related.path));
+    map.related_symbols.retain(|related| {
+        matches_prefix(&related.source_path) && matches_prefix(&related.symbol.path)
+    });
 
     let retained_paths = map
         .brief
@@ -556,6 +569,18 @@ pub(crate) fn filter_repo_map_by_prefix(map: &mut RepoMap, path_prefix: &str) {
         .chain(map.entrypoints.iter())
         .chain(map.test_files.iter())
         .chain(map.top_symbols.iter().map(|symbol| &symbol.path))
+        .chain(map.related_files.iter().map(|related| &related.source_path))
+        .chain(map.related_files.iter().map(|related| &related.path))
+        .chain(
+            map.related_symbols
+                .iter()
+                .map(|related| &related.source_path),
+        )
+        .chain(
+            map.related_symbols
+                .iter()
+                .map(|related| &related.symbol.path),
+        )
         .collect::<HashSet<_>>()
         .into_iter()
         .cloned()

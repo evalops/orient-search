@@ -1690,6 +1690,8 @@ fn server_handles_indexed_search_request() {
     assert!(stdout.contains("\"id\":\"indexed-repo-map\""));
     assert!(stdout.contains("\"entrypoints\""));
     assert!(stdout.contains("\"manifest_files\""));
+    assert!(stdout.contains("\"related_files\""));
+    assert!(stdout.contains("\"related_symbols\""));
     assert!(stdout.contains("tests/auth_test.rs"));
     assert!(stdout.contains("\"id\":\"related-index-files\""));
     assert!(stdout.contains("tests/auth_test.rs"));

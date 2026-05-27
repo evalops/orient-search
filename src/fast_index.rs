@@ -7,7 +7,7 @@ use crate::repo_index::{
     best_snippet_for_path, extract_symbols, file_range_from_text, filter_only_query,
     filter_only_search_result, finalize_results, is_entrypoint_path, is_ignored, is_important_file,
     is_manifest_file, is_test_path, known_commands_from_manifest_texts, language_for,
-    matches_filters, normalize_token, regular_file_metadata, repo_matches,
+    matches_filters, normalize_token, regular_file_metadata, repo_map_seed_paths, repo_matches,
     result_matches_all_tokens, result_matches_symbol_filters, round4, score_filter_only_path,
     symbol_kind_rank, token_counts, tokenize,
 };
@@ -370,6 +370,13 @@ impl FastIndex {
         });
         top_symbols.truncate(symbol_limit);
 
+        let mut related_file_seeds = important_files.clone();
+        related_file_seeds.extend(top_symbols.iter().map(|symbol| symbol.path.clone()));
+        let related_files =
+            self.repo_map_related_files(&entrypoints, &test_files, &related_file_seeds, 12);
+        let related_symbols =
+            self.repo_map_related_symbols(&entrypoints, &test_files, &top_symbols, 12);
+
         RepoMap {
             brief: RepoBrief {
                 root_name: self
@@ -386,7 +393,69 @@ impl FastIndex {
             entrypoints,
             test_files,
             top_symbols,
+            related_files,
+            related_symbols,
         }
+    }
+
+    fn repo_map_related_files(
+        &self,
+        entrypoints: &[String],
+        test_files: &[String],
+        important_files: &[String],
+        limit: usize,
+    ) -> Vec<crate::repo_index::RepoMapRelatedFile> {
+        let mut seen = HashSet::new();
+        let mut related = Vec::new();
+        for source_path in repo_map_seed_paths(entrypoints, test_files, important_files) {
+            for item in self.related_files(&source_path, 3) {
+                if seen.insert((source_path.clone(), item.path.clone())) {
+                    related.push(crate::repo_index::RepoMapRelatedFile {
+                        source_path: source_path.clone(),
+                        path: item.path,
+                        reason: item.reason,
+                        score: item.score,
+                    });
+                }
+            }
+        }
+        related.truncate(limit);
+        related
+    }
+
+    fn repo_map_related_symbols(
+        &self,
+        entrypoints: &[String],
+        test_files: &[String],
+        top_symbols: &[Symbol],
+        limit: usize,
+    ) -> Vec<crate::repo_index::RepoMapRelatedSymbol> {
+        let symbol_paths = top_symbols
+            .iter()
+            .map(|symbol| symbol.path.clone())
+            .collect::<Vec<_>>();
+        let mut seen = HashSet::new();
+        let mut related = Vec::new();
+        for source_path in repo_map_seed_paths(entrypoints, test_files, &symbol_paths) {
+            for item in self.related_symbols(Some(&source_path), None, 3) {
+                let key = (
+                    source_path.clone(),
+                    item.symbol.path.clone(),
+                    item.symbol.line,
+                    item.symbol.name.clone(),
+                );
+                if seen.insert(key) {
+                    related.push(crate::repo_index::RepoMapRelatedSymbol {
+                        source_path: source_path.clone(),
+                        symbol: item.symbol,
+                        reason: item.reason,
+                        score: item.score,
+                    });
+                }
+            }
+        }
+        related.truncate(limit);
+        related
     }
 
     pub fn find_symbol(&self, name: &str, limit: usize) -> Vec<Symbol> {
@@ -483,6 +552,17 @@ impl FastIndex {
             .parent()
             .map(|value| value.to_string_lossy().to_string())
             .unwrap_or_default();
+        let source_symbols = self
+            .files
+            .iter()
+            .find(|file| file.path == normalized)
+            .map(|file| {
+                file.symbols
+                    .iter()
+                    .map(|symbol| symbol.name.clone())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
         let mut related = Vec::new();
 
         for file in &self.files {
@@ -512,6 +592,14 @@ impl FastIndex {
             if !directory.is_empty() && file_dir == directory {
                 score += 1.0;
                 reasons.push("same directory".to_string());
+            }
+            let content_lower = file.content.to_ascii_lowercase();
+            for symbol in &source_symbols {
+                if content_lower.contains(&symbol.to_ascii_lowercase()) {
+                    score += 6.0;
+                    reasons.push(format!("references symbol {symbol}"));
+                    break;
+                }
             }
 
             if score > 0.0 {

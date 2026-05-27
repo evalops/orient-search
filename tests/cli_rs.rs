@@ -349,6 +349,8 @@ fn cli_outputs_repo_map_and_reads_ranges() {
         .success()
         .stdout(predicate::str::contains("\"entrypoints\""))
         .stdout(predicate::str::contains("\"manifest_files\""))
+        .stdout(predicate::str::contains("\"related_files\""))
+        .stdout(predicate::str::contains("\"related_symbols\""))
         .stdout(predicate::str::contains("src/auth.rs"))
         .stdout(predicate::str::contains("tests/auth_test.rs"))
         .stdout(predicate::str::contains("SessionManager"));
