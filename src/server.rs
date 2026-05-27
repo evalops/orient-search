@@ -415,7 +415,7 @@ impl ToolRuntime {
                     repo,
                     &query,
                     limit,
-                    &search_filters(&request.arguments, false),
+                    &search_filters(&request.arguments, false)?,
                 )?)?)
             }
             "indexed_search_code" => {
@@ -426,7 +426,7 @@ impl ToolRuntime {
                 Ok(serde_json::to_value(index.search_filtered(
                     &query,
                     limit,
-                    &search_filters(&request.arguments, true),
+                    &search_filters(&request.arguments, true)?,
                 )?)?)
             }
             "read_index_range" => {
@@ -482,7 +482,7 @@ impl ToolRuntime {
                     &index_dir,
                     &query,
                     limit,
-                    &search_filters(&request.arguments, true),
+                    &search_filters(&request.arguments, true)?,
                 )?)?)
             }
             "read_shard_range" => {
@@ -516,7 +516,7 @@ impl ToolRuntime {
                     &index_dir,
                     symbol_limit,
                     test_limit,
-                    &search_filters(&request.arguments, true),
+                    &search_filters(&request.arguments, true)?,
                 )?)?)
             }
             "find_shard_symbol" => {
@@ -527,7 +527,7 @@ impl ToolRuntime {
                     &index_dir,
                     &name,
                     limit,
-                    &search_filters(&request.arguments, true),
+                    &search_filters(&request.arguments, true)?,
                 )?)?)
             }
             "find_symbol" => {
@@ -942,6 +942,12 @@ const SEARCH_OPTIONAL_ARGS: &[&str] = &[
     "snippet",
     "explain",
     "require_all",
+    "exclude_file",
+    "exclude_path",
+    "exclude_language",
+    "exclude_extension",
+    "exclude_symbol",
+    "exclude_repo",
 ];
 
 const SEARCH_INDEX_OPTIONAL_ARGS: &[&str] = &[
@@ -957,6 +963,12 @@ const SEARCH_INDEX_OPTIONAL_ARGS: &[&str] = &[
     "snippet",
     "explain",
     "require_all",
+    "exclude_file",
+    "exclude_path",
+    "exclude_language",
+    "exclude_extension",
+    "exclude_symbol",
+    "exclude_repo",
 ];
 
 fn string_arg(arguments: &Value, name: &str) -> Result<String> {
@@ -1067,8 +1079,36 @@ fn optional_string_arg_any(arguments: &Value, names: &[&str]) -> Option<String> 
         .find_map(|name| optional_string_arg(arguments, name))
 }
 
-fn search_filters(arguments: &Value, allow_repo_alias: bool) -> SearchFilters {
-    SearchFilters {
+fn optional_string_list_arg(arguments: &Value, name: &str) -> Result<Vec<String>> {
+    let Some(value) = arguments.get(name) else {
+        return Ok(Vec::new());
+    };
+    if let Some(value) = value.as_str() {
+        return Ok(vec![value.to_string()]);
+    }
+    let values = value
+        .as_array()
+        .ok_or_else(|| anyhow!("string list argument {name} must be a string or array"))?;
+    values
+        .iter()
+        .map(|value| {
+            value
+                .as_str()
+                .map(String::from)
+                .ok_or_else(|| anyhow!("string list argument {name} must contain only strings"))
+        })
+        .collect()
+}
+
+fn normalized_string_list_arg(arguments: &Value, name: &str) -> Result<Vec<String>> {
+    Ok(optional_string_list_arg(arguments, name)?
+        .into_iter()
+        .map(|value| value.trim_start_matches('.').to_ascii_lowercase())
+        .collect())
+}
+
+fn search_filters(arguments: &Value, allow_repo_alias: bool) -> Result<SearchFilters> {
+    Ok(SearchFilters {
         path: optional_string_arg(arguments, "path"),
         language: optional_string_arg(arguments, "language"),
         extension: optional_string_arg(arguments, "extension"),
@@ -1092,6 +1132,12 @@ fn search_filters(arguments: &Value, allow_repo_alias: bool) -> SearchFilters {
             .get("require_all")
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        exclude_file: optional_string_list_arg(arguments, "exclude_file")?,
+        exclude_path: optional_string_list_arg(arguments, "exclude_path")?,
+        exclude_language: normalized_string_list_arg(arguments, "exclude_language")?,
+        exclude_extension: normalized_string_list_arg(arguments, "exclude_extension")?,
+        exclude_symbol: optional_string_list_arg(arguments, "exclude_symbol")?,
+        exclude_repo: optional_string_list_arg(arguments, "exclude_repo")?,
         ..SearchFilters::default()
-    }
+    })
 }

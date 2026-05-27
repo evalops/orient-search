@@ -55,6 +55,8 @@ fn server_reports_tool_manifest_for_agent_wrappers() {
     assert!(stdout.contains("\"name\":\"search_code\""));
     assert!(stdout.contains("\"required\":[\"repo\",\"query\"]"));
     assert!(stdout.contains("\"optional\""));
+    assert!(stdout.contains("exclude_path"));
+    assert!(stdout.contains("exclude_symbol"));
     assert!(stdout.contains("read_ranges"));
     assert!(stdout.contains("read_index_ranges"));
     assert!(stdout.contains("read_shard_ranges"));
@@ -73,6 +75,64 @@ fn server_reports_tool_manifest_for_agent_wrappers() {
     assert!(stdout.contains("warm_shards"));
     assert!(stdout.contains("ensure_shards"));
     assert!(stdout.contains("discover_repos"));
+}
+
+#[test]
+fn runtime_accepts_structured_negative_search_filters() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/auth.rs"),
+        "pub struct SessionManager;\npub fn issue_token() {}\n",
+    );
+    write(
+        &repo.path().join("generated/auth.rs"),
+        "pub struct GeneratedSessionManager;\npub fn issue_token() {}\n",
+    );
+    write(
+        &repo.path().join("src/generated_symbol.rs"),
+        "pub struct GeneratedSessionManager;\npub fn issue_token() {}\n",
+    );
+    let index_path = repo.path().join(".orient/index");
+    FastIndex::build(repo.path())
+        .unwrap()
+        .save(&index_path)
+        .unwrap();
+    let runtime = ToolRuntime::default();
+
+    let fallback = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("fallback"),
+        tool: "search_code".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "query": "issue token",
+            "limit": 10,
+            "require_all": true,
+            "exclude_path": ["generated"]
+        }),
+    });
+    assert!(fallback.error.is_none(), "{:?}", fallback.error);
+    let result = serde_json::to_string(&fallback.result).unwrap();
+    assert!(result.contains("src/auth.rs"), "{result}");
+    assert!(!result.contains("generated/auth.rs"), "{result}");
+    assert!(!result.contains("src/generated_symbol.rs"), "{result}");
+
+    let indexed = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("indexed"),
+        tool: "indexed_search_code".to_string(),
+        arguments: serde_json::json!({
+            "index": index_path,
+            "query": "issue token",
+            "limit": 10,
+            "require_all": true,
+            "exclude_path": ["generated"],
+            "exclude_symbol": "GeneratedSessionManager"
+        }),
+    });
+    assert!(indexed.error.is_none(), "{:?}", indexed.error);
+    let result = serde_json::to_string(&indexed.result).unwrap();
+    assert!(result.contains("src/auth.rs"), "{result}");
+    assert!(!result.contains("generated/auth.rs"), "{result}");
+    assert!(!result.contains("src/generated_symbol.rs"), "{result}");
 }
 
 #[test]

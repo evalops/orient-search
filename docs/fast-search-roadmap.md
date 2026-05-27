@@ -45,6 +45,7 @@ Implemented now:
 - Search results include structured `line_range` metadata derived from numbered snippets plus exact `match_lines` from indexed token-to-line tables when available, allowing direct read-range and jump-to-line follow-up calls.
 - Persistent indexes store bounded source snapshots, so indexed snippets, `read-index-range`, `read-index-ranges`, and shard range reads can return context from the saved index even when the live workspace file is unavailable.
 - Path, file, repo, extension, language, and symbol filters match case-insensitively across fallback, indexed, and shard search surfaces.
+- JSON-lines search tools accept structured `exclude_*` filters as strings or arrays, so wrappers can express negative filters without query-string rewriting.
 - Optional structured ranking explanations with path/content/term-frequency/symbol signals.
 - Indexed explain mode includes query-plan metadata: planner strategy, normalized tokens/trigrams, rarest planned posting lists, and candidate count.
 - Indexed search plans candidates from the rarest content/path token postings, falling back to rare trigram postings for substring queries.
@@ -64,12 +65,12 @@ Implemented now:
 
 Measured on this machine:
 
-- Wide tree fallback: `/Users/jonathanhaas/Documents/Projects`, common top-10 literal/token queries at `18-38ms` p95 after warmup across the sampled runs.
+- Wide tree fallback: `/Users/jonathanhaas/Documents/Projects`, common top-10 literal/token queries at `17-69ms` p95 after warmup across the sampled runs.
 - Local repo fallback: query `indexed search symbol filters`, top 10 at about `12.5ms` p95 after warmup.
 - Hot-path fallback has a `250ms` wall-clock timeout plus match caps; if the timeout fires it returns partial results instead of blocking the agent.
 - Local repo index build: about `0.25s`.
 - Local repo refresh after build: reuses unchanged files, reuses same-content renames by retargeting path-derived postings, and rebuilds postings from per-file term lists.
-- Local repo indexed search: query `indexed search symbol filters`, top 10 at about `0.63ms` p95 after warmup.
+- Local repo indexed search: query `indexed search symbol filters`, top 10 at about `0.57ms` p95 after warmup.
 
 ## Exit Conditions
 
