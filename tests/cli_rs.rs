@@ -522,6 +522,42 @@ fn cli_ensures_shards_builds_then_refreshes_existing_directory() {
         .success()
         .stdout(predicate::str::contains("\"action\":\"refresh\""))
         .stdout(predicate::str::contains("\"shards\":1"));
+
+    write(
+        &root.path().join("workspace/billing/src/lib.rs"),
+        "pub fn invoice_total() -> usize { 42 }\n",
+    );
+    write(
+        &root.path().join("workspace/billing/Cargo.toml"),
+        "[package]\nname='billing'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    let mut add = Command::cargo_bin("orient").unwrap();
+    add.args([
+        "ensure-shards",
+        "--discover-root",
+        root.path().to_str().unwrap(),
+        "--max-depth",
+        "2",
+        "--output-dir",
+        shard_dir.path().to_str().unwrap(),
+    ])
+    .assert()
+    .success()
+    .stdout(predicate::str::contains("\"action\":\"refresh+add\""))
+    .stdout(predicate::str::contains("\"added_shards\":1"))
+    .stdout(predicate::str::contains("\"shards\":2"));
+
+    let mut search = Command::cargo_bin("orient").unwrap();
+    search
+        .args([
+            "search-shards",
+            "--index-dir",
+            shard_dir.path().to_str().unwrap(),
+            "invoice_total",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("billing/src/lib.rs"));
 }
 
 #[test]

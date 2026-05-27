@@ -73,6 +73,7 @@ pub struct ShardEnsureStats {
     pub output_dir: PathBuf,
     pub action: String,
     pub shards: usize,
+    pub added_shards: usize,
     pub files: usize,
     pub terms: usize,
     pub path_terms: usize,
@@ -155,11 +156,12 @@ pub fn ensure_shards(repos: &[PathBuf], output_dir: impl AsRef<Path>) -> Result<
     let output_dir = output_dir.as_ref();
     if output_dir.join("manifest.json").exists() {
         let stats = refresh_shards(output_dir)?;
-        return Ok(ShardEnsureStats {
+        let mut total = ShardEnsureStats {
             version: stats.version,
             output_dir: stats.output_dir,
             action: "refresh".to_string(),
             shards: stats.shards,
+            added_shards: 0,
             files: stats.files,
             terms: stats.terms,
             path_terms: stats.path_terms,
@@ -169,7 +171,12 @@ pub fn ensure_shards(repos: &[PathBuf], output_dir: impl AsRef<Path>) -> Result<
             renamed_files: stats.renamed_files,
             refreshed_files: stats.refreshed_files,
             deleted_files: stats.deleted_files,
-        });
+        };
+        let added = add_missing_shards(repos, output_dir, &mut total)?;
+        if added > 0 {
+            total.action = "refresh+add".to_string();
+        }
+        return Ok(total);
     }
 
     anyhow::ensure!(
@@ -182,6 +189,7 @@ pub fn ensure_shards(repos: &[PathBuf], output_dir: impl AsRef<Path>) -> Result<
         output_dir: stats.output_dir,
         action: "build".to_string(),
         shards: stats.shards,
+        added_shards: stats.shards,
         files: stats.files,
         terms: stats.terms,
         path_terms: stats.path_terms,
@@ -242,6 +250,63 @@ pub fn refresh_shards(index_dir: impl AsRef<Path>) -> Result<ShardRefreshStats> 
 
     save_manifest(index_dir, &manifest)?;
     Ok(total)
+}
+
+fn add_missing_shards(
+    repos: &[PathBuf],
+    output_dir: &Path,
+    total: &mut ShardEnsureStats,
+) -> Result<usize> {
+    if repos.is_empty() {
+        return Ok(0);
+    }
+
+    let mut manifest = load_manifest(output_dir)?;
+    let mut existing_roots = manifest
+        .shards
+        .iter()
+        .map(|shard| canonical_or_self(&shard.root))
+        .collect::<HashSet<_>>();
+    let mut names = manifest
+        .shards
+        .iter()
+        .map(|shard| shard.name.clone())
+        .collect::<HashSet<_>>();
+    let mut added = 0usize;
+
+    for repo in repos {
+        let root = repo.canonicalize()?;
+        if !existing_roots.insert(root.clone()) {
+            continue;
+        }
+        let base_name = root
+            .file_name()
+            .map(|value| value.to_string_lossy().to_string())
+            .unwrap_or_else(|| "repo".to_string());
+        let hash = stable_hash(&root);
+        let name = unique_shard_name(&base_name, &hash, &mut names);
+        let index_name = format!("{}-{}.orient", sanitize_name(&name), stable_hash(&root));
+        let index_path = output_dir.join(&index_name);
+        let index = FastIndex::build(&root)?;
+        index.save(&index_path)?;
+        add_ensure_stats(total, &index.stats());
+        manifest.shards.push(ShardEntry {
+            aliases: shard_aliases(&root, &base_name)?,
+            git: shard_git_metadata(&root),
+            name,
+            root,
+            index: index_name,
+        });
+        added += 1;
+    }
+
+    if added > 0 {
+        total.added_shards += added;
+        total.shards = manifest.shards.len();
+        save_manifest(output_dir, &manifest)?;
+    }
+
+    Ok(added)
 }
 
 pub fn search_shards(
@@ -939,6 +1004,15 @@ fn add_index_stats(total: &mut ShardRefreshStats, stats: &IndexStats) {
     total.symbols += stats.symbols;
 }
 
+fn add_ensure_stats(total: &mut ShardEnsureStats, stats: &IndexStats) {
+    total.files += stats.files;
+    total.terms += stats.terms;
+    total.path_terms += stats.path_terms;
+    total.trigrams += stats.trigrams;
+    total.symbols += stats.symbols;
+    total.refreshed_files += stats.files;
+}
+
 fn sanitize_name(name: &str) -> String {
     let value = name
         .chars()
@@ -951,6 +1025,10 @@ fn sanitize_name(name: &str) -> String {
         })
         .collect::<String>();
     value.trim_matches('-').to_string()
+}
+
+fn canonical_or_self(path: &Path) -> PathBuf {
+    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
 }
 
 fn unique_shard_name(base_name: &str, hash: &str, names: &mut HashSet<String>) -> String {

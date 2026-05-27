@@ -54,7 +54,7 @@ cargo run -- shard-map --index-dir /tmp/orient-shards --repo maestro --symbols 5
 cargo run -- read-shard-range --index-dir /tmp/orient-shards maestro/src/app.rs --start 40 --lines 80
 ```
 
-Discovery treats git checkouts as boundaries by default so monorepo package manifests do not explode into separate shard candidates. Use `--family-limit N` to select at most `N` checkouts per repeated git family, and use `--nested-manifests` only when package-level directories inside a checkout should become separate shard roots. Shard build responses include a compact `discovery` summary with selected repo counts, total candidates, and top repeated families.
+Discovery treats git checkouts as boundaries by default so monorepo package manifests do not explode into separate shard candidates. Use `--family-limit N` to select at most `N` checkouts per repeated git family, and use `--nested-manifests` only when package-level directories inside a checkout should become separate shard roots. Shard build responses include a compact `discovery` summary with selected repo counts, total candidates, and top repeated families. Re-running `ensure-shards` with discovery roots refreshes existing shards and adds newly discovered repo shards.
 
 ## Shared Daemon
 

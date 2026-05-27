@@ -676,6 +676,45 @@ fn runtime_ensures_shards_builds_refreshes_and_warms() {
     assert_eq!(refresh_result["warmed_indexes"], serde_json::json!(1));
     assert_eq!(refresh_result["cached_indexes"], serde_json::json!(1));
     assert!(refresh_result["stats"]["refreshed_files"].as_u64().unwrap() >= 1);
+
+    write(
+        &root.path().join("billing/src/lib.rs"),
+        "pub fn invoice_total() -> usize { 42 }\n",
+    );
+    write(
+        &root.path().join("billing/Cargo.toml"),
+        "[package]\nname='billing'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    let add = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("ensure-add"),
+        tool: "ensure_shards".to_string(),
+        arguments: serde_json::json!({
+            "discover_root": root.path(),
+            "max_depth": 2,
+            "output_dir": root.path().join(".orient-shards")
+        }),
+    });
+    assert!(add.error.is_none(), "{:?}", add.error);
+    let add_result = add.result.unwrap();
+    assert_eq!(
+        add_result["stats"]["action"],
+        serde_json::json!("refresh+add")
+    );
+    assert_eq!(add_result["stats"]["added_shards"], serde_json::json!(1));
+    assert_eq!(add_result["stats"]["shards"], serde_json::json!(2));
+    assert_eq!(add_result["warmed_indexes"], serde_json::json!(2));
+
+    let search = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("search-added"),
+        tool: "search_shards".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": root.path().join(".orient-shards"),
+            "query": "invoice_total"
+        }),
+    });
+    assert!(search.error.is_none(), "{:?}", search.error);
+    let result = serde_json::to_string(&search.result).unwrap();
+    assert!(result.contains("billing/src/lib.rs"), "{result}");
 }
 
 #[test]
