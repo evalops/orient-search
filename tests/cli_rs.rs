@@ -626,6 +626,24 @@ fn cli_outputs_repo_map_and_reads_ranges() {
         .success()
         .stdout(predicate::str::contains("\"path\":\"src/auth.rs\""))
         .stdout(predicate::str::contains("\"path\":\"tests/auth_test.rs\""));
+
+    let mut read_precise_ranges = Command::cargo_bin("orient").unwrap();
+    read_precise_ranges
+        .args([
+            "read-ranges",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--range",
+            "src/auth.rs:5:1",
+            "--range",
+            "tests/auth_test.rs:3:1",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"start_line\":5"))
+        .stdout(predicate::str::contains("issue_token"))
+        .stdout(predicate::str::contains("\"start_line\":3"))
+        .stdout(predicate::str::contains("issues_tokens"));
 }
 
 #[test]
@@ -998,17 +1016,17 @@ fn cli_builds_and_searches_persistent_index() {
             "read-index-ranges",
             "--index",
             index_path.to_str().unwrap(),
-            "src/auth.rs",
-            "tests/auth_test.rs",
-            "--start",
-            "1",
-            "--lines",
-            "2",
+            "--range",
+            "src/auth.rs:5:1",
+            "--range",
+            "tests/auth_test.rs:3:1",
         ])
         .assert()
         .success()
         .stdout(predicate::str::contains("\"path\":\"src/auth.rs\""))
-        .stdout(predicate::str::contains("\"path\":\"tests/auth_test.rs\""));
+        .stdout(predicate::str::contains("issue_token"))
+        .stdout(predicate::str::contains("\"path\":\"tests/auth_test.rs\""))
+        .stdout(predicate::str::contains("issue_token_round_trip"));
 
     let mut index_symbol = Command::cargo_bin("orient").unwrap();
     index_symbol
@@ -1532,21 +1550,21 @@ fn cli_filters_shard_search_by_nested_repo_alias() {
             "read-shard-ranges",
             "--index-dir",
             shard_dir.path().to_str().unwrap(),
-            "billing/src/billing.rs",
-            "billing/tests/billing_test.rs",
-            "--start",
-            "1",
-            "--lines",
-            "2",
+            "--range",
+            "billing/src/billing.rs:1:1",
+            "--range",
+            "billing/tests/billing_test.rs:3:1",
         ])
         .assert()
         .success()
         .stdout(predicate::str::contains(
             "\"path\":\"billing/src/billing.rs\"",
         ))
+        .stdout(predicate::str::contains("invoice_total"))
         .stdout(predicate::str::contains(
             "\"path\":\"billing/tests/billing_test.rs\"",
-        ));
+        ))
+        .stdout(predicate::str::contains("totals_invoice"));
 
     let mut related = Command::cargo_bin("orient").unwrap();
     related

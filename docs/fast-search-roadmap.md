@@ -64,7 +64,7 @@ Implemented now:
 - `daemon_status`, `warm_shards`, and `serve-tcp --index-dir` expose compact warmed-shard details, so parallel local agents can confirm they are sharing the intended repo/branch shard set without session analytics.
 - Alias-scoped shard search, symbol lookup, and repo maps emit stable alias-prefixed paths, so search hits like `maestro/src/foo.rs` can be opened without knowing the enclosing worktree shard name.
 - Shard related-file and related-symbol tools accept alias-prefixed search-hit paths and keep returned context inside the same alias scope.
-- Batch read tools open several repo, index, or shard result paths in one request, reducing JSON-lines round trips after a multi-result search.
+- Batch read tools open several repo, index, or shard result paths in one request, reducing JSON-lines round trips after a multi-result search; CLI batch reads also accept repeatable `--range path:start:lines` specs for search hits with different line windows.
 - Shard refresh recomputes nested repo aliases, so newly added child repos become filterable after `refresh-shards`.
 - `read-shard-range` resolves alias-prefixed paths, so agents can read `maestro/src/foo.rs` even when `maestro` lives inside a broader dated worktree shard.
 

@@ -19,6 +19,7 @@ use std::fs;
 use std::io::{self, BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use std::time::Instant;
 
 #[derive(Debug, Parser)]
@@ -129,7 +130,8 @@ enum Commands {
     ReadShardRanges {
         #[arg(long)]
         index_dir: PathBuf,
-        #[arg(required = true)]
+        #[arg(long = "range", value_name = "PATH:START:LINES")]
+        ranges: Vec<CliRangeSpec>,
         paths: Vec<String>,
         #[arg(long, default_value_t = 1)]
         start: usize,
@@ -196,7 +198,8 @@ enum Commands {
     ReadRanges {
         #[arg(long, default_value = ".")]
         repo: PathBuf,
-        #[arg(required = true)]
+        #[arg(long = "range", value_name = "PATH:START:LINES")]
+        ranges: Vec<CliRangeSpec>,
         paths: Vec<String>,
         #[arg(long, default_value_t = 1)]
         start: usize,
@@ -241,7 +244,8 @@ enum Commands {
     ReadIndexRanges {
         #[arg(long)]
         index: PathBuf,
-        #[arg(required = true)]
+        #[arg(long = "range", value_name = "PATH:START:LINES")]
+        ranges: Vec<CliRangeSpec>,
         paths: Vec<String>,
         #[arg(long, default_value_t = 1)]
         start: usize,
@@ -606,15 +610,21 @@ fn main() -> Result<()> {
         }
         Commands::ReadShardRanges {
             index_dir,
+            ranges,
             paths,
             start,
             lines,
         } => {
-            let mut ranges = Vec::new();
-            for path in paths {
-                ranges.push(read_shard_range(&index_dir, &path, start, lines)?);
+            let mut results = Vec::new();
+            for range in cli_ranges(paths, ranges, start, lines)? {
+                results.push(read_shard_range(
+                    &index_dir,
+                    &range.path,
+                    range.start,
+                    range.lines,
+                )?);
             }
-            println!("{}", serde_json::to_string(&ranges)?);
+            println!("{}", serde_json::to_string(&results)?);
         }
         Commands::ShardSymbol {
             index_dir,
@@ -707,15 +717,21 @@ fn main() -> Result<()> {
         }
         Commands::ReadRanges {
             repo,
+            ranges,
             paths,
             start,
             lines,
         } => {
-            let mut ranges = Vec::new();
-            for path in paths {
-                ranges.push(read_file_range(&repo, &path, start, lines)?);
+            let mut results = Vec::new();
+            for range in cli_ranges(paths, ranges, start, lines)? {
+                results.push(read_file_range(
+                    &repo,
+                    &range.path,
+                    range.start,
+                    range.lines,
+                )?);
             }
-            println!("{}", serde_json::to_string(&ranges)?);
+            println!("{}", serde_json::to_string(&results)?);
         }
         Commands::Search {
             repo,
@@ -762,16 +778,17 @@ fn main() -> Result<()> {
         }
         Commands::ReadIndexRanges {
             index,
+            ranges,
             paths,
             start,
             lines,
         } => {
             let index = FastIndex::load(index)?;
-            let mut ranges = Vec::new();
-            for path in paths {
-                ranges.push(index.read_range(&path, start, lines)?);
+            let mut results = Vec::new();
+            for range in cli_ranges(paths, ranges, start, lines)? {
+                results.push(index.read_range(&range.path, range.start, range.lines)?);
             }
-            println!("{}", serde_json::to_string(&ranges)?);
+            println!("{}", serde_json::to_string(&results)?);
         }
         Commands::Symbol { repo, name, limit } => {
             let index = RepoIndexer::new(repo).build()?;
@@ -1051,6 +1068,57 @@ fn shard_repos_from_args_required(
 
 fn normalize_family_limit(value: Option<usize>) -> Option<usize> {
     value.filter(|limit| *limit > 0)
+}
+
+#[derive(Debug, Clone)]
+struct CliRangeSpec {
+    path: String,
+    start: usize,
+    lines: usize,
+}
+
+impl FromStr for CliRangeSpec {
+    type Err = String;
+
+    fn from_str(value: &str) -> std::result::Result<Self, Self::Err> {
+        let mut parts = value.rsplitn(3, ':');
+        let lines = parts
+            .next()
+            .ok_or_else(|| "range must be PATH:START:LINES".to_string())?
+            .parse::<usize>()
+            .map_err(|_| "range lines must be a positive integer".to_string())?;
+        let start = parts
+            .next()
+            .ok_or_else(|| "range must be PATH:START:LINES".to_string())?
+            .parse::<usize>()
+            .map_err(|_| "range start must be a positive integer".to_string())?;
+        let path = parts
+            .next()
+            .filter(|path| !path.is_empty())
+            .ok_or_else(|| "range must be PATH:START:LINES".to_string())?
+            .to_string();
+        if start == 0 || lines == 0 {
+            return Err("range start and lines must be positive integers".to_string());
+        }
+        Ok(Self { path, start, lines })
+    }
+}
+
+fn cli_ranges(
+    paths: Vec<String>,
+    mut ranges: Vec<CliRangeSpec>,
+    start: usize,
+    lines: usize,
+) -> Result<Vec<CliRangeSpec>> {
+    ranges.extend(
+        paths
+            .into_iter()
+            .map(|path| CliRangeSpec { path, start, lines }),
+    );
+    if ranges.is_empty() {
+        bail!("provide at least one path or --range PATH:START:LINES");
+    }
+    Ok(ranges)
 }
 
 fn shard_bootstrap_output<T: Serialize>(
