@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::thread;
 
 const SHARD_MANIFEST_VERSION: u32 = 1;
 
@@ -342,29 +343,90 @@ pub fn search_shards(
     let parsed = parse_query(query);
     let filters = merge_filters(filters.clone(), parsed.filters);
     let shard_query = query_text(&parsed.terms, &filters);
+    let jobs = manifest
+        .shards
+        .into_iter()
+        .filter_map(|shard| {
+            let scopes = shard_search_scopes(&shard, &filters);
+            (!scopes.is_empty()).then_some(ShardSearchJob { shard, scopes })
+        })
+        .collect::<Vec<_>>();
+    let results = search_shard_jobs(index_dir, &shard_query, limit, &filters, jobs)?;
+    Ok(finalize_results(results, limit))
+}
+
+#[derive(Debug, Clone)]
+struct ShardSearchJob {
+    shard: ShardEntry,
+    scopes: Vec<ShardSearchScope>,
+}
+
+fn search_shard_jobs(
+    index_dir: &Path,
+    query: &str,
+    limit: usize,
+    filters: &SearchFilters,
+    jobs: Vec<ShardSearchJob>,
+) -> Result<Vec<SearchResult>> {
+    if jobs.is_empty() || limit == 0 {
+        return Ok(Vec::new());
+    }
+
+    let workers = std::thread::available_parallelism()
+        .map(|count| count.get())
+        .unwrap_or(1)
+        .min(jobs.len());
+    if workers <= 1 {
+        return search_shard_job_batch(index_dir, query, limit, filters, &jobs);
+    }
+
+    let chunk_size = jobs.len().div_ceil(workers);
     let mut results = Vec::new();
-    for shard in manifest.shards {
-        let scopes = shard_search_scopes(&shard, &filters);
-        if scopes.is_empty() {
-            continue;
+    thread::scope(|scope| {
+        let handles = jobs
+            .chunks(chunk_size)
+            .map(|chunk| {
+                scope.spawn(move || search_shard_job_batch(index_dir, query, limit, filters, chunk))
+            })
+            .collect::<Vec<_>>();
+
+        for handle in handles {
+            let batch = handle
+                .join()
+                .map_err(|_| anyhow::anyhow!("shard search worker panicked"))??;
+            results.extend(batch);
         }
-        let index = FastIndex::load(index_dir.join(&shard.index))
-            .with_context(|| format!("load shard {}", shard.index))?;
-        for scope in scopes {
-            let scoped_filters = filters_for_shard_scope(&filters, scope.path_prefix.as_deref());
-            for mut result in index.search_filtered(&shard_query, limit, &scoped_filters)? {
+        Ok::<(), anyhow::Error>(())
+    })?;
+    Ok(results)
+}
+
+fn search_shard_job_batch(
+    index_dir: &Path,
+    query: &str,
+    limit: usize,
+    filters: &SearchFilters,
+    jobs: &[ShardSearchJob],
+) -> Result<Vec<SearchResult>> {
+    let mut results = Vec::new();
+    for job in jobs {
+        let index = FastIndex::load(index_dir.join(&job.shard.index))
+            .with_context(|| format!("load shard {}", job.shard.index))?;
+        for scope in &job.scopes {
+            let scoped_filters = filters_for_shard_scope(filters, scope.path_prefix.as_deref());
+            for mut result in index.search_filtered(query, limit, &scoped_filters)? {
                 if let Some(prefix) = &scope.path_prefix {
                     if !result.path.starts_with(prefix) {
                         continue;
                     }
                 }
-                result.path = scoped_output_path(&scope, &result.path);
+                result.path = scoped_output_path(scope, &result.path);
                 result.reason = format!("shard:{}; {}", scope.output_prefix, result.reason);
                 results.push(result);
             }
         }
     }
-    Ok(finalize_results(results, limit))
+    Ok(results)
 }
 
 pub fn shard_query_plans(
