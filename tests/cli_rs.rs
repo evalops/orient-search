@@ -232,6 +232,10 @@ fn cli_builds_and_searches_shard_directory() {
         "pub fn invoice_total() -> usize { 42 }\n",
     );
     write(
+        &billing_repo.path().join("src/legacy.rs"),
+        "pub fn legacy_invoice() -> usize { 1 }\n",
+    );
+    write(
         &billing_repo.path().join("Cargo.toml"),
         "[package]\nname='billing'\nversion='0.1.0'\nedition='2024'\n",
     );
@@ -305,6 +309,62 @@ fn cli_builds_and_searches_shard_directory() {
     .success()
     .stdout(predicate::str::contains("\"path\""))
     .stdout(predicate::str::contains("invoice_total"));
+
+    write(
+        &billing_repo.path().join("src/billing.rs"),
+        "pub fn invoice_total() -> usize { 42 }\npub fn credit_memo() -> usize { 7 }\n",
+    );
+    fs::rename(
+        billing_repo.path().join("src/legacy.rs"),
+        billing_repo.path().join("src/refunds.rs"),
+    )
+    .unwrap();
+    write(
+        &billing_repo.path().join("src/refunds.rs"),
+        "pub fn refund_credit() -> usize { 1 }\n",
+    );
+    let mut refresh = Command::cargo_bin("orient").unwrap();
+    refresh
+        .args([
+            "refresh-shards",
+            "--index-dir",
+            shard_dir.path().to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"reused_files\""))
+        .stdout(predicate::str::contains("\"refreshed_files\""))
+        .stdout(predicate::str::contains("\"deleted_files\":1"));
+
+    let mut refreshed_search = Command::cargo_bin("orient").unwrap();
+    refreshed_search
+        .args([
+            "search-shards",
+            "--index-dir",
+            shard_dir.path().to_str().unwrap(),
+            "credit memo",
+            "--repo",
+            &billing_name,
+            "--require-all",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("credit_memo"));
+
+    let mut renamed_search = Command::cargo_bin("orient").unwrap();
+    renamed_search
+        .args([
+            "search-shards",
+            "--index-dir",
+            shard_dir.path().to_str().unwrap(),
+            "refund credit",
+            "--repo",
+            &billing_name,
+            "--require-all",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("src/refunds.rs"));
 }
 
 #[test]

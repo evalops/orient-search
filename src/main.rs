@@ -5,7 +5,7 @@ use orient::repo_index::{
     RepoIndexer, SearchFilters, SnippetMode, read_file_range, search_repo_fast_filtered,
 };
 use orient::server::serve_jsonl;
-use orient::shards::{build_shards, read_shard_range, search_shards};
+use orient::shards::{build_shards, read_shard_range, refresh_shards, search_shards};
 use serde::Serialize;
 use std::io;
 use std::path::PathBuf;
@@ -38,6 +38,10 @@ enum Commands {
         repos: Vec<PathBuf>,
         #[arg(long)]
         output_dir: PathBuf,
+    },
+    RefreshShards {
+        #[arg(long)]
+        index_dir: PathBuf,
     },
     SearchShards {
         #[arg(long)]
@@ -229,6 +233,9 @@ fn main() -> Result<()> {
                 "{}",
                 serde_json::to_string(&build_shards(&repos, output_dir)?)?
             );
+        }
+        Commands::RefreshShards { index_dir } => {
+            println!("{}", serde_json::to_string(&refresh_shards(index_dir)?)?);
         }
         Commands::SearchShards {
             index_dir,

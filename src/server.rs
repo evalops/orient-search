@@ -2,7 +2,7 @@ use crate::fast_index::FastIndex;
 use crate::repo_index::{
     RepoIndexer, SearchFilters, SnippetMode, read_file_range, search_repo_fast_filtered,
 };
-use crate::shards::{build_shards, read_shard_range, search_shards};
+use crate::shards::{build_shards, read_shard_range, refresh_shards, search_shards};
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -113,6 +113,10 @@ fn dispatch_result(request: &ToolRequest) -> Result<Value> {
             let output_dir = path_arg(&request.arguments, "output_dir")?;
             Ok(serde_json::to_value(build_shards(&repos, output_dir)?)?)
         }
+        "refresh_shards" => {
+            let index_dir = path_arg(&request.arguments, "index_dir")?;
+            Ok(serde_json::to_value(refresh_shards(index_dir)?)?)
+        }
         "search_shards" => {
             let index_dir = path_arg(&request.arguments, "index_dir")?;
             let query = string_arg(&request.arguments, "query")?;
@@ -166,6 +170,7 @@ fn dispatch_result(request: &ToolRequest) -> Result<Value> {
             "search_code",
             "indexed_search_code",
             "index_shards",
+            "refresh_shards",
             "search_shards",
             "read_shard_range",
             "find_symbol",

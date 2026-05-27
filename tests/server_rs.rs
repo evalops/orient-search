@@ -125,6 +125,10 @@ fn server_handles_shard_index_search_and_read_requests() {
         "pub fn invoice_total() -> usize { 42 }\n",
     );
     write(
+        &billing_repo.join("src/legacy.rs"),
+        "pub fn legacy_invoice() -> usize { 1 }\n",
+    );
+    write(
         &billing_repo.join("Cargo.toml"),
         "[package]\nname='billing'\nversion='0.1.0'\nedition='2024'\n",
     );
@@ -184,6 +188,102 @@ fn server_handles_shard_index_search_and_read_requests() {
     assert!(stdout.contains("\"id\":\"read-shard-range\""));
     assert!(stdout.contains("\"path\":\"billing/src/billing.rs\""));
     assert!(stdout.contains("invoice_total"));
+}
+
+#[test]
+fn server_handles_shard_refresh_request() {
+    let parent = tempfile::tempdir().unwrap();
+    let auth_repo = parent.path().join("auth");
+    let billing_repo = parent.path().join("billing");
+    write(
+        &auth_repo.join("src/auth.rs"),
+        "pub fn issue_token() -> String { \"token\".to_string() }\n",
+    );
+    write(
+        &auth_repo.join("Cargo.toml"),
+        "[package]\nname='auth'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    write(
+        &billing_repo.join("src/billing.rs"),
+        "pub fn invoice_total() -> usize { 42 }\n",
+    );
+    write(
+        &billing_repo.join("src/legacy.rs"),
+        "pub fn legacy_invoice() -> usize { 1 }\n",
+    );
+    write(
+        &billing_repo.join("Cargo.toml"),
+        "[package]\nname='billing'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    let shard_dir = parent.path().join(".orient-shards");
+
+    let binary = assert_cmd::cargo::cargo_bin("orient");
+    let status = Command::new(&binary)
+        .args([
+            "index-shards",
+            "--repo",
+            auth_repo.to_str().unwrap(),
+            "--repo",
+            billing_repo.to_str().unwrap(),
+            "--output-dir",
+            shard_dir.to_str().unwrap(),
+        ])
+        .stdout(Stdio::null())
+        .status()
+        .unwrap();
+    assert!(status.success());
+
+    write(
+        &billing_repo.join("src/billing.rs"),
+        "pub fn invoice_total() -> usize { 42 }\npub fn credit_memo() -> usize { 7 }\n",
+    );
+    fs::rename(
+        billing_repo.join("src/legacy.rs"),
+        billing_repo.join("src/refunds.rs"),
+    )
+    .unwrap();
+    write(
+        &billing_repo.join("src/refunds.rs"),
+        "pub fn refund_credit() -> usize { 1 }\n",
+    );
+
+    let mut child = Command::new(binary)
+        .arg("serve-jsonl")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+
+    let refresh_request = serde_json::json!({
+        "id": "refresh-shards",
+        "tool": "refresh_shards",
+        "arguments": {
+            "index_dir": shard_dir
+        }
+    });
+    let search_request = serde_json::json!({
+        "id": "search-after-refresh",
+        "tool": "search_shards",
+        "arguments": {
+            "index_dir": parent.path().join(".orient-shards"),
+            "query": "repo:billing credit memo",
+            "limit": 5,
+            "require_all": true
+        }
+    });
+    writeln!(child.stdin.as_mut().unwrap(), "{refresh_request}").unwrap();
+    writeln!(child.stdin.as_mut().unwrap(), "{search_request}").unwrap();
+    drop(child.stdin.take());
+
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("\"id\":\"refresh-shards\""));
+    assert!(stdout.contains("\"reused_files\""));
+    assert!(stdout.contains("\"refreshed_files\""));
+    assert!(stdout.contains("\"deleted_files\":1"));
+    assert!(stdout.contains("\"id\":\"search-after-refresh\""));
+    assert!(stdout.contains("credit_memo"));
 }
 
 #[test]
