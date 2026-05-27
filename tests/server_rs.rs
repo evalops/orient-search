@@ -71,6 +71,7 @@ fn server_reports_tool_manifest_for_agent_wrappers() {
     assert!(stdout.contains("daemon_status"));
     assert!(stdout.contains("warm_index"));
     assert!(stdout.contains("warm_shards"));
+    assert!(stdout.contains("ensure_shards"));
     assert!(stdout.contains("discover_repos"));
 }
 
@@ -203,6 +204,57 @@ fn runtime_indexes_shards_from_multiple_discovered_roots() {
     assert!(search.error.is_none(), "{:?}", search.error);
     let result = serde_json::to_string(&search.result).unwrap();
     assert!(result.contains("maestro/src/lib.rs"), "{result}");
+}
+
+#[test]
+fn runtime_ensures_shards_builds_refreshes_and_warms() {
+    let root = tempfile::tempdir().unwrap();
+    write(
+        &root.path().join("platform/src/lib.rs"),
+        "pub fn platform_session() {}\n",
+    );
+    write(
+        &root.path().join("platform/Cargo.toml"),
+        "[package]\nname='platform'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    let shard_dir = root.path().join(".orient-shards");
+
+    let runtime = ToolRuntime::default();
+    let build = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("ensure-build"),
+        tool: "ensure_shards".to_string(),
+        arguments: serde_json::json!({
+            "discover_root": root.path(),
+            "max_depth": 2,
+            "output_dir": shard_dir
+        }),
+    });
+    assert!(build.error.is_none(), "{:?}", build.error);
+    let build_result = build.result.unwrap();
+    assert_eq!(build_result["stats"]["action"], serde_json::json!("build"));
+    assert_eq!(build_result["warmed_indexes"], serde_json::json!(1));
+    assert_eq!(build_result["cached_indexes"], serde_json::json!(1));
+
+    write(
+        &root.path().join("platform/src/extra.rs"),
+        "pub fn extra_platform_session() {}\n",
+    );
+    let refresh = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("ensure-refresh"),
+        tool: "ensure_shards".to_string(),
+        arguments: serde_json::json!({
+            "output_dir": root.path().join(".orient-shards")
+        }),
+    });
+    assert!(refresh.error.is_none(), "{:?}", refresh.error);
+    let refresh_result = refresh.result.unwrap();
+    assert_eq!(
+        refresh_result["stats"]["action"],
+        serde_json::json!("refresh")
+    );
+    assert_eq!(refresh_result["warmed_indexes"], serde_json::json!(1));
+    assert_eq!(refresh_result["cached_indexes"], serde_json::json!(1));
+    assert!(refresh_result["stats"]["refreshed_files"].as_u64().unwrap() >= 1);
 }
 
 #[test]

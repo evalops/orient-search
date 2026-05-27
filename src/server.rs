@@ -6,8 +6,8 @@ use crate::repo_index::{
     normalize_token, read_file_range, search_repo_fast_filtered,
 };
 use crate::shards::{
-    ShardRepoMap, build_shards, filter_repo_map_by_prefix, filters_for_shard_scope, load_manifest,
-    read_shard_range, refresh_shards, related_shard_files, related_shard_symbols,
+    ShardRepoMap, build_shards, ensure_shards, filter_repo_map_by_prefix, filters_for_shard_scope,
+    load_manifest, read_shard_range, refresh_shards, related_shard_files, related_shard_symbols,
     shard_search_scopes,
 };
 use anyhow::{Result, anyhow};
@@ -258,6 +258,12 @@ pub fn tool_manifest() -> Value {
             "optional": ["repos", "discover_root", "discover_roots", "root", "max_depth", "discover_limit", "limit"]
         },
         {
+            "name": "ensure_shards",
+            "description": "Build or refresh a local multi-repo shard directory, then warm its indexes in the daemon cache.",
+            "required": ["output_dir"],
+            "optional": ["repos", "discover_root", "discover_roots", "root", "max_depth", "discover_limit", "limit"]
+        },
+        {
             "name": "refresh_shards",
             "description": "Refresh every repo index in a local shard directory incrementally.",
             "required": ["index_dir"],
@@ -453,11 +459,23 @@ impl ToolRuntime {
                 Ok(serde_json::to_value(results)?)
             }
             "index_shards" => {
-                let repos = shard_repos_from_arguments(&request.arguments)?;
+                let repos = shard_repos_from_arguments_required(&request.arguments)?;
                 let output_dir = path_arg(&request.arguments, "output_dir")?;
                 let stats = build_shards(&repos, output_dir)?;
                 self.clear_index_cache()?;
                 Ok(serde_json::to_value(stats)?)
+            }
+            "ensure_shards" => {
+                let repos = shard_repos_from_arguments(&request.arguments)?;
+                let output_dir = path_arg(&request.arguments, "output_dir")?;
+                let stats = ensure_shards(&repos, &output_dir)?;
+                self.clear_index_cache()?;
+                let warmed_indexes = self.warm_shards(output_dir)?;
+                Ok(json!({
+                    "stats": stats,
+                    "warmed_indexes": warmed_indexes,
+                    "cached_indexes": self.cached_index_count()
+                }))
             }
             "refresh_shards" => {
                 let index_dir = path_arg(&request.arguments, "index_dir")?;
@@ -631,6 +649,7 @@ impl ToolRuntime {
                 "read_index_range",
                 "read_index_ranges",
                 "index_shards",
+                "ensure_shards",
                 "refresh_shards",
                 "search_shards",
                 "read_shard_range",
@@ -972,6 +991,11 @@ fn shard_repos_from_arguments(arguments: &Value) -> Result<Vec<PathBuf>> {
     }
     repos.sort();
     repos.dedup();
+    Ok(repos)
+}
+
+fn shard_repos_from_arguments_required(arguments: &Value) -> Result<Vec<PathBuf>> {
+    let repos = shard_repos_from_arguments(arguments)?;
     if repos.is_empty() {
         return Err(anyhow!("provide repos, discover_root, or discover_roots"));
     }

@@ -63,6 +63,22 @@ pub struct ShardRefreshStats {
     pub deleted_files: usize,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShardEnsureStats {
+    pub version: u32,
+    pub output_dir: PathBuf,
+    pub action: String,
+    pub shards: usize,
+    pub files: usize,
+    pub terms: usize,
+    pub path_terms: usize,
+    pub trigrams: usize,
+    pub symbols: usize,
+    pub reused_files: usize,
+    pub refreshed_files: usize,
+    pub deleted_files: usize,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ShardRepoMap {
     pub name: String,
@@ -115,6 +131,47 @@ pub fn build_shards(repos: &[PathBuf], output_dir: impl AsRef<Path>) -> Result<S
     total.shards = manifest.shards.len();
     save_manifest(output_dir, &manifest)?;
     Ok(total)
+}
+
+pub fn ensure_shards(repos: &[PathBuf], output_dir: impl AsRef<Path>) -> Result<ShardEnsureStats> {
+    let output_dir = output_dir.as_ref();
+    if output_dir.join("manifest.json").exists() {
+        let stats = refresh_shards(output_dir)?;
+        return Ok(ShardEnsureStats {
+            version: stats.version,
+            output_dir: stats.output_dir,
+            action: "refresh".to_string(),
+            shards: stats.shards,
+            files: stats.files,
+            terms: stats.terms,
+            path_terms: stats.path_terms,
+            trigrams: stats.trigrams,
+            symbols: stats.symbols,
+            reused_files: stats.reused_files,
+            refreshed_files: stats.refreshed_files,
+            deleted_files: stats.deleted_files,
+        });
+    }
+
+    anyhow::ensure!(
+        !repos.is_empty(),
+        "provide repos or discover roots when building a new shard directory"
+    );
+    let stats = build_shards(repos, output_dir)?;
+    Ok(ShardEnsureStats {
+        version: stats.version,
+        output_dir: stats.output_dir,
+        action: "build".to_string(),
+        shards: stats.shards,
+        files: stats.files,
+        terms: stats.terms,
+        path_terms: stats.path_terms,
+        trigrams: stats.trigrams,
+        symbols: stats.symbols,
+        reused_files: 0,
+        refreshed_files: stats.files,
+        deleted_files: 0,
+    })
 }
 
 pub fn refresh_shards(index_dir: impl AsRef<Path>) -> Result<ShardRefreshStats> {

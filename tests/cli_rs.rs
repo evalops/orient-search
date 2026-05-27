@@ -196,6 +196,52 @@ fn cli_indexes_shards_from_discovered_root() {
 }
 
 #[test]
+fn cli_ensures_shards_builds_then_refreshes_existing_directory() {
+    let root = tempfile::tempdir().unwrap();
+    write(
+        &root.path().join("workspace/auth/src/lib.rs"),
+        "pub fn issue_token() -> &'static str { \"token\" }\n",
+    );
+    write(
+        &root.path().join("workspace/auth/Cargo.toml"),
+        "[package]\nname='auth'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    let shard_dir = tempfile::tempdir().unwrap();
+
+    let mut build = Command::cargo_bin("orient").unwrap();
+    build
+        .args([
+            "ensure-shards",
+            "--discover-root",
+            root.path().to_str().unwrap(),
+            "--max-depth",
+            "2",
+            "--output-dir",
+            shard_dir.path().to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"action\":\"build\""))
+        .stdout(predicate::str::contains("\"shards\":1"));
+
+    write(
+        &root.path().join("workspace/auth/src/refresh.rs"),
+        "pub fn refresh_token() -> &'static str { \"token\" }\n",
+    );
+    let mut refresh = Command::cargo_bin("orient").unwrap();
+    refresh
+        .args([
+            "ensure-shards",
+            "--output-dir",
+            shard_dir.path().to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"action\":\"refresh\""))
+        .stdout(predicate::str::contains("\"shards\":1"));
+}
+
+#[test]
 fn cli_outputs_repo_map_and_reads_ranges() {
     let repo = sample_repo();
     write(

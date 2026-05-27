@@ -7,8 +7,8 @@ use orient::repo_index::{
 };
 use orient::server::{ToolRuntime, serve_jsonl, serve_tcp, tool_manifest};
 use orient::shards::{
-    build_shards, find_shard_symbol, read_shard_range, refresh_shards, related_shard_files,
-    related_shard_symbols, search_shards, shard_repo_maps,
+    build_shards, ensure_shards, find_shard_symbol, read_shard_range, refresh_shards,
+    related_shard_files, related_shard_symbols, search_shards, shard_repo_maps,
 };
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -62,6 +62,18 @@ enum Commands {
     RefreshShards {
         #[arg(long)]
         index_dir: PathBuf,
+    },
+    EnsureShards {
+        #[arg(long = "repo")]
+        repos: Vec<PathBuf>,
+        #[arg(long = "discover-root")]
+        discover_roots: Vec<PathBuf>,
+        #[arg(long, default_value_t = 4)]
+        max_depth: usize,
+        #[arg(long, default_value_t = 500)]
+        discover_limit: usize,
+        #[arg(long)]
+        output_dir: PathBuf,
     },
     SearchShards {
         #[arg(long)]
@@ -393,7 +405,8 @@ fn main() -> Result<()> {
             discover_limit,
             output_dir,
         } => {
-            let repos = shard_repos_from_args(repos, discover_roots, max_depth, discover_limit)?;
+            let repos =
+                shard_repos_from_args_required(repos, discover_roots, max_depth, discover_limit)?;
             println!(
                 "{}",
                 serde_json::to_string(&build_shards(&repos, output_dir)?)?
@@ -401,6 +414,19 @@ fn main() -> Result<()> {
         }
         Commands::RefreshShards { index_dir } => {
             println!("{}", serde_json::to_string(&refresh_shards(index_dir)?)?);
+        }
+        Commands::EnsureShards {
+            repos,
+            discover_roots,
+            max_depth,
+            discover_limit,
+            output_dir,
+        } => {
+            let repos = shard_repos_from_args(repos, discover_roots, max_depth, discover_limit)?;
+            println!(
+                "{}",
+                serde_json::to_string(&ensure_shards(&repos, output_dir)?)?
+            );
         }
         Commands::SearchShards {
             index_dir,
@@ -857,6 +883,16 @@ fn shard_repos_from_args(
     }
     repos.sort();
     repos.dedup();
+    Ok(repos)
+}
+
+fn shard_repos_from_args_required(
+    repos: Vec<PathBuf>,
+    discover_roots: Vec<PathBuf>,
+    max_depth: usize,
+    discover_limit: usize,
+) -> Result<Vec<PathBuf>> {
+    let repos = shard_repos_from_args(repos, discover_roots, max_depth, discover_limit)?;
     if repos.is_empty() {
         bail!("provide at least one --repo or --discover-root");
     }
