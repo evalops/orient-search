@@ -4,8 +4,8 @@ use crate::discover::{RepoGitMetadata, git_metadata_for_repo};
 use crate::fast_index::{FastIndex, IndexStats};
 use crate::query::{merge_filters, parse_query, query_text};
 use crate::repo_index::{
-    FileRange, QueryPlan, RelatedFile, RelatedSymbol, RepoMap, SearchFilters, SearchResult, Symbol,
-    finalize_results, is_manifest_file, language_for, normalize_token,
+    CommandHint, FileRange, QueryPlan, RelatedFile, RelatedSymbol, RepoMap, SearchFilters,
+    SearchResult, Symbol, finalize_results, is_manifest_file, language_for, normalize_token,
 };
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -565,6 +565,9 @@ fn scoped_output_path(scope: &ShardSearchScope, path: &str) -> String {
 }
 
 fn prefix_repo_map_paths(map: &mut RepoMap, scope: &ShardSearchScope) {
+    for hint in &mut map.brief.command_hints {
+        hint.source = scoped_output_path(scope, &hint.source);
+    }
     for path in &mut map.brief.manifest_files {
         *path = scoped_output_path(scope, path);
     }
@@ -636,6 +639,7 @@ pub(crate) fn filter_repo_map_by_prefix(map: &mut RepoMap, path_prefix: &str) {
     map.brief.file_count = retained_paths.len();
     map.brief.language_counts = language_counts_for_paths(&retained_paths);
     map.brief.known_commands = known_commands_for_manifest_paths(&map.brief.manifest_files);
+    map.brief.command_hints = command_hints_for_manifest_paths(&map.brief.manifest_files);
 }
 
 fn language_counts_for_paths(paths: &[String]) -> HashMap<String, usize> {
@@ -649,19 +653,35 @@ fn language_counts_for_paths(paths: &[String]) -> HashMap<String, usize> {
 }
 
 fn known_commands_for_manifest_paths(paths: &[String]) -> Vec<String> {
+    let mut commands = command_hints_for_manifest_paths(paths)
+        .into_iter()
+        .map(|hint| hint.command)
+        .collect::<Vec<_>>();
+    commands.sort();
+    commands.dedup();
+    commands
+}
+
+fn command_hints_for_manifest_paths(paths: &[String]) -> Vec<CommandHint> {
     let has_manifest = |name: &str| {
         paths
             .iter()
             .any(|path| Path::new(path).file_name().and_then(|value| value.to_str()) == Some(name))
     };
-    let mut commands = Vec::new();
-    if has_manifest("Cargo.toml") {
-        commands.push("cargo test".to_string());
+    let manifest_path = |name: &str| {
+        paths
+            .iter()
+            .find(|path| Path::new(path).file_name().and_then(|value| value.to_str()) == Some(name))
+            .cloned()
+    };
+    let mut hints = Vec::new();
+    if let Some(source) = manifest_path("Cargo.toml") {
+        hints.push(command_hint("cargo test", "test", source));
     }
-    if has_manifest("pyproject.toml") {
-        commands.push("pytest".to_string());
+    if let Some(source) = manifest_path("pyproject.toml") {
+        hints.push(command_hint("pytest", "test", source));
     }
-    if has_manifest("package.json") {
+    if let Some(source) = manifest_path("package.json") {
         let package_manager = if has_manifest("pnpm-lock.yaml") {
             "pnpm"
         } else if has_manifest("yarn.lock") {
@@ -671,17 +691,37 @@ fn known_commands_for_manifest_paths(paths: &[String]) -> Vec<String> {
         } else {
             "npm"
         };
-        commands.push(format!("{package_manager} test"));
+        hints.push(command_hint(
+            format!("{package_manager} test"),
+            "test",
+            source,
+        ));
     }
-    if has_manifest("go.mod") {
-        commands.push("go test ./...".to_string());
+    if let Some(source) = manifest_path("go.mod") {
+        hints.push(command_hint("go test ./...", "test", source));
     }
-    if has_manifest("Package.swift") {
-        commands.push("swift test".to_string());
+    if let Some(source) = manifest_path("Package.swift") {
+        hints.push(command_hint("swift test", "test", source));
     }
-    commands.sort();
-    commands.dedup();
-    commands
+    hints.sort_by(|left, right| {
+        left.command
+            .cmp(&right.command)
+            .then_with(|| left.source.cmp(&right.source))
+    });
+    hints.dedup_by(|left, right| left.command == right.command && left.source == right.source);
+    hints
+}
+
+fn command_hint(
+    command: impl Into<String>,
+    kind: impl Into<String>,
+    source: impl Into<String>,
+) -> CommandHint {
+    CommandHint {
+        command: command.into(),
+        kind: kind.into(),
+        source: source.into(),
+    }
 }
 
 pub(crate) fn load_manifest(index_dir: &Path) -> Result<ShardManifest> {

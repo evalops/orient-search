@@ -1125,6 +1125,11 @@ fn runtime_filters_shard_search_by_nested_repo_alias() {
     let result = serde_json::to_string(&map.result).unwrap();
     assert!(result.contains("billing/Cargo.toml"), "{result}");
     assert!(result.contains("cargo test"), "{result}");
+    assert!(result.contains("\"command_hints\""), "{result}");
+    assert!(
+        result.contains("\"source\":\"billing/Cargo.toml\""),
+        "{result}"
+    );
     assert!(!result.contains("auth/src/auth.rs"), "{result}");
 
     let symbol = runtime.dispatch(ToolRequest {
@@ -2079,6 +2084,9 @@ fn server_handles_repo_map_and_read_range_requests() {
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.contains("\"id\":\"map\""));
     assert!(stdout.contains("SessionManager"));
+    assert!(stdout.contains("\"command_hints\""));
+    assert!(stdout.contains("\"command\":\"cargo test\""));
+    assert!(stdout.contains("\"source\":\"Cargo.toml\""));
     assert!(stdout.contains("tests/auth_test.rs"));
     assert!(stdout.contains("\"id\":\"range\""));
     assert!(stdout.contains("\"start_line\":2"));

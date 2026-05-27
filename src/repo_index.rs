@@ -220,8 +220,17 @@ pub struct RepoBrief {
     pub file_count: usize,
     pub language_counts: HashMap<String, usize>,
     pub known_commands: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub command_hints: Vec<CommandHint>,
     pub manifest_files: Vec<String>,
     pub important_files: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CommandHint {
+    pub command: String,
+    pub kind: String,
+    pub source: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1097,6 +1106,9 @@ impl RepoIndex {
             .collect::<Vec<_>>();
         important_files.sort();
 
+        let command_hints = self.command_hints();
+        let known_commands = known_commands_from_hints(&command_hints);
+
         RepoBrief {
             root_name: self
                 .root
@@ -1105,7 +1117,8 @@ impl RepoIndex {
                 .unwrap_or_else(|| self.root.display().to_string()),
             file_count: self.files.len(),
             language_counts,
-            known_commands: self.known_commands(),
+            known_commands,
+            command_hints,
             manifest_files,
             important_files,
         }
@@ -1217,8 +1230,8 @@ impl RepoIndex {
         related
     }
 
-    fn known_commands(&self) -> Vec<String> {
-        known_commands_from_manifest_texts(
+    fn command_hints(&self) -> Vec<CommandHint> {
+        command_hints_from_manifest_texts(
             self.files
                 .iter()
                 .map(|(path, file)| (path.as_str(), file.text.as_str())),
@@ -1335,44 +1348,78 @@ pub(crate) fn regular_file_metadata(path: &Path) -> Option<fs::Metadata> {
     metadata.file_type().is_file().then_some(metadata)
 }
 
-pub(crate) fn known_commands_from_manifest_texts<'a>(
+pub(crate) fn command_hints_from_manifest_texts<'a>(
     files: impl IntoIterator<Item = (&'a str, &'a str)>,
-) -> Vec<String> {
+) -> Vec<CommandHint> {
     let mut files = files.into_iter().collect::<Vec<_>>();
     files.sort_by(|left, right| left.0.cmp(right.0));
-    let has_file = |name: &str| {
-        files.iter().any(|(path, _)| {
-            Path::new(path).file_name().and_then(|value| value.to_str()) == Some(name)
-        })
-    };
+    let manifest_path = |name: &str| manifest_path_in_files(&files, name);
+    let has_file = |name: &str| manifest_path(name).is_some();
 
-    let mut commands = Vec::new();
-    if has_file("Cargo.toml") {
-        commands.push("cargo test".to_string());
+    let mut hints = Vec::new();
+    if let Some(source) = manifest_path("Cargo.toml") {
+        hints.push(command_hint("cargo test", "test", source));
     }
-    if has_file("pyproject.toml") {
-        commands.push("pytest".to_string());
+    if let Some(source) = manifest_path("pyproject.toml") {
+        hints.push(command_hint("pytest", "test", source));
     }
-    for (_, package_json) in files.iter().filter(|(path, _)| {
+    for (path, package_json) in files.iter().filter(|(path, _)| {
         Path::new(path).file_name().and_then(|value| value.to_str()) == Some("package.json")
     }) {
-        commands.extend(package_json_commands(
+        hints.extend(package_json_command_hints(
             package_json,
             package_manager_command(&has_file),
+            path,
         ));
     }
-    if has_file("go.mod") {
-        commands.push("go test ./...".to_string());
+    if let Some(source) = manifest_path("go.mod") {
+        hints.push(command_hint("go test ./...", "test", source));
     }
-    if has_file("Package.swift") {
-        commands.push("swift test".to_string());
+    if let Some(source) = manifest_path("Package.swift") {
+        hints.push(command_hint("swift test", "test", source));
     }
-    if has_file("Makefile") {
-        commands.push("make test".to_string());
+    if let Some(source) = manifest_path("Makefile") {
+        hints.push(command_hint("make test", "test", source));
     }
+    hints.sort_by(|left, right| {
+        left.command
+            .cmp(&right.command)
+            .then_with(|| left.source.cmp(&right.source))
+            .then_with(|| left.kind.cmp(&right.kind))
+    });
+    hints.dedup_by(|left, right| left.command == right.command && left.source == right.source);
+    hints
+}
+
+pub(crate) fn known_commands_from_hints(hints: &[CommandHint]) -> Vec<String> {
+    let mut commands = hints
+        .iter()
+        .map(|hint| hint.command.clone())
+        .collect::<Vec<_>>();
     commands.sort();
     commands.dedup();
     commands
+}
+
+fn manifest_path_in_files(files: &[(&str, &str)], name: &str) -> Option<String> {
+    files
+        .iter()
+        .find(|(path, _)| {
+            Path::new(path).file_name().and_then(|value| value.to_str()) == Some(name)
+        })
+        .map(|(path, _)| (*path).to_string())
+}
+
+fn command_hint(
+    command: impl Into<String>,
+    kind: impl Into<String>,
+    source: impl Into<String>,
+) -> CommandHint {
+    CommandHint {
+        command: command.into(),
+        kind: kind.into(),
+        source: source.into(),
+    }
 }
 
 fn package_manager_command(has_file: &impl Fn(&str) -> bool) -> &'static str {
@@ -1387,23 +1434,36 @@ fn package_manager_command(has_file: &impl Fn(&str) -> bool) -> &'static str {
     }
 }
 
-fn package_json_commands(package_json: &str, package_manager: &str) -> Vec<String> {
+fn package_json_command_hints(
+    package_json: &str,
+    package_manager: &str,
+    source: &str,
+) -> Vec<CommandHint> {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(package_json) else {
-        return vec![format!("{package_manager} test")];
+        return vec![command_hint(
+            format!("{package_manager} test"),
+            "test",
+            source,
+        )];
     };
     let Some(scripts) = value.get("scripts").and_then(|value| value.as_object()) else {
-        return vec![format!("{package_manager} test")];
+        return vec![command_hint(
+            format!("{package_manager} test"),
+            "test",
+            source,
+        )];
     };
 
     ["test", "lint", "typecheck", "check", "build"]
         .into_iter()
         .filter(|script| scripts.contains_key(*script))
         .map(|script| {
-            if script == "test" {
+            let command = if script == "test" {
                 format!("{package_manager} test")
             } else {
                 format!("{package_manager} run {script}")
-            }
+            };
+            command_hint(command, script, source)
         })
         .collect()
 }

@@ -4,12 +4,13 @@ use crate::query::{merge_filters, normalize_phrase_text, parse_query, query_phra
 use crate::repo_index::{
     FileRange, QueryPlan, QueryPlanPosting, QueryPlanRepairHint, RankSignal, RelatedFile,
     RelatedSymbol, RepoBrief, RepoMap, SearchFilters, SearchResult, SnippetMode, Symbol,
-    apply_phrase_matches, best_snippet_for_path, extract_symbols, file_range_from_text,
-    filter_only_query, filter_only_search_result, finalize_results, is_entrypoint_path, is_ignored,
-    is_important_file, is_manifest_file, is_test_path, known_commands_from_manifest_texts,
-    language_for, matches_filters, normalize_token, regular_file_metadata, repo_map_seed_paths,
-    repo_matches, result_matches_all_tokens, result_matches_symbol_filters, round4,
-    score_filter_only_path, symbol_kind_rank, token_counts, tokenize,
+    apply_phrase_matches, best_snippet_for_path, command_hints_from_manifest_texts,
+    extract_symbols, file_range_from_text, filter_only_query, filter_only_search_result,
+    finalize_results, is_entrypoint_path, is_ignored, is_important_file, is_manifest_file,
+    is_test_path, known_commands_from_hints, language_for, matches_filters, normalize_token,
+    regular_file_metadata, repo_map_seed_paths, repo_matches, result_matches_all_tokens,
+    result_matches_symbol_filters, round4, score_filter_only_path, symbol_kind_rank, token_counts,
+    tokenize,
 };
 use anyhow::{Context, Result};
 use ignore::WalkBuilder;
@@ -377,6 +378,9 @@ impl FastIndex {
         let related_symbols =
             self.repo_map_related_symbols(&entrypoints, &test_files, &top_symbols, 12);
 
+        let command_hints = command_hints_from_indexed_files(&self.files);
+        let known_commands = known_commands_from_hints(&command_hints);
+
         RepoMap {
             brief: RepoBrief {
                 root_name: self
@@ -386,7 +390,8 @@ impl FastIndex {
                     .unwrap_or_else(|| self.root.display().to_string()),
                 file_count: self.files.len(),
                 language_counts,
-                known_commands: known_commands_from_indexed_files(&self.files),
+                known_commands,
+                command_hints,
                 manifest_files,
                 important_files,
             },
@@ -1731,8 +1736,8 @@ fn counted_terms(counts: &HashMap<String, usize>) -> Vec<TermCount> {
     terms
 }
 
-fn known_commands_from_indexed_files(files: &[IndexedPath]) -> Vec<String> {
-    known_commands_from_manifest_texts(
+fn command_hints_from_indexed_files(files: &[IndexedPath]) -> Vec<crate::repo_index::CommandHint> {
+    command_hints_from_manifest_texts(
         files
             .iter()
             .map(|file| (file.path.as_str(), file.content.as_str())),

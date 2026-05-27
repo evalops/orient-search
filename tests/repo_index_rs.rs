@@ -86,6 +86,15 @@ def test_issue_token_round_trip():
             .known_commands
             .contains(&"pnpm run typecheck".to_string())
     );
+    assert!(brief.command_hints.iter().any(|hint| {
+        hint.command == "pnpm test" && hint.kind == "test" && hint.source == "package.json"
+    }));
+    assert!(brief.command_hints.iter().any(|hint| {
+        hint.command == "pnpm run lint" && hint.kind == "lint" && hint.source == "package.json"
+    }));
+    assert!(brief.command_hints.iter().any(|hint| {
+        hint.command == "pytest" && hint.kind == "test" && hint.source == "pyproject.toml"
+    }));
     assert!(brief.manifest_files.contains(&"pyproject.toml".to_string()));
     assert!(
         brief

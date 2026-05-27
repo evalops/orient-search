@@ -349,6 +349,9 @@ fn cli_outputs_repo_map_and_reads_ranges() {
         .success()
         .stdout(predicate::str::contains("\"entrypoints\""))
         .stdout(predicate::str::contains("\"manifest_files\""))
+        .stdout(predicate::str::contains("\"command_hints\""))
+        .stdout(predicate::str::contains("\"command\":\"cargo test\""))
+        .stdout(predicate::str::contains("\"source\":\"Cargo.toml\""))
         .stdout(predicate::str::contains("\"related_files\""))
         .stdout(predicate::str::contains("\"related_symbols\""))
         .stdout(predicate::str::contains("src/auth.rs"))
@@ -984,6 +987,10 @@ fn cli_builds_and_searches_shard_directory() {
         )))
         .stdout(predicate::str::contains(&format!(
             "\"manifest_files\":[\"{billing_name}/Cargo.toml\"]"
+        )))
+        .stdout(predicate::str::contains("\"command_hints\""))
+        .stdout(predicate::str::contains(&format!(
+            "\"source\":\"{billing_name}/Cargo.toml\""
         )))
         .stdout(predicate::str::contains(&format!(
             "\"path\":\"{billing_name}/src/billing.rs\""

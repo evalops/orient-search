@@ -228,6 +228,12 @@ fn indexed_repo_map_returns_orientation_from_persisted_metadata() {
             .known_commands
             .contains(&"yarn run build".to_string())
     );
+    assert!(map.brief.command_hints.iter().any(|hint| {
+        hint.command == "yarn test" && hint.kind == "test" && hint.source == "package.json"
+    }));
+    assert!(map.brief.command_hints.iter().any(|hint| {
+        hint.command == "cargo test" && hint.kind == "test" && hint.source == "Cargo.toml"
+    }));
     assert_eq!(map.top_symbols[0].name, "SessionManager");
     assert!(
         map.related_files.iter().any(|related| {
