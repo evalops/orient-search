@@ -42,6 +42,7 @@ Implemented now:
 - CLI tools: `repo-map`, `index-map`, `shard-map`, `read-range`, `read-ranges`, `read-index-range`, `read-index-ranges`, `read-shard-ranges`, `index-symbol`, `shard-symbol`, `related-index`, `related-index-symbols`, `related-shard`, `related-shard-symbols`, and `related-symbols`, so agents can inspect entrypoints/tests/top symbols, open bounded file context, and jump to nearby definitions after a search hit.
 - `orient tool-manifest`: emits descriptions plus required/optional argument metadata for JSON-lines wrappers.
 - Search snippet modes: `short`, `medium`, `block`, and `symbol`.
+- Search results include structured `line_range` metadata derived from numbered snippets, allowing direct read-range follow-up calls.
 - Path, file, repo, extension, language, and symbol filters match case-insensitively across fallback, indexed, and shard search surfaces.
 - Optional structured ranking explanations with path/content/term-frequency/symbol signals.
 - Indexed explain mode includes query-plan metadata: planner strategy, normalized tokens/trigrams, rarest planned posting lists, and candidate count.
@@ -62,12 +63,12 @@ Implemented now:
 
 Measured on this machine:
 
-- Wide tree fallback: `/Users/jonathanhaas/Documents/Projects`, common top-10 literal/token queries at `20-33ms` p95 after warmup across the sampled runs.
+- Wide tree fallback: `/Users/jonathanhaas/Documents/Projects`, common top-10 literal/token queries at `22-31ms` p95 after warmup across the sampled runs.
 - Local repo fallback: query `indexed search symbol filters`, top 10 at about `12.5ms` p95 after warmup.
 - Hot-path fallback has a `250ms` wall-clock timeout plus match caps; if the timeout fires it returns partial results instead of blocking the agent.
 - Local repo index build: about `0.25s`.
 - Local repo refresh after build: reuses unchanged files and rebuilds postings from per-file term lists.
-- Local repo indexed search: query `indexed search symbol filters`, top 10 at about `0.18ms` p95 after warmup.
+- Local repo indexed search: query `indexed search symbol filters`, top 10 at about `0.39ms` p95 after warmup.
 
 ## Exit Conditions
 

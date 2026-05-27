@@ -280,6 +280,8 @@ fn indexed_search_supports_line_offsets_and_snippet_modes() {
     assert_eq!(short[0].path, "src/auth.rs");
     assert_eq!(short[0].snippet.lines().count(), 1);
     assert!(short[0].snippet.contains("4:"));
+    assert_eq!(short[0].line_range.as_ref().unwrap().start_line, 4);
+    assert_eq!(short[0].line_range.as_ref().unwrap().end_line, 4);
 
     let block = index
         .search_filtered(
@@ -293,6 +295,8 @@ fn indexed_search_supports_line_offsets_and_snippet_modes() {
         .unwrap();
     assert!(block[0].snippet.contains("1: pub struct SessionManager;"));
     assert!(block[0].snippet.contains("7: }"));
+    assert_eq!(block[0].line_range.as_ref().unwrap().start_line, 1);
+    assert_eq!(block[0].line_range.as_ref().unwrap().end_line, 7);
 
     let symbol = index
         .search_filtered(
@@ -309,6 +313,7 @@ fn indexed_search_supports_line_offsets_and_snippet_modes() {
             .snippet
             .starts_with("1: pub struct SessionManager;")
     );
+    assert_eq!(symbol[0].line_range.as_ref().unwrap().start_line, 1);
 }
 
 #[test]
@@ -428,6 +433,8 @@ fn search_explain_mode_returns_structured_rank_signals() {
             .iter()
             .any(|signal| signal.kind == "symbol_exact" && signal.value == "SessionManager")
     );
+    assert_eq!(fallback[0].line_range.as_ref().unwrap().start_line, 1);
+    assert_eq!(fallback[0].line_range.as_ref().unwrap().end_line, 1);
 
     let index = FastIndex::build(repo.path()).unwrap();
     let indexed = index
@@ -446,6 +453,8 @@ fn search_explain_mode_returns_structured_rank_signals() {
             .iter()
             .any(|signal| signal.kind == "symbol_exact" && signal.value == "SessionManager")
     );
+    assert_eq!(indexed[0].line_range.as_ref().unwrap().start_line, 1);
+    assert_eq!(indexed[0].line_range.as_ref().unwrap().end_line, 2);
     let plan = indexed[0].query_plan.as_ref().unwrap();
     assert_eq!(plan.strategy, "posting_intersection");
     assert_eq!(plan.query_tokens, vec!["session", "manager"]);

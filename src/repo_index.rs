@@ -42,6 +42,8 @@ pub struct SearchResult {
     pub reason: String,
     pub snippet: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line_range: Option<ResultLineRange>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub explanation: Option<Vec<RankSignal>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub query_plan: Option<QueryPlan>,
@@ -54,6 +56,12 @@ pub struct RankSignal {
     pub kind: String,
     pub value: String,
     pub score: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResultLineRange {
+    pub start_line: usize,
+    pub end_line: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -584,6 +592,7 @@ fn merge_match_result(
             score: round4(score),
             reason: format!("matched {}", reasons.join(", ")),
             snippet,
+            line_range: None,
             explanation: explain.then_some(signals),
             query_plan: None,
             duplicate_group: None,
@@ -727,6 +736,7 @@ impl RepoIndex {
                     score: round4(score),
                     reason: format!("matched {}", reasons.join(", ")),
                     snippet: best_snippet(&file.text, &query_tokens),
+                    line_range: None,
                     explanation: None,
                     query_plan: None,
                     duplicate_group: None,
@@ -1201,6 +1211,7 @@ fn score_text_file(
         score: round4(score),
         reason: format!("matched {}", reasons.join(", ")),
         snippet: best_snippet_for_path(path, text, query_tokens, snippet_mode),
+        line_range: None,
         explanation: explain.then_some(signals),
         query_plan: None,
         duplicate_group: None,
@@ -1404,6 +1415,9 @@ pub(crate) fn finalize_results(mut results: Vec<SearchResult>, limit: usize) -> 
         if let Some(signals) = result.explanation.take() {
             result.explanation = Some(compact_rank_signals(signals));
         }
+        if result.line_range.is_none() {
+            result.line_range = line_range_from_snippet(&result.snippet);
+        }
     }
 
     results.sort_by(|a, b| {
@@ -1465,6 +1479,25 @@ fn compact_rank_signals(signals: Vec<RankSignal>) -> Vec<RankSignal> {
     });
     signals.truncate(16);
     signals
+}
+
+fn line_range_from_snippet(snippet: &str) -> Option<ResultLineRange> {
+    let mut start_line = usize::MAX;
+    let mut end_line = 0usize;
+    for line in snippet.lines() {
+        let Some(number) = line
+            .split_once(':')
+            .and_then(|(prefix, _)| prefix.trim().parse::<usize>().ok())
+        else {
+            continue;
+        };
+        start_line = start_line.min(number);
+        end_line = end_line.max(number);
+    }
+    (end_line > 0).then_some(ResultLineRange {
+        start_line,
+        end_line,
+    })
 }
 
 pub(crate) fn matches_filters(path: &str, filters: &SearchFilters) -> bool {

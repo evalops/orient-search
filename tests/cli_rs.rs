@@ -330,6 +330,7 @@ fn cli_searches_symbols_and_related_files() {
         .success()
         .stdout(predicate::str::contains("src/auth.rs"))
         .stdout(predicate::str::contains("SessionManager"))
+        .stdout(predicate::str::contains("\"line_range\""))
         .stdout(predicate::str::contains("\"explanation\""));
 
     let mut symbol = Command::cargo_bin("orient").unwrap();

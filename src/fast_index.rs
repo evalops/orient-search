@@ -813,6 +813,7 @@ impl FastIndex {
             score: round4(score),
             reason: format!("indexed match {}", reasons.join(", ")),
             snippet,
+            line_range: None,
             explanation: explain.then_some(signals),
             query_plan: query_plan.cloned(),
             duplicate_group: None,

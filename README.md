@@ -220,6 +220,8 @@ Search tools and CLI commands accept `--snippet <mode>` or JSON `"snippet":"<mod
 
 Indexed search persists line-offset tables in the binary index and uses them to render bounded snippets without reparsing the file into an in-memory repo index.
 
+Every search result with a numbered snippet includes a `line_range` object with `start_line` and `end_line`, so agents can immediately call `read-range`, `read-index-range`, or `read-shard-range` without scraping snippet text.
+
 ## Ranking Explanations
 
 Search commands and JSON-lines tools accept `--explain` or JSON `"explain":true`. Normal output stays compact; explain mode adds an `explanation` array to each result with structured ranking signals such as:
@@ -257,9 +259,9 @@ Product impact criteria for follow-up adoption:
 Current search baseline:
 
 - `orient bench-search --repo . "indexed search symbol filters"`: `9.413ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "session token auth"`: `19.649ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "browser session implementation"`: `19.859ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "postgres migration user"`: `32.984ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "session token auth"`: `22.141ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "browser session implementation"`: `22.407ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "postgres migration user"`: `30.535ms` p95 after warmup.
 - The `rg` hot path has a `250ms` wall-clock timeout plus a bounded match cap; timed-out searches return partial results rather than hanging.
 - `orient index --repo . --output /tmp/orient-self.index`: versioned binary index with file metadata, content token postings, path token postings, trigram postings, line offsets, and symbol boosts.
 - `orient discover-repos --root /Users/jonathanhaas/Documents/Projects --max-depth 4 --limit 200`: finds git or manifest-backed repo roots while skipping dependency/build directories and prioritizing visible canonical repos ahead of dated split, temp, and worktree folders when limits are small.
@@ -271,11 +273,12 @@ Current search baseline:
 - `orient related-shard --index-dir /tmp/orient-shards maestro/src/app.rs`: returns nearby source/test files from the same shard alias scope.
 - `orient related-shard-symbols --index-dir /tmp/orient-shards maestro/src/app.rs --query "app server"`: returns nearby definitions from the same shard alias scope.
 - `orient related-index` and `orient related-index-symbols`: return nearby files and definitions directly from persisted index metadata, without rebuilding a live repo scan.
+- Search results include structured `line_range` metadata for direct read-range follow-up calls.
 - `orient refresh-shards --index-dir /tmp/orient-shards`: refreshes each shard incrementally, reusing unchanged file metadata and postings per repo, and refreshes nested repo aliases.
 - `orient refresh-index --repo . --index /tmp/orient-self.index`: reuses unchanged files and refreshes changed/deleted files.
 - `orient index-map --index /tmp/orient-self.index`: returns repo-map orientation directly from the persistent index without rebuilding a live repo scan.
 - `orient shard-map --index-dir /tmp/orient-shards`: returns repo-prefixed repo maps for local multi-repo shard directories.
-- `orient bench-search --repo . --index /tmp/orient-self.index "indexed search symbol filters"`: `0.181ms` p95 after warmup.
+- `orient bench-search --repo . --index /tmp/orient-self.index "indexed search symbol filters"`: `0.390ms` p95 after warmup.
 
 Benchmark methodology:
 
