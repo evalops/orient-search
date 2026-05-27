@@ -57,3 +57,22 @@ fn cli_searches_symbols_and_related_files() {
         .success()
         .stdout(predicate::str::contains("\"kind\":\"struct\""));
 }
+
+#[test]
+fn cli_reports_jsonl_metrics() {
+    let temp = tempfile::tempdir().unwrap();
+    write(
+        &temp.path().join(".codex/sample.jsonl"),
+        r#"
+{"type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"rg auth src\"}","call_id":"c1"}}
+{"type":"response_item","payload":{"type":"function_call_output","call_id":"c1","output":"Process exited with code 0\nOutput:\nsrc/auth.py"}}
+"#,
+    );
+
+    let mut cmd = Command::cargo_bin("orient").unwrap();
+    cmd.args(["metrics", "--root", temp.path().to_str().unwrap()])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"total_calls\":1"))
+        .stdout(predicate::str::contains("search_discovery"));
+}

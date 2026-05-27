@@ -1,6 +1,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use orient::repo_index::RepoIndexer;
+use orient::session_metrics::{scan_jsonl_roots, ScanOptions};
 use std::path::PathBuf;
 
 #[derive(Debug, Parser)]
@@ -38,6 +39,14 @@ enum Commands {
         #[arg(long, default_value_t = 10)]
         limit: usize,
     },
+    Metrics {
+        #[arg(long = "root", required = true)]
+        roots: Vec<PathBuf>,
+        #[arg(long)]
+        max_files: Option<usize>,
+        #[arg(long)]
+        max_file_mb: Option<u64>,
+    },
 }
 
 fn main() -> Result<()> {
@@ -58,6 +67,18 @@ fn main() -> Result<()> {
         Commands::Related { repo, path, limit } => {
             let index = RepoIndexer::new(repo).build()?;
             println!("{}", serde_json::to_string(&index.related_files(&path, limit))?);
+        }
+        Commands::Metrics {
+            roots,
+            max_files,
+            max_file_mb,
+        } => {
+            let metrics = scan_jsonl_roots(ScanOptions {
+                roots,
+                max_files,
+                max_file_bytes: max_file_mb.map(|mb| mb * 1024 * 1024),
+            })?;
+            println!("{}", serde_json::to_string(&metrics)?);
         }
     }
     Ok(())
