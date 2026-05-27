@@ -658,6 +658,90 @@ fn runtime_reuses_cached_shard_index_after_initial_load() {
 }
 
 #[test]
+fn runtime_reuses_cached_shard_manifest_after_initial_load() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/billing.rs"),
+        "pub fn invoice_total() -> usize { 42 }\n",
+    );
+    write(
+        &repo.path().join("Cargo.toml"),
+        "[package]\nname='billing'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    let shard_dir = tempfile::tempdir().unwrap();
+    let runtime = ToolRuntime::default();
+
+    let build = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("build"),
+        tool: "index_shards".to_string(),
+        arguments: serde_json::json!({
+            "repos": [repo.path()],
+            "output_dir": shard_dir.path()
+        }),
+    });
+    assert!(build.error.is_none(), "{:?}", build.error);
+    let shard_dir_canonical = shard_dir.path().canonicalize().unwrap();
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(shard_dir.path().join("manifest.json")).unwrap()).unwrap();
+    let shard_name = manifest["shards"][0]["name"].as_str().unwrap();
+
+    let first = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("first"),
+        tool: "search_shards".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": shard_dir.path(),
+            "query": "invoice total",
+            "limit": 3,
+            "require_all": true
+        }),
+    });
+    assert!(first.error.is_none(), "{:?}", first.error);
+    assert!(
+        serde_json::to_string(&first.result)
+            .unwrap()
+            .contains("src/billing.rs"),
+        "{:?}",
+        first.result
+    );
+
+    fs::remove_file(shard_dir.path().join("manifest.json")).unwrap();
+    let range = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("range"),
+        tool: "read_shard_range".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": shard_dir.path(),
+            "path": format!("{shard_name}/src/billing.rs"),
+            "start": 1,
+            "lines": 1
+        }),
+    });
+    assert!(range.error.is_none(), "{:?}", range.error);
+    assert!(
+        serde_json::to_string(&range.result)
+            .unwrap()
+            .contains("invoice_total"),
+        "{:?}",
+        range.result
+    );
+
+    let status = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("status"),
+        tool: "daemon_status".to_string(),
+        arguments: serde_json::json!({}),
+    });
+    let result = status.result.unwrap();
+    assert_eq!(result["cached_indexes"], serde_json::json!(1));
+    assert_eq!(result["cached_shard_manifests"], serde_json::json!(1));
+    assert!(
+        result["cached_shard_manifest_paths"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|path| path.as_str().unwrap() == shard_dir_canonical.to_str().unwrap())
+    );
+}
+
+#[test]
 fn runtime_warms_shards_by_tool_request() {
     let repo = tempfile::tempdir().unwrap();
     write(

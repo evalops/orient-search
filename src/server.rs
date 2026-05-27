@@ -6,9 +6,9 @@ use crate::repo_index::{
     finalize_results, normalize_token, read_file_range, search_repo_fast_filtered,
 };
 use crate::shards::{
-    ShardEntry, ShardRepoMap, ShardSearchScope, build_shards, ensure_shards,
+    ShardEntry, ShardManifest, ShardRepoMap, ShardSearchScope, build_shards, ensure_shards,
     filter_repo_map_by_prefix, filters_for_shard_scope, load_manifest, refresh_shards,
-    resolve_shard_path, shard_search_scopes,
+    resolve_shard_read_path, shard_search_scopes,
 };
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
@@ -93,6 +93,7 @@ pub fn dispatch(request: ToolRequest) -> ToolResponse {
 #[derive(Default)]
 pub struct ToolRuntime {
     indexes: Mutex<HashMap<PathBuf, Arc<IndexCacheEntry>>>,
+    shard_manifests: Mutex<HashMap<PathBuf, Arc<ShardManifest>>>,
 }
 
 struct IndexCacheEntry {
@@ -134,9 +135,9 @@ impl ToolRuntime {
     }
 
     pub fn warm_shards(&self, index_dir: PathBuf) -> Result<usize> {
-        let manifest = load_manifest(&index_dir)?;
+        let manifest = self.cached_shard_manifest(&index_dir)?;
         let mut warmed = 0usize;
-        for shard in manifest.shards {
+        for shard in &manifest.shards {
             self.warm_index(index_dir.join(&shard.index))?;
             warmed += 1;
         }
@@ -147,6 +148,13 @@ impl ToolRuntime {
         self.indexes
             .lock()
             .map(|indexes| indexes.values().filter(|entry| entry.is_ready()).count())
+            .unwrap_or(0)
+    }
+
+    pub fn cached_shard_manifest_count(&self) -> usize {
+        self.shard_manifests
+            .lock()
+            .map(|manifests| manifests.len())
             .unwrap_or(0)
     }
 
@@ -668,14 +676,14 @@ impl ToolRuntime {
                 let repos = shard_repos_from_arguments_required(&request.arguments)?;
                 let output_dir = path_arg(&request.arguments, "output_dir")?;
                 let stats = build_shards(&repos, output_dir)?;
-                self.clear_index_cache()?;
+                self.clear_runtime_caches()?;
                 Ok(serde_json::to_value(stats)?)
             }
             "ensure_shards" => {
                 let repos = shard_repos_from_arguments(&request.arguments)?;
                 let output_dir = path_arg(&request.arguments, "output_dir")?;
                 let stats = ensure_shards(&repos, &output_dir)?;
-                self.clear_index_cache()?;
+                self.clear_runtime_caches()?;
                 let warmed_indexes = self.warm_shards(output_dir)?;
                 Ok(json!({
                     "stats": stats,
@@ -686,7 +694,7 @@ impl ToolRuntime {
             "refresh_shards" => {
                 let index_dir = path_arg(&request.arguments, "index_dir")?;
                 let stats = refresh_shards(index_dir)?;
-                self.clear_index_cache()?;
+                self.clear_runtime_caches()?;
                 Ok(serde_json::to_value(stats)?)
             }
             "search_shards" => {
@@ -837,7 +845,9 @@ impl ToolRuntime {
             }
             "daemon_status" => Ok(json!({
                 "cached_indexes": self.cached_index_count(),
-                "cached_index_paths": self.cached_index_paths()
+                "cached_index_paths": self.cached_index_paths(),
+                "cached_shard_manifests": self.cached_shard_manifest_count(),
+                "cached_shard_manifest_paths": self.cached_shard_manifest_paths()
             })),
             "tool_manifest" => Ok(tool_manifest()),
             "list_tools" => Ok(json!([
@@ -969,10 +979,63 @@ impl ToolRuntime {
         paths
     }
 
-    fn clear_index_cache(&self) -> Result<()> {
+    fn cached_shard_manifest(&self, index_dir: &std::path::Path) -> Result<Arc<ShardManifest>> {
+        let key = canonical_cache_key(index_dir);
+        if let Some(manifest) = self
+            .shard_manifests
+            .lock()
+            .map_err(|_| anyhow!("shard manifest cache lock poisoned"))?
+            .get(&key)
+            .cloned()
+        {
+            return Ok(manifest);
+        }
+
+        let manifest = Arc::new(load_manifest(index_dir)?);
+        self.shard_manifests
+            .lock()
+            .map_err(|_| anyhow!("shard manifest cache lock poisoned"))?
+            .entry(key)
+            .or_insert_with(|| Arc::clone(&manifest));
+        Ok(manifest)
+    }
+
+    fn cached_shard_manifest_paths(&self) -> Vec<String> {
+        let mut paths = self
+            .shard_manifests
+            .lock()
+            .map(|manifests| {
+                manifests
+                    .keys()
+                    .map(|path| path.to_string_lossy().to_string())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        paths.sort();
+        paths
+    }
+
+    fn resolve_shard_path_cached(
+        &self,
+        index_dir: &std::path::Path,
+        path: &str,
+    ) -> Result<crate::shards::ResolvedShardRead> {
+        let manifest = self.cached_shard_manifest(index_dir)?;
+        let (prefix, relative_path) = path
+            .split_once('/')
+            .ok_or_else(|| anyhow!("shard path must be '<repo>/<path>'"))?;
+        resolve_shard_read_path(&manifest, prefix, relative_path)
+            .ok_or_else(|| anyhow!("unknown shard or alias: {prefix}"))
+    }
+
+    fn clear_runtime_caches(&self) -> Result<()> {
         self.indexes
             .lock()
             .map_err(|_| anyhow!("index cache lock poisoned"))?
+            .clear();
+        self.shard_manifests
+            .lock()
+            .map_err(|_| anyhow!("shard manifest cache lock poisoned"))?
             .clear();
         Ok(())
     }
@@ -985,13 +1048,14 @@ impl ToolRuntime {
         filters: &SearchFilters,
         context_lines: usize,
     ) -> Result<Vec<SearchResult>> {
-        let manifest = load_manifest(index_dir)?;
+        let manifest = self.cached_shard_manifest(index_dir)?;
         let parsed = parse_query(query);
         let filters = merge_filters(filters.clone(), parsed.filters);
         let shard_query = query_text(&parsed.terms, &filters);
         let jobs = manifest
             .shards
-            .into_iter()
+            .iter()
+            .cloned()
             .filter_map(|shard| {
                 let scopes = shard_search_scopes(&shard, &filters);
                 (!scopes.is_empty()).then_some(ShardSearchJob { shard, scopes })
@@ -1084,7 +1148,7 @@ impl ToolRuntime {
         start: usize,
         lines: usize,
     ) -> Result<crate::repo_index::FileRange> {
-        let resolved = resolve_shard_path(index_dir, path)?;
+        let resolved = self.resolve_shard_path_cached(index_dir, path)?;
         let index = self.cached_index(index_dir.join(&resolved.index))?;
         let mut range = index.read_range(&resolved.relative_path, start, lines)?;
         range.path = resolved.output_path(&range.path);
@@ -1097,7 +1161,7 @@ impl ToolRuntime {
         path: &str,
         limit: usize,
     ) -> Result<Vec<crate::repo_index::RelatedFile>> {
-        let resolved = resolve_shard_path(index_dir, path)?;
+        let resolved = self.resolve_shard_path_cached(index_dir, path)?;
         let index = self.cached_index(index_dir.join(&resolved.index))?;
         let mut related =
             index.related_files(&resolved.relative_path, limit.saturating_mul(4).max(10));
@@ -1116,7 +1180,7 @@ impl ToolRuntime {
         query: Option<&str>,
         limit: usize,
     ) -> Result<Vec<crate::repo_index::RelatedSymbol>> {
-        let resolved = resolve_shard_path(index_dir, path)?;
+        let resolved = self.resolve_shard_path_cached(index_dir, path)?;
         let index = self.cached_index(index_dir.join(&resolved.index))?;
         let mut related = index.related_symbols(
             Some(&resolved.relative_path),
@@ -1138,10 +1202,10 @@ impl ToolRuntime {
         test_limit: usize,
         filters: &SearchFilters,
     ) -> Result<Vec<ShardRepoMap>> {
-        let manifest = load_manifest(index_dir)?;
+        let manifest = self.cached_shard_manifest(index_dir)?;
         let mut maps = Vec::new();
-        for shard in manifest.shards {
-            let scopes = shard_search_scopes(&shard, filters);
+        for shard in &manifest.shards {
+            let scopes = shard_search_scopes(shard, filters);
             if scopes.is_empty() {
                 continue;
             }
@@ -1185,10 +1249,10 @@ impl ToolRuntime {
             return Ok(Vec::new());
         }
 
-        let manifest = load_manifest(index_dir)?;
+        let manifest = self.cached_shard_manifest(index_dir)?;
         let mut symbols = Vec::new();
-        for shard in manifest.shards {
-            let scopes = shard_search_scopes(&shard, filters);
+        for shard in &manifest.shards {
+            let scopes = shard_search_scopes(shard, filters);
             if scopes.is_empty() {
                 continue;
             }
