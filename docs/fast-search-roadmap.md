@@ -29,7 +29,7 @@ The Ceramic-level insight for this product is: agents already search, so the lev
 Implemented now:
 
 - `orient search`: fast `rg`-backed candidate collection with Rust-side scoring/snippets.
-- Agent-oriented query language for `file:`, `path:`, `lang:`, `ext:`, `symbol:`, `repo:`, `test:`, quoted literals, negative filters, and default multi-term AND behavior.
+- Agent-oriented query language for `file:`, `path:`, `lang:`, `ext:`, `symbol:`, `repo:`, `test:`, separator-normalized exact quoted phrases, negative filters, and default multi-term AND behavior.
 - `orient index`: persistent Rust content-token, path-token, and trigram posting index.
 - `orient refresh-index`: incremental refresh that reuses unchanged file metadata/terms, detects same-content renames, and refreshes changed files.
 - `orient indexed-search`: indexed query path.
@@ -48,7 +48,7 @@ Implemented now:
 - Path, file, repo, extension, language, and symbol filters match case-insensitively across fallback, indexed, and shard search surfaces.
 - JSON-lines search tools accept structured `exclude_*` filters as strings or arrays, so wrappers can express negative filters without query-string rewriting.
 - Optional structured ranking explanations with path/content/term-frequency/symbol signals.
-- Indexed explain mode includes query-plan metadata: planner strategy, normalized tokens/trigrams, rarest planned posting lists, and candidate count.
+- Indexed explain mode includes query-plan metadata: planner strategy, normalized tokens, exact phrases, trigrams, rarest planned posting lists, and candidate count.
 - Indexed search plans candidates from the rarest content/path token postings, falling back to rare trigram postings for substring queries.
 - Indexed files persist line-offset and token-to-line tables for bounded snippet rendering and exact match-line metadata.
 - Result de-duping and grouping for repeated worktree copies using normalized path suffixes and snippet signatures, with compact duplicate metadata on the kept result.
@@ -67,12 +67,12 @@ Implemented now:
 
 Measured on this machine:
 
-- Wide tree fallback: `/Users/jonathanhaas/Documents/Projects`, common top-10 literal/token queries at `19-31ms` p95 after warmup across the sampled runs.
+- Wide tree fallback: `/Users/jonathanhaas/Documents/Projects`, common top-10 literal/token queries at `18-26ms` p95 after warmup across the sampled runs.
 - Local repo fallback: query `indexed search symbol filters`, top 10 at about `12.5ms` p95 after warmup.
 - Hot-path fallback has a `250ms` wall-clock timeout plus match caps; if the timeout fires it returns partial results instead of blocking the agent.
 - Local repo index build: about `0.25s`.
 - Local repo refresh after build: reuses unchanged files, reuses same-content renames by retargeting path-derived postings, and rebuilds postings from per-file term lists.
-- Local repo indexed search: query `indexed search symbol filters`, top 10 at about `0.62ms` p95 after warmup.
+- Local repo indexed search: query `indexed search symbol filters`, top 10 at about `0.86ms` p95 after warmup.
 
 ## Exit Conditions
 
@@ -86,7 +86,7 @@ High-performance definition:
 
 Search quality definition:
 
-- Query support covers literals, multi-token AND semantics, path filters, extension/language filters, and exact-symbol boosts.
+- Query support covers literals, separator-normalized exact quoted phrases, multi-token AND semantics, path filters, extension/language filters, and exact-symbol boosts.
 - Snippets include line numbers, exact match-line metadata, and enough context for an agent to decide whether to read/edit.
 - Search surfaces can optionally attach bounded read-range context to each hit when an agent wants fewer follow-up calls.
 - Explain mode returns structured ranking signals when an agent needs to compare close results.

@@ -1,6 +1,6 @@
 //! Repo orientation index.
 
-use crate::query::{merge_filters, parse_query, query_text};
+use crate::query::{merge_filters, normalize_phrase_text, parse_query, query_phrases, query_text};
 use anyhow::Result;
 use ignore::WalkBuilder;
 use regex::Regex;
@@ -74,6 +74,7 @@ pub struct QueryPlan {
     pub strategy: String,
     pub require_all: bool,
     pub query_tokens: Vec<String>,
+    pub query_phrases: Vec<String>,
     pub query_trigrams: Vec<String>,
     pub planned_postings: Vec<QueryPlanPosting>,
     pub candidate_count: usize,
@@ -262,6 +263,7 @@ pub fn search_repo_fast_filtered_with_timeout(
 ) -> Result<Vec<SearchResult>> {
     let root = root.as_ref().canonicalize()?;
     let parsed = parse_query(query);
+    let query_phrases = query_phrases(&parsed.terms);
     let mut filters = merge_filters(filters.clone(), parsed.filters);
     if !repo_matches(&root, &filters) {
         return Ok(Vec::new());
@@ -275,16 +277,24 @@ pub fn search_repo_fast_filtered_with_timeout(
         filters.require_all = true;
     }
 
-    if let Some(results) = search_repo_ripgrep(&root, &query_tokens, limit, &filters, timeout)? {
+    if let Some(results) = search_repo_ripgrep(
+        &root,
+        &query_tokens,
+        &query_phrases,
+        limit,
+        &filters,
+        timeout,
+    )? {
         return Ok(results);
     }
 
-    search_repo_streaming(&root, &query_tokens, limit, &filters)
+    search_repo_streaming(&root, &query_tokens, &query_phrases, limit, &filters)
 }
 
 fn search_repo_ripgrep(
     root: &Path,
     query_tokens: &[String],
+    query_phrases: &[String],
     limit: usize,
     filters: &SearchFilters,
     timeout: Duration,
@@ -326,6 +336,9 @@ fn search_repo_ripgrep(
 
     for token in query_tokens {
         command.arg("-e").arg(token);
+    }
+    for phrase in query_phrases {
+        command.arg("-e").arg(phrase);
     }
     command.arg(".");
 
@@ -415,6 +428,7 @@ fn search_repo_ripgrep(
             text,
             line_number,
             query_tokens,
+            query_phrases,
             true,
             filters.snippet,
             filters.explain,
@@ -431,6 +445,9 @@ fn search_repo_ripgrep(
     if filters.require_all {
         results.retain(|result| result_matches_all_tokens(result, query_tokens));
     }
+    if !query_phrases.is_empty() {
+        results.retain(|result| result_or_file_matches_phrases(root, result, query_phrases));
+    }
     results.retain(|result| result_matches_symbol_filters(result, filters));
     Ok(Some(finalize_results(results, limit)))
 }
@@ -438,6 +455,7 @@ fn search_repo_ripgrep(
 fn search_repo_streaming(
     root: &Path,
     query_tokens: &[String],
+    query_phrases: &[String],
     limit: usize,
     filters: &SearchFilters,
 ) -> Result<Vec<SearchResult>> {
@@ -472,6 +490,7 @@ fn search_repo_streaming(
             &rel,
             &text,
             &query_tokens,
+            query_phrases,
             true,
             filters.snippet,
             filters.explain,
@@ -494,6 +513,7 @@ fn merge_match_result(
     line: &str,
     line_number: u64,
     query_tokens: &[String],
+    query_phrases: &[String],
     parse_symbols: bool,
     snippet_mode: SnippetMode,
     explain: bool,
@@ -504,12 +524,26 @@ fn merge_match_result(
     let mut score = 0.0;
     let mut reasons = Vec::new();
     let mut signals = Vec::new();
-    let match_lines =
-        if line_number > 0 && query_tokens.iter().any(|token| line_lower.contains(token)) {
-            vec![line_number as usize]
-        } else {
-            Vec::new()
-        };
+    let _ = apply_phrase_matches(
+        &path_lower,
+        &line_lower,
+        query_phrases,
+        "line_phrase",
+        12.0,
+        &mut score,
+        &mut reasons,
+        &mut signals,
+    );
+    let match_lines = if line_number > 0
+        && (query_tokens.iter().any(|token| line_lower.contains(token))
+            || query_phrases
+                .iter()
+                .any(|phrase| line_lower.contains(phrase)))
+    {
+        vec![line_number as usize]
+    } else {
+        Vec::new()
+    };
 
     for token in query_tokens {
         let mut token_score = 0.0;
@@ -751,7 +785,7 @@ impl RepoIndex {
                     reason: format!("matched {}", reasons.join(", ")),
                     snippet: best_snippet(&file.text, &query_tokens),
                     line_range: None,
-                    match_lines: match_lines_from_text(&file.text, &query_tokens, 16),
+                    match_lines: match_lines_from_text(&file.text, &query_tokens, &[], 16),
                     explanation: None,
                     query_plan: None,
                     duplicate_group: None,
@@ -1255,6 +1289,7 @@ fn score_text_file(
     path: &str,
     text: &str,
     query_tokens: &[String],
+    query_phrases: &[String],
     parse_symbols: bool,
     snippet_mode: SnippetMode,
     explain: bool,
@@ -1265,6 +1300,18 @@ fn score_text_file(
     let mut score = 0.0;
     let mut reasons = Vec::new();
     let mut signals = Vec::new();
+    if !apply_phrase_matches(
+        &path_lower,
+        &text_lower,
+        query_phrases,
+        "content_phrase",
+        16.0,
+        &mut score,
+        &mut reasons,
+        &mut signals,
+    ) {
+        return None;
+    }
 
     for token in query_tokens {
         let mut token_score = 0.0;
@@ -1308,7 +1355,7 @@ fn score_text_file(
         reason: format!("matched {}", reasons.join(", ")),
         snippet: best_snippet_for_path(path, text, query_tokens, snippet_mode),
         line_range: None,
-        match_lines: match_lines_from_text(text, query_tokens, 16),
+        match_lines: match_lines_from_text(text, query_tokens, query_phrases, 16),
         explanation: explain.then_some(signals),
         query_plan: None,
         duplicate_group: None,
@@ -1367,6 +1414,75 @@ fn apply_symbol_boost(
             signals,
         );
     }
+}
+
+pub(crate) fn apply_phrase_matches(
+    path_lower: &str,
+    content_lower: &str,
+    query_phrases: &[String],
+    content_signal_kind: &str,
+    content_score: f64,
+    score: &mut f64,
+    reasons: &mut Vec<String>,
+    signals: &mut Vec<RankSignal>,
+) -> bool {
+    if query_phrases.is_empty() {
+        return true;
+    }
+    let path_phrase_text = normalize_phrase_text(path_lower);
+    let content_phrase_text = normalize_phrase_text(content_lower);
+    let matches = query_phrases
+        .iter()
+        .map(|phrase| {
+            (
+                phrase,
+                path_phrase_text.contains(phrase),
+                content_phrase_text.contains(phrase),
+            )
+        })
+        .collect::<Vec<_>>();
+    if matches
+        .iter()
+        .any(|(_, path_match, content_match)| !path_match && !content_match)
+    {
+        return false;
+    }
+    for (phrase, path_match, content_match) in matches {
+        let reason = format!("phrase:{phrase}");
+        if !reasons.contains(&reason) {
+            reasons.push(reason);
+        }
+        if path_match {
+            *score += 10.0;
+            signals.push(rank_signal("path_phrase", phrase, 10.0));
+        }
+        if content_match {
+            *score += content_score;
+            signals.push(rank_signal(content_signal_kind, phrase, content_score));
+        }
+    }
+    true
+}
+
+fn result_or_file_matches_phrases(
+    root: &Path,
+    result: &SearchResult,
+    query_phrases: &[String],
+) -> bool {
+    let result_text = normalize_phrase_text(&format!("{}\n{}", result.path, result.snippet));
+    if query_phrases
+        .iter()
+        .all(|phrase| result_text.contains(phrase))
+    {
+        return true;
+    }
+    fs::read_to_string(root.join(&result.path))
+        .ok()
+        .map(|text| {
+            let text = normalize_phrase_text(&text);
+            query_phrases.iter().all(|phrase| text.contains(phrase))
+        })
+        .unwrap_or(false)
 }
 
 fn apply_symbol_match(
@@ -1572,15 +1688,21 @@ pub(crate) fn finalize_results(mut results: Vec<SearchResult>, limit: usize) -> 
 pub(crate) fn match_lines_from_text(
     text: &str,
     query_tokens: &[String],
+    query_phrases: &[String],
     limit: usize,
 ) -> Vec<usize> {
-    if query_tokens.is_empty() || limit == 0 {
+    if (query_tokens.is_empty() && query_phrases.is_empty()) || limit == 0 {
         return Vec::new();
     }
     let mut lines = Vec::new();
     for (index, line) in text.lines().enumerate() {
         let line_lower = line.to_lowercase();
-        if query_tokens.iter().any(|token| line_lower.contains(token)) {
+        let phrase_line = normalize_phrase_text(line);
+        if query_tokens.iter().any(|token| line_lower.contains(token))
+            || query_phrases
+                .iter()
+                .any(|phrase| phrase_line.contains(phrase))
+        {
             lines.push(index + 1);
             if lines.len() >= limit {
                 break;

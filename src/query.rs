@@ -1,4 +1,4 @@
-use crate::repo_index::SearchFilters;
+use crate::repo_index::{SearchFilters, tokenize};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedQuery {
@@ -125,6 +125,37 @@ pub fn query_text(terms: &[String], filters: &SearchFilters) -> String {
     pieces.join(" ")
 }
 
+pub fn query_phrases(terms: &[String]) -> Vec<String> {
+    let mut phrases = terms
+        .iter()
+        .map(|term| normalize_phrase_text(term))
+        .filter(|term| term.chars().any(char::is_whitespace) && tokenize(term).len() > 1)
+        .collect::<Vec<_>>();
+    phrases.sort();
+    phrases.dedup();
+    phrases
+}
+
+pub(crate) fn normalize_phrase_text(input: &str) -> String {
+    let mut normalized = String::new();
+    let mut last_was_space = true;
+    for ch in input.chars() {
+        if ch.is_alphanumeric() {
+            for lower in ch.to_lowercase() {
+                normalized.push(lower);
+            }
+            last_was_space = false;
+        } else if !last_was_space {
+            normalized.push(' ');
+            last_was_space = true;
+        }
+    }
+    if normalized.ends_with(' ') {
+        normalized.pop();
+    }
+    normalized
+}
+
 pub fn merge_filters(mut base: SearchFilters, parsed: SearchFilters) -> SearchFilters {
     if parsed.file.is_some() {
         base.file = parsed.file;
@@ -171,6 +202,7 @@ mod tests {
         assert_eq!(parsed.filters.language.as_deref(), Some("rust"));
         assert_eq!(parsed.filters.exclude_path, vec!["docs"]);
         assert_eq!(parsed.filters.test, Some(false));
+        assert_eq!(query_phrases(&parsed.terms), vec!["issue token"]);
     }
 
     #[test]

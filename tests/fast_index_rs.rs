@@ -343,6 +343,71 @@ fn query_language_filters_fallback_and_indexed_search() {
 }
 
 #[test]
+fn quoted_phrases_require_exact_matches_and_explain_phrase_signals() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/exact.rs"),
+        "pub fn connect() {\n    let message = \"database connection refused\";\n}\n",
+    );
+    write(
+        &repo.path().join("src/scattered.rs"),
+        "pub fn connect() {\n    let database = \"primary\";\n    let connection = \"pool\";\n    let refused = true;\n}\n",
+    );
+
+    let fallback = search_repo_fast_filtered(
+        repo.path(),
+        "\"database connection refused\"",
+        10,
+        &SearchFilters {
+            explain: true,
+            ..SearchFilters::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(fallback.len(), 1);
+    assert_eq!(fallback[0].path, "src/exact.rs");
+    assert!(
+        fallback[0]
+            .reason
+            .contains("phrase:database connection refused")
+    );
+    assert!(
+        fallback[0]
+            .explanation
+            .as_ref()
+            .unwrap()
+            .iter()
+            .any(|signal| signal.kind == "line_phrase")
+    );
+
+    let index = FastIndex::build(repo.path()).unwrap();
+    let indexed = index
+        .search_filtered(
+            "\"database connection refused\"",
+            10,
+            &SearchFilters {
+                explain: true,
+                ..SearchFilters::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(indexed.len(), 1);
+    assert_eq!(indexed[0].path, "src/exact.rs");
+    assert_eq!(
+        indexed[0].query_plan.as_ref().unwrap().query_phrases,
+        vec!["database connection refused"]
+    );
+    assert!(
+        indexed[0]
+            .explanation
+            .as_ref()
+            .unwrap()
+            .iter()
+            .any(|signal| signal.kind == "content_phrase")
+    );
+}
+
+#[test]
 fn indexed_search_supports_line_offsets_and_snippet_modes() {
     let repo = tempfile::tempdir().unwrap();
     write(

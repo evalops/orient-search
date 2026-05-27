@@ -1,13 +1,14 @@
 //! Persistent local search index for agent-oriented code retrieval.
 
-use crate::query::{merge_filters, parse_query, query_text};
+use crate::query::{merge_filters, normalize_phrase_text, parse_query, query_phrases, query_text};
 use crate::repo_index::{
     FileRange, QueryPlan, QueryPlanPosting, RankSignal, RelatedFile, RelatedSymbol, RepoBrief,
-    RepoMap, SearchFilters, SearchResult, SnippetMode, Symbol, best_snippet_for_path,
-    extract_symbols, file_range_from_text, finalize_results, is_entrypoint_path, is_ignored,
-    is_important_file, is_manifest_file, is_test_path, known_commands_from_manifest_texts,
-    language_for, matches_filters, normalize_token, repo_matches, result_matches_all_tokens,
-    result_matches_symbol_filters, round4, symbol_kind_rank, token_counts, tokenize,
+    RepoMap, SearchFilters, SearchResult, SnippetMode, Symbol, apply_phrase_matches,
+    best_snippet_for_path, extract_symbols, file_range_from_text, finalize_results,
+    is_entrypoint_path, is_ignored, is_important_file, is_manifest_file, is_test_path,
+    known_commands_from_manifest_texts, language_for, matches_filters, normalize_token,
+    repo_matches, result_matches_all_tokens, result_matches_symbol_filters, round4,
+    symbol_kind_rank, token_counts, tokenize,
 };
 use anyhow::{Context, Result};
 use ignore::WalkBuilder;
@@ -650,6 +651,7 @@ impl FastIndex {
         filters: &SearchFilters,
     ) -> Result<Vec<SearchResult>> {
         let parsed = parse_query(query);
+        let query_phrases = query_phrases(&parsed.terms);
         let mut filters = merge_filters(filters.clone(), parsed.filters);
         if !repo_matches(&self.root, &filters) {
             return Ok(Vec::new());
@@ -742,6 +744,7 @@ impl FastIndex {
         let query_plan = filters.explain.then(|| {
             indexed_query_plan(
                 &query_tokens,
+                &query_phrases,
                 &query_trigrams,
                 &token_postings,
                 &path_postings,
@@ -800,6 +803,7 @@ impl FastIndex {
                 self.score_file(
                     file_id,
                     &query_tokens,
+                    &query_phrases,
                     &posting_maps,
                     &path_maps,
                     &trigram_maps,
@@ -822,6 +826,7 @@ impl FastIndex {
         &self,
         file_id: u32,
         query_tokens: &[String],
+        query_phrases: &[String],
         posting_maps: &[(String, HashMap<u32, u16>)],
         path_maps: &[(String, HashMap<u32, u16>)],
         trigram_maps: &[(String, HashMap<u32, u16>)],
@@ -831,10 +836,23 @@ impl FastIndex {
     ) -> Option<SearchResult> {
         let file = self.files.get(file_id as usize)?;
         let path_lower = file.path.to_lowercase();
+        let content_lower = file.content.to_lowercase();
         let query_name = query_tokens.join("");
         let mut score = 0.0;
         let mut reasons = Vec::new();
         let mut signals = Vec::new();
+        if !apply_phrase_matches(
+            &path_lower,
+            &content_lower,
+            query_phrases,
+            "content_phrase",
+            16.0,
+            &mut score,
+            &mut reasons,
+            &mut signals,
+        ) {
+            return None;
+        }
 
         for (token, postings) in posting_maps {
             let count = postings.get(&file_id).copied().unwrap_or_default();
@@ -903,8 +921,8 @@ impl FastIndex {
             return None;
         }
 
-        let snippet = indexed_snippet(&self.root, file, query_tokens, snippet_mode);
-        let match_lines = indexed_match_lines(file, query_tokens, 16);
+        let snippet = indexed_snippet(&self.root, file, query_tokens, query_phrases, snippet_mode);
+        let match_lines = indexed_match_lines(file, query_tokens, query_phrases, 16);
 
         Some(SearchResult {
             path: file.path.clone(),
@@ -931,6 +949,7 @@ fn rank_signal(kind: &str, value: &str, score: f64) -> RankSignal {
 
 fn indexed_query_plan(
     query_tokens: &[String],
+    query_phrases: &[String],
     query_trigrams: &[String],
     token_postings: &[(&String, &Vec<Posting>)],
     path_postings: &[(&String, &Vec<Posting>)],
@@ -972,6 +991,7 @@ fn indexed_query_plan(
         },
         require_all,
         query_tokens: query_tokens.to_vec(),
+        query_phrases: query_phrases.to_vec(),
         query_trigrams: query_trigrams.to_vec(),
         planned_postings,
         candidate_count,
@@ -1090,8 +1110,13 @@ fn indexed_term_lines(text: &str) -> Vec<IndexedTermLines> {
     term_lines
 }
 
-fn indexed_match_lines(file: &IndexedPath, query_tokens: &[String], limit: usize) -> Vec<usize> {
-    if query_tokens.is_empty() || limit == 0 {
+fn indexed_match_lines(
+    file: &IndexedPath,
+    query_tokens: &[String],
+    query_phrases: &[String],
+    limit: usize,
+) -> Vec<usize> {
+    if (query_tokens.is_empty() && query_phrases.is_empty()) || limit == 0 {
         return Vec::new();
     }
     let mut lines = query_tokens
@@ -1105,6 +1130,17 @@ fn indexed_match_lines(file: &IndexedPath, query_tokens: &[String], limit: usize
         .flat_map(|lines| lines.iter().copied())
         .map(|line| line as usize)
         .collect::<Vec<_>>();
+    if !query_phrases.is_empty() {
+        for (index, line) in file.content.lines().enumerate() {
+            let line_lower = normalize_phrase_text(line);
+            if query_phrases
+                .iter()
+                .any(|phrase| line_lower.contains(phrase))
+            {
+                lines.push(index + 1);
+            }
+        }
+    }
     lines.sort_unstable();
     lines.dedup();
     lines.truncate(limit);
@@ -1154,6 +1190,7 @@ fn indexed_snippet(
     root: &Path,
     file: &IndexedPath,
     query_tokens: &[String],
+    query_phrases: &[String],
     mode: SnippetMode,
 ) -> String {
     let live_bytes = fs::read(root.join(&file.path)).ok().filter(|bytes| {
@@ -1184,7 +1221,8 @@ fn indexed_snippet(
         }
     }
 
-    if let Some(line) = first_matching_line(&bytes, &file.line_offsets, query_tokens) {
+    if let Some(line) = first_matching_line(&bytes, &file.line_offsets, query_tokens, query_phrases)
+    {
         return render_indexed_window(&bytes, &file.line_offsets, line, mode);
     }
 
@@ -1192,15 +1230,22 @@ fn indexed_snippet(
     best_snippet_for_path(&file.path, &text, query_tokens, mode)
 }
 
-fn first_matching_line(bytes: &[u8], offsets: &[u32], query_tokens: &[String]) -> Option<usize> {
+fn first_matching_line(
+    bytes: &[u8],
+    offsets: &[u32],
+    query_tokens: &[String],
+    query_phrases: &[String],
+) -> Option<usize> {
     offsets.iter().enumerate().find_map(|(index, offset)| {
         let start = *offset as usize;
         let end = line_end(bytes, offsets, index);
         let lowered = String::from_utf8_lossy(&bytes[start..end]).to_lowercase();
-        query_tokens
+        let phrase_text = normalize_phrase_text(&lowered);
+        (query_phrases
             .iter()
-            .any(|token| lowered.contains(token))
-            .then_some(index + 1)
+            .any(|phrase| phrase_text.contains(phrase))
+            || query_tokens.iter().any(|token| lowered.contains(token)))
+        .then_some(index + 1)
     })
 }
 
