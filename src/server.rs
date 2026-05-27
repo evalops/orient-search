@@ -214,6 +214,12 @@ pub fn tool_manifest() -> Value {
             "optional": ["start", "lines"]
         },
         {
+            "name": "read_ranges",
+            "description": "Read several bounded line ranges from repository-relative paths in one request.",
+            "required": ["repo", "ranges"],
+            "optional": []
+        },
+        {
             "name": "search_code",
             "description": "Search a local repository with the fast fallback path and return ranked snippets.",
             "required": ["repo", "query"],
@@ -230,6 +236,12 @@ pub fn tool_manifest() -> Value {
             "description": "Read a bounded line range from a persistent index result path.",
             "required": ["index", "path"],
             "optional": ["start", "lines"]
+        },
+        {
+            "name": "read_index_ranges",
+            "description": "Read several bounded line ranges from persistent index result paths in one request.",
+            "required": ["index", "ranges"],
+            "optional": []
         },
         {
             "name": "index_shards",
@@ -254,6 +266,12 @@ pub fn tool_manifest() -> Value {
             "description": "Read a bounded line range from a repo-prefixed shard search result path.",
             "required": ["index_dir", "path"],
             "optional": ["start", "lines"]
+        },
+        {
+            "name": "read_shard_ranges",
+            "description": "Read several bounded line ranges from repo-prefixed shard result paths in one request.",
+            "required": ["index_dir", "ranges"],
+            "optional": []
         },
         {
             "name": "shard_repo_map",
@@ -362,6 +380,20 @@ impl ToolRuntime {
                     repo, &path, start, lines,
                 )?)?)
             }
+            "read_ranges" => {
+                let repo = path_arg(&request.arguments, "repo")?;
+                let ranges = range_args(&request.arguments)?;
+                let mut results = Vec::new();
+                for range in ranges {
+                    results.push(read_file_range(
+                        &repo,
+                        &range.path,
+                        range.start,
+                        range.lines,
+                    )?);
+                }
+                Ok(serde_json::to_value(results)?)
+            }
             "search_code" => {
                 let repo = path_arg(&request.arguments, "repo")?;
                 let query = string_arg(&request.arguments, "query")?;
@@ -397,6 +429,21 @@ impl ToolRuntime {
                     lines,
                 )?)?)
             }
+            "read_index_ranges" => {
+                let index_path = path_arg(&request.arguments, "index")?;
+                let ranges = range_args(&request.arguments)?;
+                let index = self.cached_index(index_path)?;
+                let mut results = Vec::new();
+                for range in ranges {
+                    results.push(read_file_range(
+                        &index.root,
+                        &range.path,
+                        range.start,
+                        range.lines,
+                    )?);
+                }
+                Ok(serde_json::to_value(results)?)
+            }
             "index_shards" => {
                 let repos = shard_repos_from_arguments(&request.arguments)?;
                 let output_dir = path_arg(&request.arguments, "output_dir")?;
@@ -429,6 +476,20 @@ impl ToolRuntime {
                 Ok(serde_json::to_value(read_shard_range(
                     index_dir, &path, start, lines,
                 )?)?)
+            }
+            "read_shard_ranges" => {
+                let index_dir = path_arg(&request.arguments, "index_dir")?;
+                let ranges = range_args(&request.arguments)?;
+                let mut results = Vec::new();
+                for range in ranges {
+                    results.push(read_shard_range(
+                        &index_dir,
+                        &range.path,
+                        range.start,
+                        range.lines,
+                    )?);
+                }
+                Ok(serde_json::to_value(results)?)
             }
             "shard_repo_map" => {
                 let index_dir = path_arg(&request.arguments, "index_dir")?;
@@ -558,13 +619,16 @@ impl ToolRuntime {
                 "repo_map",
                 "indexed_repo_map",
                 "read_range",
+                "read_ranges",
                 "search_code",
                 "indexed_search_code",
                 "read_index_range",
+                "read_index_ranges",
                 "index_shards",
                 "refresh_shards",
                 "search_shards",
                 "read_shard_range",
+                "read_shard_ranges",
                 "shard_repo_map",
                 "find_shard_symbol",
                 "find_symbol",
@@ -835,6 +899,31 @@ fn optional_path_array_arg(arguments: &Value, name: &str) -> Result<Vec<PathBuf>
                 .ok_or_else(|| anyhow!("path array argument {name} must contain only strings"))
         })
         .collect()
+}
+
+struct RangeArg {
+    path: String,
+    start: usize,
+    lines: usize,
+}
+
+fn range_args(arguments: &Value) -> Result<Vec<RangeArg>> {
+    let values = arguments
+        .get("ranges")
+        .and_then(Value::as_array)
+        .ok_or_else(|| anyhow!("missing ranges array argument"))?;
+    let mut ranges = Vec::with_capacity(values.len());
+    for value in values {
+        let path = value
+            .get("path")
+            .and_then(Value::as_str)
+            .map(String::from)
+            .ok_or_else(|| anyhow!("range entry must include string path"))?;
+        let start = value.get("start").and_then(Value::as_u64).unwrap_or(1) as usize;
+        let lines = value.get("lines").and_then(Value::as_u64).unwrap_or(80) as usize;
+        ranges.push(RangeArg { path, start, lines });
+    }
+    Ok(ranges)
 }
 
 fn shard_repos_from_arguments(arguments: &Value) -> Result<Vec<PathBuf>> {

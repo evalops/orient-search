@@ -45,6 +45,9 @@ fn server_reports_tool_manifest_for_agent_wrappers() {
     assert!(stdout.contains("\"name\":\"search_code\""));
     assert!(stdout.contains("\"required\":[\"repo\",\"query\"]"));
     assert!(stdout.contains("\"optional\""));
+    assert!(stdout.contains("read_ranges"));
+    assert!(stdout.contains("read_index_ranges"));
+    assert!(stdout.contains("read_shard_ranges"));
     assert!(stdout.contains("read_index_range"));
     assert!(stdout.contains("indexed_repo_map"));
     assert!(stdout.contains("find_index_symbol"));
@@ -822,6 +825,17 @@ fn server_handles_indexed_search_request() {
             "lines": 2
         }
     });
+    let read_ranges_request = serde_json::json!({
+        "id": "read-index-ranges",
+        "tool": "read_index_ranges",
+        "arguments": {
+            "index": index_path,
+            "ranges": [
+                {"path": "src/auth.rs", "start": 1, "lines": 1},
+                {"path": "tests/auth_test.rs", "start": 1, "lines": 2}
+            ]
+        }
+    });
     let symbol_request = serde_json::json!({
         "id": "find-index-symbol",
         "tool": "find_index_symbol",
@@ -861,6 +875,7 @@ fn server_handles_indexed_search_request() {
     });
     writeln!(child.stdin.as_mut().unwrap(), "{request}").unwrap();
     writeln!(child.stdin.as_mut().unwrap(), "{read_request}").unwrap();
+    writeln!(child.stdin.as_mut().unwrap(), "{read_ranges_request}").unwrap();
     writeln!(child.stdin.as_mut().unwrap(), "{symbol_request}").unwrap();
     writeln!(child.stdin.as_mut().unwrap(), "{map_request}").unwrap();
     writeln!(child.stdin.as_mut().unwrap(), "{related_request}").unwrap();
@@ -875,6 +890,8 @@ fn server_handles_indexed_search_request() {
     assert!(stdout.contains("\"id\":\"read-index-range\""));
     assert!(stdout.contains("\"path\":\"src/auth.rs\""));
     assert!(stdout.contains("issue_token"));
+    assert!(stdout.contains("\"id\":\"read-index-ranges\""));
+    assert!(stdout.contains("\"path\":\"tests/auth_test.rs\""));
     assert!(stdout.contains("\"id\":\"find-index-symbol\""));
     assert!(stdout.contains("\"kind\":\"struct\""));
     assert!(stdout.contains("\"id\":\"indexed-repo-map\""));
@@ -956,6 +973,17 @@ fn server_handles_shard_index_search_and_read_requests() {
             "lines": 1
         }
     });
+    let read_ranges_request = serde_json::json!({
+        "id": "read-shard-ranges",
+        "tool": "read_shard_ranges",
+        "arguments": {
+            "index_dir": parent.path().join(".orient-shards"),
+            "ranges": [
+                {"path": "billing/src/billing.rs", "start": 1, "lines": 1},
+                {"path": "billing/tests/billing_test.rs", "start": 1, "lines": 2}
+            ]
+        }
+    });
     let symbol_request = serde_json::json!({
         "id": "find-shard-symbol",
         "tool": "find_shard_symbol",
@@ -1000,6 +1028,7 @@ fn server_handles_shard_index_search_and_read_requests() {
     writeln!(child.stdin.as_mut().unwrap(), "{symbol_request}").unwrap();
     writeln!(child.stdin.as_mut().unwrap(), "{map_request}").unwrap();
     writeln!(child.stdin.as_mut().unwrap(), "{read_request}").unwrap();
+    writeln!(child.stdin.as_mut().unwrap(), "{read_ranges_request}").unwrap();
     writeln!(child.stdin.as_mut().unwrap(), "{related_request}").unwrap();
     writeln!(child.stdin.as_mut().unwrap(), "{related_symbols_request}").unwrap();
     drop(child.stdin.take());
@@ -1022,6 +1051,8 @@ fn server_handles_shard_index_search_and_read_requests() {
     assert!(stdout.contains("\"id\":\"read-shard-range\""));
     assert!(stdout.contains("\"path\":\"billing/src/billing.rs\""));
     assert!(stdout.contains("invoice_total"));
+    assert!(stdout.contains("\"id\":\"read-shard-ranges\""));
+    assert!(stdout.contains("\"path\":\"billing/tests/billing_test.rs\""));
     assert!(stdout.contains("\"id\":\"related-shard-files\""));
     assert!(stdout.contains("billing/tests/billing_test.rs"));
     assert!(stdout.contains("\"id\":\"related-shard-symbols\""));
@@ -1167,6 +1198,17 @@ fn server_handles_repo_map_and_read_range_requests() {
             "lines": 2
         }
     });
+    let ranges_request = serde_json::json!({
+        "id": "ranges",
+        "tool": "read_ranges",
+        "arguments": {
+            "repo": repo.path(),
+            "ranges": [
+                {"path": "src/auth.rs", "start": 1, "lines": 1},
+                {"path": "tests/auth_test.rs", "start": 1, "lines": 2}
+            ]
+        }
+    });
     let symbols_request = serde_json::json!({
         "id": "symbols",
         "tool": "related_symbols",
@@ -1179,6 +1221,7 @@ fn server_handles_repo_map_and_read_range_requests() {
     });
     writeln!(child.stdin.as_mut().unwrap(), "{map_request}").unwrap();
     writeln!(child.stdin.as_mut().unwrap(), "{range_request}").unwrap();
+    writeln!(child.stdin.as_mut().unwrap(), "{ranges_request}").unwrap();
     writeln!(child.stdin.as_mut().unwrap(), "{symbols_request}").unwrap();
     drop(child.stdin.take());
 
@@ -1191,6 +1234,9 @@ fn server_handles_repo_map_and_read_range_requests() {
     assert!(stdout.contains("\"id\":\"range\""));
     assert!(stdout.contains("\"start_line\":2"));
     assert!(stdout.contains("issue_token"));
+    assert!(stdout.contains("\"id\":\"ranges\""));
+    assert!(stdout.contains("\"path\":\"src/auth.rs\""));
+    assert!(stdout.contains("\"path\":\"tests/auth_test.rs\""));
     assert!(stdout.contains("\"id\":\"symbols\""));
     assert!(stdout.contains("same file"));
 }

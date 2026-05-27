@@ -57,6 +57,9 @@ fn cli_outputs_tool_manifest() {
         .stdout(predicate::str::contains("daemon_status"))
         .stdout(predicate::str::contains("warm_index"))
         .stdout(predicate::str::contains("warm_shards"))
+        .stdout(predicate::str::contains("read_ranges"))
+        .stdout(predicate::str::contains("read_index_ranges"))
+        .stdout(predicate::str::contains("read_shard_ranges"))
         .stdout(predicate::str::contains("read_shard_range"))
         .stdout(predicate::str::contains("related_shard_files"))
         .stdout(predicate::str::contains("related_shard_symbols"));
@@ -200,6 +203,24 @@ fn cli_outputs_repo_map_and_reads_ranges() {
         .success()
         .stdout(predicate::str::contains("\"start_line\":3"))
         .stdout(predicate::str::contains("issue_token"));
+
+    let mut read_ranges = Command::cargo_bin("orient").unwrap();
+    read_ranges
+        .args([
+            "read-ranges",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "src/auth.rs",
+            "tests/auth_test.rs",
+            "--start",
+            "1",
+            "--lines",
+            "2",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"path\":\"src/auth.rs\""))
+        .stdout(predicate::str::contains("\"path\":\"tests/auth_test.rs\""));
 }
 
 #[test]
@@ -319,6 +340,24 @@ fn cli_builds_and_searches_persistent_index() {
         .success()
         .stdout(predicate::str::contains("\"path\":\"src/auth.rs\""))
         .stdout(predicate::str::contains("issue_token"));
+
+    let mut read_index_ranges = Command::cargo_bin("orient").unwrap();
+    read_index_ranges
+        .args([
+            "read-index-ranges",
+            "--index",
+            index_path.to_str().unwrap(),
+            "src/auth.rs",
+            "tests/auth_test.rs",
+            "--start",
+            "1",
+            "--lines",
+            "2",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"path\":\"src/auth.rs\""))
+        .stdout(predicate::str::contains("\"path\":\"tests/auth_test.rs\""));
 
     let mut index_symbol = Command::cargo_bin("orient").unwrap();
     index_symbol
@@ -716,6 +755,28 @@ fn cli_filters_shard_search_by_nested_repo_alias() {
         "\"path\":\"billing/src/billing.rs\"",
     ))
     .stdout(predicate::str::contains("invoice_total"));
+
+    let mut read_many = Command::cargo_bin("orient").unwrap();
+    read_many
+        .args([
+            "read-shard-ranges",
+            "--index-dir",
+            shard_dir.path().to_str().unwrap(),
+            "billing/src/billing.rs",
+            "billing/tests/billing_test.rs",
+            "--start",
+            "1",
+            "--lines",
+            "2",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "\"path\":\"billing/src/billing.rs\"",
+        ))
+        .stdout(predicate::str::contains(
+            "\"path\":\"billing/tests/billing_test.rs\"",
+        ));
 
     let mut related = Command::cargo_bin("orient").unwrap();
     related

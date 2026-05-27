@@ -93,6 +93,16 @@ enum Commands {
         #[arg(long, default_value_t = 80)]
         lines: usize,
     },
+    ReadShardRanges {
+        #[arg(long)]
+        index_dir: PathBuf,
+        #[arg(required = true)]
+        paths: Vec<String>,
+        #[arg(long, default_value_t = 1)]
+        start: usize,
+        #[arg(long, default_value_t = 80)]
+        lines: usize,
+    },
     ShardSymbol {
         #[arg(long)]
         index_dir: PathBuf,
@@ -141,6 +151,16 @@ enum Commands {
         #[arg(long, default_value_t = 80)]
         lines: usize,
     },
+    ReadRanges {
+        #[arg(long, default_value = ".")]
+        repo: PathBuf,
+        #[arg(required = true)]
+        paths: Vec<String>,
+        #[arg(long, default_value_t = 1)]
+        start: usize,
+        #[arg(long, default_value_t = 80)]
+        lines: usize,
+    },
     Search {
         #[arg(long, default_value = ".")]
         repo: PathBuf,
@@ -183,6 +203,16 @@ enum Commands {
         #[arg(long)]
         index: PathBuf,
         path: String,
+        #[arg(long, default_value_t = 1)]
+        start: usize,
+        #[arg(long, default_value_t = 80)]
+        lines: usize,
+    },
+    ReadIndexRanges {
+        #[arg(long)]
+        index: PathBuf,
+        #[arg(required = true)]
+        paths: Vec<String>,
         #[arg(long, default_value_t = 1)]
         start: usize,
         #[arg(long, default_value_t = 80)]
@@ -415,6 +445,18 @@ fn main() -> Result<()> {
                 serde_json::to_string(&read_shard_range(index_dir, &path, start, lines)?)?
             );
         }
+        Commands::ReadShardRanges {
+            index_dir,
+            paths,
+            start,
+            lines,
+        } => {
+            let mut ranges = Vec::new();
+            for path in paths {
+                ranges.push(read_shard_range(&index_dir, &path, start, lines)?);
+            }
+            println!("{}", serde_json::to_string(&ranges)?);
+        }
         Commands::ShardSymbol {
             index_dir,
             name,
@@ -490,6 +532,18 @@ fn main() -> Result<()> {
                 serde_json::to_string(&read_file_range(repo, &path, start, lines)?)?
             );
         }
+        Commands::ReadRanges {
+            repo,
+            paths,
+            start,
+            lines,
+        } => {
+            let mut ranges = Vec::new();
+            for path in paths {
+                ranges.push(read_file_range(&repo, &path, start, lines)?);
+            }
+            println!("{}", serde_json::to_string(&ranges)?);
+        }
         Commands::Search {
             repo,
             query,
@@ -561,6 +615,19 @@ fn main() -> Result<()> {
                 "{}",
                 serde_json::to_string(&read_file_range(index.root, &path, start, lines)?)?
             );
+        }
+        Commands::ReadIndexRanges {
+            index,
+            paths,
+            start,
+            lines,
+        } => {
+            let index = FastIndex::load(index)?;
+            let mut ranges = Vec::new();
+            for path in paths {
+                ranges.push(read_file_range(&index.root, &path, start, lines)?);
+            }
+            println!("{}", serde_json::to_string(&ranges)?);
         }
         Commands::Symbol { repo, name, limit } => {
             let index = RepoIndexer::new(repo).build()?;
