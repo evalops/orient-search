@@ -35,6 +35,7 @@ Implemented now:
 - `orient bench-search`: built-in p50/p95/max latency reporting for fallback and indexed search.
 - JSON-lines tools: `search_code` and `indexed_search_code`.
 - Result de-duping for repeated worktree copies where practical.
+- Exact symbol definition boosting in both fallback and indexed search.
 
 Measured on this machine:
 

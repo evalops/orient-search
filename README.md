@@ -6,6 +6,7 @@ Rust-native fast local code search for coding agents. It gives Codex, Claude, Am
 
 - Indexes a local repo and returns compact search answers.
 - Searches code with a fast `rg`-backed hot path plus an experimental persistent Rust index.
+- Boosts exact symbol definitions in both fallback and indexed search.
 - Finds symbols and related test/source files.
 - Infers known commands from repo manifests.
 - Exposes a Rust CLI and JSON-lines tool server suitable for MCP-style wrapping.

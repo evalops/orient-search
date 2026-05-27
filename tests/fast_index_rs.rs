@@ -77,6 +77,26 @@ fn indexed_search_supports_filters_require_all_and_symbol_boosting() {
 }
 
 #[test]
+fn fallback_search_boosts_exact_symbols() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("docs/session_manager.md"),
+        "SessionManager SessionManager SessionManager notes.\n",
+    );
+    write(
+        &repo.path().join("src/auth.rs"),
+        "pub struct SessionManager;\npub fn issue_token() {}\n",
+    );
+
+    let results =
+        search_repo_fast_filtered(repo.path(), "SessionManager", 10, &SearchFilters::default())
+            .unwrap();
+
+    assert_eq!(results[0].path, "src/auth.rs");
+    assert!(results[0].reason.contains("symbol:SessionManager"));
+}
+
+#[test]
 fn fast_search_deduplicates_repeated_worktree_hits() {
     let repo = tempfile::tempdir().unwrap();
     write(

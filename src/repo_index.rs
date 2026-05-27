@@ -246,7 +246,7 @@ fn search_repo_ripgrep(
             .get("line_number")
             .and_then(|line| line.as_u64())
             .unwrap_or_default();
-        merge_match_result(&mut scored, &path, text, line_number, query_tokens);
+        merge_match_result(&mut scored, &path, text, line_number, query_tokens, true);
         match_count += 1;
         if match_count >= max_matches {
             let _ = child.kill();
@@ -295,7 +295,7 @@ fn search_repo_streaming(
         if !matches_filters(&rel, filters) {
             continue;
         }
-        if let Some(result) = score_text_file(&rel, &text, &query_tokens) {
+        if let Some(result) = score_text_file(&rel, &text, &query_tokens, true) {
             results.push(result);
         }
     }
@@ -312,9 +312,11 @@ fn merge_match_result(
     line: &str,
     line_number: u64,
     query_tokens: &[String],
+    parse_symbols: bool,
 ) {
     let path_lower = path.to_lowercase();
     let line_lower = line.to_lowercase();
+    let query_name = query_tokens.join("");
     let mut score = 0.0;
     let mut reasons = Vec::new();
 
@@ -330,6 +332,17 @@ fn merge_match_result(
             score += token_score;
             reasons.push(token.clone());
         }
+    }
+
+    if parse_symbols {
+        apply_symbol_boost(
+            path,
+            line,
+            query_tokens,
+            &query_name,
+            &mut score,
+            &mut reasons,
+        );
     }
 
     if score == 0.0 {
@@ -735,9 +748,15 @@ pub(crate) fn token_counts(text: &str) -> HashMap<String, usize> {
     counts
 }
 
-fn score_text_file(path: &str, text: &str, query_tokens: &[String]) -> Option<SearchResult> {
+fn score_text_file(
+    path: &str,
+    text: &str,
+    query_tokens: &[String],
+    parse_symbols: bool,
+) -> Option<SearchResult> {
     let path_lower = path.to_lowercase();
     let text_lower = text.to_lowercase();
+    let query_name = query_tokens.join("");
     let mut score = 0.0;
     let mut reasons = Vec::new();
 
@@ -756,6 +775,19 @@ fn score_text_file(path: &str, text: &str, query_tokens: &[String]) -> Option<Se
         }
     }
 
+    if parse_symbols {
+        let language = language_for(Path::new(path)).unwrap_or_else(|| "text".to_string());
+        for symbol in extract_symbols(path, text, &language) {
+            apply_symbol_match(
+                &symbol.name,
+                query_tokens,
+                &query_name,
+                &mut score,
+                &mut reasons,
+            );
+        }
+    }
+
     if score == 0.0 {
         return None;
     }
@@ -766,6 +798,45 @@ fn score_text_file(path: &str, text: &str, query_tokens: &[String]) -> Option<Se
         reason: format!("matched {}", reasons.join(", ")),
         snippet: best_snippet(text, query_tokens),
     })
+}
+
+fn apply_symbol_boost(
+    path: &str,
+    line: &str,
+    query_tokens: &[String],
+    query_name: &str,
+    score: &mut f64,
+    reasons: &mut Vec<String>,
+) {
+    let Some(language) = language_for(Path::new(path)) else {
+        return;
+    };
+    for symbol in extract_symbols(path, line, &language) {
+        apply_symbol_match(&symbol.name, query_tokens, query_name, score, reasons);
+    }
+}
+
+fn apply_symbol_match(
+    symbol_name: &str,
+    query_tokens: &[String],
+    query_name: &str,
+    score: &mut f64,
+    reasons: &mut Vec<String>,
+) {
+    let normalized = normalize_token(symbol_name);
+    if normalized == query_name {
+        *score += 25.0;
+        reasons.push(format!("symbol:{symbol_name}"));
+        return;
+    }
+    let overlap = tokenize(symbol_name)
+        .into_iter()
+        .filter(|token| query_tokens.contains(token))
+        .count();
+    if overlap > 0 {
+        *score += 4.0 * overlap as f64;
+        reasons.push(format!("symbol:{symbol_name}"));
+    }
 }
 
 pub(crate) fn tokenize(text: &str) -> Vec<String> {
