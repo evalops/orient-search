@@ -1,9 +1,10 @@
 //! Persistent local search index for agent-oriented code retrieval.
 
+use crate::query::{merge_filters, parse_query, query_text};
 use crate::repo_index::{
     SearchFilters, SearchResult, best_snippet, extract_symbols, finalize_results, is_ignored,
-    language_for, matches_filters, normalize_token, result_matches_all_tokens, round4,
-    token_counts, tokenize,
+    language_for, matches_filters, normalize_token, repo_matches, result_matches_all_tokens,
+    result_matches_symbol_filters, round4, token_counts, tokenize,
 };
 use anyhow::{Context, Result};
 use ignore::WalkBuilder;
@@ -228,9 +229,18 @@ impl FastIndex {
         limit: usize,
         filters: &SearchFilters,
     ) -> Result<Vec<SearchResult>> {
-        let query_tokens = tokenize(query);
+        let parsed = parse_query(query);
+        let mut filters = merge_filters(filters.clone(), parsed.filters);
+        if !repo_matches(&self.root, &filters) {
+            return Ok(Vec::new());
+        }
+        let query = query_text(&parsed.terms, &filters);
+        let query_tokens = tokenize(&query);
         if query_tokens.is_empty() || limit == 0 {
             return Ok(Vec::new());
+        }
+        if query_tokens.len() > 1 {
+            filters.require_all = true;
         }
 
         let mut token_postings = query_tokens
@@ -282,7 +292,7 @@ impl FastIndex {
             .filter(|file_id| {
                 self.files
                     .get(*file_id as usize)
-                    .is_some_and(|file| matches_filters(&file.path, filters))
+                    .is_some_and(|file| matches_filters(&file.path, &filters))
             })
             .filter_map(|file_id| self.score_file(file_id, &query_tokens, &posting_maps))
             .collect::<Vec<_>>();
@@ -291,6 +301,7 @@ impl FastIndex {
         if filters.require_all {
             results.retain(|result| result_matches_all_tokens(result, &query_tokens));
         }
+        results.retain(|result| result_matches_symbol_filters(result, &filters));
         Ok(finalize_results(results, limit))
     }
 

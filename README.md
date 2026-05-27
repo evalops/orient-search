@@ -22,6 +22,7 @@ cargo run -- brief --repo /path/to/repo
 
 # Search code.
 cargo run -- search --repo /path/to/repo "session token auth"
+cargo run -- search --repo /path/to/repo 'symbol:SessionManager lang:rust -path:docs "issue token"'
 
 # Build and query a persistent local index.
 cargo run -- index --repo /path/to/repo --output /tmp/orient.index
@@ -70,6 +71,22 @@ Supported tools:
 - `indexed_search_code`
 - `find_symbol`
 - `related_files`
+
+## Query Language
+
+Search queries support agent-friendly filters inline with normal terms:
+
+- `file:auth.rs`: match file basename.
+- `path:src/auth`: require a path substring.
+- `lang:rust` or `language:rust`: require a detected language.
+- `ext:rs`: require a file extension.
+- `symbol:SessionManager`: require/boost an exact symbol definition.
+- `repo:orient-search`: require the root repo name.
+- `test:true` or `test:false`: include only test or non-test paths.
+- `-path:docs`, `-file:generated`, `-lang:markdown`, `-ext:md`, `-symbol:Foo`, `-repo:old`: exclude matches.
+- `"issue token"`: keep multi-word literals grouped while parsing.
+
+Multiple positive terms use AND behavior by default, so `session token auth` means all three terms should be represented in the returned result.
 
 ## Success Criteria
 

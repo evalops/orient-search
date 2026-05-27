@@ -143,9 +143,14 @@ fn search_filters(arguments: &Value) -> SearchFilters {
         path: optional_string_arg(arguments, "path"),
         language: optional_string_arg(arguments, "language"),
         extension: optional_string_arg(arguments, "extension"),
+        symbol: optional_string_arg(arguments, "symbol"),
+        file: optional_string_arg(arguments, "file"),
+        repo: optional_string_arg(arguments, "repo_filter"),
+        test: arguments.get("test").and_then(Value::as_bool),
         require_all: arguments
             .get("require_all")
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        ..SearchFilters::default()
     }
 }

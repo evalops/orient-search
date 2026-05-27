@@ -1,5 +1,6 @@
 //! Repo orientation index.
 
+use crate::query::{merge_filters, parse_query, query_text};
 use anyhow::Result;
 use ignore::WalkBuilder;
 use regex::Regex;
@@ -44,10 +45,20 @@ pub struct SearchResult {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SearchFilters {
+    pub file: Option<String>,
     pub path: Option<String>,
     pub language: Option<String>,
     pub extension: Option<String>,
+    pub symbol: Option<String>,
+    pub repo: Option<String>,
+    pub test: Option<bool>,
     pub require_all: bool,
+    pub exclude_file: Vec<String>,
+    pub exclude_path: Vec<String>,
+    pub exclude_language: Vec<String>,
+    pub exclude_extension: Vec<String>,
+    pub exclude_symbol: Vec<String>,
+    pub exclude_repo: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -113,16 +124,25 @@ pub fn search_repo_fast_filtered_with_timeout(
     timeout: Duration,
 ) -> Result<Vec<SearchResult>> {
     let root = root.as_ref().canonicalize()?;
-    let query_tokens = tokenize(query);
+    let parsed = parse_query(query);
+    let mut filters = merge_filters(filters.clone(), parsed.filters);
+    if !repo_matches(&root, &filters) {
+        return Ok(Vec::new());
+    }
+    let query = query_text(&parsed.terms, &filters);
+    let query_tokens = tokenize(&query);
     if query_tokens.is_empty() || limit == 0 {
         return Ok(Vec::new());
     }
+    if query_tokens.len() > 1 {
+        filters.require_all = true;
+    }
 
-    if let Some(results) = search_repo_ripgrep(&root, &query_tokens, limit, filters, timeout)? {
+    if let Some(results) = search_repo_ripgrep(&root, &query_tokens, limit, &filters, timeout)? {
         return Ok(results);
     }
 
-    search_repo_streaming(&root, &query_tokens, limit, filters)
+    search_repo_streaming(&root, &query_tokens, limit, &filters)
 }
 
 fn search_repo_ripgrep(
@@ -172,7 +192,12 @@ fn search_repo_ripgrep(
     }
     command.arg(".");
 
-    let Ok(mut child) = command.stdout(Stdio::piped()).stderr(Stdio::null()).spawn() else {
+    let Ok(mut child) = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+    else {
         return Ok(None);
     };
     let Some(stdout) = child.stdout.take() else {
@@ -259,6 +284,7 @@ fn search_repo_ripgrep(
     if filters.require_all {
         results.retain(|result| result_matches_all_tokens(result, query_tokens));
     }
+    results.retain(|result| result_matches_symbol_filters(result, filters));
     Ok(Some(finalize_results(results, limit)))
 }
 
@@ -303,6 +329,7 @@ fn search_repo_streaming(
     if filters.require_all {
         results.retain(|result| result_matches_all_tokens(result, query_tokens));
     }
+    results.retain(|result| result_matches_symbol_filters(result, filters));
     Ok(finalize_results(results, limit))
 }
 
@@ -902,6 +929,17 @@ pub(crate) fn finalize_results(mut results: Vec<SearchResult>, limit: usize) -> 
 }
 
 pub(crate) fn matches_filters(path: &str, filters: &SearchFilters) -> bool {
+    if let Some(file_filter) = &filters.file {
+        let Some(file_name) = Path::new(path)
+            .file_name()
+            .map(|value| value.to_string_lossy())
+        else {
+            return false;
+        };
+        if !file_name.contains(file_filter) {
+            return false;
+        }
+    }
     if let Some(path_filter) = &filters.path {
         if !path.contains(path_filter) {
             return false;
@@ -930,12 +968,88 @@ pub(crate) fn matches_filters(path: &str, filters: &SearchFilters) -> bool {
             return false;
         }
     }
+    if let Some(test) = filters.test {
+        if is_test_path(&path.to_ascii_lowercase()) != test {
+            return false;
+        }
+    }
+    let file_name = Path::new(path)
+        .file_name()
+        .map(|value| value.to_string_lossy().to_string())
+        .unwrap_or_default();
+    if filters
+        .exclude_file
+        .iter()
+        .any(|filter| file_name.contains(filter))
+    {
+        return false;
+    }
+    if filters
+        .exclude_path
+        .iter()
+        .any(|filter| path.contains(filter))
+    {
+        return false;
+    }
+    if let Some(language) = language_for(Path::new(path)) {
+        if filters
+            .exclude_language
+            .iter()
+            .any(|filter| &language == filter)
+        {
+            return false;
+        }
+    }
+    if let Some(extension) = Path::new(path)
+        .extension()
+        .map(|value| value.to_string_lossy().to_lowercase())
+    {
+        if filters
+            .exclude_extension
+            .iter()
+            .any(|filter| &extension == filter)
+        {
+            return false;
+        }
+    }
     true
+}
+
+pub(crate) fn repo_matches(root: &Path, filters: &SearchFilters) -> bool {
+    let repo = root
+        .file_name()
+        .map(|value| value.to_string_lossy().to_string())
+        .unwrap_or_else(|| root.display().to_string());
+    if let Some(filter) = &filters.repo {
+        if !repo.contains(filter) {
+            return false;
+        }
+    }
+    !filters
+        .exclude_repo
+        .iter()
+        .any(|filter| repo.contains(filter))
 }
 
 pub(crate) fn result_matches_all_tokens(result: &SearchResult, query_tokens: &[String]) -> bool {
     let haystack = format!("{}\n{}\n{}", result.path, result.reason, result.snippet).to_lowercase();
     query_tokens.iter().all(|token| haystack.contains(token))
+}
+
+pub(crate) fn result_matches_symbol_filters(
+    result: &SearchResult,
+    filters: &SearchFilters,
+) -> bool {
+    if let Some(symbol) = &filters.symbol {
+        let wanted = format!("symbol:{symbol}");
+        if !result.reason.contains(&wanted) {
+            return false;
+        }
+    }
+    !filters
+        .exclude_symbol
+        .iter()
+        .any(|symbol| result.reason.contains(&format!("symbol:{symbol}")))
 }
 
 fn format_numbered_lines(lines: &[&str], start: usize, end: usize) -> String {

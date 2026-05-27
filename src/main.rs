@@ -168,6 +168,7 @@ fn main() -> Result<()> {
                         language,
                         extension,
                         require_all,
+                        ..SearchFilters::default()
                     },
                 )?)?
             );
@@ -192,6 +193,7 @@ fn main() -> Result<()> {
                         language,
                         extension,
                         require_all,
+                        ..SearchFilters::default()
                     },
                 )?)?
             );
@@ -227,6 +229,7 @@ fn main() -> Result<()> {
                 language,
                 extension,
                 require_all,
+                ..SearchFilters::default()
             };
             let report = bench_search(BenchConfig {
                 repo,

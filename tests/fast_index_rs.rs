@@ -66,6 +66,7 @@ fn indexed_search_supports_filters_require_all_and_symbol_boosting() {
                 language: Some("rust".to_string()),
                 extension: Some("rs".to_string()),
                 require_all: true,
+                ..SearchFilters::default()
             },
         )
         .unwrap();
@@ -94,6 +95,50 @@ fn fallback_search_boosts_exact_symbols() {
 
     assert_eq!(results[0].path, "src/auth.rs");
     assert!(results[0].reason.contains("symbol:SessionManager"));
+}
+
+#[test]
+fn query_language_filters_fallback_and_indexed_search() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/auth.rs"),
+        "pub struct SessionManager;\npub fn issue_token() {}\n",
+    );
+    write(
+        &repo.path().join("src/session.ts"),
+        "export function SessionManager() { return 'doc-ish' }\n",
+    );
+    write(
+        &repo.path().join("tests/auth_test.rs"),
+        "pub fn issue_token_test() {}\n",
+    );
+    write(
+        &repo.path().join("docs/auth.md"),
+        "SessionManager issue token docs.\n",
+    );
+
+    let query = r#"symbol:SessionManager lang:rust ext:rs path:src -path:docs "issue token""#;
+    let fallback =
+        search_repo_fast_filtered(repo.path(), query, 10, &SearchFilters::default()).unwrap();
+    assert_eq!(fallback.len(), 1);
+    assert_eq!(fallback[0].path, "src/auth.rs");
+
+    let indexed = FastIndex::build(repo.path()).unwrap();
+    let indexed_results = indexed
+        .search_filtered(query, 10, &SearchFilters::default())
+        .unwrap();
+    assert_eq!(indexed_results.len(), 1);
+    assert_eq!(indexed_results[0].path, "src/auth.rs");
+
+    let test_results = search_repo_fast_filtered(
+        repo.path(),
+        r#"test:true issue token -path:src"#,
+        10,
+        &SearchFilters::default(),
+    )
+    .unwrap();
+    assert_eq!(test_results.len(), 1);
+    assert_eq!(test_results[0].path, "tests/auth_test.rs");
 }
 
 #[test]
