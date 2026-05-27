@@ -188,7 +188,7 @@ Supported tools:
 - `related_index_symbols`
 - `related_shard_symbols`
 
-`tool_manifest` returns the same tool list with descriptions plus required and optional argument names, so a wrapper can bootstrap the JSON-lines surface without scraping this README.
+`tool_manifest` returns the same tool list with descriptions, compatibility `required`/`optional` argument names, typed `arguments` metadata, and an `input_schema` object for each tool. Wrappers can bootstrap the JSON-lines surface without scraping this README, including defaults such as `limit:10`, `snippet:"medium"`, and range-read object shapes.
 `daemon_status` reports local warm-cache counts for the current daemon process; it does not inspect Codex/Claude sessions or emit telemetry.
 Use `warm_index` or `warm_shards`, or pass `--index` / `--index-dir` to `serve-tcp`, to load persistent indexes before the first agent query.
 Use `ensure_shards` when several local agents share the same workspaces: it builds the shard directory on first run, refreshes it on later runs, and warms the daemon cache in one request.
@@ -268,9 +268,9 @@ Product impact criteria for follow-up adoption:
 Current search baseline:
 
 - `orient bench-search --repo . "indexed search symbol filters"`: `9.413ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "session token auth"`: `18.483ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "browser session implementation"`: `20.097ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "postgres migration user"`: `26.271ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "session token auth"`: `20.039ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "browser session implementation"`: `31.292ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "postgres migration user"`: `40.576ms` p95 after warmup.
 - The `rg` hot path has a `250ms` wall-clock timeout plus a bounded match cap; timed-out searches return partial results rather than hanging.
 - `orient index --repo . --output /tmp/orient-self.index`: versioned binary index with file metadata, content token postings, path token postings, trigram postings, line offsets, token-to-line tables, bounded source snapshots, and symbol boosts.
 - `orient discover-repos --root /Users/jonathanhaas/Documents/Projects --max-depth 4 --limit 200`: finds git or manifest-backed repo roots while skipping dependency/build directories and prioritizing visible canonical repos ahead of dated split, temp, and worktree folders when limits are small.
@@ -289,7 +289,7 @@ Current search baseline:
 - `orient index-map --index /tmp/orient-self.index`: returns repo-map orientation directly from the persistent index without rebuilding a live repo scan.
 - `orient shard-map --index-dir /tmp/orient-shards`: returns repo-prefixed repo maps for local multi-repo shard directories.
 - Repo maps infer command hints from manifests and common scripts, including `cargo test`, `pytest`, `go test ./...`, `swift test`, package-manager-specific `test` scripts, and common `lint`/`typecheck`/`check`/`build` scripts.
-- `orient bench-search --repo . --index /tmp/orient-self.index "indexed search symbol filters"`: `0.860ms` p95 after warmup.
+- `orient bench-search --repo . --index /tmp/orient-self.index "indexed search symbol filters"`: `0.832ms` p95 after warmup.
 
 Benchmark methodology:
 

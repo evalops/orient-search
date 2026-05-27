@@ -11,7 +11,7 @@ use crate::shards::{
 };
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use std::collections::HashMap;
 use std::io::{BufRead, Write};
 use std::net::{TcpListener, TcpStream};
@@ -159,194 +159,380 @@ impl ToolRuntime {
 }
 
 pub fn tool_manifest() -> Value {
-    json!([
-        {
-            "name": "list_tools",
-            "description": "Return the available JSON-lines tool names.",
-            "required": [],
-            "optional": []
-        },
-        {
-            "name": "tool_manifest",
-            "description": "Return tool descriptions and argument metadata for agent wrappers.",
-            "required": [],
-            "optional": []
-        },
-        {
-            "name": "daemon_status",
-            "description": "Return local daemon runtime cache status for warm-index clients.",
-            "required": [],
-            "optional": []
-        },
-        {
-            "name": "warm_index",
-            "description": "Load a persistent single-repo index into the daemon cache before searches need it.",
-            "required": ["index"],
-            "optional": []
-        },
-        {
-            "name": "warm_shards",
-            "description": "Load every shard index from a local shard directory into the daemon cache.",
-            "required": ["index_dir"],
-            "optional": []
-        },
-        {
-            "name": "discover_repos",
-            "description": "Discover local repo roots under a broad workspace for shard setup.",
-            "required": ["root"],
-            "optional": ["max_depth", "limit"]
-        },
-        {
-            "name": "repo_brief",
-            "description": "Summarize a local repository with language counts, important files, and known commands.",
-            "required": ["repo"],
-            "optional": []
-        },
-        {
-            "name": "repo_map",
-            "description": "Return entrypoints, tests, top symbols, known commands, and important files for a local repository.",
-            "required": ["repo"],
-            "optional": ["symbols", "tests"]
-        },
-        {
-            "name": "indexed_repo_map",
-            "description": "Return repo-map orientation from a persistent single-repo index.",
-            "required": ["index"],
-            "optional": ["symbols", "tests"]
-        },
-        {
-            "name": "read_range",
-            "description": "Read a bounded line range from a repository-relative path.",
-            "required": ["repo", "path"],
-            "optional": ["start", "lines"]
-        },
-        {
-            "name": "read_ranges",
-            "description": "Read several bounded line ranges from repository-relative paths in one request.",
-            "required": ["repo", "ranges"],
-            "optional": []
-        },
-        {
-            "name": "search_code",
-            "description": "Search a local repository with the fast fallback path and return ranked snippets.",
-            "required": ["repo", "query"],
-            "optional": SEARCH_OPTIONAL_ARGS
-        },
-        {
-            "name": "indexed_search_code",
-            "description": "Search a persistent single-repo index and return ranked snippets.",
-            "required": ["index", "query"],
-            "optional": SEARCH_INDEX_OPTIONAL_ARGS
-        },
-        {
-            "name": "read_index_range",
-            "description": "Read a bounded line range from a persistent index result path.",
-            "required": ["index", "path"],
-            "optional": ["start", "lines"]
-        },
-        {
-            "name": "read_index_ranges",
-            "description": "Read several bounded line ranges from persistent index result paths in one request.",
-            "required": ["index", "ranges"],
-            "optional": []
-        },
-        {
-            "name": "index_shards",
-            "description": "Build a local multi-repo shard directory from explicit repos or a discovered workspace root.",
-            "required": ["output_dir"],
-            "optional": ["repos", "discover_root", "discover_roots", "root", "max_depth", "discover_limit", "limit"]
-        },
-        {
-            "name": "ensure_shards",
-            "description": "Build or refresh a local multi-repo shard directory, then warm its indexes in the daemon cache.",
-            "required": ["output_dir"],
-            "optional": ["repos", "discover_root", "discover_roots", "root", "max_depth", "discover_limit", "limit"]
-        },
-        {
-            "name": "refresh_shards",
-            "description": "Refresh every repo index in a local shard directory incrementally.",
-            "required": ["index_dir"],
-            "optional": []
-        },
-        {
-            "name": "search_shards",
-            "description": "Search a local multi-repo shard directory and return repo-prefixed ranked snippets.",
-            "required": ["index_dir", "query"],
-            "optional": SEARCH_INDEX_OPTIONAL_ARGS
-        },
-        {
-            "name": "read_shard_range",
-            "description": "Read a bounded line range from a repo-prefixed shard search result path.",
-            "required": ["index_dir", "path"],
-            "optional": ["start", "lines"]
-        },
-        {
-            "name": "read_shard_ranges",
-            "description": "Read several bounded line ranges from repo-prefixed shard result paths in one request.",
-            "required": ["index_dir", "ranges"],
-            "optional": []
-        },
-        {
-            "name": "shard_repo_map",
-            "description": "Return repo-map orientation for every matching repo in a local shard directory.",
-            "required": ["index_dir"],
-            "optional": ["symbols", "tests", "repo", "repo_filter"]
-        },
-        {
-            "name": "find_shard_symbol",
-            "description": "Find symbol definitions across a local multi-repo shard directory.",
-            "required": ["index_dir", "name"],
-            "optional": ["limit", "repo", "repo_filter"]
-        },
-        {
-            "name": "find_symbol",
-            "description": "Find symbol definitions in a local repository.",
-            "required": ["repo", "name"],
-            "optional": ["limit"]
-        },
-        {
-            "name": "find_index_symbol",
-            "description": "Find symbol definitions directly from a persistent index.",
-            "required": ["index", "name"],
-            "optional": ["limit"]
-        },
-        {
-            "name": "related_files",
-            "description": "Find nearby source/test files related to a repository-relative path.",
-            "required": ["repo", "path"],
-            "optional": ["limit"]
-        },
-        {
-            "name": "related_index_files",
-            "description": "Find nearby source/test files related to an indexed result path.",
-            "required": ["index", "path"],
-            "optional": ["limit"]
-        },
-        {
-            "name": "related_shard_files",
-            "description": "Find nearby source/test files related to a shard result path.",
-            "required": ["index_dir", "path"],
-            "optional": ["limit"]
-        },
-        {
-            "name": "related_symbols",
-            "description": "Find symbols related to a path and optional query.",
-            "required": ["repo"],
-            "optional": ["path", "query", "limit"]
-        },
-        {
-            "name": "related_index_symbols",
-            "description": "Find symbols related to an indexed path and optional query.",
-            "required": ["index"],
-            "optional": ["path", "query", "limit"]
-        },
-        {
-            "name": "related_shard_symbols",
-            "description": "Find symbols related to a shard result path and optional query.",
-            "required": ["index_dir", "path"],
-            "optional": ["query", "limit"]
-        }
+    Value::Array(vec![
+        tool_entry(
+            "list_tools",
+            "Return the available JSON-lines tool names.",
+            &[],
+            &[],
+        ),
+        tool_entry(
+            "tool_manifest",
+            "Return tool descriptions and argument metadata for agent wrappers.",
+            &[],
+            &[],
+        ),
+        tool_entry(
+            "daemon_status",
+            "Return local daemon runtime cache status for warm-index clients.",
+            &[],
+            &[],
+        ),
+        tool_entry(
+            "warm_index",
+            "Load a persistent single-repo index into the daemon cache before searches need it.",
+            &["index"],
+            &[],
+        ),
+        tool_entry(
+            "warm_shards",
+            "Load every shard index from a local shard directory into the daemon cache.",
+            &["index_dir"],
+            &[],
+        ),
+        tool_entry(
+            "discover_repos",
+            "Discover local repo roots under a broad workspace for shard setup.",
+            &["root"],
+            &["max_depth", "limit"],
+        ),
+        tool_entry(
+            "repo_brief",
+            "Summarize a local repository with language counts, important files, and known commands.",
+            &["repo"],
+            &[],
+        ),
+        tool_entry(
+            "repo_map",
+            "Return entrypoints, tests, top symbols, known commands, and important files for a local repository.",
+            &["repo"],
+            &["symbols", "tests"],
+        ),
+        tool_entry(
+            "indexed_repo_map",
+            "Return repo-map orientation from a persistent single-repo index.",
+            &["index"],
+            &["symbols", "tests"],
+        ),
+        tool_entry(
+            "read_range",
+            "Read a bounded line range from a repository-relative path.",
+            &["repo", "path"],
+            &["start", "lines"],
+        ),
+        tool_entry(
+            "read_ranges",
+            "Read several bounded line ranges from repository-relative paths in one request.",
+            &["repo", "ranges"],
+            &[],
+        ),
+        tool_entry(
+            "search_code",
+            "Search a local repository with the fast fallback path and return ranked snippets.",
+            &["repo", "query"],
+            SEARCH_OPTIONAL_ARGS,
+        ),
+        tool_entry(
+            "indexed_search_code",
+            "Search a persistent single-repo index and return ranked snippets.",
+            &["index", "query"],
+            SEARCH_INDEX_OPTIONAL_ARGS,
+        ),
+        tool_entry(
+            "read_index_range",
+            "Read a bounded line range from a persistent index result path.",
+            &["index", "path"],
+            &["start", "lines"],
+        ),
+        tool_entry(
+            "read_index_ranges",
+            "Read several bounded line ranges from persistent index result paths in one request.",
+            &["index", "ranges"],
+            &[],
+        ),
+        tool_entry(
+            "index_shards",
+            "Build a local multi-repo shard directory from explicit repos or a discovered workspace root.",
+            &["output_dir"],
+            SHARD_BUILD_OPTIONAL_ARGS,
+        ),
+        tool_entry(
+            "ensure_shards",
+            "Build or refresh a local multi-repo shard directory, then warm its indexes in the daemon cache.",
+            &["output_dir"],
+            SHARD_BUILD_OPTIONAL_ARGS,
+        ),
+        tool_entry(
+            "refresh_shards",
+            "Refresh every repo index in a local shard directory incrementally.",
+            &["index_dir"],
+            &[],
+        ),
+        tool_entry(
+            "search_shards",
+            "Search a local multi-repo shard directory and return repo-prefixed ranked snippets.",
+            &["index_dir", "query"],
+            SEARCH_INDEX_OPTIONAL_ARGS,
+        ),
+        tool_entry(
+            "read_shard_range",
+            "Read a bounded line range from a repo-prefixed shard search result path.",
+            &["index_dir", "path"],
+            &["start", "lines"],
+        ),
+        tool_entry(
+            "read_shard_ranges",
+            "Read several bounded line ranges from repo-prefixed shard result paths in one request.",
+            &["index_dir", "ranges"],
+            &[],
+        ),
+        tool_entry(
+            "shard_repo_map",
+            "Return repo-map orientation for every matching repo in a local shard directory.",
+            &["index_dir"],
+            &["symbols", "tests", "repo", "repo_filter"],
+        ),
+        tool_entry(
+            "find_shard_symbol",
+            "Find symbol definitions across a local multi-repo shard directory.",
+            &["index_dir", "name"],
+            &["limit", "repo", "repo_filter"],
+        ),
+        tool_entry(
+            "find_symbol",
+            "Find symbol definitions in a local repository.",
+            &["repo", "name"],
+            &["limit"],
+        ),
+        tool_entry(
+            "find_index_symbol",
+            "Find symbol definitions directly from a persistent index.",
+            &["index", "name"],
+            &["limit"],
+        ),
+        tool_entry(
+            "related_files",
+            "Find nearby source/test files related to a repository-relative path.",
+            &["repo", "path"],
+            &["limit"],
+        ),
+        tool_entry(
+            "related_index_files",
+            "Find nearby source/test files related to an indexed result path.",
+            &["index", "path"],
+            &["limit"],
+        ),
+        tool_entry(
+            "related_shard_files",
+            "Find nearby source/test files related to a shard result path.",
+            &["index_dir", "path"],
+            &["limit"],
+        ),
+        tool_entry(
+            "related_symbols",
+            "Find symbols related to a path and optional query.",
+            &["repo"],
+            &["path", "query", "limit"],
+        ),
+        tool_entry(
+            "related_index_symbols",
+            "Find symbols related to an indexed path and optional query.",
+            &["index"],
+            &["path", "query", "limit"],
+        ),
+        tool_entry(
+            "related_shard_symbols",
+            "Find symbols related to a shard result path and optional query.",
+            &["index_dir", "path"],
+            &["query", "limit"],
+        ),
     ])
+}
+
+fn tool_entry(name: &str, description: &str, required: &[&str], optional: &[&str]) -> Value {
+    json!({
+        "name": name,
+        "description": description,
+        "required": required,
+        "optional": optional,
+        "arguments": argument_metadata(name, required, optional),
+        "input_schema": input_schema(name, required, optional)
+    })
+}
+
+fn argument_metadata(tool_name: &str, required: &[&str], optional: &[&str]) -> Vec<Value> {
+    required
+        .iter()
+        .map(|name| argument_metadata_entry(tool_name, name, true))
+        .chain(
+            optional
+                .iter()
+                .map(|name| argument_metadata_entry(tool_name, name, false)),
+        )
+        .collect()
+}
+
+fn argument_metadata_entry(tool_name: &str, name: &str, required: bool) -> Value {
+    let mut entry = Map::new();
+    entry.insert("name".to_string(), json!(name));
+    entry.insert("required".to_string(), json!(required));
+    entry.insert("type".to_string(), json!(argument_type(name)));
+    entry.insert("description".to_string(), json!(argument_description(name)));
+    if let Some(default) = argument_default(tool_name, name) {
+        entry.insert("default".to_string(), default);
+    }
+    if let Some(values) = argument_enum(name) {
+        entry.insert("enum".to_string(), json!(values));
+    }
+    Value::Object(entry)
+}
+
+fn input_schema(tool_name: &str, required: &[&str], optional: &[&str]) -> Value {
+    let mut properties = Map::new();
+    for name in required.iter().chain(optional.iter()) {
+        properties.insert((*name).to_string(), argument_schema(tool_name, name));
+    }
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": required,
+        "properties": properties
+    })
+}
+
+fn argument_schema(tool_name: &str, name: &str) -> Value {
+    let mut schema = Map::new();
+    match name {
+        "exclude_file" | "exclude_path" | "exclude_language" | "exclude_extension"
+        | "exclude_symbol" | "exclude_repo" => {
+            schema.insert(
+                "oneOf".to_string(),
+                json!([
+                    {"type": "string"},
+                    {"type": "array", "items": {"type": "string"}}
+                ]),
+            );
+        }
+        "ranges" => {
+            schema.insert("type".to_string(), json!("array"));
+            schema.insert(
+                "items".to_string(),
+                json!({
+                    "type": "object",
+                    "required": ["path"],
+                    "properties": {
+                        "path": {"type": "string"},
+                        "start": {"type": "integer", "minimum": 1, "default": 1},
+                        "lines": {"type": "integer", "minimum": 1, "default": 80}
+                    }
+                }),
+            );
+        }
+        "repos" | "discover_roots" => {
+            schema.insert("type".to_string(), json!("array"));
+            schema.insert("items".to_string(), json!({"type": "string"}));
+        }
+        "test" | "explain" | "require_all" => {
+            schema.insert("type".to_string(), json!("boolean"));
+        }
+        "limit" | "max_depth" | "discover_limit" | "symbols" | "start" | "lines" | "tests"
+        | "context_lines" => {
+            schema.insert("type".to_string(), json!("integer"));
+            schema.insert(
+                "minimum".to_string(),
+                json!(if name == "context_lines" { 0 } else { 1 }),
+            );
+        }
+        _ => {
+            schema.insert("type".to_string(), json!("string"));
+        }
+    }
+    schema.insert("description".to_string(), json!(argument_description(name)));
+    if let Some(default) = argument_default(tool_name, name) {
+        schema.insert("default".to_string(), default);
+    }
+    if let Some(values) = argument_enum(name) {
+        schema.insert("enum".to_string(), json!(values));
+    }
+    Value::Object(schema)
+}
+
+fn argument_type(name: &str) -> &'static str {
+    match name {
+        "limit" | "max_depth" | "discover_limit" | "symbols" | "start" | "lines" | "tests"
+        | "context_lines" => "integer",
+        "test" | "explain" | "require_all" => "boolean",
+        "exclude_file" | "exclude_path" | "exclude_language" | "exclude_extension"
+        | "exclude_symbol" | "exclude_repo" => "string|string[]",
+        "ranges" => "range[]",
+        "repos" | "discover_roots" => "string[]",
+        _ => "string",
+    }
+}
+
+fn argument_default(tool_name: &str, name: &str) -> Option<Value> {
+    match (tool_name, name) {
+        ("discover_repos", "limit") | ("index_shards" | "ensure_shards", "limit") => {
+            Some(json!(500))
+        }
+        (_, "limit") => Some(json!(10)),
+        (_, "max_depth") => Some(json!(4)),
+        (_, "discover_limit") => Some(json!(500)),
+        (_, "symbols" | "tests") => Some(json!(50)),
+        (_, "start") => Some(json!(1)),
+        (_, "lines") => Some(json!(80)),
+        (_, "snippet") => Some(json!("medium")),
+        (_, "context_lines") => Some(json!(0)),
+        (_, "explain" | "require_all") => Some(json!(false)),
+        _ => None,
+    }
+}
+
+fn argument_enum(name: &str) -> Option<&'static [&'static str]> {
+    match name {
+        "snippet" => Some(&["short", "medium", "block", "symbol"]),
+        _ => None,
+    }
+}
+
+fn argument_description(name: &str) -> &'static str {
+    match name {
+        "repo" => "Local repository root or shard repo filter, depending on the tool.",
+        "repo_filter" => "Repository name filter when repo is already used as a root path.",
+        "index" => "Path to a persistent single-repo Orient index.",
+        "index_dir" => "Path to a local multi-repo shard directory.",
+        "output_dir" => "Directory where shard indexes and manifest.json should be written.",
+        "query" => "Agent query string with filters, quoted phrases, and normal search terms.",
+        "path" => "Repository-relative, index-relative, or shard-prefixed result path.",
+        "ranges" => "Array of {path,start,lines} objects for batch range reads.",
+        "limit" => "Maximum number of results to return.",
+        "language" => "Detected language filter, such as rust, python, or typescript.",
+        "extension" => "File extension filter with or without a leading dot.",
+        "symbol" => "Symbol name to require or boost.",
+        "file" => "File basename substring filter.",
+        "test" => "When true, include only test paths; when false, exclude test paths.",
+        "snippet" => "Snippet mode: short, medium, block, or symbol.",
+        "explain" => "Include structured rank signals and indexed query plans.",
+        "require_all" => "Require all normalized query tokens to appear in each result.",
+        "context_lines" => "Attach this many bounded line-numbered context lines per result.",
+        "exclude_file" => "File basename substring or list of substrings to exclude.",
+        "exclude_path" => "Path substring or list of substrings to exclude.",
+        "exclude_language" => "Language or list of languages to exclude.",
+        "exclude_extension" => "Extension or list of extensions to exclude.",
+        "exclude_symbol" => "Symbol name or list of symbols to exclude.",
+        "exclude_repo" => "Repository name substring or list of substrings to exclude.",
+        "root" | "discover_root" => "Workspace root to scan for repositories.",
+        "discover_roots" => "Workspace roots to scan for repositories.",
+        "repos" => "Explicit repository roots to add to a shard directory.",
+        "max_depth" => "Maximum directory depth for repository discovery.",
+        "discover_limit" => "Maximum discovered repositories to add when building shards.",
+        "symbols" => "Maximum top symbols to include in repo maps.",
+        "tests" => "Maximum test files to include in repo maps.",
+        "start" => "One-based start line for range reads.",
+        "lines" => "Number of lines to read.",
+        "name" => "Symbol name or search-like symbol query.",
+        _ => "Tool argument.",
+    }
 }
 
 impl ToolRuntime {
@@ -988,6 +1174,16 @@ const SEARCH_INDEX_OPTIONAL_ARGS: &[&str] = &[
     "exclude_extension",
     "exclude_symbol",
     "exclude_repo",
+];
+
+const SHARD_BUILD_OPTIONAL_ARGS: &[&str] = &[
+    "repos",
+    "discover_root",
+    "discover_roots",
+    "root",
+    "max_depth",
+    "discover_limit",
+    "limit",
 ];
 
 fn string_arg(arguments: &Value, name: &str) -> Result<String> {

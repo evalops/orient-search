@@ -6,7 +6,7 @@ use std::process::{Command, Stdio};
 use std::thread;
 
 use orient::fast_index::FastIndex;
-use orient::server::{ToolRequest, ToolRuntime};
+use orient::server::{ToolRequest, ToolRuntime, tool_manifest};
 
 fn write(path: &Path, text: &str) {
     fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -20,6 +20,44 @@ fn tcp_tool_request(addr: &str, request: serde_json::Value) -> String {
     let mut response = String::new();
     reader.read_line(&mut response).unwrap();
     response
+}
+
+#[test]
+fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
+    let manifest = tool_manifest();
+    let tools = manifest.as_array().unwrap();
+    let search = tools
+        .iter()
+        .find(|tool| tool["name"] == "search_code")
+        .unwrap();
+    let discover = tools
+        .iter()
+        .find(|tool| tool["name"] == "discover_repos")
+        .unwrap();
+    let read_ranges = tools
+        .iter()
+        .find(|tool| tool["name"] == "read_ranges")
+        .unwrap();
+
+    assert_eq!(search["required"], serde_json::json!(["repo", "query"]));
+    assert_eq!(search["input_schema"]["properties"]["limit"]["default"], 10);
+    assert_eq!(
+        search["input_schema"]["properties"]["snippet"]["enum"],
+        serde_json::json!(["short", "medium", "block", "symbol"])
+    );
+    assert_eq!(
+        search["input_schema"]["properties"]["exclude_path"]["oneOf"][1]["items"]["type"],
+        "string"
+    );
+    assert_eq!(
+        discover["input_schema"]["properties"]["limit"]["default"],
+        500
+    );
+    assert_eq!(
+        read_ranges["input_schema"]["properties"]["ranges"]["items"]["properties"]["lines"]["default"],
+        80
+    );
+    assert_eq!(read_ranges["arguments"][1]["type"], "range[]");
 }
 
 #[test]
@@ -55,6 +93,12 @@ fn server_reports_tool_manifest_for_agent_wrappers() {
     assert!(stdout.contains("\"name\":\"search_code\""));
     assert!(stdout.contains("\"required\":[\"repo\",\"query\"]"));
     assert!(stdout.contains("\"optional\""));
+    assert!(stdout.contains("\"arguments\""));
+    assert!(stdout.contains("\"input_schema\""));
+    assert!(stdout.contains("\"type\":\"integer\""));
+    assert!(stdout.contains("\"default\":10"));
+    assert!(stdout.contains("\"enum\":[\"short\",\"medium\",\"block\",\"symbol\"]"));
+    assert!(stdout.contains("\"type\":\"range[]\""));
     assert!(stdout.contains("exclude_path"));
     assert!(stdout.contains("exclude_symbol"));
     assert!(stdout.contains("read_ranges"));

@@ -63,7 +63,11 @@ fn cli_outputs_tool_manifest() {
         .stdout(predicate::str::contains("read_shard_range"))
         .stdout(predicate::str::contains("related_shard_files"))
         .stdout(predicate::str::contains("related_shard_symbols"))
-        .stdout(predicate::str::contains("context_lines"));
+        .stdout(predicate::str::contains("context_lines"))
+        .stdout(predicate::str::contains("\"arguments\""))
+        .stdout(predicate::str::contains("\"input_schema\""))
+        .stdout(predicate::str::contains("\"default\":10"))
+        .stdout(predicate::str::contains("\"type\":\"range[]\""));
 }
 
 #[test]
