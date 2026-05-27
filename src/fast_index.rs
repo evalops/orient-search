@@ -8,9 +8,9 @@ use crate::repo_index::{
     extract_symbols, file_range_from_text, filter_only_query, filter_only_search_result,
     finalize_results, is_entrypoint_path, is_ignored, is_important_file, is_manifest_file,
     is_test_path, known_commands_from_hints, language_for, matches_filters, normalize_token,
-    regular_file_metadata, repo_map_seed_paths, repo_matches, result_matches_all_tokens,
-    result_matches_symbol_filters, round4, score_filter_only_path, symbol_kind_rank, token_counts,
-    tokenize,
+    regular_file_metadata, related_stem_terms, repo_map_seed_paths, repo_matches,
+    result_matches_all_tokens, result_matches_symbol_filters, round4, score_filter_only_path,
+    symbol_kind_rank, token_counts, tokenize,
 };
 use anyhow::{Context, Result};
 use ignore::WalkBuilder;
@@ -553,11 +553,12 @@ impl FastIndex {
             .map(|value| value.to_string_lossy().to_string())
             .unwrap_or_default();
         let stem_lower = stem.to_ascii_lowercase();
-        let stem_without_test = stem_lower.strip_prefix("test_").unwrap_or(&stem_lower);
+        let stem_terms = related_stem_terms(&stem_lower);
         let directory = Path::new(&normalized)
             .parent()
             .map(|value| value.to_string_lossy().to_string())
             .unwrap_or_default();
+        let source_is_test = is_test_path(&normalized.to_ascii_lowercase());
         let source_symbols = self
             .files
             .iter()
@@ -583,12 +584,15 @@ impl FastIndex {
                 score += 4.0;
                 reasons.push(format!("shares stem {stem}"));
             }
-            if is_test_path(&lower)
-                && !stem_without_test.is_empty()
-                && lower.contains(stem_without_test)
+            if stem_terms.iter().any(|term| lower.contains(term)) {
+                score += 3.0;
+                reasons.push("shares normalized stem".to_string());
+            }
+            if source_is_test != is_test_path(&lower)
+                && stem_terms.iter().any(|term| lower.contains(term))
             {
                 score += 5.0;
-                reasons.push("test coverage candidate".to_string());
+                reasons.push("source/test counterpart".to_string());
             }
 
             let file_dir = Path::new(&file.path)
@@ -649,6 +653,7 @@ impl FastIndex {
             .and_then(|path| Path::new(path).file_stem())
             .map(|value| value.to_string_lossy().to_ascii_lowercase())
             .unwrap_or_default();
+        let path_stem_terms = related_stem_terms(&path_stem);
         let path_dir = normalized_path
             .as_deref()
             .and_then(|path| Path::new(path).parent())
@@ -688,6 +693,13 @@ impl FastIndex {
                     {
                         score += 3.0;
                         reasons.push(format!("shares stem {path_stem}"));
+                    }
+                    if path_stem_terms.iter().any(|term| {
+                        symbol.name.to_ascii_lowercase().contains(term)
+                            || symbol_path_lower.contains(term)
+                    }) {
+                        score += 3.0;
+                        reasons.push("shares normalized stem".to_string());
                     }
                 }
 

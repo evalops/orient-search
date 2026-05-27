@@ -379,6 +379,13 @@ fn indexed_related_context_uses_persisted_metadata() {
             .any(|file| file.path == "tests/auth_test.rs"),
         "{related_files:?}"
     );
+    let test_related_files = loaded.related_files("tests/auth_test.rs", 10);
+    assert!(
+        test_related_files
+            .iter()
+            .any(|file| file.path == "src/auth.rs"),
+        "{test_related_files:?}"
+    );
 
     let related_symbols = loaded.related_symbols(Some("src/auth.rs"), Some("SessionManager"), 10);
     assert!(
@@ -388,6 +395,14 @@ fn indexed_related_context_uses_persisted_metadata() {
                 && symbol.reason.contains("same file")
         }),
         "{related_symbols:?}"
+    );
+    let test_related_symbols = loaded.related_symbols(Some("tests/auth_test.rs"), None, 10);
+    assert!(
+        test_related_symbols
+            .iter()
+            .any(|symbol| symbol.symbol.name == "SessionManager"
+                && symbol.symbol.path == "src/auth.rs"),
+        "{test_related_symbols:?}"
     );
 }
 

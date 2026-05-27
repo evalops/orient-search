@@ -65,6 +65,12 @@ def test_issue_token_round_trip():
         .map(|item| item.path)
         .collect();
     assert!(related.contains(&"tests/test_auth.py".to_string()));
+    let test_related: Vec<_> = index
+        .related_files("tests/test_auth.py", 10)
+        .into_iter()
+        .map(|item| item.path)
+        .collect();
+    assert!(test_related.contains(&"src/auth.py".to_string()));
 
     let related_symbols = index.related_symbols(Some("src/auth.py"), Some("session token"), 10);
     assert_eq!(related_symbols[0].symbol.name, "SessionManager");
@@ -74,6 +80,13 @@ def test_issue_token_round_trip():
         related_symbols
             .iter()
             .any(|item| item.symbol.name == "verify_token")
+    );
+    let test_related_symbols = index.related_symbols(Some("tests/test_auth.py"), None, 10);
+    assert!(
+        test_related_symbols
+            .iter()
+            .any(|item| item.symbol.name == "SessionManager" && item.symbol.path == "src/auth.py"),
+        "{test_related_symbols:?}"
     );
 
     let brief = index.repo_brief();

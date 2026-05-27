@@ -921,15 +921,21 @@ impl RepoIndex {
     }
 
     pub fn related_files(&self, path: &str, limit: usize) -> Vec<RelatedFile> {
+        if limit == 0 {
+            return Vec::new();
+        }
+
         let normalized = path.trim_start_matches('/').to_string();
         let stem = Path::new(&normalized)
             .file_stem()
             .map(|value| value.to_string_lossy().to_string())
             .unwrap_or_default();
+        let stem_terms = related_stem_terms(&stem);
         let directory = Path::new(&normalized)
             .parent()
             .map(|value| value.to_string_lossy().to_string())
             .unwrap_or_default();
+        let source_is_test = is_test_path(&normalized.to_ascii_lowercase());
         let source_symbols = self
             .files
             .get(&normalized)
@@ -952,12 +958,15 @@ impl RepoIndex {
                 score += 4.0;
                 reasons.push(format!("shares stem {stem}"));
             }
-            if is_test_path(&lower)
-                && !stem.is_empty()
-                && lower.contains(&stem.replace("test_", "").to_lowercase())
+            if stem_terms.iter().any(|term| lower.contains(term)) {
+                score += 3.0;
+                reasons.push("shares normalized stem".to_string());
+            }
+            if source_is_test != is_test_path(&lower)
+                && stem_terms.iter().any(|term| lower.contains(term))
             {
                 score += 5.0;
-                reasons.push("test coverage candidate".to_string());
+                reasons.push("source/test counterpart".to_string());
             }
             let file_dir = Path::new(file_path)
                 .parent()
@@ -1011,6 +1020,7 @@ impl RepoIndex {
             .and_then(|path| Path::new(path).file_stem())
             .map(|value| value.to_string_lossy().to_ascii_lowercase())
             .unwrap_or_default();
+        let path_stem_terms = related_stem_terms(&path_stem);
         let path_dir = normalized_path
             .as_deref()
             .and_then(|path| Path::new(path).parent())
@@ -1042,6 +1052,13 @@ impl RepoIndex {
                 {
                     score += 3.0;
                     reasons.push(format!("shares stem {path_stem}"));
+                }
+                if path_stem_terms.iter().any(|term| {
+                    symbol.name.to_ascii_lowercase().contains(term)
+                        || symbol_path_lower.contains(term)
+                }) {
+                    score += 3.0;
+                    reasons.push("shares normalized stem".to_string());
                 }
             }
 
@@ -1819,6 +1836,41 @@ pub(crate) fn tokenize(text: &str) -> Vec<String> {
 
 pub(crate) fn normalize_token(text: &str) -> String {
     tokenize(text).join("")
+}
+
+pub(crate) fn related_stem_terms(stem: &str) -> Vec<String> {
+    let lower = stem.to_ascii_lowercase();
+    let mut terms = Vec::new();
+    push_related_stem_term(&mut terms, lower.as_str());
+
+    for prefix in [
+        "test_", "tests_", "spec_", "specs_", "test.", "tests.", "spec.", "specs.", "test-",
+        "tests-", "spec-", "specs-",
+    ] {
+        if let Some(stripped) = lower.strip_prefix(prefix) {
+            push_related_stem_term(&mut terms, stripped);
+        }
+    }
+    for suffix in [
+        "_test", "_tests", "_spec", "_specs", ".test", ".tests", ".spec", ".specs", "-test",
+        "-tests", "-spec", "-specs",
+    ] {
+        if let Some(stripped) = lower.strip_suffix(suffix) {
+            push_related_stem_term(&mut terms, stripped);
+        }
+    }
+
+    terms
+}
+
+fn push_related_stem_term(terms: &mut Vec<String>, value: &str) {
+    let value = value.trim_matches(|ch: char| !ch.is_ascii_alphanumeric());
+    if value.len() > 1 && !matches!(value, "test" | "tests" | "spec" | "specs") {
+        let value = value.to_string();
+        if !terms.contains(&value) {
+            terms.push(value);
+        }
+    }
 }
 
 pub(crate) fn identifier_boundary_text(text: &str) -> String {
