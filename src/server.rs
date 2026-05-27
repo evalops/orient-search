@@ -579,15 +579,16 @@ impl ToolRuntime {
             }
             let index = self.cached_index(index_dir.join(&shard.index))?;
             for scope in scopes {
-                let scoped_filters = filters_for_shard_scope(&filters, scope.as_deref());
+                let scoped_filters =
+                    filters_for_shard_scope(&filters, scope.path_prefix.as_deref());
                 for mut result in index.search_filtered(&shard_query, limit, &scoped_filters)? {
-                    if let Some(prefix) = &scope {
+                    if let Some(prefix) = &scope.path_prefix {
                         if !result.path.starts_with(prefix) {
                             continue;
                         }
                     }
-                    result.path = format!("{}/{}", shard.name, result.path);
-                    result.reason = format!("shard:{}; {}", shard.name, result.reason);
+                    result.path = scoped_output_path(&scope, &result.path);
+                    result.reason = format!("shard:{}; {}", scope.output_prefix, result.reason);
                     results.push(result);
                 }
             }
@@ -610,24 +611,24 @@ impl ToolRuntime {
                 continue;
             }
             let index = self.cached_index(index_dir.join(&shard.index))?;
-            let scoped = scopes.iter().any(Option::is_some);
+            let scoped = scopes.iter().any(|scope| scope.path_prefix.is_some());
             let base_symbol_limit = if scoped { usize::MAX } else { symbol_limit };
             let base_test_limit = if scoped { usize::MAX } else { test_limit };
             for scope in scopes {
                 let mut map = index.repo_map(base_symbol_limit, base_test_limit);
-                if let Some(prefix) = scope.as_deref() {
+                if let Some(prefix) = scope.path_prefix.as_deref() {
                     filter_repo_map_by_prefix(&mut map, prefix);
                     map.test_files.truncate(test_limit);
                     map.top_symbols.truncate(symbol_limit);
                 }
-                prefix_repo_map_paths(&mut map, &shard.name);
+                prefix_repo_map_paths(&mut map, &scope);
                 maps.push(ShardRepoMap {
                     aliases: shard
                         .aliases
                         .iter()
                         .map(|alias| alias.name.clone())
                         .collect(),
-                    name: shard.name.clone(),
+                    name: scope.output_prefix.clone(),
                     root: shard.root.clone(),
                     map,
                 });
@@ -659,12 +660,12 @@ impl ToolRuntime {
             let index = self.cached_index(index_dir.join(&shard.index))?;
             for scope in scopes {
                 for mut symbol in index.find_symbol(name, limit) {
-                    if let Some(prefix) = &scope {
+                    if let Some(prefix) = &scope.path_prefix {
                         if !symbol.path.starts_with(prefix) {
                             continue;
                         }
                     }
-                    symbol.path = format!("{}/{}", shard.name, symbol.path);
+                    symbol.path = scoped_output_path(&scope, &symbol.path);
                     symbols.push(symbol);
                 }
             }
@@ -707,21 +708,38 @@ fn symbol_match_score(symbol: &Symbol, name: &str, needle: &str) -> u8 {
     }
 }
 
-fn prefix_repo_map_paths(map: &mut crate::repo_index::RepoMap, shard_name: &str) {
+fn scoped_output_path(scope: &crate::shards::ShardSearchScope, path: &str) -> String {
+    let trimmed = scope
+        .path_prefix
+        .as_deref()
+        .and_then(|prefix| path.strip_prefix(prefix))
+        .unwrap_or(path)
+        .trim_start_matches('/');
+    if trimmed.is_empty() {
+        scope.output_prefix.clone()
+    } else {
+        format!("{}/{}", scope.output_prefix, trimmed)
+    }
+}
+
+fn prefix_repo_map_paths(
+    map: &mut crate::repo_index::RepoMap,
+    scope: &crate::shards::ShardSearchScope,
+) {
     for path in &mut map.brief.manifest_files {
-        *path = format!("{shard_name}/{path}");
+        *path = scoped_output_path(scope, path);
     }
     for path in &mut map.brief.important_files {
-        *path = format!("{shard_name}/{path}");
+        *path = scoped_output_path(scope, path);
     }
     for path in &mut map.entrypoints {
-        *path = format!("{shard_name}/{path}");
+        *path = scoped_output_path(scope, path);
     }
     for path in &mut map.test_files {
-        *path = format!("{shard_name}/{path}");
+        *path = scoped_output_path(scope, path);
     }
     for symbol in &mut map.top_symbols {
-        symbol.path = format!("{shard_name}/{}", symbol.path);
+        symbol.path = scoped_output_path(scope, &symbol.path);
     }
 }
 

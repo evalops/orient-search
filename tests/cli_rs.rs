@@ -643,12 +643,6 @@ fn cli_filters_shard_search_by_nested_repo_alias() {
         .success()
         .stdout(predicate::str::contains("\"shards\":1"));
 
-    let workspace_name = workspace
-        .path()
-        .file_name()
-        .unwrap()
-        .to_string_lossy()
-        .to_string();
     let mut search = Command::cargo_bin("orient").unwrap();
     search
         .args([
@@ -660,11 +654,27 @@ fn cli_filters_shard_search_by_nested_repo_alias() {
         ])
         .assert()
         .success()
-        .stdout(predicate::str::contains(&format!(
-            "\"path\":\"{workspace_name}/billing/src/billing.rs\""
-        )))
+        .stdout(predicate::str::contains(
+            "\"path\":\"billing/src/billing.rs\"",
+        ))
         .stdout(predicate::str::contains("invoice_total"))
         .stdout(predicate::str::contains("auth.rs").not());
+
+    let mut shard_symbol = Command::cargo_bin("orient").unwrap();
+    shard_symbol
+        .args([
+            "shard-symbol",
+            "--index-dir",
+            shard_dir.path().to_str().unwrap(),
+            "--repo",
+            "billing",
+            "invoice_total",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "\"path\":\"billing/src/billing.rs\"",
+        ));
 
     let mut shard_map = Command::cargo_bin("orient").unwrap();
     shard_map
@@ -680,9 +690,7 @@ fn cli_filters_shard_search_by_nested_repo_alias() {
         .stdout(predicate::str::contains("\"aliases\""))
         .stdout(predicate::str::contains("billing"))
         .stdout(predicate::str::contains("cargo test"))
-        .stdout(predicate::str::contains(&format!(
-            "{workspace_name}/billing/Cargo.toml"
-        )))
+        .stdout(predicate::str::contains("billing/Cargo.toml"))
         .stdout(predicate::str::contains("auth/src/auth.rs").not());
 
     let mut read = Command::cargo_bin("orient").unwrap();
@@ -751,12 +759,6 @@ fn cli_refresh_shards_updates_nested_repo_aliases() {
         .success()
         .stdout(predicate::str::contains("\"refreshed_files\""));
 
-    let workspace_name = workspace
-        .path()
-        .file_name()
-        .unwrap()
-        .to_string_lossy()
-        .to_string();
     let mut search = Command::cargo_bin("orient").unwrap();
     search
         .args([
@@ -768,9 +770,7 @@ fn cli_refresh_shards_updates_nested_repo_aliases() {
         ])
         .assert()
         .success()
-        .stdout(predicate::str::contains(&format!(
-            "\"path\":\"{workspace_name}/auth/src/auth.rs\""
-        )))
+        .stdout(predicate::str::contains("\"path\":\"auth/src/auth.rs\""))
         .stdout(predicate::str::contains("issue_token"))
         .stdout(predicate::str::contains("billing/src/billing.rs").not());
 }

@@ -165,7 +165,7 @@ Supported tools:
 `daemon_status` reports local warm-cache counts for the current daemon process; it does not inspect Codex/Claude sessions or emit telemetry.
 Use `warm_index` or `warm_shards`, or pass `--index` / `--index-dir` to `serve-tcp`, to load persistent indexes before the first agent query.
 Use `discover_repos`, or `index_shards` with `discover_root`, when a local machine has many duplicated worktrees and nested repo collections.
-For indexed or shard JSON search arguments, use `repo` or `repo_filter` to restrict by repository name. Shard search also records aliases for immediate child directories that look like repos, so a shard rooted at a dated worktree can still answer filters like `repo:maestro` or `repo:platform`; `read-shard-range` accepts those alias-prefixed paths too. For `search_code`, `repo` is the repository root path, so use `repo_filter` for name filtering.
+For indexed or shard JSON search arguments, use `repo` or `repo_filter` to restrict by repository name. Shard search also records aliases for immediate child directories that look like repos, so a shard rooted at a dated worktree can still answer filters like `repo:maestro` or `repo:platform`. Alias-scoped shard search, symbol lookup, and repo maps return alias-prefixed paths such as `maestro/src/app.rs`, and `read-shard-range` accepts those paths directly. For `search_code`, `repo` is the repository root path, so use `repo_filter` for name filtering.
 
 ## Query Language
 
@@ -227,20 +227,21 @@ Product impact criteria for follow-up adoption:
 
 Current search baseline:
 
-- `orient bench-search --repo . "indexed search symbol filters"`: `9.296ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "session token auth"`: `18.732ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "browser session implementation"`: `22.085ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "postgres migration user"`: `34.628ms` p95 after warmup.
+- `orient bench-search --repo . "indexed search symbol filters"`: `6.424ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "session token auth"`: `20.328ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "browser session implementation"`: `16.278ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "postgres migration user"`: `27.753ms` p95 after warmup.
 - The `rg` hot path has a `250ms` wall-clock timeout plus a bounded match cap; timed-out searches return partial results rather than hanging.
 - `orient index --repo . --output /tmp/orient-self.index`: versioned binary index with file metadata, content token postings, path token postings, trigram postings, line offsets, and symbol boosts.
 - `orient discover-repos --root /Users/jonathanhaas/Documents/Projects --max-depth 4 --limit 200`: finds git or manifest-backed repo roots while skipping dependency/build directories.
 - `orient index-shards --repo repo-a --repo repo-b --output-dir /tmp/orient-shards`: writes per-repo index shards plus a manifest for local multi-repo search, including stable aliases for nested repo directories.
 - `orient index-shards --discover-root /Users/jonathanhaas/Documents/Projects --output-dir /tmp/orient-shards`: discovers repos and writes shard indexes in one step.
+- `orient search-shards --index-dir /tmp/orient-shards "repo:maestro app server"`: returns stable alias-prefixed paths that can be passed straight to `read-shard-range`.
 - `orient refresh-shards --index-dir /tmp/orient-shards`: refreshes each shard incrementally, reusing unchanged file metadata and postings per repo, and refreshes nested repo aliases.
 - `orient refresh-index --repo . --index /tmp/orient-self.index`: reuses unchanged files and refreshes changed/deleted files.
 - `orient index-map --index /tmp/orient-self.index`: returns repo-map orientation directly from the persistent index without rebuilding a live repo scan.
 - `orient shard-map --index-dir /tmp/orient-shards`: returns repo-prefixed repo maps for local multi-repo shard directories.
-- `orient bench-search --repo . --index /tmp/orient-self.index "indexed search symbol filters"`: `0.186ms` p95 after warmup.
+- `orient bench-search --repo . --index /tmp/orient-self.index "indexed search symbol filters"`: `0.218ms` p95 after warmup.
 
 Benchmark methodology:
 
