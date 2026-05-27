@@ -45,6 +45,8 @@ cargo run -- index-shards \
   --repo /path/to/repo-b \
   --output-dir /tmp/orient-shards
 cargo run -- search-shards --index-dir /tmp/orient-shards "session token auth"
+cargo run -- search-shards --index-dir /tmp/orient-shards "repo:repo-a session token auth"
+cargo run -- read-shard-range --index-dir /tmp/orient-shards repo-a/src/auth.rs --start 40 --lines 80
 
 # Find a symbol.
 cargo run -- symbol --repo /path/to/repo SessionManager
@@ -81,6 +83,12 @@ Example request:
 {"id":1,"tool":"search_code","arguments":{"repo":"/path/to/repo","query":"issue token","limit":5,"extension":"rs","require_all":true,"snippet":"block","explain":true}}
 ```
 
+Shard request:
+
+```json
+{"id":2,"tool":"search_shards","arguments":{"index_dir":"/tmp/orient-shards","query":"repo:billing invoice total","limit":5,"require_all":true,"explain":true}}
+```
+
 Supported tools:
 
 - `list_tools`
@@ -89,6 +97,9 @@ Supported tools:
 - `read_range`
 - `search_code`
 - `indexed_search_code`
+- `index_shards`
+- `search_shards`
+- `read_shard_range`
 - `find_symbol`
 - `related_files`
 - `related_symbols`
@@ -135,6 +146,7 @@ The build is useful when it can:
 
 - Answer repo brief/search/symbol/related-file questions through Rust CLI and JSON-lines server.
 - Let an agent search, inspect a repo map, and read bounded file ranges without shelling out to `cat`/`sed`.
+- Let an agent search and read bounded file ranges from a local multi-repo shard directory.
 - Return wide-tree search results in hundreds of milliseconds, not seconds.
 - Bound the hot path with a wall-clock timeout and match caps so pathological trees cannot hang searches.
 - Provide a persistent indexed search mode that can evolve toward Zoekt-style shards/postings.
@@ -152,14 +164,14 @@ Product impact criteria for follow-up adoption:
 Current search baseline:
 
 - `orient bench-search --repo . "indexed search symbol filters"`: `7.117ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "session token auth"`: `18.038ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "browser session implementation"`: `18.523ms` p95 after warmup.
-- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "postgres migration user"`: `39.572ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "session token auth"`: `18.538ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "browser session implementation"`: `24.866ms` p95 after warmup.
+- `orient bench-search --repo /Users/jonathanhaas/Documents/Projects "postgres migration user"`: `36.819ms` p95 after warmup.
 - The `rg` hot path has a `250ms` wall-clock timeout plus a bounded match cap; timed-out searches return partial results rather than hanging.
 - `orient index --repo . --output /tmp/orient-self.index`: versioned binary index with file metadata, content token postings, path token postings, trigram postings, line offsets, and symbol boosts.
 - `orient index-shards --repo repo-a --repo repo-b --output-dir /tmp/orient-shards`: writes per-repo index shards plus a manifest for local multi-repo search.
 - `orient refresh-index --repo . --index /tmp/orient-self.index`: reuses unchanged files and refreshes changed/deleted files.
-- `orient bench-search --repo . --index /tmp/orient-self.index "indexed search symbol filters"`: `0.117ms` p95 after warmup.
+- `orient bench-search --repo . --index /tmp/orient-self.index "indexed search symbol filters"`: `0.163ms` p95 after warmup.
 
 Benchmark methodology:
 

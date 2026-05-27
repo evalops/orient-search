@@ -33,9 +33,9 @@ Implemented now:
 - `orient index`: persistent Rust content-token, path-token, and trigram posting index.
 - `orient refresh-index`: incremental refresh that reuses unchanged file metadata/terms and refreshes changed files.
 - `orient indexed-search`: indexed query path.
-- `orient index-shards` and `orient search-shards`: local multi-repo shard manifest with one versioned index file per repo.
+- `orient index-shards`, `orient search-shards`, and `orient read-shard-range`: local multi-repo shard manifest with one versioned index file per repo and bounded range reads from prefixed shard paths.
 - `orient bench-search`: built-in p50/p95/max latency reporting for fallback and indexed search, with `--fail-p95-ms` for regression gates.
-- JSON-lines tools: `search_code`, `indexed_search_code`, `repo_map`, `read_range`, and `related_symbols`.
+- JSON-lines tools: `search_code`, `indexed_search_code`, `index_shards`, `search_shards`, `read_shard_range`, `repo_map`, `read_range`, and `related_symbols`.
 - CLI tools: `repo-map`, `read-range`, and `related-symbols`, so agents can inspect entrypoints/tests/top symbols, open bounded file context, and jump to nearby definitions after a search hit.
 - Search snippet modes: `short`, `medium`, `block`, and `symbol`.
 - Optional structured ranking explanations with path/content/term-frequency/symbol signals.
@@ -46,7 +46,7 @@ Implemented now:
 
 Measured on this machine:
 
-- Wide tree fallback: `/Users/jonathanhaas/Documents/Projects`, common top-10 literal/token queries at `18-40ms` p95 after warmup across the sampled runs.
+- Wide tree fallback: `/Users/jonathanhaas/Documents/Projects`, common top-10 literal/token queries at `19-37ms` p95 after warmup across the sampled runs.
 - Local repo fallback: query `indexed search symbol filters`, top 10 at about `8ms` p95 after warmup.
 - Hot-path fallback has a `250ms` wall-clock timeout plus match caps; if the timeout fires it returns partial results instead of blocking the agent.
 - Local repo index build: about `0.25s`.
@@ -68,7 +68,7 @@ Search quality definition:
 - Query support covers literals, multi-token AND semantics, path filters, extension/language filters, and exact-symbol boosts.
 - Snippets include line numbers and enough context for an agent to decide whether to read/edit.
 - Explain mode returns structured ranking signals when an agent needs to compare close results.
-- CLI and JSON-lines server expose the same search capabilities.
+- CLI and JSON-lines server expose the same search capabilities, including multi-repo shard search.
 
 Engineering definition:
 
@@ -77,7 +77,7 @@ Engineering definition:
 - Multi-repo shard directories store a manifest plus one versioned index per repo.
 - Persistent indexed files include line-offset tables for snippet retrieval.
 - Incremental refresh exists.
-- Tests cover fallback search, indexed search, incremental refresh, filters, ranking explanations, duplicate suppression, JSON-lines server calls, corrupt index errors, path safety, snippet modes, and a guarded `rg` differential check.
+- Tests cover fallback search, indexed search, shard search/read tools, incremental refresh, filters, ranking explanations, duplicate suppression, JSON-lines server calls, corrupt index errors, path safety, snippet modes, and a guarded `rg` differential check.
 - Every release claim is backed by `cargo fmt --check`, `cargo test`, `cargo build --release`, and `orient bench-search` or equivalent timed searches.
 
 ## Architecture Direction

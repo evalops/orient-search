@@ -268,6 +268,43 @@ fn cli_builds_and_searches_shard_directory() {
         .success()
         .stdout(predicate::str::contains("billing.rs"))
         .stdout(predicate::str::contains("shard:"));
+
+    let billing_name = billing_repo
+        .path()
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+    let mut repo_filtered = Command::cargo_bin("orient").unwrap();
+    repo_filtered
+        .args([
+            "search-shards",
+            "--index-dir",
+            shard_dir.path().to_str().unwrap(),
+            "invoice total",
+            "--repo",
+            &billing_name,
+            "--require-all",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("billing.rs"));
+
+    let mut read = Command::cargo_bin("orient").unwrap();
+    read.args([
+        "read-shard-range",
+        "--index-dir",
+        shard_dir.path().to_str().unwrap(),
+        &format!("{billing_name}/src/billing.rs"),
+        "--start",
+        "1",
+        "--lines",
+        "1",
+    ])
+    .assert()
+    .success()
+    .stdout(predicate::str::contains("\"path\""))
+    .stdout(predicate::str::contains("invoice_total"));
 }
 
 #[test]

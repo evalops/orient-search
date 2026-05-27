@@ -108,6 +108,85 @@ fn server_handles_indexed_search_request() {
 }
 
 #[test]
+fn server_handles_shard_index_search_and_read_requests() {
+    let parent = tempfile::tempdir().unwrap();
+    let auth_repo = parent.path().join("auth");
+    let billing_repo = parent.path().join("billing");
+    write(
+        &auth_repo.join("src/auth.rs"),
+        "pub fn issue_token() -> String { \"token\".to_string() }\n",
+    );
+    write(
+        &auth_repo.join("Cargo.toml"),
+        "[package]\nname='auth'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    write(
+        &billing_repo.join("src/billing.rs"),
+        "pub fn invoice_total() -> usize { 42 }\n",
+    );
+    write(
+        &billing_repo.join("Cargo.toml"),
+        "[package]\nname='billing'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    let shard_dir = parent.path().join(".orient-shards");
+
+    let binary = assert_cmd::cargo::cargo_bin("orient");
+    let mut child = Command::new(binary)
+        .arg("serve-jsonl")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+
+    let index_request = serde_json::json!({
+        "id": "index-shards",
+        "tool": "index_shards",
+        "arguments": {
+            "repos": [auth_repo, billing_repo],
+            "output_dir": shard_dir
+        }
+    });
+    let search_request = serde_json::json!({
+        "id": "search-shards",
+        "tool": "search_shards",
+        "arguments": {
+            "index_dir": parent.path().join(".orient-shards"),
+            "query": "repo:billing invoice total",
+            "limit": 5,
+            "require_all": true,
+            "explain": true
+        }
+    });
+    let read_request = serde_json::json!({
+        "id": "read-shard-range",
+        "tool": "read_shard_range",
+        "arguments": {
+            "index_dir": parent.path().join(".orient-shards"),
+            "path": "billing/src/billing.rs",
+            "start": 1,
+            "lines": 1
+        }
+    });
+    writeln!(child.stdin.as_mut().unwrap(), "{index_request}").unwrap();
+    writeln!(child.stdin.as_mut().unwrap(), "{search_request}").unwrap();
+    writeln!(child.stdin.as_mut().unwrap(), "{read_request}").unwrap();
+    drop(child.stdin.take());
+
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("\"id\":\"index-shards\""));
+    assert!(stdout.contains("\"shards\":2"));
+    assert!(stdout.contains("\"id\":\"search-shards\""));
+    assert!(stdout.contains("billing/src/billing.rs"));
+    assert!(stdout.contains("shard:billing"));
+    assert!(!stdout.contains("auth/src/auth.rs"));
+    assert!(stdout.contains("\"id\":\"read-shard-range\""));
+    assert!(stdout.contains("\"path\":\"billing/src/billing.rs\""));
+    assert!(stdout.contains("invoice_total"));
+}
+
+#[test]
 fn server_handles_repo_map_and_read_range_requests() {
     let repo = tempfile::tempdir().unwrap();
     write(

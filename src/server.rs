@@ -2,6 +2,7 @@ use crate::fast_index::FastIndex;
 use crate::repo_index::{
     RepoIndexer, SearchFilters, SnippetMode, read_file_range, search_repo_fast_filtered,
 };
+use crate::shards::{build_shards, read_shard_range, search_shards};
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -107,6 +108,31 @@ fn dispatch_result(request: &ToolRequest) -> Result<Value> {
                 &search_filters(&request.arguments),
             )?)?)
         }
+        "index_shards" => {
+            let repos = path_array_arg(&request.arguments, "repos")?;
+            let output_dir = path_arg(&request.arguments, "output_dir")?;
+            Ok(serde_json::to_value(build_shards(&repos, output_dir)?)?)
+        }
+        "search_shards" => {
+            let index_dir = path_arg(&request.arguments, "index_dir")?;
+            let query = string_arg(&request.arguments, "query")?;
+            let limit = usize_arg(&request.arguments, "limit").unwrap_or(10);
+            Ok(serde_json::to_value(search_shards(
+                index_dir,
+                &query,
+                limit,
+                &search_filters(&request.arguments),
+            )?)?)
+        }
+        "read_shard_range" => {
+            let index_dir = path_arg(&request.arguments, "index_dir")?;
+            let path = string_arg(&request.arguments, "path")?;
+            let start = usize_arg(&request.arguments, "start").unwrap_or(1);
+            let lines = usize_arg(&request.arguments, "lines").unwrap_or(80);
+            Ok(serde_json::to_value(read_shard_range(
+                index_dir, &path, start, lines,
+            )?)?)
+        }
         "find_symbol" => {
             let repo = path_arg(&request.arguments, "repo")?;
             let name = string_arg(&request.arguments, "name")?;
@@ -139,6 +165,9 @@ fn dispatch_result(request: &ToolRequest) -> Result<Value> {
             "read_range",
             "search_code",
             "indexed_search_code",
+            "index_shards",
+            "search_shards",
+            "read_shard_range",
             "find_symbol",
             "related_files",
             "related_symbols"
@@ -157,6 +186,22 @@ fn string_arg(arguments: &Value, name: &str) -> Result<String> {
 
 fn path_arg(arguments: &Value, name: &str) -> Result<PathBuf> {
     Ok(PathBuf::from(string_arg(arguments, name)?))
+}
+
+fn path_array_arg(arguments: &Value, name: &str) -> Result<Vec<PathBuf>> {
+    let values = arguments
+        .get(name)
+        .and_then(Value::as_array)
+        .ok_or_else(|| anyhow!("missing path array argument: {name}"))?;
+    values
+        .iter()
+        .map(|value| {
+            value
+                .as_str()
+                .map(PathBuf::from)
+                .ok_or_else(|| anyhow!("path array argument {name} must contain only strings"))
+        })
+        .collect()
 }
 
 fn usize_arg(arguments: &Value, name: &str) -> Option<usize> {

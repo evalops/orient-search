@@ -5,7 +5,7 @@ use orient::repo_index::{
     RepoIndexer, SearchFilters, SnippetMode, read_file_range, search_repo_fast_filtered,
 };
 use orient::server::serve_jsonl;
-use orient::shards::{build_shards, search_shards};
+use orient::shards::{build_shards, read_shard_range, search_shards};
 use serde::Serialize;
 use std::io;
 use std::path::PathBuf;
@@ -51,12 +51,23 @@ enum Commands {
         language: Option<String>,
         #[arg(long)]
         extension: Option<String>,
+        #[arg(long = "repo")]
+        repo: Option<String>,
         #[arg(long)]
         require_all: bool,
         #[arg(long, default_value = "medium")]
         snippet: String,
         #[arg(long)]
         explain: bool,
+    },
+    ReadShardRange {
+        #[arg(long)]
+        index_dir: PathBuf,
+        path: String,
+        #[arg(long, default_value_t = 1)]
+        start: usize,
+        #[arg(long, default_value_t = 80)]
+        lines: usize,
     },
     Brief {
         #[arg(long, default_value = ".")]
@@ -226,6 +237,7 @@ fn main() -> Result<()> {
             path,
             language,
             extension,
+            repo,
             require_all,
             snippet,
             explain,
@@ -241,12 +253,24 @@ fn main() -> Result<()> {
                         path,
                         language,
                         extension,
+                        repo,
                         require_all,
                         snippet,
                         explain,
                         ..SearchFilters::default()
                     },
                 )?)?
+            );
+        }
+        Commands::ReadShardRange {
+            index_dir,
+            path,
+            start,
+            lines,
+        } => {
+            println!(
+                "{}",
+                serde_json::to_string(&read_shard_range(index_dir, &path, start, lines)?)?
             );
         }
         Commands::Brief { repo } => {

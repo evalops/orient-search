@@ -1,9 +1,13 @@
 //! Multi-repo shard manifests for local indexed search.
 
 use crate::fast_index::{FastIndex, IndexStats};
-use crate::repo_index::{SearchFilters, SearchResult, finalize_results};
+use crate::query::{merge_filters, parse_query};
+use crate::repo_index::{
+    FileRange, SearchFilters, SearchResult, finalize_results, read_file_range, repo_matches,
+};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -52,12 +56,15 @@ pub fn build_shards(repos: &[PathBuf], output_dir: impl AsRef<Path>) -> Result<S
         symbols: 0,
     };
 
+    let mut names = HashSet::new();
     for repo in repos {
         let root = repo.canonicalize()?;
-        let name = root
+        let base_name = root
             .file_name()
             .map(|value| value.to_string_lossy().to_string())
             .unwrap_or_else(|| "repo".to_string());
+        let hash = stable_hash(&root);
+        let name = unique_shard_name(&base_name, &hash, &mut names);
         let index_name = format!("{}-{}.orient", sanitize_name(&name), stable_hash(&root));
         let index_path = output_dir.join(&index_name);
         let index = FastIndex::build(&root)?;
@@ -84,17 +91,42 @@ pub fn search_shards(
 ) -> Result<Vec<SearchResult>> {
     let index_dir = index_dir.as_ref();
     let manifest = load_manifest(index_dir)?;
+    let parsed = parse_query(query);
+    let filters = merge_filters(filters.clone(), parsed.filters);
     let mut results = Vec::new();
     for shard in manifest.shards {
+        if !repo_matches(&shard.root, &filters) {
+            continue;
+        }
         let index = FastIndex::load(index_dir.join(&shard.index))
             .with_context(|| format!("load shard {}", shard.index))?;
-        for mut result in index.search_filtered(query, limit, filters)? {
+        for mut result in index.search_filtered(query, limit, &filters)? {
             result.path = format!("{}/{}", shard.name, result.path);
             result.reason = format!("shard:{}; {}", shard.name, result.reason);
             results.push(result);
         }
     }
     Ok(finalize_results(results, limit))
+}
+
+pub fn read_shard_range(
+    index_dir: impl AsRef<Path>,
+    shard_path: &str,
+    start: usize,
+    lines: usize,
+) -> Result<FileRange> {
+    let manifest = load_manifest(index_dir.as_ref())?;
+    let (shard_name, relative_path) = shard_path
+        .split_once('/')
+        .ok_or_else(|| anyhow::anyhow!("shard path must be '<repo>/<path>'"))?;
+    let shard = manifest
+        .shards
+        .iter()
+        .find(|shard| shard.name == shard_name)
+        .ok_or_else(|| anyhow::anyhow!("unknown shard: {shard_name}"))?;
+    let mut range = read_file_range(&shard.root, relative_path, start, lines)?;
+    range.path = format!("{}/{}", shard.name, range.path);
+    Ok(range)
 }
 
 fn load_manifest(index_dir: &Path) -> Result<ShardManifest> {
@@ -137,6 +169,27 @@ fn sanitize_name(name: &str) -> String {
         })
         .collect::<String>();
     value.trim_matches('-').to_string()
+}
+
+fn unique_shard_name(base_name: &str, hash: &str, names: &mut HashSet<String>) -> String {
+    let mut name = base_name.to_string();
+    if names.insert(name.clone()) {
+        return name;
+    }
+
+    name = format!("{base_name}-{}", &hash[..8]);
+    if names.insert(name.clone()) {
+        return name;
+    }
+
+    let mut counter = 2usize;
+    loop {
+        let candidate = format!("{base_name}-{}-{counter}", &hash[..8]);
+        if names.insert(candidate.clone()) {
+            return candidate;
+        }
+        counter += 1;
+    }
 }
 
 fn stable_hash(path: &Path) -> String {
