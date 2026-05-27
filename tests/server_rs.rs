@@ -1712,6 +1712,8 @@ fn server_handles_indexed_search_request() {
     assert!(stdout.contains("\"missing_terms\""));
     assert!(stdout.contains("definitely"));
     assert!(stdout.contains("missing"));
+    assert!(stdout.contains("\"filtered_candidate_count\":0"));
+    assert!(stdout.contains("\"final_match_count\":0"));
 }
 
 #[test]
@@ -1883,6 +1885,8 @@ fn server_handles_shard_index_search_and_read_requests() {
     assert!(stdout.contains("\"name\":\"billing\""));
     assert!(stdout.contains("\"missing_terms\""));
     assert!(stdout.contains("missingterm"));
+    assert!(stdout.contains("\"filtered_candidate_count\":0"));
+    assert!(stdout.contains("\"final_match_count\":0"));
 }
 
 #[test]

@@ -273,6 +273,9 @@ fn indexed_query_plan_reports_missing_terms_without_results() {
     );
     assert_eq!(plan.missing_terms, vec!["definitely", "missing"]);
     assert_eq!(plan.candidate_count, 0);
+    assert_eq!(plan.filtered_candidate_count, 0);
+    assert_eq!(plan.scored_candidate_count, 0);
+    assert_eq!(plan.final_match_count, 0);
     assert!(
         plan.planned_postings
             .iter()
@@ -290,7 +293,48 @@ fn indexed_query_plan_reports_missing_terms_without_results() {
         .unwrap();
     assert_eq!(filter_plan.strategy, "filter_scan");
     assert_eq!(filter_plan.candidate_count, 1);
+    assert_eq!(filter_plan.filtered_candidate_count, 1);
+    assert_eq!(filter_plan.scored_candidate_count, 1);
+    assert_eq!(filter_plan.final_match_count, 1);
     assert!(filter_plan.missing_terms.is_empty());
+}
+
+#[test]
+fn indexed_query_plan_counts_filter_and_phrase_rejections() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/auth.rs"),
+        "pub struct SessionManager;\npub fn issue_token() {}\n",
+    );
+
+    let index = FastIndex::build(repo.path()).unwrap();
+    let filter_rejected = index
+        .query_plan(
+            "SessionManager path:tests",
+            &SearchFilters {
+                explain: true,
+                ..SearchFilters::default()
+            },
+        )
+        .unwrap();
+    assert!(filter_rejected.candidate_count >= 1);
+    assert_eq!(filter_rejected.filtered_candidate_count, 0);
+    assert_eq!(filter_rejected.scored_candidate_count, 0);
+    assert_eq!(filter_rejected.final_match_count, 0);
+
+    let phrase_rejected = index
+        .query_plan(
+            "\"session token\"",
+            &SearchFilters {
+                explain: true,
+                ..SearchFilters::default()
+            },
+        )
+        .unwrap();
+    assert!(phrase_rejected.candidate_count >= 1);
+    assert_eq!(phrase_rejected.filtered_candidate_count, 1);
+    assert_eq!(phrase_rejected.scored_candidate_count, 0);
+    assert_eq!(phrase_rejected.final_match_count, 0);
 }
 
 #[test]

@@ -841,21 +841,7 @@ impl FastIndex {
             } else {
                 intersect_planned_postings(&planned_postings, filters.require_all)
             };
-        let query_plan = filters.explain.then(|| {
-            indexed_query_plan(
-                &query_tokens,
-                &query_phrases,
-                &query_trigrams,
-                &token_postings,
-                &path_postings,
-                &trigram_postings,
-                &missing_terms,
-                &missing_trigrams,
-                use_trigrams,
-                filters.require_all,
-                candidate_ids.len(),
-            )
-        });
+        let candidate_count = candidate_ids.len();
 
         let posting_maps = token_postings
             .iter()
@@ -894,13 +880,17 @@ impl FastIndex {
                 )
             })
             .collect::<Vec<_>>();
-        let results = candidate_ids
+        let filtered_candidate_ids = candidate_ids
             .into_iter()
             .filter(|file_id| {
                 self.files
                     .get(*file_id as usize)
                     .is_some_and(|file| matches_filters(&file.path, &filters))
             })
+            .collect::<Vec<_>>();
+        let filtered_candidate_count = filtered_candidate_ids.len();
+        let results = filtered_candidate_ids
+            .into_iter()
             .filter_map(|file_id| {
                 self.score_file(
                     file_id,
@@ -911,16 +901,39 @@ impl FastIndex {
                     &trigram_maps,
                     filters.snippet,
                     filters.explain,
-                    query_plan.as_ref(),
+                    None,
                 )
             })
             .collect::<Vec<_>>();
 
         let mut results = results;
+        let scored_candidate_count = results.len();
         if filters.require_all {
             results.retain(|result| result_matches_all_tokens(result, &query_tokens));
         }
         results.retain(|result| result_matches_symbol_filters(result, &filters));
+        let final_match_count = results.len();
+        if filters.explain {
+            let query_plan = indexed_query_plan(
+                &query_tokens,
+                &query_phrases,
+                &query_trigrams,
+                &token_postings,
+                &path_postings,
+                &trigram_postings,
+                &missing_terms,
+                &missing_trigrams,
+                use_trigrams,
+                filters.require_all,
+                candidate_count,
+                filtered_candidate_count,
+                scored_candidate_count,
+                final_match_count,
+            );
+            for result in &mut results {
+                result.query_plan = Some(query_plan.clone());
+            }
+        }
         Ok(finalize_results(results, limit))
     }
 
@@ -939,6 +952,9 @@ impl FastIndex {
                 missing_terms: Vec::new(),
                 missing_trigrams: Vec::new(),
                 candidate_count: 0,
+                filtered_candidate_count: 0,
+                scored_candidate_count: 0,
+                final_match_count: 0,
             });
         }
         let query = query_text(&parsed.terms, &filters);
@@ -964,6 +980,9 @@ impl FastIndex {
                     missing_terms: Vec::new(),
                     missing_trigrams: Vec::new(),
                     candidate_count,
+                    filtered_candidate_count: candidate_count,
+                    scored_candidate_count: candidate_count,
+                    final_match_count: candidate_count,
                 });
             }
             return Ok(QueryPlan {
@@ -976,6 +995,9 @@ impl FastIndex {
                 missing_terms: Vec::new(),
                 missing_trigrams: Vec::new(),
                 candidate_count: 0,
+                filtered_candidate_count: 0,
+                scored_candidate_count: 0,
+                final_match_count: 0,
             });
         }
 
@@ -1056,6 +1078,76 @@ impl FastIndex {
                 intersect_planned_postings(&planned_postings, filters.require_all)
             };
 
+        let candidate_count = candidate_ids.len();
+        let posting_maps = token_postings
+            .iter()
+            .map(|(token, postings)| {
+                (
+                    (*token).clone(),
+                    postings
+                        .iter()
+                        .map(|posting| (posting.file_id, posting.count))
+                        .collect::<HashMap<_, _>>(),
+                )
+            })
+            .collect::<Vec<_>>();
+        let path_maps = path_postings
+            .iter()
+            .map(|(token, postings)| {
+                (
+                    (*token).clone(),
+                    postings
+                        .iter()
+                        .map(|posting| (posting.file_id, posting.count))
+                        .collect::<HashMap<_, _>>(),
+                )
+            })
+            .collect::<Vec<_>>();
+        let trigram_maps = trigram_postings
+            .iter()
+            .take(16)
+            .map(|(trigram, postings)| {
+                (
+                    (*trigram).clone(),
+                    postings
+                        .iter()
+                        .map(|posting| (posting.file_id, posting.count))
+                        .collect::<HashMap<_, _>>(),
+                )
+            })
+            .collect::<Vec<_>>();
+        let filtered_candidate_ids = candidate_ids
+            .into_iter()
+            .filter(|file_id| {
+                self.files
+                    .get(*file_id as usize)
+                    .is_some_and(|file| matches_filters(&file.path, &filters))
+            })
+            .collect::<Vec<_>>();
+        let filtered_candidate_count = filtered_candidate_ids.len();
+        let mut results = filtered_candidate_ids
+            .into_iter()
+            .filter_map(|file_id| {
+                self.score_file(
+                    file_id,
+                    &query_tokens,
+                    &query_phrases,
+                    &posting_maps,
+                    &path_maps,
+                    &trigram_maps,
+                    filters.snippet,
+                    false,
+                    None,
+                )
+            })
+            .collect::<Vec<_>>();
+        let scored_candidate_count = results.len();
+        if filters.require_all {
+            results.retain(|result| result_matches_all_tokens(result, &query_tokens));
+        }
+        results.retain(|result| result_matches_symbol_filters(result, &filters));
+        let final_match_count = results.len();
+
         Ok(indexed_query_plan(
             &query_tokens,
             &query_phrases,
@@ -1067,7 +1159,10 @@ impl FastIndex {
             &missing_trigrams,
             use_trigrams,
             filters.require_all,
-            candidate_ids.len(),
+            candidate_count,
+            filtered_candidate_count,
+            scored_candidate_count,
+            final_match_count,
         ))
     }
 
@@ -1098,6 +1193,9 @@ impl FastIndex {
                 missing_terms: Vec::new(),
                 missing_trigrams: Vec::new(),
                 candidate_count,
+                filtered_candidate_count: candidate_count,
+                scored_candidate_count: candidate_count,
+                final_match_count: candidate_count,
             };
             for result in &mut results {
                 result.query_plan = Some(query_plan.clone());
@@ -1242,6 +1340,9 @@ fn indexed_query_plan(
     use_trigrams: bool,
     require_all: bool,
     candidate_count: usize,
+    filtered_candidate_count: usize,
+    scored_candidate_count: usize,
+    final_match_count: usize,
 ) -> QueryPlan {
     let mut planned_postings = token_postings
         .iter()
@@ -1282,6 +1383,9 @@ fn indexed_query_plan(
         missing_terms: missing_terms.to_vec(),
         missing_trigrams: missing_trigrams.to_vec(),
         candidate_count,
+        filtered_candidate_count,
+        scored_candidate_count,
+        final_match_count,
     }
 }
 

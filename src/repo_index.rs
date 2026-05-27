@@ -81,6 +81,12 @@ pub struct QueryPlan {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub missing_trigrams: Vec<String>,
     pub candidate_count: usize,
+    #[serde(default)]
+    pub filtered_candidate_count: usize,
+    #[serde(default)]
+    pub scored_candidate_count: usize,
+    #[serde(default)]
+    pub final_match_count: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
