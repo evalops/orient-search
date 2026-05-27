@@ -3,8 +3,8 @@
 use crate::fast_index::{FastIndex, IndexStats};
 use crate::query::{merge_filters, parse_query, query_text};
 use crate::repo_index::{
-    FileRange, RelatedFile, RelatedSymbol, RepoIndexer, RepoMap, SearchFilters, SearchResult,
-    Symbol, finalize_results, is_manifest_file, language_for, normalize_token, read_file_range,
+    FileRange, RelatedFile, RelatedSymbol, RepoMap, SearchFilters, SearchResult, Symbol,
+    finalize_results, is_manifest_file, language_for, normalize_token, read_file_range,
 };
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -311,7 +311,8 @@ pub fn related_shard_files(
     limit: usize,
 ) -> Result<Vec<RelatedFile>> {
     let resolved = resolve_shard_path(index_dir.as_ref(), shard_path)?;
-    let index = RepoIndexer::new(&resolved.root).build()?;
+    let index = FastIndex::load(index_dir.as_ref().join(&resolved.index))
+        .with_context(|| format!("load shard {}", resolved.index))?;
     let mut related = index.related_files(&resolved.relative_path, limit.saturating_mul(4).max(10));
     related.retain(|file| resolved.contains_actual_path(&file.path));
     for file in &mut related {
@@ -328,7 +329,8 @@ pub fn related_shard_symbols(
     limit: usize,
 ) -> Result<Vec<RelatedSymbol>> {
     let resolved = resolve_shard_path(index_dir.as_ref(), shard_path)?;
-    let index = RepoIndexer::new(&resolved.root).build()?;
+    let index = FastIndex::load(index_dir.as_ref().join(&resolved.index))
+        .with_context(|| format!("load shard {}", resolved.index))?;
     let mut related = index.related_symbols(
         Some(&resolved.relative_path),
         query,
@@ -344,6 +346,7 @@ pub fn related_shard_symbols(
 
 struct ResolvedShardRead {
     root: PathBuf,
+    index: String,
     relative_path: String,
     output_prefix: String,
     path_prefix: Option<String>,
@@ -389,6 +392,7 @@ fn resolve_shard_read_path(
     if let Some(shard) = manifest.shards.iter().find(|shard| shard.name == prefix) {
         return Some(ResolvedShardRead {
             root: shard.root.clone(),
+            index: shard.index.clone(),
             relative_path: relative_path.to_string(),
             output_prefix: shard.name.clone(),
             path_prefix: None,
@@ -406,6 +410,7 @@ fn resolve_shard_read_path(
             .unwrap_or_else(|| relative_path.to_string());
         return Some(ResolvedShardRead {
             root: shard.root.clone(),
+            index: shard.index.clone(),
             relative_path,
             output_prefix: alias.name.clone(),
             path_prefix: alias.path_prefix.clone(),

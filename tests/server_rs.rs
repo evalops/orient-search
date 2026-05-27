@@ -158,6 +158,54 @@ fn runtime_indexes_shards_from_discovered_root() {
 }
 
 #[test]
+fn runtime_indexes_shards_from_multiple_discovered_roots() {
+    let left = tempfile::tempdir().unwrap();
+    let right = tempfile::tempdir().unwrap();
+    write(
+        &left.path().join("platform/src/lib.rs"),
+        "pub fn platform_session() {}\n",
+    );
+    write(
+        &left.path().join("platform/Cargo.toml"),
+        "[package]\nname='platform'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    write(
+        &right.path().join("maestro/src/lib.rs"),
+        "pub fn maestro_session() {}\n",
+    );
+    write(
+        &right.path().join("maestro/Cargo.toml"),
+        "[package]\nname='maestro'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    let shard_dir = tempfile::tempdir().unwrap();
+
+    let runtime = ToolRuntime::default();
+    let build = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("index"),
+        tool: "index_shards".to_string(),
+        arguments: serde_json::json!({
+            "discover_roots": [left.path(), right.path()],
+            "max_depth": 2,
+            "output_dir": shard_dir.path()
+        }),
+    });
+    assert!(build.error.is_none(), "{:?}", build.error);
+    assert_eq!(build.result.unwrap()["shards"], serde_json::json!(2));
+
+    let search = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("search"),
+        tool: "search_shards".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": shard_dir.path(),
+            "query": "maestro_session"
+        }),
+    });
+    assert!(search.error.is_none(), "{:?}", search.error);
+    let result = serde_json::to_string(&search.result).unwrap();
+    assert!(result.contains("maestro/src/lib.rs"), "{result}");
+}
+
+#[test]
 fn runtime_warms_index_by_tool_request() {
     let repo = tempfile::tempdir().unwrap();
     write(

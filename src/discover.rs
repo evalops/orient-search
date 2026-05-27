@@ -85,8 +85,10 @@ pub fn discover_repos(root: impl AsRef<Path>, options: &DiscoverOptions) -> Resu
     }
 
     repos.sort_by(|left, right| {
-        left.path
-            .cmp(&right.path)
+        discovery_name_rank(&left.name)
+            .cmp(&discovery_name_rank(&right.name))
+            .then_with(|| left.depth.cmp(&right.depth))
+            .then_with(|| left.path.cmp(&right.path))
             .then_with(|| left.name.cmp(&right.name))
     });
 
@@ -161,7 +163,11 @@ fn sorted_child_dirs(dir: &Path) -> Result<Vec<PathBuf>> {
         }
         children.push(path);
     }
-    children.sort();
+    children.sort_by(|left, right| {
+        discovery_path_rank(left)
+            .cmp(&discovery_path_rank(right))
+            .then_with(|| left.cmp(right))
+    });
     Ok(children)
 }
 
@@ -199,6 +205,38 @@ fn discovery_ignored_name(path: &Path) -> bool {
             | ".idea"
             | ".DS_Store"
     )
+}
+
+fn discovery_path_rank(path: &Path) -> u8 {
+    path.file_name()
+        .and_then(|value| value.to_str())
+        .map(discovery_name_rank)
+        .unwrap_or(0)
+}
+
+fn discovery_name_rank(name: &str) -> u8 {
+    if name.starts_with(".tmp")
+        || name.starts_with("tmp-")
+        || name.starts_with(".codex")
+        || name.starts_with("_worktree")
+        || name.contains("worktree")
+    {
+        3
+    } else if looks_like_dated_worktree(name) {
+        1
+    } else if name.starts_with('.') {
+        2
+    } else {
+        0
+    }
+}
+
+fn looks_like_dated_worktree(name: &str) -> bool {
+    name.as_bytes().windows(6).any(|window| {
+        window[0] == b'2'
+            && window[1] == b'0'
+            && window[2..].iter().all(|byte| byte.is_ascii_digit())
+    })
 }
 
 fn canonical_or_self(path: &Path) -> PathBuf {

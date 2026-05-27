@@ -255,7 +255,7 @@ pub fn tool_manifest() -> Value {
             "name": "index_shards",
             "description": "Build a local multi-repo shard directory from explicit repos or a discovered workspace root.",
             "required": ["output_dir"],
-            "optional": ["repos", "discover_root", "root", "max_depth", "discover_limit", "limit"]
+            "optional": ["repos", "discover_root", "discover_roots", "root", "max_depth", "discover_limit", "limit"]
         },
         {
             "name": "refresh_shards",
@@ -546,8 +546,7 @@ impl ToolRuntime {
                 let index_path = path_arg(&request.arguments, "index")?;
                 let path = string_arg(&request.arguments, "path")?;
                 let limit = usize_arg(&request.arguments, "limit").unwrap_or(10);
-                let fast_index = self.cached_index(index_path)?;
-                let index = RepoIndexer::new(&fast_index.root).build()?;
+                let index = self.cached_index(index_path)?;
                 Ok(serde_json::to_value(index.related_files(&path, limit))?)
             }
             "related_shard_files" => {
@@ -587,8 +586,7 @@ impl ToolRuntime {
                 let path = optional_string_arg(&request.arguments, "path");
                 let query = optional_string_arg(&request.arguments, "query");
                 let limit = usize_arg(&request.arguments, "limit").unwrap_or(10);
-                let fast_index = self.cached_index(index_path)?;
-                let index = RepoIndexer::new(&fast_index.root).build()?;
+                let index = self.cached_index(index_path)?;
                 Ok(serde_json::to_value(index.related_symbols(
                     path.as_deref(),
                     query.as_deref(),
@@ -954,23 +952,28 @@ fn range_args(arguments: &Value) -> Result<Vec<RangeArg>> {
 
 fn shard_repos_from_arguments(arguments: &Value) -> Result<Vec<PathBuf>> {
     let mut repos = optional_path_array_arg(arguments, "repos")?;
-    let discover_root = optional_string_arg_any(arguments, &["discover_root", "root"]);
-    if let Some(root) = discover_root {
+    let mut discover_roots = optional_path_array_arg(arguments, "discover_roots")?;
+    if let Some(root) = optional_string_arg_any(arguments, &["discover_root", "root"]) {
+        discover_roots.push(PathBuf::from(root));
+    }
+    if !discover_roots.is_empty() {
         let max_depth = usize_arg(arguments, "max_depth").unwrap_or(4);
         let limit = usize_arg(arguments, "discover_limit")
             .or_else(|| usize_arg(arguments, "limit"))
             .unwrap_or(500);
-        repos.extend(
-            discover_repos(root, &DiscoverOptions { max_depth, limit })?
-                .repos
-                .into_iter()
-                .map(|repo| repo.path),
-        );
+        for root in discover_roots {
+            repos.extend(
+                discover_repos(root, &DiscoverOptions { max_depth, limit })?
+                    .repos
+                    .into_iter()
+                    .map(|repo| repo.path),
+            );
+        }
     }
     repos.sort();
     repos.dedup();
     if repos.is_empty() {
-        return Err(anyhow!("provide repos or discover_root"));
+        return Err(anyhow!("provide repos, discover_root, or discover_roots"));
     }
     Ok(repos)
 }

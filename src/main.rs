@@ -50,8 +50,8 @@ enum Commands {
     IndexShards {
         #[arg(long = "repo")]
         repos: Vec<PathBuf>,
-        #[arg(long)]
-        discover_root: Option<PathBuf>,
+        #[arg(long = "discover-root")]
+        discover_roots: Vec<PathBuf>,
         #[arg(long, default_value_t = 4)]
         max_depth: usize,
         #[arg(long, default_value_t = 500)]
@@ -388,12 +388,12 @@ fn main() -> Result<()> {
         }
         Commands::IndexShards {
             repos,
-            discover_root,
+            discover_roots,
             max_depth,
             discover_limit,
             output_dir,
         } => {
-            let repos = shard_repos_from_args(repos, discover_root, max_depth, discover_limit)?;
+            let repos = shard_repos_from_args(repos, discover_roots, max_depth, discover_limit)?;
             println!(
                 "{}",
                 serde_json::to_string(&build_shards(&repos, output_dir)?)?
@@ -651,8 +651,7 @@ fn main() -> Result<()> {
             );
         }
         Commands::RelatedIndex { index, path, limit } => {
-            let fast_index = FastIndex::load(index)?;
-            let index = RepoIndexer::new(fast_index.root).build()?;
+            let index = FastIndex::load(index)?;
             println!(
                 "{}",
                 serde_json::to_string(&index.related_files(&path, limit))?
@@ -690,8 +689,7 @@ fn main() -> Result<()> {
             query,
             limit,
         } => {
-            let fast_index = FastIndex::load(index)?;
-            let index = RepoIndexer::new(fast_index.root).build()?;
+            let index = FastIndex::load(index)?;
             println!(
                 "{}",
                 serde_json::to_string(&index.related_symbols(
@@ -843,11 +841,11 @@ fn client_jsonl(addr: &str) -> Result<()> {
 
 fn shard_repos_from_args(
     mut repos: Vec<PathBuf>,
-    discover_root: Option<PathBuf>,
+    discover_roots: Vec<PathBuf>,
     max_depth: usize,
     discover_limit: usize,
 ) -> Result<Vec<PathBuf>> {
-    if let Some(root) = discover_root {
+    for root in discover_roots {
         let discovered = discover_repos(
             root,
             &DiscoverOptions {

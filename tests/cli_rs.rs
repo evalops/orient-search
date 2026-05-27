@@ -112,6 +112,41 @@ fn cli_discovers_repos_for_shard_setup() {
 }
 
 #[test]
+fn cli_discovery_prioritizes_visible_repos_before_temp_roots() {
+    let root = tempfile::tempdir().unwrap();
+    write(
+        &root.path().join(".tmp-platform/Cargo.toml"),
+        "[package]\nname='tmp-platform'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    write(
+        &root
+            .path()
+            .join("platform-feature-split-20260527/Cargo.toml"),
+        "[package]\nname='platform-feature'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    write(
+        &root.path().join("platform/Cargo.toml"),
+        "[package]\nname='platform'\nversion='0.1.0'\nedition='2024'\n",
+    );
+
+    let mut cmd = Command::cargo_bin("orient").unwrap();
+    cmd.args([
+        "discover-repos",
+        "--root",
+        root.path().to_str().unwrap(),
+        "--max-depth",
+        "1",
+        "--limit",
+        "1",
+    ])
+    .assert()
+    .success()
+    .stdout(predicate::str::contains("\"name\":\"platform\""))
+    .stdout(predicate::str::contains("platform-feature-split").not())
+    .stdout(predicate::str::contains(".tmp-platform").not());
+}
+
+#[test]
 fn cli_indexes_shards_from_discovered_root() {
     let root = tempfile::tempdir().unwrap();
     write(

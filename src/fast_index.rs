@@ -2,15 +2,16 @@
 
 use crate::query::{merge_filters, parse_query, query_text};
 use crate::repo_index::{
-    RankSignal, RepoBrief, RepoMap, SearchFilters, SearchResult, SnippetMode, Symbol,
-    best_snippet_for_path, extract_symbols, finalize_results, is_entrypoint_path, is_ignored,
-    is_important_file, is_manifest_file, is_test_path, language_for, matches_filters,
-    normalize_token, repo_matches, result_matches_all_tokens, result_matches_symbol_filters,
-    round4, symbol_kind_rank, token_counts, tokenize,
+    RankSignal, RelatedFile, RelatedSymbol, RepoBrief, RepoMap, SearchFilters, SearchResult,
+    SnippetMode, Symbol, best_snippet_for_path, extract_symbols, finalize_results,
+    is_entrypoint_path, is_ignored, is_important_file, is_manifest_file, is_test_path,
+    language_for, matches_filters, normalize_token, repo_matches, result_matches_all_tokens,
+    result_matches_symbol_filters, round4, symbol_kind_rank, token_counts, tokenize,
 };
 use anyhow::{Context, Result};
 use ignore::WalkBuilder;
 use serde::{Deserialize, Serialize};
+use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -365,6 +366,183 @@ impl FastIndex {
             .take(limit)
             .map(|(_, symbol)| symbol)
             .collect()
+    }
+
+    pub fn related_files(&self, path: &str, limit: usize) -> Vec<RelatedFile> {
+        if limit == 0 {
+            return Vec::new();
+        }
+
+        let normalized = path.trim_start_matches('/').to_string();
+        let stem = Path::new(&normalized)
+            .file_stem()
+            .map(|value| value.to_string_lossy().to_string())
+            .unwrap_or_default();
+        let stem_lower = stem.to_ascii_lowercase();
+        let stem_without_test = stem_lower.strip_prefix("test_").unwrap_or(&stem_lower);
+        let directory = Path::new(&normalized)
+            .parent()
+            .map(|value| value.to_string_lossy().to_string())
+            .unwrap_or_default();
+        let mut related = Vec::new();
+
+        for file in &self.files {
+            if file.path == normalized {
+                continue;
+            }
+            let lower = file.path.to_ascii_lowercase();
+            let mut score = 0.0;
+            let mut reasons = Vec::new();
+
+            if !stem_lower.is_empty() && lower.contains(&stem_lower) {
+                score += 4.0;
+                reasons.push(format!("shares stem {stem}"));
+            }
+            if is_test_path(&lower)
+                && !stem_without_test.is_empty()
+                && lower.contains(stem_without_test)
+            {
+                score += 5.0;
+                reasons.push("test coverage candidate".to_string());
+            }
+
+            let file_dir = Path::new(&file.path)
+                .parent()
+                .map(|value| value.to_string_lossy().to_string())
+                .unwrap_or_default();
+            if !directory.is_empty() && file_dir == directory {
+                score += 1.0;
+                reasons.push("same directory".to_string());
+            }
+
+            if score > 0.0 {
+                related.push(RelatedFile {
+                    path: file.path.clone(),
+                    reason: reasons.join("; "),
+                    score,
+                });
+            }
+        }
+
+        related.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(Ordering::Equal)
+                .then_with(|| a.path.cmp(&b.path))
+        });
+        related.truncate(limit);
+        related
+    }
+
+    pub fn related_symbols(
+        &self,
+        path: Option<&str>,
+        query: Option<&str>,
+        limit: usize,
+    ) -> Vec<RelatedSymbol> {
+        if limit == 0 {
+            return Vec::new();
+        }
+
+        let normalized_path = path.map(|value| value.trim_start_matches('/').to_string());
+        let query_tokens = query
+            .map(tokenize)
+            .unwrap_or_default()
+            .into_iter()
+            .collect::<HashSet<_>>();
+        let query_symbol = query.map(normalize_token).unwrap_or_default();
+        let path_stem = normalized_path
+            .as_deref()
+            .and_then(|path| Path::new(path).file_stem())
+            .map(|value| value.to_string_lossy().to_ascii_lowercase())
+            .unwrap_or_default();
+        let path_dir = normalized_path
+            .as_deref()
+            .and_then(|path| Path::new(path).parent())
+            .map(|value| value.to_string_lossy().to_string())
+            .unwrap_or_default();
+        let mut related = Vec::new();
+
+        for file in &self.files {
+            for indexed_symbol in &file.symbols {
+                let symbol = Symbol {
+                    name: indexed_symbol.name.clone(),
+                    kind: indexed_symbol.kind.clone(),
+                    path: file.path.clone(),
+                    line: indexed_symbol.line,
+                };
+                let mut score = 0.0;
+                let mut reasons = Vec::new();
+
+                if let Some(path) = &normalized_path {
+                    if &symbol.path == path {
+                        score += 20.0;
+                        reasons.push("same file".to_string());
+                    }
+                    if !path_dir.is_empty()
+                        && Path::new(&symbol.path)
+                            .parent()
+                            .map(|value| value.to_string_lossy() == path_dir)
+                            .unwrap_or(false)
+                    {
+                        score += 4.0;
+                        reasons.push("same directory".to_string());
+                    }
+                    let symbol_path_lower = symbol.path.to_ascii_lowercase();
+                    if !path_stem.is_empty()
+                        && (symbol.name.to_ascii_lowercase().contains(&path_stem)
+                            || symbol_path_lower.contains(&path_stem))
+                    {
+                        score += 3.0;
+                        reasons.push(format!("shares stem {path_stem}"));
+                    }
+                }
+
+                if !query_tokens.is_empty() {
+                    let symbol_tokens = indexed_symbol
+                        .tokens
+                        .iter()
+                        .cloned()
+                        .chain(tokenize(&symbol.path))
+                        .collect::<HashSet<_>>();
+                    let overlap = query_tokens
+                        .iter()
+                        .filter(|token| symbol_tokens.contains(*token))
+                        .count();
+                    if overlap > 0 {
+                        score += 5.0 * overlap as f64;
+                        reasons.push(format!("query overlap {overlap}"));
+                    }
+                    if !query_symbol.is_empty() && indexed_symbol.normalized == query_symbol {
+                        score += 15.0;
+                        reasons.push("exact query symbol".to_string());
+                    }
+                }
+
+                if score > 0.0 {
+                    score += match symbol.kind.as_str() {
+                        "class" | "struct" | "enum" | "interface" => 2.0,
+                        _ => 0.0,
+                    };
+                    related.push(RelatedSymbol {
+                        symbol,
+                        reason: reasons.join("; "),
+                        score: round4(score),
+                    });
+                }
+            }
+        }
+
+        related.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(Ordering::Equal)
+                .then_with(|| a.symbol.path.cmp(&b.symbol.path))
+                .then_with(|| a.symbol.line.cmp(&b.symbol.line))
+                .then_with(|| a.symbol.name.cmp(&b.symbol.name))
+        });
+        related.truncate(limit);
+        related
     }
 
     pub fn search_filtered(

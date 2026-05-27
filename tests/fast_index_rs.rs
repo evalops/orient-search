@@ -135,6 +135,43 @@ fn indexed_repo_map_returns_orientation_from_persisted_metadata() {
 }
 
 #[test]
+fn indexed_related_context_uses_persisted_metadata() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/auth.rs"),
+        "pub struct SessionManager;\npub fn issue_token() {}\n",
+    );
+    write(
+        &repo.path().join("tests/auth_test.rs"),
+        "use sample::SessionManager;\n#[test]\nfn issue_token_round_trip() {}\n",
+    );
+
+    let index_path = repo.path().join("orient.index");
+    let index = FastIndex::build(repo.path()).unwrap();
+    index.save(&index_path).unwrap();
+    fs::remove_file(repo.path().join("tests/auth_test.rs")).unwrap();
+    let loaded = FastIndex::load(&index_path).unwrap();
+
+    let related_files = loaded.related_files("src/auth.rs", 10);
+    assert!(
+        related_files
+            .iter()
+            .any(|file| file.path == "tests/auth_test.rs"),
+        "{related_files:?}"
+    );
+
+    let related_symbols = loaded.related_symbols(Some("src/auth.rs"), Some("SessionManager"), 10);
+    assert!(
+        related_symbols.iter().any(|symbol| {
+            symbol.symbol.name == "SessionManager"
+                && symbol.symbol.path == "src/auth.rs"
+                && symbol.reason.contains("same file")
+        }),
+        "{related_symbols:?}"
+    );
+}
+
+#[test]
 fn fallback_search_boosts_exact_symbols() {
     let repo = tempfile::tempdir().unwrap();
     write(
