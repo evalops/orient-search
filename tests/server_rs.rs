@@ -49,6 +49,10 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         .iter()
         .find(|tool| tool["name"] == "refresh_index")
         .unwrap();
+    let ensure_index = tools
+        .iter()
+        .find(|tool| tool["name"] == "ensure_index")
+        .unwrap();
     let read_ranges = tools
         .iter()
         .find(|tool| tool["name"] == "read_ranges")
@@ -86,6 +90,10 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
     );
     assert_eq!(
         refresh_index["required"],
+        serde_json::json!(["repo", "index"])
+    );
+    assert_eq!(
+        ensure_index["required"],
         serde_json::json!(["repo", "index"])
     );
     assert_eq!(
@@ -934,6 +942,61 @@ fn runtime_refresh_index_updates_cached_single_repo_index() {
         "{:?}",
         range.result
     );
+}
+
+#[test]
+fn runtime_ensure_index_builds_missing_index_and_warms_cache() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/auth.rs"),
+        "pub struct SessionManager;\npub fn issue_token() {}\n",
+    );
+    write(
+        &repo.path().join("Cargo.toml"),
+        "[package]\nname='sample'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    let index_path = repo.path().join(".orient/index");
+    let runtime = ToolRuntime::default();
+
+    let ensure = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("ensure"),
+        tool: "ensure_index".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "index": index_path
+        }),
+    });
+    assert!(ensure.error.is_none(), "{:?}", ensure.error);
+    assert!(index_path.exists());
+    assert_eq!(ensure.result.as_ref().unwrap()["refreshed_files"], 2);
+    assert_eq!(ensure.result.as_ref().unwrap()["files"], 2);
+
+    let status = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("status"),
+        tool: "daemon_status".to_string(),
+        arguments: serde_json::json!({}),
+    });
+    assert!(status.error.is_none(), "{:?}", status.error);
+    let status = status.result.unwrap();
+    assert_eq!(status["cached_indexes"], serde_json::json!(1));
+    assert_eq!(
+        status["cached_index_details"][0]["files"],
+        serde_json::json!(2)
+    );
+
+    let search = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("search"),
+        tool: "indexed_search_code".to_string(),
+        arguments: serde_json::json!({
+            "index": index_path,
+            "query": "issue token",
+            "limit": 3,
+            "require_all": true
+        }),
+    });
+    assert!(search.error.is_none(), "{:?}", search.error);
+    let result = serde_json::to_string(&search.result).unwrap();
+    assert!(result.contains("issue_token"), "{result}");
 }
 
 #[test]

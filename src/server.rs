@@ -262,6 +262,12 @@ pub fn tool_manifest() -> Value {
             &[],
         ),
         tool_entry(
+            "ensure_index",
+            "Build or refresh a persistent single-repo index from its live repository, then warm it in the daemon cache.",
+            &["repo", "index"],
+            &[],
+        ),
+        tool_entry(
             "refresh_index",
             "Refresh a persistent single-repo index from its live repository and replace the daemon cache entry.",
             &["repo", "index"],
@@ -801,7 +807,7 @@ impl ToolRuntime {
                 }
                 Ok(serde_json::to_value(results)?)
             }
-            "refresh_index" => {
+            "ensure_index" | "refresh_index" => {
                 let repo = path_arg(&request.arguments, "repo")?;
                 let index_path = path_arg(&request.arguments, "index")?;
                 Ok(serde_json::to_value(self.refresh_index(repo, index_path)?)?)
@@ -995,6 +1001,7 @@ impl ToolRuntime {
                 "tool_manifest",
                 "daemon_status",
                 "warm_index",
+                "ensure_index",
                 "refresh_index",
                 "warm_shards",
                 "discover_repos",
