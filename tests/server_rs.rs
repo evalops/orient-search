@@ -2040,6 +2040,8 @@ fn server_handles_json_lines_tool_request() {
     assert!(stdout.contains("src/auth.rs"));
     assert!(stdout.contains("\"explanation\""));
     assert!(stdout.contains("\"context\""));
+    assert!(stdout.contains("\"read_range\""));
+    assert!(stdout.contains("\"lines\":80"));
     assert!(stdout.contains("symbol_exact"));
 }
 
@@ -2176,6 +2178,7 @@ fn server_handles_indexed_search_request() {
     assert!(stdout.contains("\"id\":2"));
     assert!(stdout.contains("src/auth.rs"));
     assert!(stdout.contains("\"match_lines\""));
+    assert!(stdout.contains("\"read_range\""));
     assert!(stdout.contains("\"context\""));
     assert!(stdout.contains("\"id\":\"read-index-range\""));
     assert!(stdout.contains("\"path\":\"src/auth.rs\""));
@@ -2352,6 +2355,8 @@ fn server_handles_shard_index_search_and_read_requests() {
     assert!(stdout.contains("\"id\":\"search-shards\""));
     assert!(stdout.contains("billing/src/billing.rs"));
     assert!(stdout.contains("shard:billing"));
+    assert!(stdout.contains("\"read_range\""));
+    assert!(stdout.contains("\"lines\":80"));
     assert!(stdout.contains("\"context\""));
     assert!(!stdout.contains("auth/src/auth.rs"));
     assert!(stdout.contains("\"id\":\"find-shard-symbol\""));
