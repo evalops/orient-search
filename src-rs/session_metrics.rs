@@ -151,7 +151,10 @@ fn parse_tool_call(value: &Value) -> Option<ToolCall> {
     if top_type == "response_item" {
         let payload = value.get("payload")?;
         let item_type = payload.get("type")?.as_str()?;
-        if !matches!(item_type, "function_call" | "custom_tool_call" | "web_search_call" | "tool_search_call") {
+        if !matches!(
+            item_type,
+            "function_call" | "custom_tool_call" | "web_search_call" | "tool_search_call"
+        ) {
             return None;
         }
         let call_id = payload
@@ -199,7 +202,10 @@ fn parse_tool_output(value: &Value) -> Option<(String, bool)> {
     if top_type == "response_item" {
         let payload = value.get("payload")?;
         let item_type = payload.get("type")?.as_str()?;
-        if !matches!(item_type, "function_call_output" | "custom_tool_call_output" | "tool_search_output") {
+        if !matches!(
+            item_type,
+            "function_call_output" | "custom_tool_call_output" | "tool_search_output"
+        ) {
             return None;
         }
         let call_id = payload.get("call_id")?.as_str()?.to_string();
@@ -211,7 +217,10 @@ fn parse_tool_output(value: &Value) -> Option<(String, bool)> {
         for item in content {
             if item.get("type").and_then(Value::as_str) == Some("tool_result") {
                 let call_id = item.get("tool_use_id")?.as_str()?.to_string();
-                let explicit_error = item.get("is_error").and_then(Value::as_bool).unwrap_or(false);
+                let explicit_error = item
+                    .get("is_error")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
                 let output = compact_value(item.get("content"));
                 return Some((call_id, explicit_error || output_failed(&output)));
             }
@@ -232,20 +241,30 @@ fn output_failed(output: &str) -> bool {
             .unwrap_or(false);
     }
     let lowered = output.to_lowercase();
-    ["traceback", "permission denied", "command not found", "fatal:", "error:"]
-        .iter()
-        .any(|pattern| lowered.contains(pattern))
+    [
+        "traceback",
+        "permission denied",
+        "command not found",
+        "fatal:",
+        "error:",
+    ]
+    .iter()
+    .any(|pattern| lowered.contains(pattern))
 }
 
 pub fn classify_action(tool_name: &str, input: &str) -> ActionKind {
     let tool = tool_name.to_lowercase();
     let input = input.to_lowercase();
     if contains_any(&tool, &["search", "grep", "rg", "glob", "find"])
-        || Regex::new(r"\b(rg|grep|find|fd|ls)\b").unwrap().is_match(&input)
+        || Regex::new(r"\b(rg|grep|find|fd|ls)\b")
+            .unwrap()
+            .is_match(&input)
     {
         ActionKind::SearchDiscovery
     } else if contains_any(&tool, &["read", "fetch", "cat", "sed"])
-        || Regex::new(r"\b(cat|sed|head|tail|nl)\b").unwrap().is_match(&input)
+        || Regex::new(r"\b(cat|sed|head|tail|nl)\b")
+            .unwrap()
+            .is_match(&input)
     {
         ActionKind::ReadFetch
     } else if contains_any(&tool, &["apply_patch", "edit", "write"]) {

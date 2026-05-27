@@ -97,7 +97,10 @@ impl RepoIndexer {
             if text.contains('\0') {
                 continue;
             }
-            let rel = path.strip_prefix(&root)?.to_string_lossy().replace('\\', "/");
+            let rel = path
+                .strip_prefix(&root)?
+                .to_string_lossy()
+                .replace('\\', "/");
             let symbols = extract_symbols(&rel, &text, &language);
             let tokens = token_counts(&format!("{rel}\n{text}"));
             files.insert(
@@ -231,7 +234,10 @@ impl RepoIndex {
                 score += 4.0;
                 reasons.push(format!("shares stem {stem}"));
             }
-            if is_test_path(&lower) && !stem.is_empty() && lower.contains(&stem.replace("test_", "").to_lowercase()) {
+            if is_test_path(&lower)
+                && !stem.is_empty()
+                && lower.contains(&stem.replace("test_", "").to_lowercase())
+            {
                 score += 5.0;
                 reasons.push("test coverage candidate".to_string());
             }
@@ -333,7 +339,10 @@ fn is_ignored(path: &Path) -> bool {
 
 fn language_for(path: &Path) -> Option<String> {
     let file_name = path.file_name()?.to_string_lossy();
-    if matches!(file_name.as_ref(), "README" | "README.md" | "AGENTS.md" | "CLAUDE.md" | "Makefile") {
+    if matches!(
+        file_name.as_ref(),
+        "README" | "README.md" | "AGENTS.md" | "CLAUDE.md" | "Makefile"
+    ) {
         return Some("text".to_string());
     }
     let ext = path.extension()?.to_string_lossy().to_lowercase();
@@ -393,7 +402,12 @@ fn extract_python_symbols(path: &str, text: &str) -> Vec<Symbol> {
             let raw_kind = capture.get(1)?.as_str();
             Some(Symbol {
                 name: capture.get(2)?.as_str().to_string(),
-                kind: if raw_kind == "class" { "class" } else { "function" }.to_string(),
+                kind: if raw_kind == "class" {
+                    "class"
+                } else {
+                    "function"
+                }
+                .to_string(),
                 path: path.to_string(),
                 line: index + 1,
             })

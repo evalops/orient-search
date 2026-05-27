@@ -2,7 +2,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use orient::repo_index::RepoIndexer;
 use orient::server::serve_jsonl;
-use orient::session_metrics::{scan_jsonl_roots, ScanOptions};
+use orient::session_metrics::{ScanOptions, scan_jsonl_roots};
 use std::io;
 use std::path::PathBuf;
 
@@ -61,15 +61,24 @@ fn main() -> Result<()> {
         }
         Commands::Search { repo, query, limit } => {
             let index = RepoIndexer::new(repo).build()?;
-            println!("{}", serde_json::to_string(&index.search_code(&query, limit))?);
+            println!(
+                "{}",
+                serde_json::to_string(&index.search_code(&query, limit))?
+            );
         }
         Commands::Symbol { repo, name, limit } => {
             let index = RepoIndexer::new(repo).build()?;
-            println!("{}", serde_json::to_string(&index.find_symbol(&name, limit))?);
+            println!(
+                "{}",
+                serde_json::to_string(&index.find_symbol(&name, limit))?
+            );
         }
         Commands::Related { repo, path, limit } => {
             let index = RepoIndexer::new(repo).build()?;
-            println!("{}", serde_json::to_string(&index.related_files(&path, limit))?);
+            println!(
+                "{}",
+                serde_json::to_string(&index.related_files(&path, limit))?
+            );
         }
         Commands::Metrics {
             roots,

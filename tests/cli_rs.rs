@@ -23,7 +23,10 @@ impl SessionManager {
 }
 "#,
     );
-    write(&temp.path().join("Cargo.toml"), "[package]\nname='sample'\nversion='0.1.0'\nedition='2024'\n");
+    write(
+        &temp.path().join("Cargo.toml"),
+        "[package]\nname='sample'\nversion='0.1.0'\nedition='2024'\n",
+    );
     temp
 }
 
@@ -45,14 +48,24 @@ fn cli_searches_symbols_and_related_files() {
 
     let mut search = Command::cargo_bin("orient").unwrap();
     search
-        .args(["search", "--repo", repo.path().to_str().unwrap(), "issue token"])
+        .args([
+            "search",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "issue token",
+        ])
         .assert()
         .success()
         .stdout(predicate::str::contains("src/auth.rs"));
 
     let mut symbol = Command::cargo_bin("orient").unwrap();
     symbol
-        .args(["symbol", "--repo", repo.path().to_str().unwrap(), "SessionManager"])
+        .args([
+            "symbol",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "SessionManager",
+        ])
         .assert()
         .success()
         .stdout(predicate::str::contains("\"kind\":\"struct\""));

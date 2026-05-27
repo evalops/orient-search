@@ -15,7 +15,10 @@ fn server_handles_json_lines_tool_request() {
         &repo.path().join("src/auth.rs"),
         "pub struct SessionManager;\npub fn issue_token() {}\n",
     );
-    write(&repo.path().join("Cargo.toml"), "[package]\nname='sample'\nversion='0.1.0'\nedition='2024'\n");
+    write(
+        &repo.path().join("Cargo.toml"),
+        "[package]\nname='sample'\nversion='0.1.0'\nedition='2024'\n",
+    );
 
     let binary = assert_cmd::cargo::cargo_bin("orient");
     let mut child = Command::new(binary)

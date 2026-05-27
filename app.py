@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import subprocess
 from datetime import datetime, time, timezone
 from pathlib import Path
 
@@ -32,6 +34,19 @@ def cached_scan(roots, include_raw_snippets, max_files, max_file_mb, min_mtime, 
             max_mtime=max_mtime,
         )
     )
+
+
+@st.cache_data(show_spinner=False)
+def cached_rust_metrics(roots, max_files, max_file_mb):
+    binary = Path(__file__).parent / "target" / "debug" / "orient"
+    if not binary.exists():
+        return None
+    command = [str(binary), "metrics"]
+    for root in roots:
+        command.extend(["--root", root])
+    command.extend(["--max-files", str(max_files), "--max-file-mb", str(max_file_mb)])
+    completed = subprocess.run(command, check=True, capture_output=True, text=True, timeout=60)
+    return json.loads(completed.stdout)
 
 
 st.title("Agent JSONL Explorer")
@@ -106,6 +121,26 @@ with tab_overview:
         right.plotly_chart(px.line(by_day, x="date", y="calls", color="source", markers=True, title="Calls over time"), width='stretch')
     else:
         right.info("No timestamps available for a timeline.")
+
+    st.subheader("Rust core baseline")
+    try:
+        rust_metrics = cached_rust_metrics(tuple(roots), int(max_files), int(max_file_mb))
+    except Exception as exc:
+        rust_metrics = {"error": str(exc)}
+    if rust_metrics is None:
+        st.info("Build the Rust binary with `cargo build` to show Rust-core metrics here.")
+    elif rust_metrics.get("error"):
+        st.warning(rust_metrics["error"])
+    else:
+        rust_cols = st.columns(4)
+        rust_total = rust_metrics.get("total_calls", 0)
+        rust_failed = rust_metrics.get("failed_calls", 0)
+        by_kind = rust_metrics.get("by_kind", {})
+        orientation = by_kind.get("search_discovery", {}).get("calls", 0) + by_kind.get("read_fetch", {}).get("calls", 0)
+        rust_cols[0].metric("Rust files", f"{rust_metrics.get('files_scanned', 0):,}")
+        rust_cols[1].metric("Rust calls", f"{rust_total:,}")
+        rust_cols[2].metric("Rust failure rate", f"{(rust_failed / rust_total if rust_total else 0):.1%}")
+        rust_cols[3].metric("Orientation share", f"{(orientation / rust_total if rust_total else 0):.1%}")
 
     st.subheader("Suggested ways to aid agents")
     suggestions = aid_suggestions(filtered)

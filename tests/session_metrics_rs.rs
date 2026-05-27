@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::Path;
 
-use orient::session_metrics::{scan_jsonl_roots, ActionKind, ScanOptions};
+use orient::session_metrics::{ActionKind, ScanOptions, scan_jsonl_roots};
 
 fn write(path: &Path, text: &str) {
     fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -36,8 +36,21 @@ fn scans_codex_and_claude_tool_calls_into_metrics() {
 
     assert_eq!(metrics.total_calls, 3);
     assert_eq!(metrics.failed_calls, 1);
-    assert_eq!(metrics.by_kind.get(&ActionKind::SearchDiscovery).unwrap().calls, 1);
-    assert_eq!(metrics.by_kind.get(&ActionKind::ReadFetch).unwrap().calls, 1);
-    assert_eq!(metrics.by_kind.get(&ActionKind::WriteEdit).unwrap().calls, 1);
+    assert_eq!(
+        metrics
+            .by_kind
+            .get(&ActionKind::SearchDiscovery)
+            .unwrap()
+            .calls,
+        1
+    );
+    assert_eq!(
+        metrics.by_kind.get(&ActionKind::ReadFetch).unwrap().calls,
+        1
+    );
+    assert_eq!(
+        metrics.by_kind.get(&ActionKind::WriteEdit).unwrap().calls,
+        1
+    );
     assert!(metrics.orientation_share() > 0.6);
 }

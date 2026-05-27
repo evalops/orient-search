@@ -33,7 +33,10 @@ def test_issue_token_round_trip():
     assert verify_token(SessionManager().issue_token("u_123"))
 "#,
     );
-    write(&temp.path().join("pyproject.toml"), "[project]\nname='sample'\n");
+    write(
+        &temp.path().join("pyproject.toml"),
+        "[project]\nname='sample'\n",
+    );
 
     let index = RepoIndexer::new(temp.path()).build().unwrap();
 
@@ -45,7 +48,11 @@ def test_issue_token_round_trip():
     assert_eq!(search[0].path, "src/auth.py");
     assert!(search[0].snippet.contains("issue_token"));
 
-    let related: Vec<_> = index.related_files("src/auth.py", 10).into_iter().map(|item| item.path).collect();
+    let related: Vec<_> = index
+        .related_files("src/auth.py", 10)
+        .into_iter()
+        .map(|item| item.path)
+        .collect();
     assert!(related.contains(&"tests/test_auth.py".to_string()));
 
     let brief = index.repo_brief();

@@ -1,8 +1,8 @@
 use crate::repo_index::RepoIndexer;
-use crate::session_metrics::{scan_jsonl_roots, ScanOptions};
-use anyhow::{anyhow, Result};
+use crate::session_metrics::{ScanOptions, scan_jsonl_roots};
+use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::io::{BufRead, Write};
 use std::path::PathBuf;
 
@@ -98,9 +98,14 @@ fn dispatch_result(request: &ToolRequest) -> Result<Value> {
                         .map(PathBuf::from)
                         .collect::<Vec<_>>()
                 })
-                .unwrap_or_else(|| vec![path_arg(&request.arguments, "root").unwrap_or_else(|_| PathBuf::from("."))]);
+                .unwrap_or_else(|| {
+                    vec![
+                        path_arg(&request.arguments, "root").unwrap_or_else(|_| PathBuf::from(".")),
+                    ]
+                });
             let max_files = usize_arg(&request.arguments, "max_files");
-            let max_file_bytes = usize_arg(&request.arguments, "max_file_mb").map(|mb| mb as u64 * 1024 * 1024);
+            let max_file_bytes =
+                usize_arg(&request.arguments, "max_file_mb").map(|mb| mb as u64 * 1024 * 1024);
             Ok(serde_json::to_value(scan_jsonl_roots(ScanOptions {
                 roots,
                 max_files,
