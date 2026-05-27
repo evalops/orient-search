@@ -84,6 +84,52 @@ pub struct DiscoveredRepoFamily {
     pub paths: Vec<PathBuf>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DiscoverySelectionSummary {
+    pub root: PathBuf,
+    pub dirs_scanned: usize,
+    pub candidates_found: usize,
+    pub selected_repos: usize,
+    pub family_count: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub family_limit: Option<usize>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub top_families: Vec<DiscoveredRepoFamilySummary>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DiscoveredRepoFamilySummary {
+    pub name: String,
+    pub checkouts: usize,
+    pub worktrees: usize,
+    pub clones: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
+}
+
+pub fn discovery_selection_summary(report: &DiscoverReport) -> DiscoverySelectionSummary {
+    DiscoverySelectionSummary {
+        root: report.root.clone(),
+        dirs_scanned: report.dirs_scanned,
+        candidates_found: report.candidates_found,
+        selected_repos: report.repos_found,
+        family_count: report.families.len(),
+        family_limit: report.family_limit,
+        top_families: report
+            .families
+            .iter()
+            .take(10)
+            .map(|family| DiscoveredRepoFamilySummary {
+                name: family.name.clone(),
+                checkouts: family.checkouts,
+                worktrees: family.worktrees,
+                clones: family.clones,
+                origin: family.origin.clone(),
+            })
+            .collect(),
+    }
+}
+
 pub fn discover_repos(root: impl AsRef<Path>, options: &DiscoverOptions) -> Result<DiscoverReport> {
     let root = root
         .as_ref()

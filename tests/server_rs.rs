@@ -473,7 +473,10 @@ fn runtime_indexes_shards_from_discovered_root() {
         }),
     });
     assert!(build.error.is_none(), "{:?}", build.error);
-    assert_eq!(build.result.unwrap()["shards"], serde_json::json!(2));
+    let build_result = build.result.unwrap();
+    assert_eq!(build_result["shards"], serde_json::json!(2));
+    assert_eq!(build_result["discovery"][0]["selected_repos"], 2);
+    assert_eq!(build_result["discovery"][0]["candidates_found"], 2);
 
     let search = runtime.dispatch(ToolRequest {
         id: serde_json::json!("search"),
@@ -646,6 +649,10 @@ fn runtime_ensures_shards_builds_refreshes_and_warms() {
     assert!(build.error.is_none(), "{:?}", build.error);
     let build_result = build.result.unwrap();
     assert_eq!(build_result["stats"]["action"], serde_json::json!("build"));
+    assert_eq!(
+        build_result["stats"]["discovery"][0]["selected_repos"],
+        serde_json::json!(1)
+    );
     assert_eq!(build_result["warmed_indexes"], serde_json::json!(1));
     assert_eq!(build_result["cached_indexes"], serde_json::json!(1));
 

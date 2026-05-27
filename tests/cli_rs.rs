@@ -453,7 +453,7 @@ fn cli_indexes_only_selected_family_representatives_when_limited() {
     let shard_dir = tempfile::tempdir().unwrap();
 
     let mut index = Command::cargo_bin("orient").unwrap();
-    index
+    let output = index
         .args([
             "index-shards",
             "--discover-root",
@@ -467,7 +467,15 @@ fn cli_indexes_only_selected_family_representatives_when_limited() {
         ])
         .assert()
         .success()
-        .stdout(predicate::str::contains("\"shards\":1"));
+        .get_output()
+        .stdout
+        .clone();
+    let result: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(result["shards"], 1);
+    assert_eq!(result["discovery"][0]["candidates_found"], 2);
+    assert_eq!(result["discovery"][0]["selected_repos"], 1);
+    assert_eq!(result["discovery"][0]["family_limit"], 1);
+    assert_eq!(result["discovery"][0]["top_families"][0]["checkouts"], 2);
 }
 
 #[test]

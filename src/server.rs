@@ -1,4 +1,6 @@
-use crate::discover::{DiscoverOptions, discover_repos};
+use crate::discover::{
+    DiscoverOptions, DiscoverySelectionSummary, discover_repos, discovery_selection_summary,
+};
 use crate::fast_index::FastIndex;
 use crate::query::{merge_filters, parse_query, query_text};
 use crate::repo_index::{
@@ -766,20 +768,20 @@ impl ToolRuntime {
                 Ok(serde_json::to_value(results)?)
             }
             "index_shards" => {
-                let repos = shard_repos_from_arguments_required(&request.arguments)?;
+                let selection = shard_repos_from_arguments_required(&request.arguments)?;
                 let output_dir = path_arg(&request.arguments, "output_dir")?;
-                let stats = build_shards(&repos, output_dir)?;
+                let stats = build_shards(&selection.repos, output_dir)?;
                 self.clear_runtime_caches()?;
-                Ok(serde_json::to_value(stats)?)
+                shard_bootstrap_output(stats, selection.discovery)
             }
             "ensure_shards" => {
-                let repos = shard_repos_from_arguments(&request.arguments)?;
+                let selection = shard_repos_from_arguments(&request.arguments)?;
                 let output_dir = path_arg(&request.arguments, "output_dir")?;
-                let stats = ensure_shards(&repos, &output_dir)?;
+                let stats = ensure_shards(&selection.repos, &output_dir)?;
                 self.clear_runtime_caches()?;
                 let warmed_indexes = self.warm_shards(output_dir)?;
                 Ok(json!({
-                    "stats": stats,
+                    "stats": shard_bootstrap_output(stats, selection.discovery)?,
                     "warmed_indexes": warmed_indexes,
                     "cached_indexes": self.cached_index_count()
                 }))
@@ -1677,7 +1679,12 @@ fn range_args(arguments: &Value) -> Result<Vec<RangeArg>> {
     Ok(ranges)
 }
 
-fn shard_repos_from_arguments(arguments: &Value) -> Result<Vec<PathBuf>> {
+struct ShardRepoSelection {
+    repos: Vec<PathBuf>,
+    discovery: Vec<DiscoverySelectionSummary>,
+}
+
+fn shard_repos_from_arguments(arguments: &Value) -> Result<ShardRepoSelection> {
     let mut repos = optional_path_array_arg(arguments, "repos")?;
     let mut discover_roots = optional_path_array_arg(arguments, "discover_roots")?;
     if let Some(root) = optional_string_arg_any(arguments, &["discover_root", "root"]) {
@@ -1693,35 +1700,53 @@ fn shard_repos_from_arguments(arguments: &Value) -> Result<Vec<PathBuf>> {
             .get("nested_manifests")
             .and_then(Value::as_bool)
             .unwrap_or(false);
+        let mut discovery = Vec::new();
         for root in discover_roots {
-            repos.extend(
-                discover_repos(
-                    root,
-                    &DiscoverOptions {
-                        max_depth,
-                        limit,
-                        family_limit,
-                        nested_manifests,
-                        ..DiscoverOptions::default()
-                    },
-                )?
-                .repos
-                .into_iter()
-                .map(|repo| repo.path),
-            );
+            let discovered = discover_repos(
+                root,
+                &DiscoverOptions {
+                    max_depth,
+                    limit,
+                    family_limit,
+                    nested_manifests,
+                    ..DiscoverOptions::default()
+                },
+            )?;
+            discovery.push(discovery_selection_summary(&discovered));
+            repos.extend(discovered.repos.into_iter().map(|repo| repo.path));
         }
+        repos.sort();
+        repos.dedup();
+        return Ok(ShardRepoSelection { repos, discovery });
     }
     repos.sort();
     repos.dedup();
-    Ok(repos)
+    Ok(ShardRepoSelection {
+        repos,
+        discovery: Vec::new(),
+    })
 }
 
-fn shard_repos_from_arguments_required(arguments: &Value) -> Result<Vec<PathBuf>> {
-    let repos = shard_repos_from_arguments(arguments)?;
-    if repos.is_empty() {
+fn shard_repos_from_arguments_required(arguments: &Value) -> Result<ShardRepoSelection> {
+    let selection = shard_repos_from_arguments(arguments)?;
+    if selection.repos.is_empty() {
         return Err(anyhow!("provide repos, discover_root, or discover_roots"));
     }
-    Ok(repos)
+    Ok(selection)
+}
+
+fn shard_bootstrap_output<T: Serialize>(
+    stats: T,
+    discovery: Vec<DiscoverySelectionSummary>,
+) -> Result<Value> {
+    let mut value = serde_json::to_value(stats)?;
+    if !discovery.is_empty() {
+        let object = value
+            .as_object_mut()
+            .ok_or_else(|| anyhow!("shard stats did not serialize to an object"))?;
+        object.insert("discovery".to_string(), serde_json::to_value(discovery)?);
+    }
+    Ok(value)
 }
 
 fn usize_arg(arguments: &Value, name: &str) -> Option<usize> {

@@ -1,6 +1,8 @@
 use anyhow::{Result, bail};
 use clap::{Args, Parser, Subcommand};
-use orient::discover::{DiscoverOptions, discover_repos};
+use orient::discover::{
+    DiscoverOptions, DiscoverySelectionSummary, discover_repos, discovery_selection_summary,
+};
 use orient::fast_index::FastIndex;
 use orient::repo_index::{
     RepoIndexer, SearchFilters, SnippetMode, attach_result_context, read_file_range,
@@ -12,6 +14,7 @@ use orient::shards::{
     related_shard_files, related_shard_symbols, search_shards, shard_query_plans, shard_repo_maps,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::fs;
 use std::io::{self, BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
@@ -520,7 +523,7 @@ fn main() -> Result<()> {
             nested_manifests,
             output_dir,
         } => {
-            let repos = shard_repos_from_args_required(
+            let selection = shard_repos_from_args_required(
                 repos,
                 discover_roots,
                 max_depth,
@@ -528,9 +531,10 @@ fn main() -> Result<()> {
                 normalize_family_limit(family_limit),
                 nested_manifests,
             )?;
+            let stats = build_shards(&selection.repos, output_dir)?;
             println!(
                 "{}",
-                serde_json::to_string(&build_shards(&repos, output_dir)?)?
+                serde_json::to_string(&shard_bootstrap_output(stats, selection.discovery)?)?
             );
         }
         Commands::RefreshShards { index_dir } => {
@@ -545,7 +549,7 @@ fn main() -> Result<()> {
             nested_manifests,
             output_dir,
         } => {
-            let repos = shard_repos_from_args(
+            let selection = shard_repos_from_args(
                 repos,
                 discover_roots,
                 max_depth,
@@ -553,9 +557,10 @@ fn main() -> Result<()> {
                 normalize_family_limit(family_limit),
                 nested_manifests,
             )?;
+            let stats = ensure_shards(&selection.repos, output_dir)?;
             println!(
                 "{}",
-                serde_json::to_string(&ensure_shards(&repos, output_dir)?)?
+                serde_json::to_string(&shard_bootstrap_output(stats, selection.discovery)?)?
             );
         }
         Commands::SearchShards {
@@ -989,6 +994,11 @@ fn client_jsonl(addr: &str) -> Result<()> {
     Ok(())
 }
 
+struct ShardRepoSelection {
+    repos: Vec<PathBuf>,
+    discovery: Vec<DiscoverySelectionSummary>,
+}
+
 fn shard_repos_from_args(
     mut repos: Vec<PathBuf>,
     discover_roots: Vec<PathBuf>,
@@ -996,7 +1006,8 @@ fn shard_repos_from_args(
     discover_limit: usize,
     family_limit: Option<usize>,
     nested_manifests: bool,
-) -> Result<Vec<PathBuf>> {
+) -> Result<ShardRepoSelection> {
+    let mut discovery = Vec::new();
     for root in discover_roots {
         let discovered = discover_repos(
             root,
@@ -1008,11 +1019,12 @@ fn shard_repos_from_args(
                 ..DiscoverOptions::default()
             },
         )?;
+        discovery.push(discovery_selection_summary(&discovered));
         repos.extend(discovered.repos.into_iter().map(|repo| repo.path));
     }
     repos.sort();
     repos.dedup();
-    Ok(repos)
+    Ok(ShardRepoSelection { repos, discovery })
 }
 
 fn shard_repos_from_args_required(
@@ -1022,8 +1034,8 @@ fn shard_repos_from_args_required(
     discover_limit: usize,
     family_limit: Option<usize>,
     nested_manifests: bool,
-) -> Result<Vec<PathBuf>> {
-    let repos = shard_repos_from_args(
+) -> Result<ShardRepoSelection> {
+    let selection = shard_repos_from_args(
         repos,
         discover_roots,
         max_depth,
@@ -1031,14 +1043,28 @@ fn shard_repos_from_args_required(
         family_limit,
         nested_manifests,
     )?;
-    if repos.is_empty() {
+    if selection.repos.is_empty() {
         bail!("provide at least one --repo or --discover-root");
     }
-    Ok(repos)
+    Ok(selection)
 }
 
 fn normalize_family_limit(value: Option<usize>) -> Option<usize> {
     value.filter(|limit| *limit > 0)
+}
+
+fn shard_bootstrap_output<T: Serialize>(
+    stats: T,
+    discovery: Vec<DiscoverySelectionSummary>,
+) -> Result<Value> {
+    let mut value = serde_json::to_value(stats)?;
+    if !discovery.is_empty() {
+        let object = value
+            .as_object_mut()
+            .ok_or_else(|| anyhow::anyhow!("shard stats did not serialize to an object"))?;
+        object.insert("discovery".to_string(), serde_json::to_value(discovery)?);
+    }
+    Ok(value)
 }
 
 struct BenchConfig {
