@@ -1,8 +1,11 @@
 use std::fs;
 use std::path::Path;
+use std::time::{Duration, Instant};
 
 use orient::fast_index::FastIndex;
-use orient::repo_index::{SearchFilters, search_repo_fast_filtered};
+use orient::repo_index::{
+    SearchFilters, search_repo_fast_filtered, search_repo_fast_filtered_with_timeout,
+};
 
 fn write(path: &Path, text: &str) {
     fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -98,4 +101,28 @@ fn fast_search_deduplicates_repeated_worktree_hits() {
 
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].path, "one/src/auth.rs");
+}
+
+#[test]
+fn fast_search_timeout_is_bounded() {
+    let repo = tempfile::tempdir().unwrap();
+    for index in 0..200 {
+        write(
+            &repo.path().join(format!("src/file_{index}.rs")),
+            "pub fn unrelated_symbol() {}\n",
+        );
+    }
+
+    let started = Instant::now();
+    let results = search_repo_fast_filtered_with_timeout(
+        repo.path(),
+        "unrelated symbol",
+        10,
+        &SearchFilters::default(),
+        Duration::from_nanos(1),
+    )
+    .unwrap();
+
+    assert!(started.elapsed() < Duration::from_millis(500));
+    assert!(results.len() <= 10);
 }

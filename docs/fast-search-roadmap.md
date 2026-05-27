@@ -37,8 +37,9 @@ Implemented now:
 
 Measured on this machine:
 
-- Wide tree fallback: `/Users/jonathanhaas/Documents/Projects`, common top-10 literal/token queries in about `19-30ms` mean after warmup.
+- Wide tree fallback: `/Users/jonathanhaas/Documents/Projects`, common top-10 literal/token queries in about `17-31ms` mean after warmup, with max observed `43ms` across the sampled runs.
 - Local repo fallback: query `indexed search symbol filters`, top 10 in about `11ms` mean after warmup.
+- Hot-path fallback has a `250ms` wall-clock timeout plus match caps; if the timeout fires it returns partial results instead of blocking the agent.
 - Local repo index build: about `0.25s`.
 - Local repo refresh after build: reuses unchanged files and rebuilds postings from per-file term lists.
 - Local repo indexed search: query `indexed search symbol filters`, top 10 in about `3ms` mean after warmup.
@@ -50,7 +51,7 @@ High-performance definition:
 - Wide-tree hot path returns useful top-10 results from `/Users/jonathanhaas/Documents/Projects` in `<=300ms` p95 for common literal/token queries.
 - Repo-local searches return `<=100ms` p95 after warmup.
 - Indexed search beats fallback search on repeated repo-local queries.
-- No multi-second hangs: candidate collection has bounded match caps and fallback behavior.
+- No multi-second hangs: candidate collection has bounded match caps and a hard wall-clock timeout.
 - Top results avoid obvious duplicate spam from repeated worktrees.
 
 Search quality definition:

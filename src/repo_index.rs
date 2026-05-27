@@ -10,9 +10,13 @@ use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::LazyLock;
+use std::sync::{LazyLock, mpsc};
+use std::thread;
+use std::time::{Duration, Instant};
 
 const MAX_FILE_BYTES: u64 = 512_000;
+const RIPGREP_TIMEOUT: Duration = Duration::from_millis(250);
+const RIPGREP_POLL_INTERVAL: Duration = Duration::from_millis(5);
 static CAMEL_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"([a-z0-9])([A-Z])").unwrap());
 static TOKEN_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[A-Za-z][A-Za-z0-9_]*").unwrap());
 static SYMBOL_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -98,13 +102,23 @@ pub fn search_repo_fast_filtered(
     limit: usize,
     filters: &SearchFilters,
 ) -> Result<Vec<SearchResult>> {
+    search_repo_fast_filtered_with_timeout(root, query, limit, filters, RIPGREP_TIMEOUT)
+}
+
+pub fn search_repo_fast_filtered_with_timeout(
+    root: impl AsRef<Path>,
+    query: &str,
+    limit: usize,
+    filters: &SearchFilters,
+    timeout: Duration,
+) -> Result<Vec<SearchResult>> {
     let root = root.as_ref().canonicalize()?;
     let query_tokens = tokenize(query);
     if query_tokens.is_empty() || limit == 0 {
         return Ok(Vec::new());
     }
 
-    if let Some(results) = search_repo_ripgrep(&root, &query_tokens, limit, filters)? {
+    if let Some(results) = search_repo_ripgrep(&root, &query_tokens, limit, filters, timeout)? {
         return Ok(results);
     }
 
@@ -116,6 +130,7 @@ fn search_repo_ripgrep(
     query_tokens: &[String],
     limit: usize,
     filters: &SearchFilters,
+    timeout: Duration,
 ) -> Result<Option<Vec<SearchResult>>> {
     let mut command = Command::new("rg");
     command
@@ -163,13 +178,37 @@ fn search_repo_ripgrep(
     let Some(stdout) = child.stdout.take() else {
         return Ok(None);
     };
+    let (lines_tx, lines_rx) = mpsc::channel();
+    thread::spawn(move || {
+        for line in BufReader::new(stdout).lines() {
+            if lines_tx.send(line).is_err() {
+                break;
+            }
+        }
+    });
 
     let mut scored: HashMap<String, SearchResult> = HashMap::new();
     let max_matches = (limit.max(1) * 300).clamp(1_000, 8_000);
     let mut match_count = 0usize;
+    let deadline = Instant::now() + timeout;
 
-    for line in BufReader::new(stdout).lines() {
-        let line = line?;
+    loop {
+        let now = Instant::now();
+        if now >= deadline {
+            let _ = child.kill();
+            break;
+        }
+        let wait_for = (deadline - now).min(RIPGREP_POLL_INTERVAL);
+        let line = match lines_rx.recv_timeout(wait_for) {
+            Ok(line) => line?,
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                if child.try_wait()?.is_some() {
+                    break;
+                }
+                continue;
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        };
         let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else {
             continue;
         };

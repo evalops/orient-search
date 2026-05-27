@@ -67,6 +67,7 @@ The build is useful when it can:
 
 - Answer repo brief/search/symbol/related-file questions through Rust CLI and JSON-lines server.
 - Return wide-tree search results in hundreds of milliseconds, not seconds.
+- Bound the hot path with a wall-clock timeout and match caps so pathological trees cannot hang searches.
 - Provide a persistent indexed search mode that can evolve toward Zoekt-style shards/postings.
 - Refresh the persistent index incrementally by reusing unchanged file metadata and postings.
 - Establish a baseline for fast local code search so future agent runs can use fewer exploratory commands.
@@ -82,8 +83,10 @@ Product impact criteria for follow-up adoption:
 Current search baseline:
 
 - `orient search --repo . "indexed search symbol filters"`: about `11ms` mean after warmup.
-- `orient search --repo /Users/jonathanhaas/Documents/Projects "session token auth"`: about `19ms` mean after warmup.
-- `orient search --repo /Users/jonathanhaas/Documents/Projects "postgres migration user"`: about `30ms` mean after warmup.
+- `orient search --repo /Users/jonathanhaas/Documents/Projects "session token auth"`: about `17ms` mean after warmup, max observed `18ms`.
+- `orient search --repo /Users/jonathanhaas/Documents/Projects "browser session implementation"`: about `20ms` mean after warmup, max observed `26ms`.
+- `orient search --repo /Users/jonathanhaas/Documents/Projects "postgres migration user"`: about `31ms` mean after warmup, max observed `43ms`.
+- The `rg` hot path has a `250ms` wall-clock timeout plus a bounded match cap; timed-out searches return partial results rather than hanging.
 - `orient index --repo . --output /tmp/orient-self.index`: versioned binary index with file metadata, terms, and symbol boosts.
 - `orient refresh-index --repo . --index /tmp/orient-self.index`: reuses unchanged files and refreshes changed/deleted files.
 - `orient indexed-search --index /tmp/orient-self.index "indexed search symbol filters"`: about `3ms` mean after warmup.
