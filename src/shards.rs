@@ -800,12 +800,7 @@ pub fn read_shard_range(
     start: usize,
     lines: usize,
 ) -> Result<FileRange> {
-    let manifest = load_manifest(index_dir.as_ref())?;
-    let (prefix, relative_path) = shard_path
-        .split_once('/')
-        .ok_or_else(|| anyhow::anyhow!("shard path must be '<repo>/<path>'"))?;
-    let resolved = resolve_shard_read_path(&manifest, prefix, relative_path)
-        .ok_or_else(|| anyhow::anyhow!("unknown shard or alias: {prefix}"))?;
+    let resolved = resolve_shard_path(index_dir.as_ref(), shard_path)?;
     let index = FastIndex::load(index_dir.as_ref().join(&resolved.index))
         .with_context(|| format!("load shard {}", resolved.index))?;
     let mut range = index.read_range(&resolved.relative_path, start, lines)?;
@@ -884,11 +879,43 @@ impl ResolvedShardRead {
 
 pub(crate) fn resolve_shard_path(index_dir: &Path, shard_path: &str) -> Result<ResolvedShardRead> {
     let manifest = load_manifest(index_dir)?;
-    let (prefix, relative_path) = shard_path
-        .split_once('/')
-        .ok_or_else(|| anyhow::anyhow!("shard path must be '<repo>/<path>'"))?;
-    resolve_shard_read_path(&manifest, prefix, relative_path)
-        .ok_or_else(|| anyhow::anyhow!("unknown shard or alias: {prefix}"))
+    resolve_shard_path_from_manifest(&manifest, shard_path)
+}
+
+pub(crate) fn resolve_shard_path_from_manifest(
+    manifest: &ShardManifest,
+    shard_path: &str,
+) -> Result<ResolvedShardRead> {
+    if let Some((prefix, relative_path)) = shard_path.split_once('/') {
+        if let Some(resolved) = resolve_shard_read_path(manifest, prefix, relative_path) {
+            return Ok(resolved);
+        }
+    }
+
+    let candidates = unqualified_shard_path_candidates(manifest, shard_path);
+    match candidates.len() {
+        1 => Ok(candidates.into_iter().next().expect("candidate exists")),
+        0 => {
+            if let Some((prefix, _)) = shard_path.split_once('/') {
+                anyhow::bail!(
+                    "unknown shard or alias: {prefix}; use '<repo>/<path>' or a unique shard-relative path"
+                );
+            }
+            anyhow::bail!("shard path must be '<repo>/<path>' or a unique shard-relative path");
+        }
+        _ => {
+            let mut names = candidates
+                .iter()
+                .map(|candidate| candidate.output_prefix.clone())
+                .collect::<Vec<_>>();
+            names.sort();
+            names.dedup();
+            anyhow::bail!(
+                "ambiguous shard path {shard_path:?}; matched {}; use '<repo>/<path>'",
+                names.join(", ")
+            );
+        }
+    }
 }
 
 pub(crate) fn resolve_shard_read_path(
@@ -923,6 +950,56 @@ pub(crate) fn resolve_shard_read_path(
     }
 
     None
+}
+
+fn unqualified_shard_path_candidates(
+    manifest: &ShardManifest,
+    shard_path: &str,
+) -> Vec<ResolvedShardRead> {
+    if !valid_unqualified_shard_path(shard_path) {
+        return Vec::new();
+    }
+
+    if manifest.shards.len() == 1 {
+        let shard = &manifest.shards[0];
+        return vec![ResolvedShardRead {
+            index: shard.index.clone(),
+            relative_path: shard_path.to_string(),
+            output_prefix: shard.name.clone(),
+            path_prefix: None,
+        }];
+    }
+
+    let mut candidates = Vec::new();
+    for shard in &manifest.shards {
+        if shard.root.join(shard_path).is_file() {
+            candidates.push(ResolvedShardRead {
+                index: shard.index.clone(),
+                relative_path: shard_path.to_string(),
+                output_prefix: shard.name.clone(),
+                path_prefix: None,
+            });
+        }
+    }
+    candidates
+}
+
+fn valid_unqualified_shard_path(value: &str) -> bool {
+    let path = Path::new(value);
+    !value.trim().is_empty()
+        && path.is_relative()
+        && path.components().all(|component| {
+            matches!(
+                component,
+                std::path::Component::Normal(_) | std::path::Component::CurDir
+            )
+        })
+        && path.components().any(|component| {
+            matches!(
+                component,
+                std::path::Component::Normal(_) | std::path::Component::CurDir
+            )
+        })
 }
 
 fn symbol_match_score(symbol: &Symbol, name: &str, needle: &str) -> u8 {

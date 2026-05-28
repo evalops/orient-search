@@ -3457,7 +3457,7 @@ fn server_handles_shard_index_search_and_read_requests() {
         "tool": "read_shard_range",
         "arguments": {
             "index_dir": parent.path().join(".orient-shards"),
-            "path": "billing/src/billing.rs",
+            "path": "src/billing.rs",
             "start": 1,
             "lines": 1
         }
@@ -3467,7 +3467,7 @@ fn server_handles_shard_index_search_and_read_requests() {
         "tool": "read_shard_ranges",
         "arguments": {
             "index_dir": parent.path().join(".orient-shards"),
-            "ranges": {"path": "billing/src/billing.rs", "start": 1, "lines": 1}
+            "ranges": {"path": "src/billing.rs", "start": 1, "lines": 1}
         }
     });
     let symbol_request = serde_json::json!({
@@ -3495,7 +3495,7 @@ fn server_handles_shard_index_search_and_read_requests() {
         "tool": "related_shard_files",
         "arguments": {
             "index_dir": parent.path().join(".orient-shards"),
-            "path": "billing/src/billing.rs",
+            "path": "src/billing.rs",
             "limit": 5
         }
     });
@@ -3504,7 +3504,7 @@ fn server_handles_shard_index_search_and_read_requests() {
         "tool": "related_shard_symbols",
         "arguments": {
             "index_dir": parent.path().join(".orient-shards"),
-            "path": "billing/src/billing.rs",
+            "path": "src/billing.rs",
             "query": "invoice total",
             "limit": 5
         }

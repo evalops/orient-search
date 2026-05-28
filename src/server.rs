@@ -11,7 +11,7 @@ use crate::repo_index::{
 use crate::shards::{
     ShardEntry, ShardManifest, ShardQueryPlan, ShardRepoMap, ShardSearchScope, build_shards,
     ensure_shards, filter_repo_map_by_prefix, filters_for_shard_scope, load_manifest,
-    refresh_shards, resolve_shard_read_path, shard_search_scopes, shard_status,
+    refresh_shards, resolve_shard_path_from_manifest, shard_search_scopes, shard_status,
 };
 use ahash::AHashMap as HashMap;
 use anyhow::{Result, anyhow};
@@ -1798,11 +1798,7 @@ impl ToolRuntime {
         path: &str,
     ) -> Result<crate::shards::ResolvedShardRead> {
         let manifest = self.cached_shard_manifest(index_dir)?;
-        let (prefix, relative_path) = path
-            .split_once('/')
-            .ok_or_else(|| anyhow!("shard path must be '<repo>/<path>'"))?;
-        resolve_shard_read_path(&manifest, prefix, relative_path)
-            .ok_or_else(|| anyhow!("unknown shard or alias: {prefix}"))
+        resolve_shard_path_from_manifest(&manifest, path)
     }
 
     fn clear_runtime_caches(&self) -> Result<()> {

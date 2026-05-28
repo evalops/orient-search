@@ -80,7 +80,7 @@ For most agents, the handoff is:
 2. Collect one or more `read_range` objects from results.
 3. Pass one object or an array of objects directly to the matching batch read tool.
 
-Read-range tools accept `/` or `\` separators in repo-relative paths and reject parent-directory escapes after separator normalization.
+Read-range tools accept `/` or `\` separators in repo-relative paths and reject parent-directory escapes after separator normalization. Shard range and related-context tools accept exact shard-prefixed paths from search hits, such as `platform/src/auth.rs`, and also accept unqualified paths like `src/auth.rs` when they resolve to exactly one shard. Ambiguous unqualified paths fail with a prompt to use `<repo>/<path>`.
 
 `open_range`, `open_index_range`, and `open_shard_range` are aliases for agents that phrase context fetches as opening a file range.
 

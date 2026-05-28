@@ -1611,6 +1611,10 @@ impl SessionManager {
 #[test]
 fn cli_builds_and_searches_shard_directory() {
     let auth_repo = sample_repo();
+    write(
+        &auth_repo.path().join("src/shared.rs"),
+        "pub fn shared_name() -> &'static str { \"auth\" }\n",
+    );
     let billing_repo = tempfile::tempdir().unwrap();
     write(
         &billing_repo.path().join("src/billing.rs"),
@@ -1619,6 +1623,10 @@ fn cli_builds_and_searches_shard_directory() {
     write(
         &billing_repo.path().join("src/legacy.rs"),
         "pub fn legacy_invoice() -> usize { 1 }\n",
+    );
+    write(
+        &billing_repo.path().join("src/shared.rs"),
+        "pub fn shared_name() -> &'static str { \"billing\" }\n",
     );
     write(
         &billing_repo.path().join("Cargo.toml"),
@@ -1746,6 +1754,59 @@ fn cli_builds_and_searches_shard_directory() {
         "\"path\":\"{billing_name}/src/billing.rs\""
     )))
     .stdout(predicate::str::contains("invoice_total"));
+
+    let mut read_unqualified = Command::cargo_bin("orient").unwrap();
+    read_unqualified
+        .args([
+            "read-shard-range",
+            "--index-dir",
+            shard_dir.path().to_str().unwrap(),
+            "--path",
+            "src/billing.rs",
+            "--start",
+            "1",
+            "--lines",
+            "1",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(&format!(
+            "\"path\":\"{billing_name}/src/billing.rs\""
+        )))
+        .stdout(predicate::str::contains("invoice_total"));
+
+    let mut related_unqualified = Command::cargo_bin("orient").unwrap();
+    related_unqualified
+        .args([
+            "related-shard",
+            "--index-dir",
+            shard_dir.path().to_str().unwrap(),
+            "--path",
+            "src/billing.rs",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(&format!(
+            "{billing_name}/src/legacy.rs"
+        )));
+
+    let mut ambiguous_read = Command::cargo_bin("orient").unwrap();
+    ambiguous_read
+        .args([
+            "read-shard-range",
+            "--index-dir",
+            shard_dir.path().to_str().unwrap(),
+            "--path",
+            "src/shared.rs",
+            "--start",
+            "1",
+            "--lines",
+            "1",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("ambiguous shard path"))
+        .stderr(predicate::str::contains("use '<repo>/<path>'"));
 
     write(
         &billing_repo.path().join("src/billing.rs"),
