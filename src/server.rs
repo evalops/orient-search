@@ -85,6 +85,12 @@ struct ShardQueryPlanBatchResult {
     plans: Vec<ShardQueryPlan>,
 }
 
+#[derive(Debug, Serialize)]
+struct SymbolBatchResult {
+    name: String,
+    symbols: Vec<Symbol>,
+}
+
 pub fn serve_jsonl(reader: impl BufRead, mut writer: impl Write) -> Result<()> {
     let mut runtime = ToolRuntime::default();
     serve_jsonl_with_runtime(reader, &mut writer, &mut runtime)
@@ -612,15 +618,33 @@ pub fn tool_manifest() -> Value {
             SYMBOL_INDEX_OPTIONAL_ARGS,
         ),
         tool_entry(
+            "find_shard_symbol_batch",
+            "Find several symbol definitions across a local multi-repo shard directory in one request.",
+            &["index_dir", "names"],
+            SYMBOL_INDEX_OPTIONAL_ARGS,
+        ),
+        tool_entry(
             "find_symbol",
             "Find symbol definitions in a local repository.",
             &["repo", "name"],
             SYMBOL_OPTIONAL_ARGS,
         ),
         tool_entry(
+            "find_symbol_batch",
+            "Find several symbol definitions in a local repository in one request.",
+            &["repo", "names"],
+            SYMBOL_OPTIONAL_ARGS,
+        ),
+        tool_entry(
             "find_index_symbol",
             "Find symbol definitions directly from a persistent index.",
             &["index", "name"],
+            SYMBOL_INDEX_OPTIONAL_ARGS,
+        ),
+        tool_entry(
+            "find_index_symbol_batch",
+            "Find several symbol definitions directly from a persistent index in one request.",
+            &["index", "names"],
             SYMBOL_INDEX_OPTIONAL_ARGS,
         ),
         tool_entry(
@@ -982,7 +1006,7 @@ fn argument_schema(tool_name: &str, name: &str) -> Value {
                 ]),
             );
         }
-        "queries" => {
+        "queries" | "names" => {
             schema.insert("type".to_string(), json!("array"));
             schema.insert("minItems".to_string(), json!(1));
             schema.insert("maxItems".to_string(), json!(MAX_BATCH_QUERIES));
@@ -1177,7 +1201,7 @@ fn argument_maximum(tool_name: &str, name: &str) -> Option<usize> {
 
 fn argument_max_items(name: &str) -> Option<usize> {
     match name {
-        "queries" => Some(MAX_BATCH_QUERIES),
+        "queries" | "names" => Some(MAX_BATCH_QUERIES),
         "ranges" => Some(MAX_BATCH_RANGES),
         _ => None,
     }
@@ -1196,6 +1220,12 @@ fn tool_has_result_limit(tool_name: &str) -> bool {
             | "indexed_search_batch"
             | "search_shards"
             | "search_shards_batch"
+            | "find_symbol"
+            | "find_symbol_batch"
+            | "find_index_symbol"
+            | "find_index_symbol_batch"
+            | "find_shard_symbol"
+            | "find_shard_symbol_batch"
     )
 }
 
@@ -1213,6 +1243,8 @@ fn argument_description(tool_name: &str, name: &str) -> &'static str {
         "output_dir" => "Directory where shard indexes and manifest.json should be written.",
         "query" => "Agent query string with filters, quoted phrases, and normal search terms.",
         "queries" => "Agent query strings to run as one batch against the same search target.",
+        "name" => "Symbol name to look up.",
+        "names" => "Symbol names to look up as one batch against the same target and filters.",
         "path" if is_shard_path_tool(tool_name) => {
             "Shard-prefixed result path, such as repo/src/lib.rs, or a unique unqualified shard-relative path, such as src/lib.rs."
         }
@@ -1297,7 +1329,6 @@ fn argument_description(tool_name: &str, name: &str) -> &'static str {
         "tests" => "Maximum test files to include in repo maps.",
         "start" => "One-based start line for range reads.",
         "lines" => "Number of lines to read, capped to the maximum bounded range size.",
-        "name" => "Symbol name or search-like symbol query.",
         _ => "Tool argument.",
     }
 }
@@ -2070,6 +2101,19 @@ impl ToolRuntime {
                     &search_filters(&request.arguments, true)?,
                 )?)?)
             }
+            "find_shard_symbol_batch" => {
+                let index_dir = self.shard_dir_arg_or_single_cached(&request.arguments)?;
+                let names = string_array_arg(&request.arguments, "names")?;
+                let limit = positive_usize_arg(&request.arguments, "limit", 10)?;
+                let filters = search_filters(&request.arguments, true)?;
+                let mut batch = Vec::new();
+                for name in names {
+                    let symbols =
+                        self.find_shard_symbol_cached(&index_dir, &name, limit, &filters)?;
+                    batch.push(SymbolBatchResult { name, symbols });
+                }
+                Ok(serde_json::to_value(batch)?)
+            }
             "find_symbol" => {
                 let repo = path_arg(&request.arguments, "repo")?;
                 let name = string_arg(&request.arguments, "name")?;
@@ -2080,6 +2124,21 @@ impl ToolRuntime {
                     index.find_symbol_filtered(&name, limit, &filters),
                 )?)
             }
+            "find_symbol_batch" => {
+                let repo = path_arg(&request.arguments, "repo")?;
+                let names = string_array_arg(&request.arguments, "names")?;
+                let limit = positive_usize_arg(&request.arguments, "limit", 10)?;
+                let filters = search_filters(&request.arguments, false)?;
+                let index = RepoIndexer::new(repo).build()?;
+                let batch = names
+                    .into_iter()
+                    .map(|name| SymbolBatchResult {
+                        symbols: index.find_symbol_filtered(&name, limit, &filters),
+                        name,
+                    })
+                    .collect::<Vec<_>>();
+                Ok(serde_json::to_value(batch)?)
+            }
             "find_index_symbol" => {
                 let index_path = self.index_path_arg_or_single_cached(&request.arguments)?;
                 let name = string_arg(&request.arguments, "name")?;
@@ -2089,6 +2148,21 @@ impl ToolRuntime {
                 Ok(serde_json::to_value(
                     index.find_symbol_filtered(&name, limit, &filters),
                 )?)
+            }
+            "find_index_symbol_batch" => {
+                let index_path = self.index_path_arg_or_single_cached(&request.arguments)?;
+                let names = string_array_arg(&request.arguments, "names")?;
+                let limit = positive_usize_arg(&request.arguments, "limit", 10)?;
+                let filters = search_filters(&request.arguments, true)?;
+                let index = self.cached_index(index_path)?;
+                let batch = names
+                    .into_iter()
+                    .map(|name| SymbolBatchResult {
+                        symbols: index.find_symbol_filtered(&name, limit, &filters),
+                        name,
+                    })
+                    .collect::<Vec<_>>();
+                Ok(serde_json::to_value(batch)?)
             }
             "related_files" => {
                 let repo = path_arg(&request.arguments, "repo")?;

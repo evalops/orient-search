@@ -7,7 +7,7 @@ use orient::discover::{
 use orient::fast_index::{FastIndex, RefreshStats};
 use orient::query::normalize_symbol_kind;
 use orient::repo_index::{
-    QueryPlan, RepoIndexer, ResultToolRequest, SearchFilters, SearchResult, SnippetMode,
+    QueryPlan, RepoIndexer, ResultToolRequest, SearchFilters, SearchResult, SnippetMode, Symbol,
     attach_result_context, attach_result_read_requests, attach_result_related_requests,
     attach_result_related_symbol_requests, read_file_range, result_read_batch_request,
     search_repo_fast_filtered,
@@ -207,6 +207,18 @@ enum Commands {
         #[arg(long)]
         index_dir: PathBuf,
         name: String,
+        #[arg(long, default_value_t = 10)]
+        limit: usize,
+        #[arg(long = "repo")]
+        repo: Option<String>,
+        #[command(flatten)]
+        filters: CommonSearchArgs,
+    },
+    ShardSymbolBatch {
+        #[arg(long)]
+        index_dir: PathBuf,
+        #[arg(required = true)]
+        names: Vec<String>,
         #[arg(long, default_value_t = 10)]
         limit: usize,
         #[arg(long = "repo")]
@@ -442,10 +454,32 @@ enum Commands {
         #[command(flatten)]
         filters: CommonSearchArgs,
     },
+    SymbolBatch {
+        #[arg(long, default_value = ".")]
+        repo: PathBuf,
+        #[arg(required = true)]
+        names: Vec<String>,
+        #[arg(long, default_value_t = 10)]
+        limit: usize,
+        #[command(flatten)]
+        filters: CommonSearchArgs,
+    },
     IndexSymbol {
         #[arg(long)]
         index: PathBuf,
         name: String,
+        #[arg(long, default_value_t = 10)]
+        limit: usize,
+        #[arg(long = "repo")]
+        repo_filter: Option<String>,
+        #[command(flatten)]
+        filters: CommonSearchArgs,
+    },
+    IndexSymbolBatch {
+        #[arg(long)]
+        index: PathBuf,
+        #[arg(required = true)]
+        names: Vec<String>,
         #[arg(long, default_value_t = 10)]
         limit: usize,
         #[arg(long = "repo")]
@@ -831,6 +865,12 @@ struct QueryPlanBatchResult {
 struct ShardQueryPlanBatchResult {
     query: String,
     plans: Vec<ShardQueryPlan>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct SymbolBatchResult {
+    name: String,
+    symbols: Vec<Symbol>,
 }
 
 fn main() {
@@ -1276,6 +1316,21 @@ fn run() -> Result<()> {
                 "{}",
                 serde_json::to_string(&find_shard_symbol(index_dir, &name, limit, &filters)?)?
             );
+        }
+        Commands::ShardSymbolBatch {
+            index_dir,
+            names,
+            limit,
+            repo,
+            filters,
+        } => {
+            let filters = search_filters_from_args(&filters, repo)?;
+            let mut batch = Vec::new();
+            for name in cli_batch_queries(names)? {
+                let symbols = find_shard_symbol(&index_dir, &name, limit, &filters)?;
+                batch.push(SymbolBatchResult { name, symbols });
+            }
+            println!("{}", serde_json::to_string(&batch)?);
         }
         Commands::ShardMap {
             index_dir,
@@ -1997,6 +2052,23 @@ fn run() -> Result<()> {
                 serde_json::to_string(&index.find_symbol_filtered(&name, limit, &filters))?
             );
         }
+        Commands::SymbolBatch {
+            repo,
+            names,
+            limit,
+            filters,
+        } => {
+            let filters = search_filters_from_args(&filters, None)?;
+            let index = RepoIndexer::new(repo).build()?;
+            let batch = cli_batch_queries(names)?
+                .into_iter()
+                .map(|name| SymbolBatchResult {
+                    symbols: index.find_symbol_filtered(&name, limit, &filters),
+                    name,
+                })
+                .collect::<Vec<_>>();
+            println!("{}", serde_json::to_string(&batch)?);
+        }
         Commands::IndexSymbol {
             index,
             name,
@@ -2010,6 +2082,24 @@ fn run() -> Result<()> {
                 "{}",
                 serde_json::to_string(&index.find_symbol_filtered(&name, limit, &filters))?
             );
+        }
+        Commands::IndexSymbolBatch {
+            index,
+            names,
+            limit,
+            repo_filter,
+            filters,
+        } => {
+            let filters = search_filters_from_args(&filters, repo_filter)?;
+            let index = FastIndex::load(index)?;
+            let batch = cli_batch_queries(names)?
+                .into_iter()
+                .map(|name| SymbolBatchResult {
+                    symbols: index.find_symbol_filtered(&name, limit, &filters),
+                    name,
+                })
+                .collect::<Vec<_>>();
+            println!("{}", serde_json::to_string(&batch)?);
         }
         Commands::Related {
             repo,

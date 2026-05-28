@@ -528,6 +528,7 @@ fn server_reports_tool_manifest_for_agent_wrappers() {
     assert!(stdout.contains("shard_query_plan"));
     assert!(stdout.contains("shard_query_plan_batch"));
     assert!(stdout.contains("find_index_symbol"));
+    assert!(stdout.contains("find_index_symbol_batch"));
     assert!(stdout.contains("related_index_files"));
     assert!(stdout.contains("related_index_symbols"));
     assert!(stdout.contains("open_shard_range"));
@@ -537,6 +538,8 @@ fn server_reports_tool_manifest_for_agent_wrappers() {
     assert!(stdout.contains("unique unqualified shard-relative path"));
     assert!(stdout.contains("shard_repo_map"));
     assert!(stdout.contains("find_shard_symbol"));
+    assert!(stdout.contains("find_shard_symbol_batch"));
+    assert!(stdout.contains("find_symbol_batch"));
     assert!(stdout.contains("daemon_status"));
     assert!(stdout.contains("warm_index"));
     assert!(stdout.contains("warm_shards"));
@@ -4135,6 +4138,16 @@ fn server_handles_indexed_search_request() {
             "limit": 5
         }
     });
+    let symbol_batch_request = serde_json::json!({
+        "id": "find-index-symbol-batch",
+        "tool": "find_index_symbol_batch",
+        "arguments": {
+            "index": index_path,
+            "names": ["SessionManager", "issue_token"],
+            "kind": "function",
+            "limit": 5
+        }
+    });
     let map_request = serde_json::json!({
         "id": "indexed-repo-map",
         "tool": "indexed_repo_map",
@@ -4176,6 +4189,7 @@ fn server_handles_indexed_search_request() {
     writeln!(child.stdin.as_mut().unwrap(), "{read_request}").unwrap();
     writeln!(child.stdin.as_mut().unwrap(), "{read_ranges_request}").unwrap();
     writeln!(child.stdin.as_mut().unwrap(), "{symbol_request}").unwrap();
+    writeln!(child.stdin.as_mut().unwrap(), "{symbol_batch_request}").unwrap();
     writeln!(child.stdin.as_mut().unwrap(), "{map_request}").unwrap();
     writeln!(child.stdin.as_mut().unwrap(), "{related_request}").unwrap();
     writeln!(child.stdin.as_mut().unwrap(), "{related_symbols_request}").unwrap();
@@ -4203,6 +4217,10 @@ fn server_handles_indexed_search_request() {
     assert!(stdout.contains("\"path\":\"tests/auth_test.rs\""));
     assert!(stdout.contains("\"id\":\"find-index-symbol\""));
     assert!(stdout.contains("\"kind\":\"struct\""));
+    assert!(stdout.contains("\"id\":\"find-index-symbol-batch\""));
+    assert!(stdout.contains("\"name\":\"SessionManager\""));
+    assert!(stdout.contains("\"symbols\":[]"));
+    assert!(stdout.contains("\"name\":\"issue_token\""));
     assert!(stdout.contains("\"id\":\"indexed-repo-map\""));
     assert!(stdout.contains("\"entrypoints\""));
     assert!(stdout.contains("\"manifest_files\""));
