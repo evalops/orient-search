@@ -3001,10 +3001,27 @@ fn planned_symbol_query_name(
     if filters.symbol.is_none() && explicit_content_terms {
         return None;
     }
-    if filters.symbol.is_none() && !positive_scope_can_contain_symbols(filters) {
+    if filters.symbol.is_none() && !scope_allows_required_implicit_symbol_posting(filters) {
         return None;
     }
     exact_symbol_query_name(terms, filters.symbol.as_deref())
+}
+
+fn scope_allows_required_implicit_symbol_posting(filters: &SearchFilters) -> bool {
+    if filters.test.is_some()
+        || !filters.exclude_file.is_empty()
+        || !filters.exclude_path.is_empty()
+        || !filters.exclude_language.is_empty()
+        || !filters.exclude_extension.is_empty()
+        || !filters.exclude_symbol.is_empty()
+        || !filters.exclude_symbol_kind.is_empty()
+        || !filters.exclude_repo.is_empty()
+        || !filters.exclude_dependency.is_empty()
+        || !filters.exclude_import.is_empty()
+    {
+        return false;
+    }
+    positive_scope_can_contain_symbols(filters)
 }
 
 fn positive_scope_can_contain_symbols(filters: &SearchFilters) -> bool {

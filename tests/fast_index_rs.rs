@@ -1214,6 +1214,51 @@ fn query_language_filters_fallback_and_indexed_search() {
         .unwrap();
     assert!(result_paths(&indexed_extension_markdown).contains(&"docs/auth.md".to_string()));
 
+    let fallback_excluding_rust = search_repo_fast_filtered(
+        repo.path(),
+        "-ext:rs SessionManager",
+        10,
+        &Default::default(),
+    )
+    .unwrap();
+    let fallback_excluding_rust_paths = result_paths(&fallback_excluding_rust);
+    assert!(fallback_excluding_rust_paths.contains(&"docs/auth.md".to_string()));
+    assert!(!fallback_excluding_rust_paths.contains(&"src/auth.rs".to_string()));
+    let indexed_excluding_rust = indexed
+        .search_filtered("-ext:rs SessionManager", 10, &Default::default())
+        .unwrap();
+    let indexed_excluding_rust_paths = result_paths(&indexed_excluding_rust);
+    assert!(indexed_excluding_rust_paths.contains(&"docs/auth.md".to_string()));
+    assert!(!indexed_excluding_rust_paths.contains(&"src/auth.rs".to_string()));
+    let negative_extension_plan = indexed
+        .query_plan("-ext:rs SessionManager", &Default::default())
+        .unwrap();
+    assert!(
+        !negative_extension_plan
+            .planned_postings
+            .iter()
+            .any(|posting| posting.kind == "symbol" && posting.value == "sessionmanager"),
+        "{:?}",
+        negative_extension_plan.planned_postings
+    );
+
+    let fallback_source_scope = search_repo_fast_filtered(
+        repo.path(),
+        "test:false SessionManager",
+        10,
+        &Default::default(),
+    )
+    .unwrap();
+    let fallback_source_scope_paths = result_paths(&fallback_source_scope);
+    assert!(fallback_source_scope_paths.contains(&"docs/auth.md".to_string()));
+    assert!(!fallback_source_scope_paths.contains(&"tests/auth_test.rs".to_string()));
+    let indexed_source_scope = indexed
+        .search_filtered("test:false SessionManager", 10, &Default::default())
+        .unwrap();
+    let indexed_source_scope_paths = result_paths(&indexed_source_scope);
+    assert!(indexed_source_scope_paths.contains(&"docs/auth.md".to_string()));
+    assert!(!indexed_source_scope_paths.contains(&"tests/auth_test.rs".to_string()));
+
     let fallback_without_markdown = search_repo_fast_filtered(
         repo.path(),
         "-lang:md SessionManager",
