@@ -1536,6 +1536,25 @@ fn cli_search_surfaces_accept_structured_filters() {
         .stdout(predicate::str::contains("tests/auth_test.rs").not())
         .stdout(predicate::str::contains("docs/auth.md").not());
 
+    let mut related_symbols = Command::cargo_bin("orient").unwrap();
+    related_symbols
+        .args([
+            "related-symbols",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--query",
+            "issue token",
+            "--kind",
+            "function",
+            "--exclude-content",
+            "GeneratedSession",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("src/auth.rs"))
+        .stdout(predicate::str::contains("GeneratedSession").not())
+        .stdout(predicate::str::contains("src/generated.rs").not());
+
     let mut fallback_filter_only = Command::cargo_bin("orient").unwrap();
     fallback_filter_only
         .args([

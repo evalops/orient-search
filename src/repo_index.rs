@@ -1963,13 +1963,25 @@ impl RepoIndex {
         query: Option<&str>,
         limit: usize,
     ) -> Vec<RelatedSymbol> {
+        self.related_symbols_filtered(path, query, limit, &SearchFilters::default())
+    }
+
+    pub fn related_symbols_filtered(
+        &self,
+        path: Option<&str>,
+        query: Option<&str>,
+        limit: usize,
+        filters: &SearchFilters,
+    ) -> Vec<RelatedSymbol> {
         let normalized_path = path.map(|value| value.trim_start_matches('/').to_string());
         if let Some(path) = &normalized_path {
             if !self.files.contains_key(path) {
                 return Vec::new();
             }
         }
-        let (query_terms, query_symbol, filters) = related_query_terms_symbol_and_filters(query);
+        let (query_terms, query_symbol, query_filters) =
+            related_query_terms_symbol_and_filters(query);
+        let filters = merge_filters(filters.clone(), query_filters);
         if !repo_matches(&self.root, &filters)
             || !dependency_filters_match(&self.dependency_hints(), &filters)
         {
@@ -2089,6 +2101,7 @@ impl RepoIndex {
             Some(&file.language),
             filters,
         ) && source_import_filters_match(&symbol.path, &file.text, filters)
+            && source_excluded_content_filters_match(&file.text, filters)
             && symbol_matches_related_filters(&symbol.name, &symbol.kind, filters)
     }
 

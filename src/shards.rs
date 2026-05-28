@@ -925,14 +925,32 @@ pub fn related_shard_symbols(
     query: Option<&str>,
     limit: usize,
 ) -> Result<Vec<RelatedSymbol>> {
+    related_shard_symbols_filtered(
+        index_dir,
+        shard_path,
+        query,
+        limit,
+        &SearchFilters::default(),
+    )
+}
+
+pub fn related_shard_symbols_filtered(
+    index_dir: impl AsRef<Path>,
+    shard_path: &str,
+    query: Option<&str>,
+    limit: usize,
+    filters: &SearchFilters,
+) -> Result<Vec<RelatedSymbol>> {
     let resolved = resolve_shard_path(index_dir.as_ref(), shard_path)?;
     let index = FastIndex::load(index_dir.as_ref().join(&resolved.index))
         .with_context(|| format!("load shard {}", resolved.index))?;
     let query = related_query_without_shard_selectors(query);
-    let mut related = index.related_symbols(
+    let filters = related_filters_without_shard_selectors(filters);
+    let mut related = index.related_symbols_filtered(
         Some(&resolved.relative_path),
         query.as_deref(),
         limit.saturating_mul(4).max(10),
+        &filters,
     );
     related.retain(|symbol| resolved.contains_actual_path(&symbol.symbol.path));
     for symbol in &mut related {
@@ -940,6 +958,17 @@ pub fn related_shard_symbols(
     }
     related.truncate(limit);
     Ok(related)
+}
+
+fn related_filters_without_shard_selectors(filters: &SearchFilters) -> SearchFilters {
+    let mut filters = filters.clone();
+    filters.repo = None;
+    filters.branch = None;
+    filters.origin = None;
+    filters.exclude_repo.clear();
+    filters.exclude_branch.clear();
+    filters.exclude_origin.clear();
+    filters
 }
 
 pub(crate) fn related_query_without_shard_selectors(query: Option<&str>) -> Option<String> {

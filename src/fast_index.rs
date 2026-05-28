@@ -920,6 +920,16 @@ impl FastIndex {
         query: Option<&str>,
         limit: usize,
     ) -> Vec<RelatedSymbol> {
+        self.related_symbols_filtered(path, query, limit, &SearchFilters::default())
+    }
+
+    pub fn related_symbols_filtered(
+        &self,
+        path: Option<&str>,
+        query: Option<&str>,
+        limit: usize,
+        filters: &SearchFilters,
+    ) -> Vec<RelatedSymbol> {
         if limit == 0 {
             return Vec::new();
         }
@@ -930,7 +940,9 @@ impl FastIndex {
                 return Vec::new();
             }
         }
-        let (query_terms, query_symbol, filters) = related_query_terms_symbol_and_filters(query);
+        let (query_terms, query_symbol, query_filters) =
+            related_query_terms_symbol_and_filters(query);
+        let filters = merge_filters(filters.clone(), query_filters);
         if !repo_matches(&self.root, &filters) || !self.matches_dependency_filters(&filters) {
             return Vec::new();
         }

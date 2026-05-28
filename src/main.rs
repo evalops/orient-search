@@ -23,8 +23,8 @@ use orient::server::{
 };
 use orient::shards::{
     ShardQueryPlan, build_shards, ensure_shards, find_shard_symbol, read_shard_range,
-    refresh_shards, related_shard_files, related_shard_symbols, search_shards, shard_query_plans,
-    shard_repo_maps, shard_status,
+    refresh_shards, related_shard_files, related_shard_symbols_filtered, search_shards,
+    shard_query_plans, shard_repo_maps, shard_status,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -640,6 +640,8 @@ enum Commands {
         query: Option<String>,
         #[arg(long, default_value_t = 10)]
         limit: usize,
+        #[command(flatten)]
+        filters: RelatedSymbolFilterArgs,
     },
     RelatedShardSymbols {
         #[arg(long)]
@@ -652,6 +654,8 @@ enum Commands {
         query: Option<String>,
         #[arg(long, default_value_t = 10)]
         limit: usize,
+        #[command(flatten)]
+        filters: RelatedSymbolFilterArgs,
     },
     RelatedIndexSymbols {
         #[arg(long)]
@@ -662,6 +666,8 @@ enum Commands {
         query: Option<String>,
         #[arg(long, default_value_t = 10)]
         limit: usize,
+        #[command(flatten)]
+        filters: RelatedSymbolFilterArgs,
     },
     BenchSearch {
         #[arg(long, default_value = ".")]
@@ -925,6 +931,122 @@ struct CommonSearchArgs {
     exclude_content: Vec<String>,
 }
 
+#[derive(Debug, Clone, Args)]
+struct RelatedSymbolFilterArgs {
+    #[arg(long, alias = "lang")]
+    language: Option<String>,
+    #[arg(long, alias = "ext")]
+    extension: Option<String>,
+    #[arg(long, alias = "filename", alias = "file-name", alias = "file_name")]
+    file: Option<String>,
+    #[arg(long)]
+    symbol: Option<String>,
+    #[arg(
+        long = "kind",
+        alias = "type",
+        alias = "symbol-kind",
+        alias = "symbol_kind"
+    )]
+    symbol_kind: Option<String>,
+    #[arg(long, alias = "git-branch", alias = "git_branch")]
+    branch: Option<String>,
+    #[arg(
+        long,
+        alias = "remote",
+        alias = "remote-origin",
+        alias = "remote_origin"
+    )]
+    origin: Option<String>,
+    #[arg(long, alias = "dep", alias = "deps")]
+    dependency: Option<String>,
+    #[arg(
+        long,
+        alias = "imports",
+        alias = "module",
+        alias = "modules",
+        alias = "use",
+        alias = "uses"
+    )]
+    import: Option<String>,
+    #[arg(long)]
+    test: Option<bool>,
+    #[arg(long)]
+    generated: Option<bool>,
+    #[arg(
+        long = "exclude-file",
+        alias = "exclude-filename",
+        alias = "exclude-file-name",
+        alias = "exclude_file_name"
+    )]
+    exclude_file: Vec<String>,
+    #[arg(
+        long = "exclude-path",
+        alias = "exclude-dir",
+        alias = "exclude-directory",
+        alias = "exclude-folder"
+    )]
+    exclude_path: Vec<String>,
+    #[arg(
+        long = "exclude-language",
+        alias = "exclude-lang",
+        alias = "exclude_language"
+    )]
+    exclude_language: Vec<String>,
+    #[arg(
+        long = "exclude-extension",
+        alias = "exclude-ext",
+        alias = "exclude_extension"
+    )]
+    exclude_extension: Vec<String>,
+    #[arg(long = "exclude-symbol")]
+    exclude_symbol: Vec<String>,
+    #[arg(
+        long = "exclude-kind",
+        alias = "exclude-type",
+        alias = "exclude-symbol-kind",
+        alias = "exclude_symbol_kind"
+    )]
+    exclude_symbol_kind: Vec<String>,
+    #[arg(long = "exclude-repo")]
+    exclude_repo: Vec<String>,
+    #[arg(
+        long = "exclude-branch",
+        alias = "exclude-git-branch",
+        alias = "exclude_branch",
+        alias = "exclude_git_branch"
+    )]
+    exclude_branch: Vec<String>,
+    #[arg(
+        long = "exclude-origin",
+        alias = "exclude-remote",
+        alias = "exclude-remote-origin",
+        alias = "exclude_origin",
+        alias = "exclude_remote_origin"
+    )]
+    exclude_origin: Vec<String>,
+    #[arg(
+        long = "exclude-dependency",
+        alias = "exclude-dep",
+        alias = "exclude-deps"
+    )]
+    exclude_dependency: Vec<String>,
+    #[arg(
+        long = "exclude-import",
+        alias = "exclude-imports",
+        alias = "exclude-module",
+        alias = "exclude-modules",
+        alias = "exclude-use",
+        alias = "exclude-uses"
+    )]
+    exclude_import: Vec<String>,
+    #[arg(
+        long = "exclude-content",
+        alias = "exclude-text",
+        alias = "exclude-term"
+    )]
+    exclude_content: Vec<String>,
+}
+
 fn search_filters_from_args(
     args: &CommonSearchArgs,
     repo: Option<String>,
@@ -992,6 +1114,72 @@ fn search_filters_from_args(
             .collect(),
         exclude_content: args.exclude_content.clone(),
     })
+}
+
+fn related_symbol_filters_from_args(
+    args: &RelatedSymbolFilterArgs,
+    repo: Option<String>,
+) -> SearchFilters {
+    SearchFilters {
+        file: args.file.clone(),
+        path: None,
+        language: args
+            .language
+            .as_ref()
+            .map(|value| normalize_language_filter(value)),
+        extension: args
+            .extension
+            .as_ref()
+            .map(|value| normalize_extension(value)),
+        symbol: args.symbol.clone(),
+        symbol_kind: args
+            .symbol_kind
+            .as_ref()
+            .map(|value| normalize_symbol_kind(value)),
+        repo,
+        branch: args.branch.clone(),
+        origin: args.origin.clone(),
+        dependency: args
+            .dependency
+            .as_ref()
+            .map(|value| normalize_filter(value)),
+        import: args.import.as_ref().map(|value| normalize_filter(value)),
+        test: args.test,
+        generated: args.generated,
+        exclude_file: args.exclude_file.clone(),
+        exclude_path: args.exclude_path.clone(),
+        exclude_language: args
+            .exclude_language
+            .iter()
+            .map(|value| normalize_language_filter(value))
+            .collect(),
+        exclude_extension: args
+            .exclude_extension
+            .iter()
+            .map(|value| normalize_extension(value))
+            .collect(),
+        exclude_symbol: args.exclude_symbol.clone(),
+        exclude_symbol_kind: args
+            .exclude_symbol_kind
+            .iter()
+            .map(|value| normalize_symbol_kind(value))
+            .collect(),
+        exclude_repo: args.exclude_repo.clone(),
+        exclude_branch: args.exclude_branch.clone(),
+        exclude_origin: args.exclude_origin.clone(),
+        exclude_dependency: args
+            .exclude_dependency
+            .iter()
+            .map(|value| normalize_filter(value))
+            .collect(),
+        exclude_import: args
+            .exclude_import
+            .iter()
+            .map(|value| normalize_filter(value))
+            .collect(),
+        exclude_content: args.exclude_content.clone(),
+        ..SearchFilters::default()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2881,7 +3069,9 @@ fn run() -> Result<()> {
             path,
             query,
             limit,
+            filters,
         } => {
+            let filters = related_symbol_filters_from_args(&filters, None);
             let (related, base_args) = if let Some(index_dir) = index_dir {
                 let path = path
                     .as_deref()
@@ -2890,19 +3080,35 @@ fn run() -> Result<()> {
                         anyhow::anyhow!("provide --path PATH for shard related-symbols")
                     })?;
                 (
-                    related_shard_symbols(&index_dir, path, query.as_deref(), limit)?,
+                    related_shard_symbols_filtered(
+                        &index_dir,
+                        path,
+                        query.as_deref(),
+                        limit,
+                        &filters,
+                    )?,
                     read_request_args("index_dir", &index_dir),
                 )
             } else if let Some(index_path) = index {
                 let index = FastIndex::load(&index_path)?;
                 (
-                    index.related_symbols(path.as_deref(), query.as_deref(), limit),
+                    index.related_symbols_filtered(
+                        path.as_deref(),
+                        query.as_deref(),
+                        limit,
+                        &filters,
+                    ),
                     read_request_args("index", &index_path),
                 )
             } else {
                 let index = RepoIndexer::new(&repo).build()?;
                 (
-                    index.related_symbols(path.as_deref(), query.as_deref(), limit),
+                    index.related_symbols_filtered(
+                        path.as_deref(),
+                        query.as_deref(),
+                        limit,
+                        &filters,
+                    ),
                     read_request_args("repo", &repo),
                 )
             };
@@ -2920,10 +3126,13 @@ fn run() -> Result<()> {
             path,
             query,
             limit,
+            filters,
         } => {
             let index_path = index;
+            let filters = related_symbol_filters_from_args(&filters, None);
             let index = FastIndex::load(&index_path)?;
-            let related = index.related_symbols(path.as_deref(), query.as_deref(), limit);
+            let related =
+                index.related_symbols_filtered(path.as_deref(), query.as_deref(), limit, &filters);
             println!(
                 "{}",
                 serde_json::to_string(&related_symbol_lookup_results(
@@ -2939,9 +3148,17 @@ fn run() -> Result<()> {
             path_arg,
             query,
             limit,
+            filters,
         } => {
             let path = cli_single_path(path, path_arg)?;
-            let related = related_shard_symbols(&index_dir, &path, query.as_deref(), limit)?;
+            let filters = related_symbol_filters_from_args(&filters, None);
+            let related = related_shard_symbols_filtered(
+                &index_dir,
+                &path,
+                query.as_deref(),
+                limit,
+                &filters,
+            )?;
             println!(
                 "{}",
                 serde_json::to_string(&related_symbol_lookup_results(

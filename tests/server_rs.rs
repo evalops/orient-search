@@ -564,6 +564,10 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         related_symbols["input_schema"]["properties"]["index_dir"]["type"],
         "string"
     );
+    assert_eq!(
+        related_symbols["input_schema"]["properties"]["exclude_content"]["oneOf"][1]["items"]["type"],
+        "string"
+    );
     assert_eq!(find_symbol["required"], serde_json::json!(["name"]));
     assert_eq!(
         find_symbol["input_schema"]["properties"]["index"]["type"],
@@ -3104,6 +3108,48 @@ fn runtime_accepts_structured_negative_search_filters() {
     assert!(result.contains("generated/auth.rs"), "{result}");
     assert!(result.contains("src/generated_symbol.rs"), "{result}");
     assert!(!result.contains("src/auth.rs"), "{result}");
+
+    let related_symbols = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("related-symbol-filters"),
+        tool: "related_symbols".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "query": "issue token",
+            "limit": 10,
+            "kind": "function",
+            "exclude_content": "GeneratedSessionManager"
+        }),
+    });
+    assert!(
+        related_symbols.error.is_none(),
+        "{:?}",
+        related_symbols.error
+    );
+    let result = serde_json::to_string(&related_symbols.result).unwrap();
+    assert!(result.contains("src/auth.rs"), "{result}");
+    assert!(!result.contains("generated/auth.rs"), "{result}");
+    assert!(!result.contains("src/generated_symbol.rs"), "{result}");
+
+    let related_index_symbols = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("related-index-symbol-filters"),
+        tool: "related_index_symbols".to_string(),
+        arguments: serde_json::json!({
+            "index": index_path,
+            "query": "issue token",
+            "limit": 10,
+            "kind": "function",
+            "exclude_text": "GeneratedSessionManager"
+        }),
+    });
+    assert!(
+        related_index_symbols.error.is_none(),
+        "{:?}",
+        related_index_symbols.error
+    );
+    let result = serde_json::to_string(&related_index_symbols.result).unwrap();
+    assert!(result.contains("src/auth.rs"), "{result}");
+    assert!(!result.contains("generated/auth.rs"), "{result}");
+    assert!(!result.contains("src/generated_symbol.rs"), "{result}");
 }
 
 #[test]
