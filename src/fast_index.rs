@@ -1079,12 +1079,15 @@ impl FastIndex {
             .take(16)
             .map(|(trigram, postings)| (trigram.as_str(), postings.as_slice()))
             .collect::<Vec<_>>();
+        let query_name = query_tokens.join("");
+        let query_token_set = query_token_set(&query_tokens);
         let candidate_cap = indexed_candidate_cap(limit);
         let (candidate_ids, candidate_cap_hit) = cap_candidate_ids(
             candidate_ids,
             candidate_cap,
             &self.files,
-            &query_tokens,
+            &query_name,
+            &query_token_set,
             &posting_lists,
             &path_lists,
             &trigram_lists,
@@ -1106,6 +1109,8 @@ impl FastIndex {
                 self.score_file(
                     file_id,
                     &query_tokens,
+                    &query_name,
+                    &query_token_set,
                     &query_phrases,
                     &posting_lists,
                     &path_lists,
@@ -1357,12 +1362,15 @@ impl FastIndex {
             .take(16)
             .map(|(trigram, postings)| (trigram.as_str(), postings.as_slice()))
             .collect::<Vec<_>>();
+        let query_name = query_tokens.join("");
+        let query_token_set = query_token_set(&query_tokens);
         let candidate_cap = MAX_INDEX_CANDIDATES_TO_SCORE;
         let (candidate_ids, candidate_cap_hit) = cap_candidate_ids(
             candidate_ids,
             candidate_cap,
             &self.files,
-            &query_tokens,
+            &query_name,
+            &query_token_set,
             &posting_lists,
             &path_lists,
             &trigram_lists,
@@ -1384,6 +1392,8 @@ impl FastIndex {
                 self.score_file(
                     file_id,
                     &query_tokens,
+                    &query_name,
+                    &query_token_set,
                     &query_phrases,
                     &posting_lists,
                     &path_lists,
@@ -1471,6 +1481,8 @@ impl FastIndex {
         &self,
         file_id: u32,
         query_tokens: &[String],
+        query_name: &str,
+        query_token_set: &HashSet<&str>,
         query_phrases: &[String],
         posting_lists: &[(&str, &[Posting])],
         path_lists: &[(&str, &[Posting])],
@@ -1481,7 +1493,6 @@ impl FastIndex {
     ) -> Option<SearchResult> {
         let file = self.files.get(file_id as usize)?;
         let path_lower = &file.path_lower;
-        let query_name = query_tokens.join("");
         let mut score = 0.0;
         let mut reasons = Vec::new();
         let mut signals = Vec::new();
@@ -1543,7 +1554,9 @@ impl FastIndex {
             reasons.push(format!("trigrams:{trigram_hits}"));
         }
         for symbol in &file.symbols {
-            if symbol.normalized == query_name || query_tokens.contains(&symbol.normalized) {
+            if symbol.normalized == query_name
+                || query_token_set.contains(symbol.normalized.as_str())
+            {
                 score += 25.0;
                 reasons.push(format!("symbol:{}", symbol.name));
                 signals.push(rank_signal("symbol_exact", &symbol.name, 25.0));
@@ -1551,7 +1564,7 @@ impl FastIndex {
                 let overlap = symbol
                     .tokens
                     .iter()
-                    .filter(|token| query_tokens.contains(token))
+                    .filter(|token| query_token_set.contains(token.as_str()))
                     .count();
                 if overlap > 0 {
                     let amount = 4.0 * overlap as f64;
@@ -2696,7 +2709,8 @@ fn cap_candidate_ids(
     candidate_ids: Vec<u32>,
     candidate_cap: usize,
     files: &[IndexedPath],
-    query_tokens: &[String],
+    query_name: &str,
+    query_token_set: &HashSet<&str>,
     posting_lists: &[(&str, &[Posting])],
     path_lists: &[(&str, &[Posting])],
     trigram_lists: &[(&str, &[Posting])],
@@ -2713,7 +2727,8 @@ fn cap_candidate_ids(
             score: candidate_rank_score(
                 file_id,
                 files,
-                query_tokens,
+                query_name,
+                query_token_set,
                 posting_lists,
                 path_lists,
                 trigram_lists,
@@ -2744,7 +2759,8 @@ struct CandidateCapRank {
 fn candidate_rank_score(
     file_id: u32,
     files: &[IndexedPath],
-    query_tokens: &[String],
+    query_name: &str,
+    query_token_set: &HashSet<&str>,
     posting_lists: &[(&str, &[Posting])],
     path_lists: &[(&str, &[Posting])],
     trigram_lists: &[(&str, &[Posting])],
@@ -2753,7 +2769,6 @@ fn candidate_rank_score(
         return 0.0;
     };
     let path_lower = &file.path_lower;
-    let query_name = query_tokens.join("");
     let mut score = 0.0;
     for &(token, postings) in posting_lists {
         let count = posting_count(postings, file_id);
@@ -2777,18 +2792,22 @@ fn candidate_rank_score(
         }
     }
     for symbol in &file.symbols {
-        if symbol.normalized == query_name || query_tokens.contains(&symbol.normalized) {
+        if symbol.normalized == query_name || query_token_set.contains(symbol.normalized.as_str()) {
             score += 25.0;
         } else {
             score += 4.0
                 * symbol
                     .tokens
                     .iter()
-                    .filter(|token| query_tokens.contains(token))
+                    .filter(|token| query_token_set.contains(token.as_str()))
                     .count() as f64;
         }
     }
     score
+}
+
+fn query_token_set(query_tokens: &[String]) -> HashSet<&str> {
+    query_tokens.iter().map(String::as_str).collect()
 }
 
 fn posting_count(postings: &[Posting], file_id: u32) -> u16 {
