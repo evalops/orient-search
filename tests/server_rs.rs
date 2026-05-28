@@ -5066,6 +5066,22 @@ fn tcp_daemon_status_cli_reports_runtime_cache() {
         status["search_auto_default"]["target"],
         status["process_cwd"]["path"]
     );
+    assert_eq!(
+        status["default_requests"]["repo_map"]["tool"],
+        serde_json::json!("repo_map")
+    );
+    assert_eq!(
+        status["default_requests"]["repo_map"]["arguments"]["repo"],
+        status["process_cwd"]["path"]
+    );
+    assert_eq!(
+        status["default_requests"]["search"]["tool"],
+        serde_json::json!("search_auto")
+    );
+    assert_eq!(
+        status["default_requests"]["query_plan"]["tool"],
+        serde_json::json!("search_query_plan")
+    );
     assert!(status.get("id").is_none(), "{status}");
 }
 
@@ -5298,6 +5314,18 @@ fn tcp_daemon_starts_with_warmed_index() {
     assert_eq!(
         startup_json["daemon_status"]["search_auto_default"]["source"],
         serde_json::json!("single_warmed_index")
+    );
+    assert_eq!(
+        startup_json["daemon_status"]["default_requests"]["repo_map"]["tool"],
+        serde_json::json!("indexed_repo_map")
+    );
+    assert_eq!(
+        startup_json["daemon_status"]["default_requests"]["repo_map"]["arguments"]["index"],
+        serde_json::json!(index_path.canonicalize().unwrap().to_string_lossy())
+    );
+    assert_eq!(
+        startup_json["daemon_status"]["default_requests"]["query_plan"]["tool"],
+        serde_json::json!("indexed_query_plan")
     );
 
     let mut stream = TcpStream::connect(addr).unwrap();
@@ -5573,6 +5601,18 @@ fn tcp_daemon_starts_with_warmed_shards() {
     assert_eq!(
         startup_json["daemon_status"]["search_auto_default"]["target"],
         serde_json::json!(shard_dir.path().canonicalize().unwrap().to_string_lossy())
+    );
+    assert_eq!(
+        startup_json["daemon_status"]["default_requests"]["repo_map"]["tool"],
+        serde_json::json!("shard_repo_map")
+    );
+    assert_eq!(
+        startup_json["daemon_status"]["default_requests"]["repo_map"]["arguments"]["index_dir"],
+        serde_json::json!(shard_dir.path().canonicalize().unwrap().to_string_lossy())
+    );
+    assert_eq!(
+        startup_json["daemon_status"]["default_requests"]["query_plan"]["tool"],
+        serde_json::json!("shard_query_plan")
     );
 
     let mut stream = TcpStream::connect(addr).unwrap();

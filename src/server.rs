@@ -260,9 +260,11 @@ impl ToolRuntime {
     }
 
     pub fn daemon_status(&self) -> Value {
+        let search_auto_default = self.search_auto_default_status();
         json!({
             "process_cwd": process_cwd_status(),
-            "search_auto_default": self.search_auto_default_status(),
+            "search_auto_default": search_auto_default.clone(),
+            "default_requests": daemon_default_requests(&search_auto_default),
             "cached_indexes": self.cached_index_count(),
             "cached_index_paths": self.cached_index_paths(),
             "cached_index_details": self.cached_index_details(),
@@ -757,7 +759,7 @@ pub fn agent_guide(
         },
         "recommended_loop": [
             "Call tool_manifest or mcp_manifest once.",
-            "Call daemon_status when using a shared daemon; trust search_auto_default for no-target search_auto routing.",
+            "Call daemon_status when using a shared daemon; trust search_auto_default for no-target search_auto routing and default_requests for copyable first calls.",
             "Use repo_map, indexed_repo_map, or shard_repo_map before editing unfamiliar code.",
             "Search first, then use read_request, related_request, or related_symbols_request from results.",
             "Call a query-plan tool when results are empty, noisy, or overly broad."
@@ -894,7 +896,7 @@ Prefer the shared daemon when it is running: `orient client-jsonl --addr {addr}`
 For many local repos, bootstrap it with `orient ensure-shards --discover-root ~/Documents/Projects --output-dir {index_dir} --family-limit 2` and `orient serve-tcp --addr {addr} --index-dir {index_dir}`.\n\
 For one repo, bootstrap it with `orient ensure-index --repo {repo} --index {index}` and `orient serve-tcp --addr {addr} --index {index}`.\n\
 Start each session with `daemon_status` or `agent_guide`, then use `search_auto` for normal lookup and `search_auto_batch` for alternate query phrasings.\n\
-Trust `daemon_status.search_auto_default` to see whether no-target `search_auto` will use a warmed shard directory, warmed index, or the daemon current directory.\n\
+Trust `daemon_status.search_auto_default` to see whether no-target `search_auto` will use a warmed shard directory, warmed index, or the daemon current directory; use `daemon_status.default_requests` for copyable first repo-map/search/query-plan calls.\n\
 Use query filters directly: `file:`, `path:`, `lang:`, `ext:`, `symbol:`, `type:`, `repo:`, `test:`, quoted literals, and negative filters like `-path:vendor`.\n\
 After search, follow returned `read_batch_request`, `read_request`, `related_request`, and `related_symbols_request` instead of reopening files manually.\n\
 When results are empty, noisy, or suspicious, use the returned `query_plan_request` or inline `query_plan_result` before broadening the search.\n\
@@ -5072,6 +5074,110 @@ fn process_cwd_status() -> Value {
             "error": error.to_string()
         }),
     }
+}
+
+fn daemon_default_requests(search_auto_default: &Value) -> Value {
+    let target = search_auto_default.get("target").and_then(Value::as_str);
+    json!({
+        "manifest": {
+            "id": "tools",
+            "tool": "tool_manifest",
+            "arguments": {}
+        },
+        "agent_guide": {
+            "id": "guide",
+            "tool": "agent_guide",
+            "arguments": {}
+        },
+        "repo_map": daemon_default_repo_map_request(search_auto_default, target),
+        "search": {
+            "id": "search",
+            "tool": "search_auto",
+            "arguments": {
+                "query": "symbol:SessionManager token",
+                "limit": 10,
+                "explain": true
+            }
+        },
+        "search_batch": {
+            "id": "searches",
+            "tool": "search_auto_batch",
+            "arguments": {
+                "queries": [
+                    "symbol:SessionManager token",
+                    "path:src token"
+                ],
+                "limit": 10,
+                "explain": true
+            }
+        },
+        "query_plan": daemon_default_query_plan_request(search_auto_default, target),
+        "note": "Use search_auto without an explicit target when search_auto_default is trusted; use the targeted repo_map and query_plan requests when orienting or diagnosing."
+    })
+}
+
+fn daemon_default_repo_map_request(search_auto_default: &Value, target: Option<&str>) -> Value {
+    let mut arguments = Map::new();
+    arguments.insert("detail".to_string(), json!("compact"));
+    arguments.insert(
+        "read_limit".to_string(),
+        json!(DEFAULT_REPO_MAP_READ_BATCH_RANGES),
+    );
+    let tool = match (
+        search_auto_default.get("surface").and_then(Value::as_str),
+        target,
+    ) {
+        (Some("shards"), Some(index_dir)) => {
+            arguments.insert("index_dir".to_string(), json!(index_dir));
+            "shard_repo_map"
+        }
+        (Some("indexed"), Some(index)) => {
+            arguments.insert("index".to_string(), json!(index));
+            "indexed_repo_map"
+        }
+        (_, Some(repo)) => {
+            arguments.insert("repo".to_string(), json!(repo));
+            "repo_map"
+        }
+        _ => "repo_map",
+    };
+    json!({
+        "id": "map",
+        "tool": tool,
+        "arguments": arguments
+    })
+}
+
+fn daemon_default_query_plan_request(search_auto_default: &Value, target: Option<&str>) -> Value {
+    let mut arguments = Map::new();
+    arguments.insert(
+        "query".to_string(),
+        json!("symbol:SessionManager missingterm"),
+    );
+    arguments.insert("require_all".to_string(), json!(true));
+    let tool = match (
+        search_auto_default.get("surface").and_then(Value::as_str),
+        target,
+    ) {
+        (Some("shards"), Some(index_dir)) => {
+            arguments.insert("index_dir".to_string(), json!(index_dir));
+            "shard_query_plan"
+        }
+        (Some("indexed"), Some(index)) => {
+            arguments.insert("index".to_string(), json!(index));
+            "indexed_query_plan"
+        }
+        (_, Some(repo)) => {
+            arguments.insert("repo".to_string(), json!(repo));
+            "search_query_plan"
+        }
+        _ => "search_query_plan",
+    };
+    json!({
+        "id": "plan",
+        "tool": tool,
+        "arguments": arguments
+    })
 }
 
 fn optional_string_arg_any(arguments: &Value, names: &[&str]) -> Option<String> {
