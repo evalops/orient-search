@@ -2205,15 +2205,17 @@ fn indexed_filter_only_result(
         filters.snippet,
         filters.explain,
     );
-    if let Some(line) = filters
+    if let Some(symbol) = filters
         .symbol_kind
         .as_deref()
-        .and_then(|kind| indexed_symbol_kind_filter_line(file, kind))
+        .and_then(|kind| indexed_symbol_kind_filter_symbol(file, kind))
     {
+        let line = symbol.line;
         if let Some(snippet) = indexed_symbol_filter_snippet(root, file, line, filters.snippet) {
             result.snippet = snippet;
             result.match_lines = vec![line];
         }
+        result.reason.push_str(&format!(", symbol:{}", symbol.name));
     }
     Some(result)
 }
@@ -2891,11 +2893,13 @@ fn indexed_symbol_filter_line(file: &IndexedPath, wanted: &str) -> Option<usize>
         .map(|symbol| symbol.line)
 }
 
-fn indexed_symbol_kind_filter_line(file: &IndexedPath, wanted: &str) -> Option<usize> {
+fn indexed_symbol_kind_filter_symbol<'a>(
+    file: &'a IndexedPath,
+    wanted: &str,
+) -> Option<&'a IndexedSymbol> {
     file.symbols
         .iter()
         .find(|symbol| symbol.kind.eq_ignore_ascii_case(wanted))
-        .map(|symbol| symbol.line)
 }
 
 fn indexed_symbol_filter_snippet(

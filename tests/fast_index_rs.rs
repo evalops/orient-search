@@ -1690,6 +1690,11 @@ fn indexed_kind_filter_snippets_anchor_on_matching_symbol_line() {
         results[0].snippet,
         "6: pub fn target_kind_function() -> &'static str { \"ok\" }"
     );
+    assert!(
+        results[0].reason.contains("symbol:target_kind_function"),
+        "{:?}",
+        results[0]
+    );
     assert_eq!(results[0].match_lines, vec![6]);
     assert_eq!(results[0].line_range.as_ref().unwrap().start_line, 6);
     assert_eq!(results[0].line_range.as_ref().unwrap().end_line, 6);
