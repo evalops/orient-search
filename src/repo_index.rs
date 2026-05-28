@@ -1588,6 +1588,11 @@ impl RepoIndex {
         limit: usize,
     ) -> Vec<RelatedSymbol> {
         let normalized_path = path.map(|value| value.trim_start_matches('/').to_string());
+        if let Some(path) = &normalized_path {
+            if !self.files.contains_key(path) {
+                return Vec::new();
+            }
+        }
         let query_tokens = query
             .map(tokenize)
             .unwrap_or_default()

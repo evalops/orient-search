@@ -80,7 +80,7 @@ Measured on this machine:
 - Hot-path fallback has a `250ms` wall-clock timeout plus match caps; if the timeout fires it returns partial results instead of blocking the agent.
 - Search result output is capped at 100 items per query across fallback, indexed, and shard search surfaces; batch request sizes are capped too.
 - Local repo index build: about `0.25s`.
-- Local repo refresh after build: reuses unchanged files, reuses same-content renames by retargeting path-derived postings, and rebuilds postings from per-file term lists.
+- Local repo refresh after build: reuses unchanged files, reuses same-content renames by retargeting path-derived postings, and rebuilds postings from per-file term lists; tests verify renamed symbols and related-symbol followups resolve to the new path.
 - Local repo indexed search: query `indexed search symbol filters`, top 10 at about `0.96ms` p95 after warmup.
 - Local single-shard search: query `repo:agent-jsonl-explorer indexed search symbol filters`, top 10 at about `3.43ms` p95 after warmup, or about `1.01ms` p95 through the warm cached runtime path.
 - Real local layout discovery: `/Users/jonathanhaas/Documents/Projects` now resolves to 409 git or manifest-backed repo roots at `max-depth 4` after scanning 508 directories, with the hottest repeated families being `maestro-internal` at 82 checkouts, `deploy` at 67, `platform` at 45, `browser-use-rs` at 30, and `maestro` at 23. `/Users/jonathanhaas/repos` resolves to 72 repo roots after scanning 106 directories. Before git-boundary discovery, the same broad tree could hit a 2,000-candidate cap by walking every nested package manifest.

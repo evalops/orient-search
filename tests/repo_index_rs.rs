@@ -90,6 +90,11 @@ def test_issue_token_round_trip():
             .any(|item| item.symbol.name == "SessionManager" && item.symbol.path == "src/auth.py"),
         "{test_related_symbols:?}"
     );
+    assert!(
+        index
+            .related_symbols(Some("src/missing_auth.py"), Some("SessionManager"), 10)
+            .is_empty()
+    );
 
     let brief = index.repo_brief();
     assert_eq!(brief.language_counts.get("python"), Some(&2));

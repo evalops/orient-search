@@ -67,6 +67,21 @@ fn refresh_reuses_renamed_files_by_content_fingerprint() {
     let refreshed = outcome.index;
     let results = refreshed.search("SessionManager", 10).unwrap();
     assert_eq!(results[0].path, "src/session.rs");
+    let symbols = refreshed.find_symbol("SessionManager", 10);
+    assert_eq!(symbols[0].path, "src/session.rs");
+    let related_symbols = refreshed.related_symbols(Some("src/session.rs"), None, 10);
+    assert!(
+        related_symbols
+            .iter()
+            .any(|related| related.symbol.name == "SessionManager"
+                && related.symbol.path == "src/session.rs"),
+        "{related_symbols:?}"
+    );
+    assert!(
+        refreshed
+            .related_symbols(Some("src/auth.rs"), None, 10)
+            .is_empty()
+    );
     assert!(refreshed.search("auth", 10).unwrap().is_empty());
     assert_eq!(
         refreshed
