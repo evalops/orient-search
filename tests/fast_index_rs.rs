@@ -1101,6 +1101,12 @@ fn indexed_related_context_uses_persisted_metadata() {
             .contains("exact query symbol"),
         "{filter_query_symbols:?}"
     );
+    assert!(
+        filter_query_symbols[invoice_rank]
+            .reason
+            .contains("query overlap"),
+        "{filter_query_symbols:?}"
+    );
     let kind_filtered_symbols =
         billing_index.related_symbols(Some("src/billing.rs"), Some("kind:struct invoice total"), 5);
     assert_eq!(kind_filtered_symbols[0].symbol.name, "InvoiceTotal");

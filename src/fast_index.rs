@@ -10,9 +10,9 @@ use crate::repo_index::{
     finalize_results, import_hints_from_source_texts, is_entrypoint_path, is_generated_path,
     is_ignored, is_important_file, is_manifest_file, is_test_path, known_commands_from_hints,
     language_for, matches_filters_with_path_metadata, normalize_language_filter, normalize_token,
-    referenced_symbol_name, regular_file_metadata, related_query_terms_symbol_and_filters,
-    related_stem_terms, repo_map_seed_paths, repo_matches, result_matches_all_tokens,
-    result_matches_symbol_filters, round4, score_filter_only_path_match,
+    query_token_overlap, referenced_symbol_name, regular_file_metadata,
+    related_query_terms_symbol_and_filters, related_stem_terms, repo_map_seed_paths, repo_matches,
+    result_matches_all_tokens, result_matches_symbol_filters, round4, score_filter_only_path_match,
     select_repo_brief_import_hints, select_repo_map_top_symbols,
     source_excluded_content_filters_match, source_import_filters_match, symbol_exact_phrase_bonus,
     symbol_matches_related_filters, symbol_query_match_score, token_counts, tokenize,
@@ -982,6 +982,7 @@ impl FastIndex {
                     if !indexed_file_matches_related_symbol_filters(file, &filters) {
                         continue;
                     }
+                    let file_path_tokens = tokenize(&file.path);
                     for indexed_symbol in &file.symbols {
                         if indexed_symbol.normalized != query_symbol {
                             continue;
@@ -995,16 +996,11 @@ impl FastIndex {
                             path: file.path.clone(),
                             line: indexed_symbol.line,
                         };
-                        let symbol_tokens = indexed_symbol
-                            .tokens
-                            .iter()
-                            .cloned()
-                            .chain(tokenize(&symbol.path))
-                            .collect::<HashSet<_>>();
-                        let overlap = query_tokens
-                            .iter()
-                            .filter(|token| symbol_tokens.contains(*token))
-                            .count();
+                        let overlap = query_token_overlap(
+                            &query_tokens,
+                            &indexed_symbol.tokens,
+                            &file_path_tokens,
+                        );
                         let mut score = 15.0 + 5.0 * overlap as f64;
                         let mut reasons = vec!["exact query symbol".to_string()];
                         if overlap > 0 {
@@ -1032,6 +1028,7 @@ impl FastIndex {
                 if !indexed_file_matches_related_symbol_filters(file, &filters) {
                     continue;
                 }
+                let file_path_tokens = tokenize(&file.path);
                 for indexed_symbol in &file.symbols {
                     if !indexed_symbol_matches_related_filters(indexed_symbol, &filters) {
                         continue;
@@ -1067,16 +1064,16 @@ impl FastIndex {
                             reasons.push("same directory".to_string());
                         }
                         let symbol_path_lower = symbol.path.to_ascii_lowercase();
+                        let symbol_name_lower = symbol.name.to_ascii_lowercase();
                         if !path_stem.is_empty()
-                            && (symbol.name.to_ascii_lowercase().contains(&path_stem)
+                            && (symbol_name_lower.contains(&path_stem)
                                 || symbol_path_lower.contains(&path_stem))
                         {
                             score += 3.0;
                             reasons.push(format!("shares stem {path_stem}"));
                         }
                         if path_stem_terms.iter().any(|term| {
-                            symbol.name.to_ascii_lowercase().contains(term)
-                                || symbol_path_lower.contains(term)
+                            symbol_name_lower.contains(term) || symbol_path_lower.contains(term)
                         }) {
                             score += 3.0;
                             reasons.push("shares normalized stem".to_string());
@@ -1084,16 +1081,11 @@ impl FastIndex {
                     }
 
                     if !query_tokens.is_empty() {
-                        let symbol_tokens = indexed_symbol
-                            .tokens
-                            .iter()
-                            .cloned()
-                            .chain(tokenize(&symbol.path))
-                            .collect::<HashSet<_>>();
-                        let overlap = query_tokens
-                            .iter()
-                            .filter(|token| symbol_tokens.contains(*token))
-                            .count();
+                        let overlap = query_token_overlap(
+                            &query_tokens,
+                            &indexed_symbol.tokens,
+                            &file_path_tokens,
+                        );
                         if overlap > 0 {
                             score += 5.0 * overlap as f64;
                             reasons.push(format!("query overlap {overlap}"));

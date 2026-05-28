@@ -2037,16 +2037,16 @@ impl RepoIndex {
                     reasons.push("same directory".to_string());
                 }
                 let symbol_path_lower = symbol.path.to_ascii_lowercase();
+                let symbol_name_lower = symbol.name.to_ascii_lowercase();
                 if !path_stem.is_empty()
-                    && (symbol.name.to_ascii_lowercase().contains(&path_stem)
+                    && (symbol_name_lower.contains(&path_stem)
                         || symbol_path_lower.contains(&path_stem))
                 {
                     score += 3.0;
                     reasons.push(format!("shares stem {path_stem}"));
                 }
                 if path_stem_terms.iter().any(|term| {
-                    symbol.name.to_ascii_lowercase().contains(term)
-                        || symbol_path_lower.contains(term)
+                    symbol_name_lower.contains(term) || symbol_path_lower.contains(term)
                 }) {
                     score += 3.0;
                     reasons.push("shares normalized stem".to_string());
@@ -2054,14 +2054,10 @@ impl RepoIndex {
             }
 
             if !query_tokens.is_empty() {
-                let symbol_tokens = tokenize(&symbol.name)
-                    .into_iter()
-                    .chain(tokenize(&symbol.path))
-                    .collect::<HashSet<_>>();
-                let overlap = query_tokens
-                    .iter()
-                    .filter(|token| symbol_tokens.contains(*token))
-                    .count();
+                let symbol_name_tokens = tokenize(&symbol.name);
+                let symbol_path_tokens = tokenize(&symbol.path);
+                let overlap =
+                    query_token_overlap(&query_tokens, &symbol_name_tokens, &symbol_path_tokens);
                 if overlap > 0 {
                     score += 5.0 * overlap as f64;
                     reasons.push(format!("query overlap {overlap}"));
@@ -3821,6 +3817,20 @@ pub(crate) fn referenced_symbol_name<'a>(
         .iter()
         .find(|(symbol, _)| contains_ascii_case_insensitive(text, symbol))
         .map(|(symbol, _)| symbol.as_str())
+}
+
+pub(crate) fn query_token_overlap(
+    query_tokens: &ahash::AHashSet<String>,
+    symbol_tokens: &[String],
+    path_tokens: &[String],
+) -> usize {
+    query_tokens
+        .iter()
+        .filter(|token| {
+            symbol_tokens.iter().any(|candidate| candidate == *token)
+                || path_tokens.iter().any(|candidate| candidate == *token)
+        })
+        .count()
 }
 
 pub(crate) fn related_stem_terms(stem: &str) -> Vec<String> {
