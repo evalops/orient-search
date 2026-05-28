@@ -1767,6 +1767,31 @@ fn cli_batches_searches_across_fallback_indexed_and_shards() {
         .stdout(predicate::str::contains("src/auth.rs"))
         .stdout(predicate::str::contains("src/billing.rs"));
 
+    let mut generic_indexed = Command::cargo_bin("orient").unwrap();
+    generic_indexed
+        .args([
+            "search-batch",
+            "--index",
+            index_path.to_str().unwrap(),
+            "--limit",
+            "2",
+            "--require-all",
+            "SessionManager",
+            "invoice total",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"query\":\"SessionManager\""))
+        .stdout(predicate::str::contains("src/auth.rs"))
+        .stdout(predicate::str::contains("\"query\":\"invoice total\""))
+        .stdout(predicate::str::contains("src/billing.rs"))
+        .stdout(predicate::str::contains("\"tool\":\"read_range\""))
+        .stdout(predicate::str::contains("\"tool\":\"read_ranges\""))
+        .stdout(predicate::str::contains(&format!(
+            "\"index\":\"{}\"",
+            index_path.display()
+        )));
+
     let shard_dir = tempfile::tempdir().unwrap();
     let mut build_shards = Command::cargo_bin("orient").unwrap();
     build_shards
@@ -1796,6 +1821,28 @@ fn cli_batches_searches_across_fallback_indexed_and_shards() {
         .success()
         .stdout(predicate::str::contains("src/auth.rs"))
         .stdout(predicate::str::contains("src/billing.rs"));
+
+    let mut generic_shards = Command::cargo_bin("orient").unwrap();
+    generic_shards
+        .args([
+            "search-batch",
+            "--index-dir",
+            shard_dir.path().to_str().unwrap(),
+            "--limit",
+            "2",
+            "--require-all",
+            "SessionManager",
+            "invoice total",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"query\":\"SessionManager\""))
+        .stdout(predicate::str::contains("src/auth.rs"))
+        .stdout(predicate::str::contains("\"query\":\"invoice total\""))
+        .stdout(predicate::str::contains("src/billing.rs"))
+        .stdout(predicate::str::contains("\"tool\":\"read_range\""))
+        .stdout(predicate::str::contains("\"tool\":\"read_ranges\""))
+        .stdout(predicate::str::contains("\"index_dir\""));
 
     let mut index_plan_batch = Command::cargo_bin("orient").unwrap();
     index_plan_batch

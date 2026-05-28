@@ -437,6 +437,10 @@ enum Commands {
     SearchBatch {
         #[arg(long, default_value = ".")]
         repo: PathBuf,
+        #[arg(long, conflicts_with = "index_dir")]
+        index: Option<PathBuf>,
+        #[arg(long, conflicts_with = "index")]
+        index_dir: Option<PathBuf>,
         #[arg(required = true, allow_hyphen_values = true)]
         queries: Vec<String>,
         #[arg(long, default_value_t = 10)]
@@ -447,6 +451,8 @@ enum Commands {
         filters: CommonSearchArgs,
         #[arg(long, default_value_t = 0)]
         context_lines: usize,
+        #[arg(long)]
+        refresh_if_stale: bool,
     },
     IndexedSearch {
         #[arg(long)]
@@ -2263,46 +2269,121 @@ fn run() -> Result<()> {
         }
         Commands::SearchBatch {
             repo,
+            index,
+            index_dir,
             queries,
             limit,
             repo_filter,
             filters,
             context_lines,
+            refresh_if_stale,
         } => {
             let queries = cli_batch_queries(queries)?;
             let filters = search_filters_from_args(&filters, repo_filter)?;
             let mut batch = Vec::new();
-            for query in queries {
-                let mut results = search_repo_fast_filtered(&repo, &query, limit, &filters)?;
-                attach_result_context(&mut results, context_lines, |path, start, lines| {
-                    read_file_range(&repo, path, start, lines)
-                })?;
-                attach_result_read_requests(
-                    &mut results,
-                    "read_range",
-                    read_request_args("repo", &repo),
-                );
-                attach_result_related_requests(
-                    &mut results,
-                    "related_files",
-                    read_request_args("repo", &repo),
-                );
-                attach_result_related_symbol_requests(
-                    &mut results,
-                    "related_symbols",
-                    Some(&query),
-                    read_request_args("repo", &repo),
-                );
-                let read_batch_request = result_read_batch_request(
-                    &results,
-                    "read_ranges",
-                    read_request_args("repo", &repo),
-                );
-                batch.push(SearchBatchResult {
-                    query,
-                    read_batch_request,
-                    results,
-                });
+            if let Some(index_dir) = index_dir {
+                if refresh_if_stale && shard_status(&index_dir)?.stale {
+                    refresh_shards(&index_dir)?;
+                }
+                for query in queries {
+                    let mut results = search_shards(&index_dir, &query, limit, &filters)?;
+                    attach_result_context(&mut results, context_lines, |path, start, lines| {
+                        read_shard_range(&index_dir, path, start, lines)
+                    })?;
+                    attach_result_read_requests(
+                        &mut results,
+                        "read_range",
+                        read_request_args("index_dir", &index_dir),
+                    );
+                    attach_result_related_requests(
+                        &mut results,
+                        "related_files",
+                        read_request_args("index_dir", &index_dir),
+                    );
+                    attach_result_related_symbol_requests(
+                        &mut results,
+                        "related_symbols",
+                        Some(&query),
+                        read_request_args("index_dir", &index_dir),
+                    );
+                    let read_batch_request = result_read_batch_request(
+                        &results,
+                        "read_ranges",
+                        read_request_args("index_dir", &index_dir),
+                    );
+                    batch.push(SearchBatchResult {
+                        query,
+                        read_batch_request,
+                        results,
+                    });
+                }
+            } else if let Some(index_path) = index {
+                let index = load_index_for_search(index_path.clone(), refresh_if_stale)?;
+                for query in queries {
+                    let mut results = index.search_filtered(&query, limit, &filters)?;
+                    attach_result_context(&mut results, context_lines, |path, start, lines| {
+                        index.read_range(path, start, lines)
+                    })?;
+                    attach_result_read_requests(
+                        &mut results,
+                        "read_range",
+                        read_request_args("index", &index_path),
+                    );
+                    attach_result_related_requests(
+                        &mut results,
+                        "related_files",
+                        read_request_args("index", &index_path),
+                    );
+                    attach_result_related_symbol_requests(
+                        &mut results,
+                        "related_symbols",
+                        Some(&query),
+                        read_request_args("index", &index_path),
+                    );
+                    let read_batch_request = result_read_batch_request(
+                        &results,
+                        "read_ranges",
+                        read_request_args("index", &index_path),
+                    );
+                    batch.push(SearchBatchResult {
+                        query,
+                        read_batch_request,
+                        results,
+                    });
+                }
+            } else {
+                for query in queries {
+                    let mut results = search_repo_fast_filtered(&repo, &query, limit, &filters)?;
+                    attach_result_context(&mut results, context_lines, |path, start, lines| {
+                        read_file_range(&repo, path, start, lines)
+                    })?;
+                    attach_result_read_requests(
+                        &mut results,
+                        "read_range",
+                        read_request_args("repo", &repo),
+                    );
+                    attach_result_related_requests(
+                        &mut results,
+                        "related_files",
+                        read_request_args("repo", &repo),
+                    );
+                    attach_result_related_symbol_requests(
+                        &mut results,
+                        "related_symbols",
+                        Some(&query),
+                        read_request_args("repo", &repo),
+                    );
+                    let read_batch_request = result_read_batch_request(
+                        &results,
+                        "read_ranges",
+                        read_request_args("repo", &repo),
+                    );
+                    batch.push(SearchBatchResult {
+                        query,
+                        read_batch_request,
+                        results,
+                    });
+                }
             }
             println!("{}", serde_json::to_string(&batch)?);
         }

@@ -65,6 +65,8 @@ The JSON-lines form uses the same live-repo fallback from the daemon process
 current directory after explicit and warmed targets.
 Use `search_auto_batch` when an agent wants to try several query formulations in
 one daemon round trip.
+Use `search-batch --repo`, `search-batch --index`, or `search-batch --index-dir`
+for the same target-aware plain batch search shape from the CLI.
 Both return a `query_plan_request` for noisy result sets and inline
 `query_plan_result` diagnostics when an automatic search is empty. Add
 `diagnose:true` / `--diagnose` to include the plan even when results exist.
