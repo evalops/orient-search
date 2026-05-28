@@ -1794,6 +1794,8 @@ fn indexed_query_plan(
             missing_trigrams,
             require_all,
             candidate_count,
+            candidate_cap,
+            candidate_cap_hit,
             filtered_candidate_count,
             scored_candidate_count,
             final_match_count,
@@ -1808,15 +1810,26 @@ fn query_plan_repair_hints(
     missing_trigrams: &[String],
     require_all: bool,
     candidate_count: usize,
+    candidate_cap: usize,
+    candidate_cap_hit: bool,
     filtered_candidate_count: usize,
     scored_candidate_count: usize,
     final_match_count: usize,
 ) -> Vec<QueryPlanRepairHint> {
+    let mut hints = Vec::new();
+    if candidate_cap_hit {
+        hints.push(repair_hint(
+            "narrow_query",
+            format!(
+                "The indexed planner found {candidate_count} candidates and capped scoring at {candidate_cap}. Add a rarer term or file/path/lang/ext/symbol filter for more complete results."
+            ),
+            suggested_token_query(query_tokens),
+        ));
+    }
     if final_match_count > 0 {
-        return Vec::new();
+        return hints;
     }
 
-    let mut hints = Vec::new();
     if !missing_terms.is_empty() {
         hints.push(repair_hint(
             "drop_missing_terms",

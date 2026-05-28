@@ -286,6 +286,40 @@ fn search_result_limits_are_capped() {
 }
 
 #[test]
+fn indexed_search_warns_when_candidate_cap_is_hit() {
+    let repo = tempfile::tempdir().unwrap();
+    for index in 0..1100 {
+        write(
+            &repo.path().join(format!("src/file_{index:04}.rs")),
+            "pub fn shared_cap_token() {}\n",
+        );
+    }
+
+    let index = FastIndex::build(repo.path()).unwrap();
+    let results = index
+        .search_filtered(
+            "shared cap token",
+            1,
+            &SearchFilters {
+                explain: true,
+                ..SearchFilters::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(results.len(), 1);
+    let plan = results[0].query_plan.as_ref().unwrap();
+    assert_eq!(plan.candidate_count, 1100);
+    assert_eq!(plan.candidate_cap, 1024);
+    assert!(plan.candidate_cap_hit);
+    assert!(plan.final_match_count > 0);
+    assert!(plan.repair_hints.iter().any(|hint| {
+        hint.kind == "narrow_query"
+            && hint.message.contains("capped scoring at 1024")
+            && hint.suggested_query.as_deref() == Some("shared cap token")
+    }));
+}
+
+#[test]
 fn indexed_search_supports_filters_require_all_and_symbol_boosting() {
     let repo = tempfile::tempdir().unwrap();
     write(
