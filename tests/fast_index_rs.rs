@@ -1151,6 +1151,32 @@ fn query_language_filters_fallback_and_indexed_search() {
     assert_eq!(indexed_results.len(), 1);
     assert_eq!(indexed_results[0].path, "src/auth.rs");
 
+    let fallback_ts = search_repo_fast_filtered(
+        repo.path(),
+        "lang:ts SessionManager",
+        10,
+        &Default::default(),
+    )
+    .unwrap();
+    assert_eq!(result_paths(&fallback_ts), vec!["src/session.ts"]);
+    let indexed_ts = indexed
+        .search_filtered("lang:ts SessionManager", 10, &Default::default())
+        .unwrap();
+    assert_eq!(result_paths(&indexed_ts), vec!["src/session.ts"]);
+
+    let fallback_without_markdown = search_repo_fast_filtered(
+        repo.path(),
+        "-lang:md SessionManager",
+        10,
+        &Default::default(),
+    )
+    .unwrap();
+    assert!(!result_paths(&fallback_without_markdown).contains(&"docs/auth.md".to_string()));
+    let indexed_without_markdown = indexed
+        .search_filtered("-lang:md SessionManager", 10, &Default::default())
+        .unwrap();
+    assert!(!result_paths(&indexed_without_markdown).contains(&"docs/auth.md".to_string()));
+
     let file_filtered = search_repo_fast_filtered(
         repo.path(),
         r#"file:AUTH.RS issue token"#,

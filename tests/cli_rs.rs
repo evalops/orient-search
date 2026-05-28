@@ -1214,6 +1214,22 @@ fn cli_searches_symbols_and_related_files() {
             "src",
             "--filename",
             "auth.rs",
+            "--lang",
+            "rs",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("src/auth.rs"));
+
+    let mut negative_query_search = Command::cargo_bin("orient").unwrap();
+    negative_query_search
+        .args([
+            "search",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "-lang:md issue token",
+            "--limit",
+            "1",
         ])
         .assert()
         .success()

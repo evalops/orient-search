@@ -10,12 +10,12 @@ use crate::repo_index::{
     filter_only_search_result, filter_value_matches, finalize_results,
     import_hints_from_source_texts, is_entrypoint_path, is_ignored, is_important_file,
     is_manifest_file, is_test_path, known_commands_from_hints, language_for,
-    matches_filters_with_path_metadata, normalize_token, regular_file_metadata,
-    related_query_terms_symbol_and_filters, related_stem_terms, repo_map_seed_paths, repo_matches,
-    result_matches_all_tokens, result_matches_symbol_filters, round4, score_filter_only_path,
-    select_repo_brief_import_hints, select_repo_map_top_symbols, source_import_filters_match,
-    symbol_exact_phrase_bonus, symbol_matches_related_filters, symbol_query_match_score,
-    token_counts, tokenize, unique_query_tokens,
+    matches_filters_with_path_metadata, normalize_language_filter, normalize_token,
+    regular_file_metadata, related_query_terms_symbol_and_filters, related_stem_terms,
+    repo_map_seed_paths, repo_matches, result_matches_all_tokens, result_matches_symbol_filters,
+    round4, score_filter_only_path, select_repo_brief_import_hints, select_repo_map_top_symbols,
+    source_import_filters_match, symbol_exact_phrase_bonus, symbol_matches_related_filters,
+    symbol_query_match_score, token_counts, tokenize, unique_query_tokens,
 };
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use anyhow::{Context, Result};
@@ -2302,7 +2302,7 @@ fn indexed_path_matches_plan_filter(file: &IndexedPath, filter: &QueryPlanFilter
     let matches = match filter.field.as_str() {
         "file" => filter_value_matches(&file.file_name_lower, &filter.value),
         "path" => filter_value_matches(&file.path_lower, &filter.value),
-        "language" => file.language == filter.value.trim().to_ascii_lowercase(),
+        "language" => file.language == normalize_language_filter(&filter.value),
         "extension" => file.extension_lower.as_deref().is_some_and(|extension| {
             extension
                 == filter

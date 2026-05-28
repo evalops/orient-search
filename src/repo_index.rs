@@ -882,7 +882,7 @@ fn rg_extension_glob(extension: &str) -> Option<String> {
 }
 
 fn rg_language_globs(language: &str) -> &'static [&'static str] {
-    match language.trim().to_ascii_lowercase().as_str() {
+    match normalize_language_filter(language).as_str() {
         "python" => &["**/*.py"],
         "rust" => &["**/*.rs"],
         "javascript" => &["**/*.js", "**/*.jsx"],
@@ -2949,6 +2949,22 @@ pub(crate) fn language_for(path: &Path) -> Option<String> {
     Some(language.to_string())
 }
 
+pub fn normalize_language_filter(value: &str) -> String {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "py" | "python" => "python".to_string(),
+        "rs" | "rust" => "rust".to_string(),
+        "js" | "jsx" | "javascript" => "javascript".to_string(),
+        "ts" | "tsx" | "typescript" => "typescript".to_string(),
+        "go" | "golang" => "go".to_string(),
+        "rb" | "ruby" => "ruby".to_string(),
+        "kt" | "kotlin" => "kotlin".to_string(),
+        "md" | "markdown" => "markdown".to_string(),
+        "yml" | "yaml" => "yaml".to_string(),
+        "txt" | "text" => "text".to_string(),
+        other => other.to_string(),
+    }
+}
+
 pub(crate) fn extract_symbols(path: &str, text: &str, language: &str) -> Vec<Symbol> {
     if language == "python" {
         return extract_python_symbols(path, text);
@@ -4350,7 +4366,9 @@ pub(crate) fn matches_filters_with_path_metadata(
         let Some(language) = language else {
             return false;
         };
-        if language != language_filter.trim().to_lowercase() {
+        if !language_filter.trim().eq_ignore_ascii_case(language)
+            && language != normalize_language_filter(language_filter)
+        {
             return false;
         }
     }
@@ -4386,11 +4404,10 @@ pub(crate) fn matches_filters_with_path_metadata(
         return false;
     }
     if let Some(language) = language {
-        if filters
-            .exclude_language
-            .iter()
-            .any(|filter| &language == filter)
-        {
+        if filters.exclude_language.iter().any(|filter| {
+            filter.trim().eq_ignore_ascii_case(language)
+                || language == normalize_language_filter(filter)
+        }) {
             return false;
         }
     }

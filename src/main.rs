@@ -11,9 +11,9 @@ use orient::repo_index::{
     RepoMapDetail, ResultToolRequest, SearchFilters, SearchResult, SnippetMode, SymbolLookupResult,
     attach_repo_map_read_batch_request_with_limit, attach_result_context,
     attach_result_read_requests, attach_result_related_requests,
-    attach_result_related_symbol_requests, read_file_range, related_file_lookup_results,
-    related_symbol_lookup_results, result_read_batch_request, search_repo_fast_filtered,
-    symbol_lookup_read_batch_request, symbol_lookup_results,
+    attach_result_related_symbol_requests, normalize_language_filter, read_file_range,
+    related_file_lookup_results, related_symbol_lookup_results, result_read_batch_request,
+    search_repo_fast_filtered, symbol_lookup_read_batch_request, symbol_lookup_results,
 };
 use orient::server::{
     MAX_BATCH_QUERIES, MAX_BATCH_RANGES, ToolRuntime, agent_guide, agent_instructions,
@@ -130,6 +130,7 @@ enum Commands {
     SearchShards {
         #[arg(long)]
         index_dir: PathBuf,
+        #[arg(allow_hyphen_values = true)]
         query: String,
         #[arg(long, default_value_t = 10)]
         limit: usize,
@@ -145,7 +146,7 @@ enum Commands {
     SearchShardsBatch {
         #[arg(long)]
         index_dir: PathBuf,
-        #[arg(required = true)]
+        #[arg(required = true, allow_hyphen_values = true)]
         queries: Vec<String>,
         #[arg(long, default_value_t = 10)]
         limit: usize,
@@ -161,6 +162,7 @@ enum Commands {
     ShardPlan {
         #[arg(long)]
         index_dir: PathBuf,
+        #[arg(allow_hyphen_values = true)]
         query: String,
         #[arg(long = "repo")]
         repo: Option<String>,
@@ -172,7 +174,7 @@ enum Commands {
     ShardPlanBatch {
         #[arg(long)]
         index_dir: PathBuf,
-        #[arg(required = true)]
+        #[arg(required = true, allow_hyphen_values = true)]
         queries: Vec<String>,
         #[arg(long = "repo")]
         repo: Option<String>,
@@ -276,6 +278,7 @@ enum Commands {
     IndexPlan {
         #[arg(long)]
         index: PathBuf,
+        #[arg(allow_hyphen_values = true)]
         query: String,
         #[arg(long = "repo-filter")]
         repo_filter: Option<String>,
@@ -287,7 +290,7 @@ enum Commands {
     IndexPlanBatch {
         #[arg(long)]
         index: PathBuf,
-        #[arg(required = true)]
+        #[arg(required = true, allow_hyphen_values = true)]
         queries: Vec<String>,
         #[arg(long = "repo-filter")]
         repo_filter: Option<String>,
@@ -299,6 +302,7 @@ enum Commands {
     SearchPlan {
         #[arg(long, default_value = ".")]
         repo: PathBuf,
+        #[arg(allow_hyphen_values = true)]
         query: String,
         #[arg(long = "repo-filter")]
         repo_filter: Option<String>,
@@ -308,7 +312,7 @@ enum Commands {
     SearchPlanBatch {
         #[arg(long, default_value = ".")]
         repo: PathBuf,
-        #[arg(required = true)]
+        #[arg(required = true, allow_hyphen_values = true)]
         queries: Vec<String>,
         #[arg(long = "repo-filter")]
         repo_filter: Option<String>,
@@ -343,6 +347,7 @@ enum Commands {
     Search {
         #[arg(long, default_value = ".")]
         repo: PathBuf,
+        #[arg(allow_hyphen_values = true)]
         query: String,
         #[arg(long, default_value_t = 10)]
         limit: usize,
@@ -354,6 +359,7 @@ enum Commands {
         context_lines: usize,
     },
     SearchAuto {
+        #[arg(allow_hyphen_values = true)]
         query: String,
         #[arg(long)]
         repo: Option<PathBuf>,
@@ -375,7 +381,7 @@ enum Commands {
         diagnose: bool,
     },
     SearchAutoBatch {
-        #[arg(required = true)]
+        #[arg(required = true, allow_hyphen_values = true)]
         queries: Vec<String>,
         #[arg(long)]
         repo: Option<PathBuf>,
@@ -399,7 +405,7 @@ enum Commands {
     SearchBatch {
         #[arg(long, default_value = ".")]
         repo: PathBuf,
-        #[arg(required = true)]
+        #[arg(required = true, allow_hyphen_values = true)]
         queries: Vec<String>,
         #[arg(long, default_value_t = 10)]
         limit: usize,
@@ -413,6 +419,7 @@ enum Commands {
     IndexedSearch {
         #[arg(long)]
         index: PathBuf,
+        #[arg(allow_hyphen_values = true)]
         query: String,
         #[arg(long, default_value_t = 10)]
         limit: usize,
@@ -428,7 +435,7 @@ enum Commands {
     IndexedSearchBatch {
         #[arg(long)]
         index: PathBuf,
-        #[arg(required = true)]
+        #[arg(required = true, allow_hyphen_values = true)]
         queries: Vec<String>,
         #[arg(long, default_value_t = 10)]
         limit: usize,
@@ -593,7 +600,7 @@ enum Commands {
         write_baseline: Option<PathBuf>,
         #[arg(long, default_value_t = 0.25)]
         max_p95_regression: f64,
-        #[arg(required = true)]
+        #[arg(required = true, allow_hyphen_values = true)]
         queries: Vec<String>,
     },
     BenchShards {
@@ -619,7 +626,7 @@ enum Commands {
         write_baseline: Option<PathBuf>,
         #[arg(long, default_value_t = 0.25)]
         max_p95_regression: f64,
-        #[arg(required = true)]
+        #[arg(required = true, allow_hyphen_values = true)]
         queries: Vec<String>,
     },
     ToolManifest,
@@ -805,7 +812,10 @@ fn search_filters_from_args(
     Ok(SearchFilters {
         file: args.file.clone(),
         path: args.path.clone(),
-        language: args.language.as_ref().map(|value| normalize_filter(value)),
+        language: args
+            .language
+            .as_ref()
+            .map(|value| normalize_language_filter(value)),
         extension: args
             .extension
             .as_ref()
@@ -831,7 +841,7 @@ fn search_filters_from_args(
         exclude_language: args
             .exclude_language
             .iter()
-            .map(|value| normalize_filter(value))
+            .map(|value| normalize_language_filter(value))
             .collect(),
         exclude_extension: args
             .exclude_extension

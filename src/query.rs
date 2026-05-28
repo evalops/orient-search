@@ -1,4 +1,6 @@
-use crate::repo_index::{SearchFilters, identifier_boundary_text, tokenize};
+use crate::repo_index::{
+    SearchFilters, identifier_boundary_text, normalize_language_filter, tokenize,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedQuery {
@@ -95,7 +97,7 @@ fn apply_filter(filters: &mut SearchFilters, token: &str, negated: bool) -> bool
     match (negated, key.as_str()) {
         (false, "file" | "filename" | "file_name" | "basename") => filters.file = Some(value),
         (false, "path" | "dir" | "directory" | "folder") => filters.path = Some(value),
-        (false, "lang" | "language") => filters.language = Some(value.to_ascii_lowercase()),
+        (false, "lang" | "language") => filters.language = Some(normalize_language_filter(&value)),
         (false, "ext" | "extension") => {
             filters.extension = Some(value.trim_start_matches('.').to_ascii_lowercase())
         }
@@ -123,7 +125,9 @@ fn apply_filter(filters: &mut SearchFilters, token: &str, negated: bool) -> bool
         },
         (true, "file" | "filename" | "file_name" | "basename") => filters.exclude_file.push(value),
         (true, "path" | "dir" | "directory" | "folder") => filters.exclude_path.push(value),
-        (true, "lang" | "language") => filters.exclude_language.push(value.to_ascii_lowercase()),
+        (true, "lang" | "language") => filters
+            .exclude_language
+            .push(normalize_language_filter(&value)),
         (true, "ext" | "extension") => filters
             .exclude_extension
             .push(value.trim_start_matches('.').to_ascii_lowercase()),
@@ -382,12 +386,14 @@ mod tests {
     #[test]
     fn parses_agent_friendly_file_and_path_aliases() {
         let parsed = parse_query(
-            "folder:src directory:services filename:auth.rs -file_name:generated.rs -folder:vendor token",
+            "folder:src directory:services filename:auth.rs lang:ts -lang:md -file_name:generated.rs -folder:vendor token",
         );
 
         assert_eq!(parsed.terms, vec!["token"]);
         assert_eq!(parsed.filters.path.as_deref(), Some("services"));
         assert_eq!(parsed.filters.file.as_deref(), Some("auth.rs"));
+        assert_eq!(parsed.filters.language.as_deref(), Some("typescript"));
+        assert_eq!(parsed.filters.exclude_language, vec!["markdown"]);
         assert_eq!(parsed.filters.exclude_file, vec!["generated.rs"]);
         assert_eq!(parsed.filters.exclude_path, vec!["vendor"]);
     }

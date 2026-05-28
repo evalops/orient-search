@@ -1922,11 +1922,11 @@ fn runtime_accepts_structured_negative_search_filters() {
             "limit": 10,
             "folder": "src",
             "filename": "view.ts",
-            "lang": "typescript",
+            "lang": "ts",
             "ext": "ts",
             "type": "functions",
             "require_all": true,
-            "exclude_lang": "rust",
+            "exclude_lang": "rs",
             "exclude_ext": "rs",
             "exclude_type": "classes"
         }),

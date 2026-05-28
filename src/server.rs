@@ -9,9 +9,10 @@ use crate::repo_index::{
     RepoMapDetail, ResultToolRequest, SearchFilters, SearchResult, SnippetMode, Symbol,
     SymbolLookupResult, attach_repo_map_read_batch_request_with_limit, attach_result_context,
     attach_result_read_requests, attach_result_related_requests,
-    attach_result_related_symbol_requests, finalize_results, normalize_token, read_file_range,
-    related_file_lookup_results, related_symbol_lookup_results, result_read_batch_request,
-    search_repo_fast_filtered, symbol_lookup_read_batch_request, symbol_lookup_results,
+    attach_result_related_symbol_requests, finalize_results, normalize_language_filter,
+    normalize_token, read_file_range, related_file_lookup_results, related_symbol_lookup_results,
+    result_read_batch_request, search_repo_fast_filtered, symbol_lookup_read_batch_request,
+    symbol_lookup_results,
 };
 use crate::shards::{
     ShardEntry, ShardManifest, ShardQueryPlan, ShardRepoMap, ShardSearchScope, build_shards,
@@ -4178,10 +4179,18 @@ fn symbol_kind_list_arg_any(arguments: &Value, names: &[&str]) -> Result<Vec<Str
         .collect())
 }
 
+fn language_list_arg_any(arguments: &Value, names: &[&str]) -> Result<Vec<String>> {
+    Ok(optional_string_list_arg_any(arguments, names)?
+        .into_iter()
+        .map(|value| normalize_language_filter(&value))
+        .collect())
+}
+
 fn search_filters(arguments: &Value, allow_repo_alias: bool) -> Result<SearchFilters> {
     Ok(SearchFilters {
         path: optional_string_arg_any(arguments, &["path", "dir", "directory", "folder"]),
-        language: optional_string_arg_any(arguments, &["language", "lang"]),
+        language: optional_string_arg_any(arguments, &["language", "lang"])
+            .map(|value| normalize_language_filter(&value)),
         extension: optional_string_arg_any(arguments, &["extension", "ext"]),
         symbol: optional_string_arg(arguments, "symbol"),
         symbol_kind: symbol_kind_arg_any(arguments, &["symbol_kind", "kind", "type"]),
@@ -4222,10 +4231,7 @@ fn search_filters(arguments: &Value, allow_repo_alias: bool) -> Result<SearchFil
                 "exclude_folder",
             ],
         )?,
-        exclude_language: normalized_string_list_arg_any(
-            arguments,
-            &["exclude_language", "exclude_lang"],
-        )?,
+        exclude_language: language_list_arg_any(arguments, &["exclude_language", "exclude_lang"])?,
         exclude_extension: normalized_string_list_arg_any(
             arguments,
             &["exclude_extension", "exclude_ext"],
