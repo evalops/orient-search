@@ -1185,6 +1185,35 @@ fn query_language_filters_fallback_and_indexed_search() {
     assert!(indexed_markdown_paths.contains(&"docs/auth.md".to_string()));
     assert!(indexed_markdown_paths.contains(&"README.md".to_string()));
 
+    let fallback_docs_wildcard = search_repo_fast_filtered(
+        repo.path(),
+        "path:docs/*.md SessionManager",
+        10,
+        &Default::default(),
+    )
+    .unwrap();
+    assert_eq!(result_paths(&fallback_docs_wildcard), vec!["docs/auth.md"]);
+    let indexed_docs_wildcard = indexed
+        .search_filtered("path:docs/*.md SessionManager", 10, &Default::default())
+        .unwrap();
+    assert_eq!(result_paths(&indexed_docs_wildcard), vec!["docs/auth.md"]);
+    let wildcard_plan = indexed
+        .query_plan("path:docs/*.md SessionManager", &Default::default())
+        .unwrap();
+    assert!(
+        !wildcard_plan
+            .planned_postings
+            .iter()
+            .any(|posting| posting.kind == "symbol" && posting.value == "sessionmanager"),
+        "{:?}",
+        wildcard_plan.planned_postings
+    );
+
+    let indexed_extension_markdown = indexed
+        .search_filtered("ext:md SessionManager", 10, &Default::default())
+        .unwrap();
+    assert!(result_paths(&indexed_extension_markdown).contains(&"docs/auth.md".to_string()));
+
     let fallback_without_markdown = search_repo_fast_filtered(
         repo.path(),
         "-lang:md SessionManager",

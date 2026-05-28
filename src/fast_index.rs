@@ -3001,17 +3001,36 @@ fn planned_symbol_query_name(
     if filters.symbol.is_none() && explicit_content_terms {
         return None;
     }
-    if filters.symbol.is_none() && !language_scope_can_contain_symbols(filters.language.as_deref())
-    {
+    if filters.symbol.is_none() && !positive_scope_can_contain_symbols(filters) {
         return None;
     }
     exact_symbol_query_name(terms, filters.symbol.as_deref())
 }
 
-fn language_scope_can_contain_symbols(language: Option<&str>) -> bool {
-    let Some(language) = language.map(normalize_language_filter) else {
-        return true;
-    };
+fn positive_scope_can_contain_symbols(filters: &SearchFilters) -> bool {
+    filters
+        .language
+        .as_deref()
+        .is_none_or(language_can_contain_symbols)
+        && filters
+            .extension
+            .as_deref()
+            .and_then(language_from_filter_extension)
+            .is_none_or(|language| language_can_contain_symbols(&language))
+        && filters
+            .file
+            .as_deref()
+            .and_then(language_from_filter_path)
+            .is_none_or(|language| language_can_contain_symbols(&language))
+        && filters
+            .path
+            .as_deref()
+            .and_then(language_from_filter_path)
+            .is_none_or(|language| language_can_contain_symbols(&language))
+}
+
+fn language_can_contain_symbols(language: &str) -> bool {
+    let language = normalize_language_filter(language);
     matches!(
         language.as_str(),
         "python"
@@ -3024,6 +3043,33 @@ fn language_scope_can_contain_symbols(language: Option<&str>) -> bool {
             | "kotlin"
             | "swift"
     )
+}
+
+fn language_from_filter_extension(extension: &str) -> Option<String> {
+    let extension = extension.trim().trim_start_matches('.');
+    if extension.is_empty() {
+        return None;
+    }
+    let probe = format!("file.{extension}");
+    language_for(Path::new(&probe))
+}
+
+fn language_from_filter_path(path: &str) -> Option<String> {
+    let path = path.trim().replace('\\', "/");
+    if path.is_empty() {
+        return None;
+    }
+    let last = path.rsplit('/').next().unwrap_or(path.as_str());
+    let extension = last.rsplit_once('.')?.1;
+    if extension.is_empty()
+        || extension.contains('*')
+        || extension.contains('?')
+        || extension.contains('[')
+        || extension.contains(']')
+    {
+        return None;
+    }
+    language_from_filter_extension(extension)
 }
 
 fn identifier_shaped_query_term(term: &str) -> bool {
