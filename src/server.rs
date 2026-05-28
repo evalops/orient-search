@@ -918,15 +918,7 @@ fn input_schema(tool_name: &str, required: &[&str], optional: &[&str]) -> Value 
 fn argument_schema(tool_name: &str, name: &str) -> Value {
     let mut schema = Map::new();
     match name {
-        "exclude_file"
-        | "exclude_path"
-        | "exclude_language"
-        | "exclude_extension"
-        | "exclude_symbol"
-        | "exclude_symbol_kind"
-        | "exclude_repo"
-        | "exclude_dependency"
-        | "exclude_import" => {
+        name if string_list_argument(name) => {
             schema.insert(
                 "oneOf".to_string(),
                 json!([
@@ -1079,19 +1071,37 @@ fn argument_type(name: &str) -> &'static str {
         | "lines" | "tests" | "context_lines" => "integer",
         "test" | "explain" | "require_all" | "any_terms" | "refresh_if_stale" | "git_metadata"
         | "tracked_files" | "nested_manifests" => "boolean",
-        "exclude_file"
-        | "exclude_path"
-        | "exclude_language"
-        | "exclude_extension"
-        | "exclude_symbol"
-        | "exclude_symbol_kind"
-        | "exclude_repo"
-        | "exclude_dependency"
-        | "exclude_import" => "string|string[]",
+        name if string_list_argument(name) => "string|string[]",
         "ranges" => "range|range[]",
         "repos" | "discover_roots" | "queries" => "string[]",
         _ => "string",
     }
+}
+
+fn string_list_argument(name: &str) -> bool {
+    matches!(
+        name,
+        "exclude_file"
+            | "exclude_path"
+            | "exclude_language"
+            | "exclude_lang"
+            | "exclude_extension"
+            | "exclude_ext"
+            | "exclude_symbol"
+            | "exclude_symbol_kind"
+            | "exclude_kind"
+            | "exclude_type"
+            | "exclude_repo"
+            | "exclude_dependency"
+            | "exclude_dep"
+            | "exclude_deps"
+            | "exclude_import"
+            | "exclude_imports"
+            | "exclude_module"
+            | "exclude_modules"
+            | "exclude_use"
+            | "exclude_uses"
+    )
 }
 
 fn argument_default(tool_name: &str, name: &str) -> Option<Value> {
@@ -1194,13 +1204,19 @@ fn argument_description(tool_name: &str, name: &str) -> &'static str {
         }
         "limit" => "Maximum number of results to return.",
         "language" => "Detected language filter, such as rust, python, or typescript.",
+        "lang" => "Alias for language.",
         "extension" => "File extension filter with or without a leading dot.",
+        "ext" => "Alias for extension.",
         "symbol" => "Symbol name to require or boost.",
         "symbol_kind" => {
             "Symbol kind to require, such as function, class, struct, enum, or method."
         }
+        "kind" => "Alias for symbol_kind.",
+        "type" => "Alias for symbol_kind using type-style names such as class, enum, or interface.",
         "dependency" => "Dependency name substring used as a repo-level search filter.",
+        "dep" | "deps" => "Alias for dependency.",
         "import" => "Imported module substring used as a file-level search filter.",
+        "module" | "modules" | "imports" | "use" | "uses" => "Alias for import.",
         "file" => "File basename substring filter.",
         "test" => "When true, include only test paths; when false, exclude test paths.",
         "snippet" => "Snippet mode: short, medium, block, or symbol.",
@@ -1216,12 +1232,19 @@ fn argument_description(tool_name: &str, name: &str) -> &'static str {
         "exclude_file" => "File basename substring or list of substrings to exclude.",
         "exclude_path" => "Path substring or list of substrings to exclude.",
         "exclude_language" => "Language or list of languages to exclude.",
+        "exclude_lang" => "Alias for exclude_language.",
         "exclude_extension" => "Extension or list of extensions to exclude.",
+        "exclude_ext" => "Alias for exclude_extension.",
         "exclude_symbol" => "Symbol name or list of symbols to exclude.",
         "exclude_symbol_kind" => "Symbol kind or list of kinds to exclude.",
+        "exclude_kind" => "Alias for exclude_symbol_kind.",
+        "exclude_type" => "Alias for exclude_symbol_kind using type-style names.",
         "exclude_repo" => "Repository name substring or list of substrings to exclude.",
         "exclude_dependency" => "Dependency name or list of dependency substrings to exclude.",
+        "exclude_dep" | "exclude_deps" => "Alias for exclude_dependency.",
         "exclude_import" => "Imported module or list of module substrings to exclude.",
+        "exclude_module" | "exclude_modules" | "exclude_imports" | "exclude_use"
+        | "exclude_uses" => "Alias for exclude_import.",
         "root" | "discover_root" => "Workspace root to scan for repositories.",
         "discover_roots" => "Workspace roots to scan for repositories.",
         "repos" => "Explicit repository roots to add to a shard directory.",
@@ -3087,11 +3110,22 @@ const SEARCH_OPTIONAL_ARGS: &[&str] = &[
     "path",
     "dir",
     "language",
+    "lang",
     "extension",
+    "ext",
     "symbol",
     "symbol_kind",
+    "kind",
+    "type",
     "dependency",
+    "dep",
+    "deps",
     "import",
+    "imports",
+    "module",
+    "modules",
+    "use",
+    "uses",
     "file",
     "repo_filter",
     "test",
@@ -3103,12 +3137,23 @@ const SEARCH_OPTIONAL_ARGS: &[&str] = &[
     "exclude_file",
     "exclude_path",
     "exclude_language",
+    "exclude_lang",
     "exclude_extension",
+    "exclude_ext",
     "exclude_symbol",
     "exclude_symbol_kind",
+    "exclude_kind",
+    "exclude_type",
     "exclude_repo",
     "exclude_dependency",
+    "exclude_dep",
+    "exclude_deps",
     "exclude_import",
+    "exclude_imports",
+    "exclude_module",
+    "exclude_modules",
+    "exclude_use",
+    "exclude_uses",
 ];
 
 const SEARCH_AUTO_OPTIONAL_ARGS: &[&str] = &[
@@ -3119,11 +3164,22 @@ const SEARCH_AUTO_OPTIONAL_ARGS: &[&str] = &[
     "path",
     "dir",
     "language",
+    "lang",
     "extension",
+    "ext",
     "symbol",
     "symbol_kind",
+    "kind",
+    "type",
     "dependency",
+    "dep",
+    "deps",
     "import",
+    "imports",
+    "module",
+    "modules",
+    "use",
+    "uses",
     "file",
     "repo_filter",
     "test",
@@ -3136,12 +3192,23 @@ const SEARCH_AUTO_OPTIONAL_ARGS: &[&str] = &[
     "exclude_file",
     "exclude_path",
     "exclude_language",
+    "exclude_lang",
     "exclude_extension",
+    "exclude_ext",
     "exclude_symbol",
     "exclude_symbol_kind",
+    "exclude_kind",
+    "exclude_type",
     "exclude_repo",
     "exclude_dependency",
+    "exclude_dep",
+    "exclude_deps",
     "exclude_import",
+    "exclude_imports",
+    "exclude_module",
+    "exclude_modules",
+    "exclude_use",
+    "exclude_uses",
 ];
 
 const SEARCH_INDEX_OPTIONAL_ARGS: &[&str] = &[
@@ -3149,11 +3216,22 @@ const SEARCH_INDEX_OPTIONAL_ARGS: &[&str] = &[
     "path",
     "dir",
     "language",
+    "lang",
     "extension",
+    "ext",
     "symbol",
     "symbol_kind",
+    "kind",
+    "type",
     "dependency",
+    "dep",
+    "deps",
     "import",
+    "imports",
+    "module",
+    "modules",
+    "use",
+    "uses",
     "file",
     "repo",
     "repo_filter",
@@ -3167,23 +3245,45 @@ const SEARCH_INDEX_OPTIONAL_ARGS: &[&str] = &[
     "exclude_file",
     "exclude_path",
     "exclude_language",
+    "exclude_lang",
     "exclude_extension",
+    "exclude_ext",
     "exclude_symbol",
     "exclude_symbol_kind",
+    "exclude_kind",
+    "exclude_type",
     "exclude_repo",
     "exclude_dependency",
+    "exclude_dep",
+    "exclude_deps",
     "exclude_import",
+    "exclude_imports",
+    "exclude_module",
+    "exclude_modules",
+    "exclude_use",
+    "exclude_uses",
 ];
 
 const PLAN_OPTIONAL_ARGS: &[&str] = &[
     "path",
     "dir",
     "language",
+    "lang",
     "extension",
+    "ext",
     "symbol",
     "symbol_kind",
+    "kind",
+    "type",
     "dependency",
+    "dep",
+    "deps",
     "import",
+    "imports",
+    "module",
+    "modules",
+    "use",
+    "uses",
     "file",
     "repo_filter",
     "test",
@@ -3192,23 +3292,45 @@ const PLAN_OPTIONAL_ARGS: &[&str] = &[
     "exclude_file",
     "exclude_path",
     "exclude_language",
+    "exclude_lang",
     "exclude_extension",
+    "exclude_ext",
     "exclude_symbol",
     "exclude_symbol_kind",
+    "exclude_kind",
+    "exclude_type",
     "exclude_repo",
     "exclude_dependency",
+    "exclude_dep",
+    "exclude_deps",
     "exclude_import",
+    "exclude_imports",
+    "exclude_module",
+    "exclude_modules",
+    "exclude_use",
+    "exclude_uses",
 ];
 
 const PLAN_INDEX_OPTIONAL_ARGS: &[&str] = &[
     "path",
     "dir",
     "language",
+    "lang",
     "extension",
+    "ext",
     "symbol",
     "symbol_kind",
+    "kind",
+    "type",
     "dependency",
+    "dep",
+    "deps",
     "import",
+    "imports",
+    "module",
+    "modules",
+    "use",
+    "uses",
     "file",
     "repo",
     "repo_filter",
@@ -3219,12 +3341,23 @@ const PLAN_INDEX_OPTIONAL_ARGS: &[&str] = &[
     "exclude_file",
     "exclude_path",
     "exclude_language",
+    "exclude_lang",
     "exclude_extension",
+    "exclude_ext",
     "exclude_symbol",
     "exclude_symbol_kind",
+    "exclude_kind",
+    "exclude_type",
     "exclude_repo",
     "exclude_dependency",
+    "exclude_dep",
+    "exclude_deps",
     "exclude_import",
+    "exclude_imports",
+    "exclude_module",
+    "exclude_modules",
+    "exclude_use",
+    "exclude_uses",
 ];
 
 const SHARD_BUILD_OPTIONAL_ARGS: &[&str] = &[
@@ -3572,8 +3705,16 @@ fn optional_string_list_arg(arguments: &Value, name: &str) -> Result<Vec<String>
         .collect()
 }
 
-fn normalized_string_list_arg(arguments: &Value, name: &str) -> Result<Vec<String>> {
-    Ok(optional_string_list_arg(arguments, name)?
+fn optional_string_list_arg_any(arguments: &Value, names: &[&str]) -> Result<Vec<String>> {
+    let mut values = Vec::new();
+    for name in names {
+        values.extend(optional_string_list_arg(arguments, name)?);
+    }
+    Ok(values)
+}
+
+fn normalized_string_list_arg_any(arguments: &Value, names: &[&str]) -> Result<Vec<String>> {
+    Ok(optional_string_list_arg_any(arguments, names)?
         .into_iter()
         .map(|value| value.trim_start_matches('.').to_ascii_lowercase())
         .collect())
@@ -3582,14 +3723,18 @@ fn normalized_string_list_arg(arguments: &Value, name: &str) -> Result<Vec<Strin
 fn search_filters(arguments: &Value, allow_repo_alias: bool) -> Result<SearchFilters> {
     Ok(SearchFilters {
         path: optional_string_arg_any(arguments, &["path", "dir"]),
-        language: optional_string_arg(arguments, "language"),
-        extension: optional_string_arg(arguments, "extension"),
+        language: optional_string_arg_any(arguments, &["language", "lang"]),
+        extension: optional_string_arg_any(arguments, &["extension", "ext"]),
         symbol: optional_string_arg(arguments, "symbol"),
-        symbol_kind: optional_string_arg(arguments, "symbol_kind")
+        symbol_kind: optional_string_arg_any(arguments, &["symbol_kind", "kind", "type"])
             .map(|value| value.to_ascii_lowercase()),
-        dependency: optional_string_arg(arguments, "dependency")
+        dependency: optional_string_arg_any(arguments, &["dependency", "dep", "deps"])
             .map(|value| value.to_ascii_lowercase()),
-        import: optional_string_arg(arguments, "import").map(|value| value.to_ascii_lowercase()),
+        import: optional_string_arg_any(
+            arguments,
+            &["import", "imports", "module", "modules", "use", "uses"],
+        )
+        .map(|value| value.to_ascii_lowercase()),
         file: optional_string_arg(arguments, "file"),
         repo: if allow_repo_alias {
             optional_string_arg_any(arguments, &["repo", "repo_filter"])
@@ -3609,13 +3754,35 @@ fn search_filters(arguments: &Value, allow_repo_alias: bool) -> Result<SearchFil
         match_any: bool_arg(arguments, "any_terms"),
         exclude_file: optional_string_list_arg(arguments, "exclude_file")?,
         exclude_path: optional_string_list_arg(arguments, "exclude_path")?,
-        exclude_language: normalized_string_list_arg(arguments, "exclude_language")?,
-        exclude_extension: normalized_string_list_arg(arguments, "exclude_extension")?,
+        exclude_language: normalized_string_list_arg_any(
+            arguments,
+            &["exclude_language", "exclude_lang"],
+        )?,
+        exclude_extension: normalized_string_list_arg_any(
+            arguments,
+            &["exclude_extension", "exclude_ext"],
+        )?,
         exclude_symbol: optional_string_list_arg(arguments, "exclude_symbol")?,
-        exclude_symbol_kind: normalized_string_list_arg(arguments, "exclude_symbol_kind")?,
+        exclude_symbol_kind: normalized_string_list_arg_any(
+            arguments,
+            &["exclude_symbol_kind", "exclude_kind", "exclude_type"],
+        )?,
         exclude_repo: optional_string_list_arg(arguments, "exclude_repo")?,
-        exclude_dependency: normalized_string_list_arg(arguments, "exclude_dependency")?,
-        exclude_import: normalized_string_list_arg(arguments, "exclude_import")?,
+        exclude_dependency: normalized_string_list_arg_any(
+            arguments,
+            &["exclude_dependency", "exclude_dep", "exclude_deps"],
+        )?,
+        exclude_import: normalized_string_list_arg_any(
+            arguments,
+            &[
+                "exclude_import",
+                "exclude_imports",
+                "exclude_module",
+                "exclude_modules",
+                "exclude_use",
+                "exclude_uses",
+            ],
+        )?,
         ..SearchFilters::default()
     })
 }

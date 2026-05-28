@@ -155,6 +155,30 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         serde_json::json!(["short", "medium", "block", "symbol"])
     );
     assert_eq!(
+        search["input_schema"]["properties"]["lang"]["description"],
+        "Alias for language."
+    );
+    assert_eq!(
+        search["input_schema"]["properties"]["ext"]["description"],
+        "Alias for extension."
+    );
+    assert_eq!(
+        search["input_schema"]["properties"]["kind"]["description"],
+        "Alias for symbol_kind."
+    );
+    assert_eq!(
+        search["input_schema"]["properties"]["dep"]["description"],
+        "Alias for dependency."
+    );
+    assert_eq!(
+        search["input_schema"]["properties"]["module"]["description"],
+        "Alias for import."
+    );
+    assert_eq!(
+        search["input_schema"]["properties"]["exclude_lang"]["oneOf"][1]["items"]["type"],
+        "string"
+    );
+    assert_eq!(
         search["input_schema"]["properties"]["exclude_path"]["oneOf"][1]["items"]["type"],
         "string"
     );
@@ -1344,6 +1368,10 @@ fn runtime_accepts_structured_negative_search_filters() {
         &repo.path().join("src/generated_symbol.rs"),
         "pub struct GeneratedSessionManager;\npub fn issue_token() {}\n",
     );
+    write(
+        &repo.path().join("src/view.ts"),
+        "import React from 'react';\nexport function renderToken() { return React.createElement('div'); }\n",
+    );
     let index_path = repo.path().join(".orient/index");
     FastIndex::build(repo.path())
         .unwrap()
@@ -1369,6 +1397,29 @@ fn runtime_accepts_structured_negative_search_filters() {
     assert!(result.contains("src/auth.rs"), "{result}");
     assert!(!result.contains("generated/auth.rs"), "{result}");
     assert!(!result.contains("src/generated_symbol.rs"), "{result}");
+
+    let alias_filters = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("alias-filters"),
+        tool: "search".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "query": "render token",
+            "limit": 10,
+            "lang": "typescript",
+            "ext": "ts",
+            "kind": "function",
+            "module": "react",
+            "require_all": true,
+            "exclude_lang": "rust",
+            "exclude_ext": "rs",
+            "exclude_kind": "class",
+            "exclude_module": "legacy"
+        }),
+    });
+    assert!(alias_filters.error.is_none(), "{:?}", alias_filters.error);
+    let result = serde_json::to_string(&alias_filters.result).unwrap();
+    assert!(result.contains("src/view.ts"), "{result}");
+    assert!(!result.contains("src/auth.rs"), "{result}");
 
     let indexed = runtime.dispatch(ToolRequest {
         id: serde_json::json!("indexed"),

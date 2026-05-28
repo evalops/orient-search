@@ -62,6 +62,12 @@ The CLI equivalent for automatic target selection is `orient search-auto`; when 
 
 Query strings support filters such as `repo:platform`, `path:src/auth` or `dir:src/auth`, `file:auth.rs`, `file:*.rs`, `path:src/*gateway.rs`, `path:src\auth.rs`, `lang:rust`, `ext:rs`, `symbol:SessionManager`, `kind:function`, `type:function`, `dep:react`, `import:crate::auth`, `test:false`, `is:test`, `is:source`, positive content aliases like `content:"issue token"` or `text:gateway`, negative filters like `-path:docs`, `-file:*test.rs`, `-kind:class`, `-dep:legacy`, or `-import:old_api`, and quoted phrases like `"issue token"`. Multi-token queries use AND behavior by default; use `mode:any` in the query or `any_terms:true` in JSON-lines calls for broad orientation searches.
 
+Structured JSON arguments accept the same common aliases for wrapper authors:
+`lang`/`language`, `ext`/`extension`, `kind`/`type`/`symbol_kind`,
+`dep`/`deps`/`dependency`, and `module`/`import`/`use`, plus matching
+`exclude_*` aliases such as `exclude_lang`, `exclude_ext`, `exclude_kind`,
+`exclude_dep`, and `exclude_module`.
+
 Search results include:
 
 - `path`: the repo-relative, index-relative, or shard-prefixed path.
