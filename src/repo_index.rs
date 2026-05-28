@@ -3568,6 +3568,18 @@ pub fn symbol_lookup_results(
         .collect()
 }
 
+pub fn symbol_lookup_read_batch_request(
+    symbols: &[SymbolLookupResult],
+    tool: &str,
+    base_arguments: serde_json::Map<String, serde_json::Value>,
+) -> Option<ResultToolRequest> {
+    let ranges = symbols
+        .iter()
+        .map(|symbol| symbol.read_range.clone())
+        .collect::<Vec<_>>();
+    read_batch_request_from_ranges(ranges, tool, base_arguments)
+}
+
 pub fn related_file_lookup_results(
     related: Vec<RelatedFile>,
     tool: &str,

@@ -1828,7 +1828,9 @@ fn cli_builds_and_searches_persistent_index() {
         .stdout(predicate::str::contains("\"name\":\"issue_token\""))
         .stdout(predicate::str::contains("\"kind\":\"function\""))
         .stdout(predicate::str::contains("\"read_request\""))
-        .stdout(predicate::str::contains("\"tool\":\"read_index_range\""));
+        .stdout(predicate::str::contains("\"tool\":\"read_index_range\""))
+        .stdout(predicate::str::contains("\"read_batch_request\""))
+        .stdout(predicate::str::contains("\"tool\":\"read_index_ranges\""));
 
     let mut index_map = Command::cargo_bin("orient").unwrap();
     index_map

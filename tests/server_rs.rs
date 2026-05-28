@@ -4242,6 +4242,8 @@ fn server_handles_indexed_search_request() {
     assert!(stdout.contains("\"name\":\"SessionManager\""));
     assert!(stdout.contains("\"symbols\":[]"));
     assert!(stdout.contains("\"name\":\"issue_token\""));
+    assert!(stdout.contains("\"read_batch_request\""));
+    assert!(stdout.contains("\"tool\":\"read_index_ranges\""));
     assert!(stdout.contains("\"id\":\"indexed-repo-map\""));
     assert!(stdout.contains("\"entrypoints\""));
     assert!(stdout.contains("\"manifest_files\""));
