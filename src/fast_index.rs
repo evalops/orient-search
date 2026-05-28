@@ -7,9 +7,10 @@ use crate::repo_index::{
     Symbol, apply_phrase_matches, best_snippet_for_path, capped_search_limit,
     command_hints_from_manifest_texts, dependency_filters_match,
     dependency_hints_from_manifest_texts, extract_symbols, file_range_from_text, filter_only_query,
-    filter_only_search_result, finalize_results, is_entrypoint_path, is_ignored, is_important_file,
-    is_manifest_file, is_test_path, known_commands_from_hints, language_for, matches_filters,
-    normalize_token, regular_file_metadata, related_stem_terms, repo_map_seed_paths, repo_matches,
+    filter_only_search_result, finalize_results, import_hints_from_source_texts,
+    is_entrypoint_path, is_ignored, is_important_file, is_manifest_file, is_test_path,
+    known_commands_from_hints, language_for, matches_filters, normalize_token,
+    regular_file_metadata, related_stem_terms, repo_map_seed_paths, repo_matches,
     result_matches_all_tokens, result_matches_symbol_filters, round4, score_filter_only_path,
     symbol_kind_rank, token_counts, tokenize,
 };
@@ -509,6 +510,7 @@ impl FastIndex {
         let command_hints = command_hints_from_indexed_files(&self.files);
         let known_commands = known_commands_from_hints(&command_hints);
         let dependency_hints = dependency_hints_from_indexed_files(&self.files);
+        let import_hints = import_hints_from_indexed_files(&self.files);
 
         RepoMap {
             brief: RepoBrief {
@@ -522,6 +524,7 @@ impl FastIndex {
                 known_commands,
                 command_hints,
                 dependency_hints,
+                import_hints,
                 manifest_files,
                 important_files,
             },
@@ -2188,6 +2191,14 @@ fn dependency_hints_from_indexed_files(
     files: &[IndexedPath],
 ) -> Vec<crate::repo_index::DependencyHint> {
     dependency_hints_from_manifest_texts(
+        files
+            .iter()
+            .map(|file| (file.path.as_str(), file.content.as_str())),
+    )
+}
+
+fn import_hints_from_indexed_files(files: &[IndexedPath]) -> Vec<crate::repo_index::ImportHint> {
+    import_hints_from_source_texts(
         files
             .iter()
             .map(|file| (file.path.as_str(), file.content.as_str())),

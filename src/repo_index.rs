@@ -257,6 +257,8 @@ pub struct RepoBrief {
     pub command_hints: Vec<CommandHint>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dependency_hints: Vec<DependencyHint>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub import_hints: Vec<ImportHint>,
     pub manifest_files: Vec<String>,
     pub important_files: Vec<String>,
 }
@@ -273,6 +275,14 @@ pub struct DependencyHint {
     pub name: String,
     pub kind: String,
     pub source: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImportHint {
+    pub module: String,
+    pub kind: String,
+    pub source: String,
+    pub line: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1174,6 +1184,7 @@ impl RepoIndex {
         let command_hints = self.command_hints();
         let known_commands = known_commands_from_hints(&command_hints);
         let dependency_hints = self.dependency_hints();
+        let import_hints = self.import_hints();
 
         RepoBrief {
             root_name: self
@@ -1186,6 +1197,7 @@ impl RepoIndex {
             known_commands,
             command_hints,
             dependency_hints,
+            import_hints,
             manifest_files,
             important_files,
         }
@@ -1307,6 +1319,14 @@ impl RepoIndex {
 
     fn dependency_hints(&self) -> Vec<DependencyHint> {
         dependency_hints_from_manifest_texts(
+            self.files
+                .iter()
+                .map(|(path, file)| (path.as_str(), file.text.as_str())),
+        )
+    }
+
+    fn import_hints(&self) -> Vec<ImportHint> {
+        import_hints_from_source_texts(
             self.files
                 .iter()
                 .map(|(path, file)| (path.as_str(), file.text.as_str())),
@@ -1521,6 +1541,176 @@ pub(crate) fn dependency_filters_match(hints: &[DependencyHint], filters: &Searc
         let excluded = excluded.to_ascii_lowercase();
         names.iter().any(|name| name.contains(&excluded))
     })
+}
+
+pub(crate) fn import_hints_from_source_texts<'a>(
+    files: impl IntoIterator<Item = (&'a str, &'a str)>,
+) -> Vec<ImportHint> {
+    let mut hints = Vec::new();
+    for (path, text) in files {
+        let Some(language) = language_for(Path::new(path)) else {
+            continue;
+        };
+        for (line_index, line) in text.lines().enumerate() {
+            let line_number = line_index + 1;
+            match language.as_str() {
+                "rust" => hints.extend(rust_import_hints(line, path, line_number)),
+                "python" => hints.extend(python_import_hints(line, path, line_number)),
+                "javascript" | "typescript" => {
+                    hints.extend(js_import_hints(line, path, line_number))
+                }
+                "go" => hints.extend(go_import_hints(line, path, line_number)),
+                _ => {}
+            }
+        }
+    }
+    hints.sort_by(|left, right| {
+        left.source
+            .cmp(&right.source)
+            .then_with(|| left.line.cmp(&right.line))
+            .then_with(|| left.kind.cmp(&right.kind))
+            .then_with(|| left.module.cmp(&right.module))
+    });
+    hints.dedup_by(|left, right| {
+        left.module == right.module
+            && left.kind == right.kind
+            && left.source == right.source
+            && left.line == right.line
+    });
+    hints.truncate(80);
+    hints
+}
+
+fn import_hint(
+    module: impl Into<String>,
+    kind: impl Into<String>,
+    source: impl Into<String>,
+    line: usize,
+) -> Option<ImportHint> {
+    let module = normalize_import_module(&module.into())?;
+    Some(ImportHint {
+        module,
+        kind: kind.into(),
+        source: source.into(),
+        line,
+    })
+}
+
+fn rust_import_hints(line: &str, source: &str, line_number: usize) -> Vec<ImportHint> {
+    let line = line.trim();
+    if let Some(module) = line.strip_prefix("use ") {
+        return import_hint(rust_use_module(module), "use", source, line_number)
+            .into_iter()
+            .collect();
+    }
+    if let Some(module) = line
+        .strip_prefix("pub mod ")
+        .or_else(|| line.strip_prefix("mod "))
+    {
+        return import_hint(module.trim_end_matches(';'), "mod", source, line_number)
+            .into_iter()
+            .collect();
+    }
+    Vec::new()
+}
+
+fn rust_use_module(module: &str) -> String {
+    module
+        .trim_end_matches(';')
+        .split("::{")
+        .next()
+        .unwrap_or(module)
+        .trim()
+        .to_string()
+}
+
+fn python_import_hints(line: &str, source: &str, line_number: usize) -> Vec<ImportHint> {
+    let line = line.trim();
+    if let Some(modules) = line.strip_prefix("import ") {
+        return modules
+            .split(',')
+            .filter_map(|module| {
+                let module = module.split_whitespace().next().unwrap_or_default().trim();
+                import_hint(module, "import", source, line_number)
+            })
+            .collect();
+    }
+    if let Some(rest) = line.strip_prefix("from ") {
+        if let Some((module, _)) = rest.split_once(" import ") {
+            return import_hint(module, "from", source, line_number)
+                .into_iter()
+                .collect();
+        }
+    }
+    Vec::new()
+}
+
+fn js_import_hints(line: &str, source: &str, line_number: usize) -> Vec<ImportHint> {
+    static JS_FROM_RE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r#"\b(?:import|export)\b.+?\bfrom\s+["']([^"']+)["']"#).unwrap()
+    });
+    static JS_SIDE_EFFECT_RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r#"\bimport\s+["']([^"']+)["']"#).unwrap());
+    static JS_REQUIRE_RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r#"\brequire\(\s*["']([^"']+)["']\s*\)"#).unwrap());
+
+    let mut hints = Vec::new();
+    if let Some(module) = JS_FROM_RE
+        .captures(line)
+        .and_then(|capture| capture.get(1))
+        .and_then(|module| import_hint(module.as_str(), "import", source, line_number))
+    {
+        hints.push(module);
+    }
+    if let Some(module) = JS_SIDE_EFFECT_RE
+        .captures(line)
+        .and_then(|capture| capture.get(1))
+        .and_then(|module| import_hint(module.as_str(), "import", source, line_number))
+    {
+        hints.push(module);
+    }
+    if let Some(module) = JS_REQUIRE_RE
+        .captures(line)
+        .and_then(|capture| capture.get(1))
+        .and_then(|module| import_hint(module.as_str(), "require", source, line_number))
+    {
+        hints.push(module);
+    }
+    hints
+}
+
+fn go_import_hints(line: &str, source: &str, line_number: usize) -> Vec<ImportHint> {
+    static GO_IMPORT_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#""([^"]+)""#).unwrap());
+    let line = line.trim();
+    if line == "import (" || line == ")" || line.starts_with("//") {
+        return Vec::new();
+    }
+    if !line.starts_with("import ") && !line.starts_with('"') {
+        return Vec::new();
+    }
+    GO_IMPORT_RE
+        .captures_iter(line)
+        .filter_map(|capture| {
+            capture
+                .get(1)
+                .and_then(|module| import_hint(module.as_str(), "import", source, line_number))
+        })
+        .collect()
+}
+
+fn normalize_import_module(module: &str) -> Option<String> {
+    let module = module
+        .trim()
+        .trim_matches(|ch: char| ch == '"' || ch == '\'' || ch == ';' || ch == ',' || ch == '{')
+        .trim();
+    if module.is_empty()
+        || module.starts_with("//")
+        || module.starts_with('#')
+        || !module.chars().any(|ch| ch.is_alphanumeric() || ch == '.')
+    {
+        return None;
+    }
+    Some(module.chars().take(160).collect())
 }
 
 fn repo_dependency_filters_match(root: &Path, filters: &SearchFilters) -> Result<bool> {

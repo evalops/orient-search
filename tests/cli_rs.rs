@@ -642,8 +642,12 @@ fn cli_outputs_repo_map_and_reads_ranges() {
         .stdout(predicate::str::contains("\"manifest_files\""))
         .stdout(predicate::str::contains("\"command_hints\""))
         .stdout(predicate::str::contains("\"dependency_hints\""))
+        .stdout(predicate::str::contains("\"import_hints\""))
         .stdout(predicate::str::contains("\"command\":\"cargo test\""))
         .stdout(predicate::str::contains("\"source\":\"Cargo.toml\""))
+        .stdout(predicate::str::contains(
+            "\"module\":\"sample::SessionManager\"",
+        ))
         .stdout(predicate::str::contains("\"related_files\""))
         .stdout(predicate::str::contains("\"related_symbols\""))
         .stdout(predicate::str::contains("src/auth.rs"))

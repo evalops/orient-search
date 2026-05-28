@@ -2131,6 +2131,15 @@ fn prefix_repo_map_paths(
     map: &mut crate::repo_index::RepoMap,
     scope: &crate::shards::ShardSearchScope,
 ) {
+    for hint in &mut map.brief.command_hints {
+        hint.source = scoped_output_path(scope, &hint.source);
+    }
+    for hint in &mut map.brief.dependency_hints {
+        hint.source = scoped_output_path(scope, &hint.source);
+    }
+    for hint in &mut map.brief.import_hints {
+        hint.source = scoped_output_path(scope, &hint.source);
+    }
     for path in &mut map.brief.manifest_files {
         *path = scoped_output_path(scope, path);
     }

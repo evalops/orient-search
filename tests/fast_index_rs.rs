@@ -388,7 +388,7 @@ fn indexed_repo_map_returns_orientation_from_persisted_metadata() {
     let repo = tempfile::tempdir().unwrap();
     write(
         &repo.path().join("src/lib.rs"),
-        "pub struct SessionManager;\npub fn issue_token() {}\n",
+        "use serde::Serialize;\npub struct SessionManager;\npub fn issue_token() {}\n",
     );
     write(
         &repo.path().join("tests/auth_test.rs"),
@@ -443,6 +443,14 @@ fn indexed_repo_map_returns_orientation_from_persisted_metadata() {
     }));
     assert!(map.brief.dependency_hints.iter().any(|hint| {
         hint.name == "vite" && hint.kind == "dev_dependency" && hint.source == "package.json"
+    }));
+    assert!(map.brief.import_hints.iter().any(|hint| {
+        hint.module == "serde::Serialize" && hint.kind == "use" && hint.source == "src/lib.rs"
+    }));
+    assert!(map.brief.import_hints.iter().any(|hint| {
+        hint.module == "sample::SessionManager"
+            && hint.kind == "use"
+            && hint.source == "tests/auth_test.rs"
     }));
     assert_eq!(map.top_symbols[0].name, "SessionManager");
     assert!(

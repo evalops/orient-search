@@ -844,6 +844,9 @@ fn prefix_repo_map_paths(map: &mut RepoMap, scope: &ShardSearchScope) {
     for hint in &mut map.brief.dependency_hints {
         hint.source = scoped_output_path(scope, &hint.source);
     }
+    for hint in &mut map.brief.import_hints {
+        hint.source = scoped_output_path(scope, &hint.source);
+    }
     for path in &mut map.brief.manifest_files {
         *path = scoped_output_path(scope, path);
     }
@@ -879,6 +882,9 @@ pub(crate) fn filter_repo_map_by_prefix(map: &mut RepoMap, path_prefix: &str) {
         .retain(|path| matches_prefix(path));
     map.brief
         .dependency_hints
+        .retain(|hint| matches_prefix(&hint.source));
+    map.brief
+        .import_hints
         .retain(|hint| matches_prefix(&hint.source));
     map.entrypoints.retain(|path| matches_prefix(path));
     map.test_files.retain(|path| matches_prefix(path));

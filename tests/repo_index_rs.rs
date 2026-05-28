@@ -117,6 +117,18 @@ def test_issue_token_round_trip():
     assert!(brief.dependency_hints.iter().any(|hint| {
         hint.name == "typescript" && hint.kind == "dev_dependency" && hint.source == "package.json"
     }));
+    assert!(brief.import_hints.iter().any(|hint| {
+        hint.module == "json"
+            && hint.kind == "import"
+            && hint.source == "src/auth.py"
+            && hint.line == 2
+    }));
+    assert!(brief.import_hints.iter().any(|hint| {
+        hint.module == "src.auth"
+            && hint.kind == "from"
+            && hint.source == "tests/test_auth.py"
+            && hint.line == 2
+    }));
     assert!(brief.manifest_files.contains(&"pyproject.toml".to_string()));
     assert!(
         brief
