@@ -1089,7 +1089,9 @@ fn cli_searches_symbols_and_related_files() {
         .assert()
         .success()
         .stdout(predicate::str::contains("SessionManager"))
-        .stdout(predicate::str::contains("same file"));
+        .stdout(predicate::str::contains("same file"))
+        .stdout(predicate::str::contains("\"read_request\""))
+        .stdout(predicate::str::contains("\"tool\":\"read_range\""));
 }
 
 #[test]
@@ -2449,7 +2451,9 @@ fn cli_filters_shard_search_by_nested_repo_alias() {
         .stdout(predicate::str::contains(
             "\"path\":\"billing/src/billing.rs\"",
         ))
-        .stdout(predicate::str::contains("invoice_total"));
+        .stdout(predicate::str::contains("invoice_total"))
+        .stdout(predicate::str::contains("\"read_request\""))
+        .stdout(predicate::str::contains("\"tool\":\"read_shard_range\""));
 }
 
 #[test]

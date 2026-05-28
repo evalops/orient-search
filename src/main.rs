@@ -10,7 +10,8 @@ use orient::repo_index::{
     QueryPlan, RepoIndexer, ResultToolRequest, SearchFilters, SearchResult, SnippetMode,
     SymbolLookupResult, attach_result_context, attach_result_read_requests,
     attach_result_related_requests, attach_result_related_symbol_requests, read_file_range,
-    result_read_batch_request, search_repo_fast_filtered, symbol_lookup_results,
+    related_symbol_lookup_results, result_read_batch_request, search_repo_fast_filtered,
+    symbol_lookup_results,
 };
 use orient::server::{
     MAX_BATCH_QUERIES, MAX_BATCH_RANGES, ToolRuntime, agent_guide, agent_instructions,
@@ -2175,13 +2176,14 @@ fn run() -> Result<()> {
             query,
             limit,
         } => {
-            let index = RepoIndexer::new(repo).build()?;
+            let index = RepoIndexer::new(&repo).build()?;
+            let related = index.related_symbols(path.as_deref(), query.as_deref(), limit);
             println!(
                 "{}",
-                serde_json::to_string(&index.related_symbols(
-                    path.as_deref(),
-                    query.as_deref(),
-                    limit,
+                serde_json::to_string(&related_symbol_lookup_results(
+                    related,
+                    "read_range",
+                    read_request_args("repo", &repo)
                 ))?
             );
         }
@@ -2191,13 +2193,15 @@ fn run() -> Result<()> {
             query,
             limit,
         } => {
-            let index = FastIndex::load(index)?;
+            let index_path = index;
+            let index = FastIndex::load(&index_path)?;
+            let related = index.related_symbols(path.as_deref(), query.as_deref(), limit);
             println!(
                 "{}",
-                serde_json::to_string(&index.related_symbols(
-                    path.as_deref(),
-                    query.as_deref(),
-                    limit,
+                serde_json::to_string(&related_symbol_lookup_results(
+                    related,
+                    "read_index_range",
+                    read_request_args("index", &index_path)
                 ))?
             );
         }
@@ -2209,14 +2213,14 @@ fn run() -> Result<()> {
             limit,
         } => {
             let path = cli_single_path(path, path_arg)?;
+            let related = related_shard_symbols(&index_dir, &path, query.as_deref(), limit)?;
             println!(
                 "{}",
-                serde_json::to_string(&related_shard_symbols(
-                    index_dir,
-                    &path,
-                    query.as_deref(),
-                    limit,
-                )?)?
+                serde_json::to_string(&related_symbol_lookup_results(
+                    related,
+                    "read_shard_range",
+                    read_request_args("index_dir", &index_dir)
+                ))?
             );
         }
         Commands::BenchSearch {

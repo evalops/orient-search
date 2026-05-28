@@ -116,6 +116,15 @@ pub struct SymbolLookupResult {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RelatedSymbolLookupResult {
+    pub symbol: Symbol,
+    pub reason: String,
+    pub score: f64,
+    pub read_range: ResultReadRange,
+    pub read_request: ResultToolRequest,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RankSignal {
     pub kind: String,
     pub value: String,
@@ -3536,23 +3545,53 @@ pub fn symbol_lookup_results(
         .into_iter()
         .map(|symbol| {
             let read_range = symbol_read_range(&symbol);
-            let mut arguments = base_arguments.clone();
-            arguments.insert(
-                "path".to_string(),
-                serde_json::json!(read_range.path.clone()),
-            );
-            arguments.insert("start".to_string(), serde_json::json!(read_range.start));
-            arguments.insert("lines".to_string(), serde_json::json!(read_range.lines));
+            let read_request = read_request_from_range(tool, &base_arguments, &read_range);
             SymbolLookupResult {
                 symbol,
                 read_range,
-                read_request: ResultReadRequest {
-                    tool: tool.to_string(),
-                    arguments: serde_json::Value::Object(arguments),
-                },
+                read_request,
             }
         })
         .collect()
+}
+
+pub fn related_symbol_lookup_results(
+    related: Vec<RelatedSymbol>,
+    tool: &str,
+    base_arguments: serde_json::Map<String, serde_json::Value>,
+) -> Vec<RelatedSymbolLookupResult> {
+    related
+        .into_iter()
+        .map(|related| {
+            let read_range = symbol_read_range(&related.symbol);
+            let read_request = read_request_from_range(tool, &base_arguments, &read_range);
+            RelatedSymbolLookupResult {
+                symbol: related.symbol,
+                reason: related.reason,
+                score: related.score,
+                read_range,
+                read_request,
+            }
+        })
+        .collect()
+}
+
+fn read_request_from_range(
+    tool: &str,
+    base_arguments: &serde_json::Map<String, serde_json::Value>,
+    read_range: &ResultReadRange,
+) -> ResultToolRequest {
+    let mut arguments = base_arguments.clone();
+    arguments.insert(
+        "path".to_string(),
+        serde_json::json!(read_range.path.clone()),
+    );
+    arguments.insert("start".to_string(), serde_json::json!(read_range.start));
+    arguments.insert("lines".to_string(), serde_json::json!(read_range.lines));
+    ResultReadRequest {
+        tool: tool.to_string(),
+        arguments: serde_json::Value::Object(arguments),
+    }
 }
 
 pub fn result_read_batch_request(

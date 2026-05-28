@@ -2787,6 +2787,15 @@ fn runtime_reuses_cached_shard_index_after_initial_load() {
         "{:?}",
         related_symbols.result
     );
+    let related_symbols_result = serde_json::to_string(&related_symbols.result).unwrap();
+    assert!(
+        related_symbols_result.contains("\"read_request\""),
+        "{related_symbols_result}"
+    );
+    assert!(
+        related_symbols_result.contains("\"tool\":\"read_shard_range\""),
+        "{related_symbols_result}"
+    );
 
     let plan = runtime.dispatch(ToolRequest {
         id: serde_json::json!("plan"),
@@ -3351,6 +3360,8 @@ fn runtime_filters_shard_search_by_nested_repo_alias() {
         "{result}"
     );
     assert!(result.contains("invoice_total"), "{result}");
+    assert!(result.contains("\"read_request\""), "{result}");
+    assert!(result.contains("\"tool\":\"read_shard_range\""), "{result}");
 }
 
 #[test]
@@ -4600,4 +4611,6 @@ fn server_handles_repo_map_and_read_range_requests() {
     assert!(stdout.contains("\"path\":\"tests/auth_test.rs\""));
     assert!(stdout.contains("\"id\":\"symbols\""));
     assert!(stdout.contains("same file"));
+    assert!(stdout.contains("\"read_request\""));
+    assert!(stdout.contains("\"tool\":\"read_range\""));
 }

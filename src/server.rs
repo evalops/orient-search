@@ -8,8 +8,8 @@ use crate::repo_index::{
     QueryPlanFilter, RepoIndexer, ResultToolRequest, SearchFilters, SearchResult, SnippetMode,
     Symbol, SymbolLookupResult, attach_result_context, attach_result_read_requests,
     attach_result_related_requests, attach_result_related_symbol_requests, finalize_results,
-    normalize_token, read_file_range, result_read_batch_request, search_repo_fast_filtered,
-    symbol_lookup_results,
+    normalize_token, read_file_range, related_symbol_lookup_results, result_read_batch_request,
+    search_repo_fast_filtered, symbol_lookup_results,
 };
 use crate::shards::{
     ShardEntry, ShardManifest, ShardQueryPlan, ShardRepoMap, ShardSearchScope, build_shards,
@@ -2216,11 +2216,12 @@ impl ToolRuntime {
                 let path = optional_string_arg(&request.arguments, "path");
                 let query = optional_string_arg(&request.arguments, "query");
                 let limit = positive_usize_arg(&request.arguments, "limit", 10)?;
-                let index = RepoIndexer::new(repo).build()?;
-                Ok(serde_json::to_value(index.related_symbols(
-                    path.as_deref(),
-                    query.as_deref(),
-                    limit,
+                let index = RepoIndexer::new(&repo).build()?;
+                let related = index.related_symbols(path.as_deref(), query.as_deref(), limit);
+                Ok(serde_json::to_value(related_symbol_lookup_results(
+                    related,
+                    "read_range",
+                    read_request_args("repo", &repo),
                 ))?)
             }
             "related_shard_symbols" => {
@@ -2228,23 +2229,25 @@ impl ToolRuntime {
                 let path = string_arg(&request.arguments, "path")?;
                 let query = optional_string_arg(&request.arguments, "query");
                 let limit = positive_usize_arg(&request.arguments, "limit", 10)?;
-                Ok(serde_json::to_value(self.related_shard_symbols_cached(
-                    &index_dir,
-                    &path,
-                    query.as_deref(),
-                    limit,
-                )?)?)
+                let related =
+                    self.related_shard_symbols_cached(&index_dir, &path, query.as_deref(), limit)?;
+                Ok(serde_json::to_value(related_symbol_lookup_results(
+                    related,
+                    "read_shard_range",
+                    read_request_args("index_dir", &index_dir),
+                ))?)
             }
             "related_index_symbols" => {
                 let index_path = self.index_path_arg_or_single_cached(&request.arguments)?;
                 let path = optional_string_arg(&request.arguments, "path");
                 let query = optional_string_arg(&request.arguments, "query");
                 let limit = positive_usize_arg(&request.arguments, "limit", 10)?;
-                let index = self.cached_index(index_path)?;
-                Ok(serde_json::to_value(index.related_symbols(
-                    path.as_deref(),
-                    query.as_deref(),
-                    limit,
+                let index = self.cached_index(index_path.clone())?;
+                let related = index.related_symbols(path.as_deref(), query.as_deref(), limit);
+                Ok(serde_json::to_value(related_symbol_lookup_results(
+                    related,
+                    "read_index_range",
+                    read_request_args("index", &index_path),
                 ))?)
             }
             "warm_index" => {
