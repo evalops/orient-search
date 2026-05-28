@@ -440,13 +440,13 @@ fn search_result_limits_are_capped() {
     for index in 0..MAX_SEARCH_RESULTS + 25 {
         write(
             &repo.path().join(format!("src/file_{index:03}.rs")),
-            "pub fn shared_cap_token() {}\n",
+            "pub fn sharedcaptoken() {}\n",
         );
     }
 
     let fallback = search_repo_fast_filtered(
         repo.path(),
-        "shared cap token",
+        "sharedcaptoken",
         MAX_SEARCH_RESULTS + 25,
         &SearchFilters::default(),
     )
@@ -456,7 +456,7 @@ fn search_result_limits_are_capped() {
     let index = FastIndex::build(repo.path()).unwrap();
     let indexed = index
         .search_filtered(
-            "shared cap token",
+            "sharedcaptoken",
             MAX_SEARCH_RESULTS + 25,
             &SearchFilters::default(),
         )
@@ -1425,6 +1425,11 @@ fn filter_only_queries_discover_files_without_content_terms() {
     assert_eq!(indexed[0].path, "tests/auth_test.rs");
     assert!(indexed[0].reason.contains("language_filter:rust"));
     assert!(indexed[0].reason.contains("test_filter:true"));
+    assert!(
+        indexed[0]
+            .snippet
+            .starts_with("1: use sample::SessionManager;")
+    );
     let plan = indexed[0].query_plan.as_ref().unwrap();
     assert_eq!(plan.strategy, "filter_scan");
     assert_eq!(plan.candidate_count, 1);

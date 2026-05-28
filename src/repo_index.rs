@@ -4766,15 +4766,6 @@ pub(crate) fn filter_only_query(filters: &SearchFilters) -> bool {
         || filters.test.is_some()
 }
 
-pub(crate) fn score_filter_only_path(
-    path: &str,
-    filters: &SearchFilters,
-    explain: bool,
-) -> Option<FilterOnlyMatch> {
-    let path_lower = path.to_ascii_lowercase();
-    score_filter_only_path_with_lower(path, &path_lower, filters, explain)
-}
-
 fn score_filter_only_path_with_lower(
     path: &str,
     path_lower: &str,
@@ -4785,6 +4776,14 @@ fn score_filter_only_path_with_lower(
         return None;
     }
 
+    Some(score_filter_only_path_match(path, filters, explain))
+}
+
+pub(crate) fn score_filter_only_path_match(
+    path: &str,
+    filters: &SearchFilters,
+    explain: bool,
+) -> FilterOnlyMatch {
     let mut score = 0.0;
     let mut reasons = Vec::new();
     let mut signals = Vec::new();
@@ -4903,11 +4902,11 @@ fn score_filter_only_path_with_lower(
         }
     }
 
-    Some(FilterOnlyMatch {
+    FilterOnlyMatch {
         score: round4(score),
         reasons,
         signals,
-    })
+    }
 }
 
 pub(crate) fn filter_only_search_result(

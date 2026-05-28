@@ -6,16 +6,16 @@ use crate::repo_index::{
     QueryPlanRepairHint, RankSignal, RelatedFile, RelatedSymbol, RepoBrief, RepoMap, RepoMapDetail,
     SearchFilters, SearchResult, SnippetMode, Symbol, best_snippet_for_path_with_phrases,
     capped_search_limit, command_hints_from_manifest_texts, dependency_filters_match,
-    dependency_hints_from_manifest_texts, extract_symbols, filter_only_query,
-    filter_only_search_result, filter_value_matches, finalize_results,
-    import_hints_from_source_texts, is_entrypoint_path, is_ignored, is_important_file,
-    is_manifest_file, is_test_path, known_commands_from_hints, language_for,
+    dependency_hints_from_manifest_texts, extract_symbols, filter_only_query, filter_value_matches,
+    finalize_results, import_hints_from_source_texts, is_entrypoint_path, is_ignored,
+    is_important_file, is_manifest_file, is_test_path, known_commands_from_hints, language_for,
     matches_filters_with_path_metadata, normalize_language_filter, normalize_token,
     regular_file_metadata, related_query_terms_symbol_and_filters, related_stem_terms,
     repo_map_seed_paths, repo_matches, result_matches_all_tokens, result_matches_symbol_filters,
-    round4, score_filter_only_path, select_repo_brief_import_hints, select_repo_map_top_symbols,
-    source_import_filters_match, symbol_exact_phrase_bonus, symbol_matches_related_filters,
-    symbol_query_match_score, token_counts, tokenize, unique_query_tokens,
+    round4, score_filter_only_path_match, select_repo_brief_import_hints,
+    select_repo_map_top_symbols, source_import_filters_match, symbol_exact_phrase_bonus,
+    symbol_matches_related_filters, symbol_query_match_score, token_counts, tokenize,
+    unique_query_tokens,
 };
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use anyhow::{Context, Result};
@@ -1414,18 +1414,12 @@ impl FastIndex {
                     Some(candidate_ids) => candidate_ids
                         .iter()
                         .filter_map(|file_id| self.files.get(*file_id as usize))
-                        .filter(|file| {
-                            indexed_file_matches_filters(file, &filters)
-                                && score_filter_only_path(&file.path, &filters, false).is_some()
-                        })
+                        .filter(|file| indexed_file_matches_filters(file, &filters))
                         .count(),
                     None => self
                         .files
                         .iter()
-                        .filter(|file| {
-                            indexed_file_matches_filters(file, &filters)
-                                && score_filter_only_path(&file.path, &filters, false).is_some()
-                        })
+                        .filter(|file| indexed_file_matches_filters(file, &filters))
                         .count(),
                 };
                 let candidate_count = candidate_ids
@@ -2429,14 +2423,23 @@ fn indexed_filter_only_result(file: &IndexedPath, filters: &SearchFilters) -> Op
     if !indexed_file_matches_filters(file, filters) {
         return None;
     }
-    let matched = score_filter_only_path(&file.path, filters, filters.explain)?;
-    let mut result = filter_only_search_result(
-        &file.path,
-        &file.content,
-        matched,
-        filters.snippet,
-        filters.explain,
-    );
+    let matched = score_filter_only_path_match(&file.path, filters, filters.explain);
+    let mut result = SearchResult {
+        path: file.path.clone(),
+        score: matched.score,
+        reason: format!("filter match {}", matched.reasons.join(", ")),
+        snippet: indexed_filter_only_snippet(file, filters.snippet),
+        line_range: None,
+        match_lines: Vec::new(),
+        explanation: filters.explain.then_some(matched.signals),
+        query_plan: None,
+        duplicate_group: None,
+        context: None,
+        read_range: None,
+        read_request: None,
+        related_request: None,
+        related_symbols_request: None,
+    };
     if let Some(symbol) = filters
         .symbol_kind
         .as_deref()
@@ -2450,6 +2453,13 @@ fn indexed_filter_only_result(file: &IndexedPath, filters: &SearchFilters) -> Op
         result.reason.push_str(&format!(", symbol:{}", symbol.name));
     }
     Some(result)
+}
+
+fn indexed_filter_only_snippet(file: &IndexedPath, mode: SnippetMode) -> String {
+    if file.content.is_empty() || file.line_offsets.is_empty() {
+        return String::new();
+    }
+    render_indexed_window(file.content.as_bytes(), &file.line_offsets, 1, mode)
 }
 
 fn indexed_path_matches_symbol_filter(file: &IndexedPath, wanted: &str) -> bool {
