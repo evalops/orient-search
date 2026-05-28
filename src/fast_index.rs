@@ -1005,42 +1005,18 @@ impl FastIndex {
             };
         let candidate_count = candidate_ids.len();
 
-        let posting_maps = token_postings
+        let posting_lists = token_postings
             .iter()
-            .map(|(token, postings)| {
-                (
-                    (*token).clone(),
-                    postings
-                        .iter()
-                        .map(|posting| (posting.file_id, posting.count))
-                        .collect::<HashMap<_, _>>(),
-                )
-            })
+            .map(|(token, postings)| (token.as_str(), postings.as_slice()))
             .collect::<Vec<_>>();
-        let path_maps = path_postings
+        let path_lists = path_postings
             .iter()
-            .map(|(token, postings)| {
-                (
-                    (*token).clone(),
-                    postings
-                        .iter()
-                        .map(|posting| (posting.file_id, posting.count))
-                        .collect::<HashMap<_, _>>(),
-                )
-            })
+            .map(|(token, postings)| (token.as_str(), postings.as_slice()))
             .collect::<Vec<_>>();
-        let trigram_maps = trigram_postings
+        let trigram_lists = trigram_postings
             .iter()
             .take(16)
-            .map(|(trigram, postings)| {
-                (
-                    (*trigram).clone(),
-                    postings
-                        .iter()
-                        .map(|posting| (posting.file_id, posting.count))
-                        .collect::<HashMap<_, _>>(),
-                )
-            })
+            .map(|(trigram, postings)| (trigram.as_str(), postings.as_slice()))
             .collect::<Vec<_>>();
         let candidate_cap = indexed_candidate_cap(limit);
         let (candidate_ids, candidate_cap_hit) = cap_candidate_ids(
@@ -1048,9 +1024,9 @@ impl FastIndex {
             candidate_cap,
             &self.files,
             &query_tokens,
-            &posting_maps,
-            &path_maps,
-            &trigram_maps,
+            &posting_lists,
+            &path_lists,
+            &trigram_lists,
         );
         let active_filters =
             query_plan_filters_for_candidates(&filters, &self.files, &candidate_ids);
@@ -1070,9 +1046,9 @@ impl FastIndex {
                     file_id,
                     &query_tokens,
                     &query_phrases,
-                    &posting_maps,
-                    &path_maps,
-                    &trigram_maps,
+                    &posting_lists,
+                    &path_lists,
+                    &trigram_lists,
                     filters.snippet,
                     filters.explain,
                     None,
@@ -1303,42 +1279,18 @@ impl FastIndex {
             };
 
         let candidate_count = candidate_ids.len();
-        let posting_maps = token_postings
+        let posting_lists = token_postings
             .iter()
-            .map(|(token, postings)| {
-                (
-                    (*token).clone(),
-                    postings
-                        .iter()
-                        .map(|posting| (posting.file_id, posting.count))
-                        .collect::<HashMap<_, _>>(),
-                )
-            })
+            .map(|(token, postings)| (token.as_str(), postings.as_slice()))
             .collect::<Vec<_>>();
-        let path_maps = path_postings
+        let path_lists = path_postings
             .iter()
-            .map(|(token, postings)| {
-                (
-                    (*token).clone(),
-                    postings
-                        .iter()
-                        .map(|posting| (posting.file_id, posting.count))
-                        .collect::<HashMap<_, _>>(),
-                )
-            })
+            .map(|(token, postings)| (token.as_str(), postings.as_slice()))
             .collect::<Vec<_>>();
-        let trigram_maps = trigram_postings
+        let trigram_lists = trigram_postings
             .iter()
             .take(16)
-            .map(|(trigram, postings)| {
-                (
-                    (*trigram).clone(),
-                    postings
-                        .iter()
-                        .map(|posting| (posting.file_id, posting.count))
-                        .collect::<HashMap<_, _>>(),
-                )
-            })
+            .map(|(trigram, postings)| (trigram.as_str(), postings.as_slice()))
             .collect::<Vec<_>>();
         let candidate_cap = MAX_INDEX_CANDIDATES_TO_SCORE;
         let (candidate_ids, candidate_cap_hit) = cap_candidate_ids(
@@ -1346,9 +1298,9 @@ impl FastIndex {
             candidate_cap,
             &self.files,
             &query_tokens,
-            &posting_maps,
-            &path_maps,
-            &trigram_maps,
+            &posting_lists,
+            &path_lists,
+            &trigram_lists,
         );
         let active_filters =
             query_plan_filters_for_candidates(&filters, &self.files, &candidate_ids);
@@ -1368,9 +1320,9 @@ impl FastIndex {
                     file_id,
                     &query_tokens,
                     &query_phrases,
-                    &posting_maps,
-                    &path_maps,
-                    &trigram_maps,
+                    &posting_lists,
+                    &path_lists,
+                    &trigram_lists,
                     filters.snippet,
                     false,
                     None,
@@ -1455,9 +1407,9 @@ impl FastIndex {
         file_id: u32,
         query_tokens: &[String],
         query_phrases: &[String],
-        posting_maps: &[(String, HashMap<u32, u16>)],
-        path_maps: &[(String, HashMap<u32, u16>)],
-        trigram_maps: &[(String, HashMap<u32, u16>)],
+        posting_lists: &[(&str, &[Posting])],
+        path_lists: &[(&str, &[Posting])],
+        trigram_lists: &[(&str, &[Posting])],
         snippet_mode: SnippetMode,
         explain: bool,
         query_plan: Option<&QueryPlan>,
@@ -1481,8 +1433,8 @@ impl FastIndex {
             return None;
         }
 
-        for (token, postings) in posting_maps {
-            let count = postings.get(&file_id).copied().unwrap_or_default();
+        for &(token, postings) in posting_lists {
+            let count = posting_count(postings, file_id);
             let mut token_score = 0.0;
             if count > 0 {
                 let amount = 1.0 + (count as f64).ln();
@@ -1495,24 +1447,24 @@ impl FastIndex {
             }
             if token_score > 0.0 {
                 score += token_score;
-                reasons.push(token.clone());
+                reasons.push(token.to_string());
             }
         }
-        for (token, postings) in path_maps {
-            let count = postings.get(&file_id).copied().unwrap_or_default();
+        for &(token, postings) in path_lists {
+            let count = posting_count(postings, file_id);
             if count > 0 {
                 let amount = 8.0 + (count as f64).ln();
                 score += amount;
                 signals.push(rank_signal("path_term", token, amount));
-                if !reasons.contains(token) {
-                    reasons.push(token.clone());
+                if !reasons.iter().any(|reason| reason == token) {
+                    reasons.push(token.to_string());
                 }
             }
         }
         let mut trigram_score = 0.0;
         let mut trigram_hits = 0usize;
-        for (trigram, postings) in trigram_maps {
-            let count = postings.get(&file_id).copied().unwrap_or_default();
+        for &(trigram, postings) in trigram_lists {
+            let count = posting_count(postings, file_id);
             if count > 0 {
                 trigram_score += 0.2 + (count as f64).ln() * 0.05;
                 trigram_hits += 1;
@@ -2414,6 +2366,9 @@ fn rebuild_postings(
                 });
         }
     }
+    for values in postings.values_mut() {
+        values.sort_unstable_by_key(|posting| posting.file_id);
+    }
     postings
 }
 
@@ -2426,9 +2381,9 @@ fn cap_candidate_ids(
     candidate_cap: usize,
     files: &[IndexedPath],
     query_tokens: &[String],
-    posting_maps: &[(String, HashMap<u32, u16>)],
-    path_maps: &[(String, HashMap<u32, u16>)],
-    trigram_maps: &[(String, HashMap<u32, u16>)],
+    posting_lists: &[(&str, &[Posting])],
+    path_lists: &[(&str, &[Posting])],
+    trigram_lists: &[(&str, &[Posting])],
 ) -> (Vec<u32>, bool) {
     let cap_hit = candidate_ids.len() > candidate_cap;
     let mut ids = candidate_ids.into_iter().collect::<Vec<_>>();
@@ -2438,17 +2393,17 @@ fn cap_candidate_ids(
                 *right,
                 files,
                 query_tokens,
-                posting_maps,
-                path_maps,
-                trigram_maps,
+                posting_lists,
+                path_lists,
+                trigram_lists,
             )
             .partial_cmp(&candidate_rank_score(
                 *left,
                 files,
                 query_tokens,
-                posting_maps,
-                path_maps,
-                trigram_maps,
+                posting_lists,
+                path_lists,
+                trigram_lists,
             ))
             .unwrap_or(Ordering::Equal)
             .then_with(|| candidate_path(files, *left).cmp(candidate_path(files, *right)))
@@ -2463,9 +2418,9 @@ fn candidate_rank_score(
     file_id: u32,
     files: &[IndexedPath],
     query_tokens: &[String],
-    posting_maps: &[(String, HashMap<u32, u16>)],
-    path_maps: &[(String, HashMap<u32, u16>)],
-    trigram_maps: &[(String, HashMap<u32, u16>)],
+    posting_lists: &[(&str, &[Posting])],
+    path_lists: &[(&str, &[Posting])],
+    trigram_lists: &[(&str, &[Posting])],
 ) -> f64 {
     let Some(file) = files.get(file_id as usize) else {
         return 0.0;
@@ -2473,21 +2428,24 @@ fn candidate_rank_score(
     let path_lower = &file.path_lower;
     let query_name = query_tokens.join("");
     let mut score = 0.0;
-    for (token, postings) in posting_maps {
-        if let Some(count) = postings.get(&file_id).copied() {
+    for &(token, postings) in posting_lists {
+        let count = posting_count(postings, file_id);
+        if count > 0 {
             score += 1.0 + (count as f64).ln();
         }
         if path_lower.contains(token) {
             score += 8.0;
         }
     }
-    for (_, postings) in path_maps {
-        if let Some(count) = postings.get(&file_id).copied() {
+    for &(_, postings) in path_lists {
+        let count = posting_count(postings, file_id);
+        if count > 0 {
             score += 8.0 + (count as f64).ln();
         }
     }
-    for (_, postings) in trigram_maps {
-        if let Some(count) = postings.get(&file_id).copied() {
+    for &(_, postings) in trigram_lists {
+        let count = posting_count(postings, file_id);
+        if count > 0 {
             score += 0.2 + (count as f64).ln() * 0.05;
         }
     }
@@ -2504,6 +2462,13 @@ fn candidate_rank_score(
         }
     }
     score
+}
+
+fn posting_count(postings: &[Posting], file_id: u32) -> u16 {
+    postings
+        .binary_search_by_key(&file_id, |posting| posting.file_id)
+        .map(|index| postings[index].count)
+        .unwrap_or_default()
 }
 
 fn candidate_path(files: &[IndexedPath], file_id: u32) -> &str {

@@ -209,6 +209,38 @@ fn saved_indexes_have_versioned_header_and_legacy_indexes_still_load() {
 }
 
 #[test]
+fn indexed_posting_lists_are_sorted_for_direct_lookup() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/a.rs"),
+        "pub fn shared_token() { let needle = 1; }\n",
+    );
+    write(
+        &repo.path().join("src/b.rs"),
+        "pub fn shared_token() { let needle = 2; }\n",
+    );
+    write(
+        &repo.path().join("tests/shared_test.rs"),
+        "#[test]\nfn shared_token_test() { assert!(true); }\n",
+    );
+
+    let index = FastIndex::build(repo.path()).unwrap();
+    for postings in index
+        .postings
+        .values()
+        .chain(index.path_postings.values())
+        .chain(index.trigram_postings.values())
+    {
+        assert!(
+            postings
+                .windows(2)
+                .all(|pair| pair[0].file_id <= pair[1].file_id)
+        );
+    }
+    assert_eq!(index.search("shared token", 10).unwrap().len(), 3);
+}
+
+#[test]
 fn saving_index_replaces_existing_file_without_leaving_temp_files() {
     let repo = tempfile::tempdir().unwrap();
     write(
