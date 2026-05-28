@@ -404,6 +404,7 @@ pub fn search_repo_fast_filtered_with_timeout(
 ) -> Result<Vec<SearchResult>> {
     let limit = capped_search_limit(limit);
     let root = root.as_ref().canonicalize()?;
+    let deadline = Instant::now() + timeout;
     let parsed = parse_query(query);
     let query_phrases = query_phrases(&parsed.terms);
     let mut filters = merge_filters(filters.clone(), parsed.filters);
@@ -438,10 +439,41 @@ pub fn search_repo_fast_filtered_with_timeout(
         &filters,
         timeout,
     )? {
+        if !results.is_empty()
+            || !strict_fallback_rescue_needed(&query_tokens, &query_phrases, &filters)
+        {
+            return Ok(results);
+        }
+        let rescued = search_repo_streaming_until(
+            &root,
+            &query_tokens,
+            &query_phrases,
+            limit,
+            &filters,
+            deadline,
+        )?;
+        if !rescued.is_empty() {
+            return Ok(rescued);
+        }
         return Ok(results);
     }
 
-    search_repo_streaming(&root, &query_tokens, &query_phrases, limit, &filters)
+    search_repo_streaming_until(
+        &root,
+        &query_tokens,
+        &query_phrases,
+        limit,
+        &filters,
+        deadline,
+    )
+}
+
+fn strict_fallback_rescue_needed(
+    query_tokens: &[String],
+    query_phrases: &[String],
+    filters: &SearchFilters,
+) -> bool {
+    filters.require_all || query_tokens.len() > 1 || !query_phrases.is_empty()
 }
 
 fn search_repo_filter_only(
@@ -966,12 +998,13 @@ fn search_repo_ripgrep(
     Ok(Some(finalize_results(results, limit)))
 }
 
-fn search_repo_streaming(
+fn search_repo_streaming_until(
     root: &Path,
     query_tokens: &[String],
     query_phrases: &[String],
     limit: usize,
     filters: &SearchFilters,
+    deadline: Instant,
 ) -> Result<Vec<SearchResult>> {
     let mut results = Vec::new();
 
@@ -980,6 +1013,9 @@ fn search_repo_streaming(
         .filter_entry(|entry| !is_ignored(entry.path()))
         .build()
     {
+        if Instant::now() >= deadline {
+            break;
+        }
         let entry = entry?;
         let path = entry.path();
         let Some(metadata) = regular_file_metadata(path) else {

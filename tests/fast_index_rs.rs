@@ -571,6 +571,31 @@ fn explicit_any_terms_relaxes_default_and_for_orientation() {
 }
 
 #[test]
+fn fallback_strict_search_rescues_late_matches_after_rg_max_count() {
+    let repo = tempfile::tempdir().unwrap();
+    let mut text = String::new();
+    for index in 0..20 {
+        text.push_str(&format!("pub const ALPHA_{index}: &str = \"alpha\";\n"));
+    }
+    text.push_str("pub fn target_value() -> &'static str { \"done\" }\n");
+    write(&repo.path().join("src/lib.rs"), &text);
+
+    let results = search_repo_fast_filtered(
+        repo.path(),
+        "alpha target_value",
+        5,
+        &SearchFilters::default(),
+    )
+    .unwrap();
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].path, "src/lib.rs");
+    assert!(results[0].reason.contains("alpha"), "{results:?}");
+    assert!(results[0].reason.contains("target"), "{results:?}");
+    assert!(results[0].reason.contains("value"), "{results:?}");
+}
+
+#[test]
 fn indexed_symbol_lookup_returns_definition_paths() {
     let repo = tempfile::tempdir().unwrap();
     write(
