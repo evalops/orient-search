@@ -92,8 +92,18 @@ fn golden_cases() -> Vec<GoldenCase> {
             filters: SearchFilters::default(),
         },
         GoldenCase {
+            query: "is:test issue token",
+            expected_path: "tests/auth_test.rs",
+            filters: SearchFilters::default(),
+        },
+        GoldenCase {
             query: "path:src gateway",
             expected_path: "src/http_gateway.rs",
+            filters: SearchFilters::default(),
+        },
+        GoldenCase {
+            query: "is:source issue token -path:docs",
+            expected_path: "src/auth.rs",
             filters: SearchFilters::default(),
         },
         GoldenCase {

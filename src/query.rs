@@ -89,6 +89,10 @@ fn apply_filter(filters: &mut SearchFilters, token: &str, negated: bool) -> bool
             filters.import = Some(value.to_ascii_lowercase())
         }
         (false, "test" | "tests") => filters.test = Some(parse_boolish(&value).unwrap_or(true)),
+        (false, "is") => match test_filter_from_is_value(&value) {
+            Some(value) => filters.test = Some(value),
+            None => return false,
+        },
         (true, "file") => filters.exclude_file.push(value),
         (true, "path" | "dir" | "directory") => filters.exclude_path.push(value),
         (true, "lang" | "language") => filters.exclude_language.push(value.to_ascii_lowercase()),
@@ -107,9 +111,21 @@ fn apply_filter(filters: &mut SearchFilters, token: &str, negated: bool) -> bool
             filters.exclude_import.push(value.to_ascii_lowercase())
         }
         (true, "test" | "tests") => filters.test = Some(false),
+        (true, "is") => match test_filter_from_is_value(&value) {
+            Some(value) => filters.test = Some(!value),
+            None => return false,
+        },
         _ => return false,
     }
     true
+}
+
+fn test_filter_from_is_value(value: &str) -> Option<bool> {
+    match value.to_ascii_lowercase().as_str() {
+        "test" | "tests" | "spec" | "specs" => Some(true),
+        "source" | "src" | "code" | "prod" | "production" => Some(false),
+        _ => None,
+    }
 }
 
 fn parse_boolish(value: &str) -> Option<bool> {
@@ -295,6 +311,24 @@ mod tests {
         assert_eq!(parsed.filters.exclude_symbol_kind, vec!["class"]);
         assert_eq!(parsed.filters.exclude_import, vec!["legacy"]);
         assert_eq!(parsed.filters.symbol.as_deref(), Some("Runtime"));
+    }
+
+    #[test]
+    fn parses_is_test_and_is_source_aliases() {
+        let tests = parse_query("is:test issue token");
+        assert_eq!(tests.terms, vec!["issue", "token"]);
+        assert_eq!(tests.filters.test, Some(true));
+
+        let source = parse_query("is:source issue token");
+        assert_eq!(source.terms, vec!["issue", "token"]);
+        assert_eq!(source.filters.test, Some(false));
+
+        let negated = parse_query("-is:test issue token");
+        assert_eq!(negated.filters.test, Some(false));
+
+        let unknown = parse_query("is:generated issue token");
+        assert_eq!(unknown.terms, vec!["is:generated", "issue", "token"]);
+        assert_eq!(unknown.filters.test, None);
     }
 
     #[test]
