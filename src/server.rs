@@ -661,7 +661,7 @@ fn argument_schema(tool_name: &str, name: &str) -> Value {
     let mut schema = Map::new();
     match name {
         "exclude_file" | "exclude_path" | "exclude_language" | "exclude_extension"
-        | "exclude_symbol" | "exclude_repo" | "exclude_dependency" => {
+        | "exclude_symbol" | "exclude_repo" | "exclude_dependency" | "exclude_import" => {
             schema.insert(
                 "oneOf".to_string(),
                 json!([
@@ -802,7 +802,9 @@ fn argument_type(name: &str) -> &'static str {
         "test" | "explain" | "require_all" | "refresh_if_stale" | "git_metadata"
         | "tracked_files" | "nested_manifests" => "boolean",
         "exclude_file" | "exclude_path" | "exclude_language" | "exclude_extension"
-        | "exclude_symbol" | "exclude_repo" | "exclude_dependency" => "string|string[]",
+        | "exclude_symbol" | "exclude_repo" | "exclude_dependency" | "exclude_import" => {
+            "string|string[]"
+        }
         "ranges" => "range[]",
         "repos" | "discover_roots" | "queries" => "string[]",
         _ => "string",
@@ -889,6 +891,7 @@ fn argument_description(name: &str) -> &'static str {
         "extension" => "File extension filter with or without a leading dot.",
         "symbol" => "Symbol name to require or boost.",
         "dependency" => "Dependency name substring used as a repo-level search filter.",
+        "import" => "Imported module substring used as a file-level search filter.",
         "file" => "File basename substring filter.",
         "test" => "When true, include only test paths; when false, exclude test paths.",
         "snippet" => "Snippet mode: short, medium, block, or symbol.",
@@ -905,6 +908,7 @@ fn argument_description(name: &str) -> &'static str {
         "exclude_symbol" => "Symbol name or list of symbols to exclude.",
         "exclude_repo" => "Repository name substring or list of substrings to exclude.",
         "exclude_dependency" => "Dependency name or list of dependency substrings to exclude.",
+        "exclude_import" => "Imported module or list of module substrings to exclude.",
         "root" | "discover_root" => "Workspace root to scan for repositories.",
         "discover_roots" => "Workspace roots to scan for repositories.",
         "repos" => "Explicit repository roots to add to a shard directory.",
@@ -2173,6 +2177,7 @@ const SEARCH_OPTIONAL_ARGS: &[&str] = &[
     "extension",
     "symbol",
     "dependency",
+    "import",
     "file",
     "repo_filter",
     "test",
@@ -2187,6 +2192,7 @@ const SEARCH_OPTIONAL_ARGS: &[&str] = &[
     "exclude_symbol",
     "exclude_repo",
     "exclude_dependency",
+    "exclude_import",
 ];
 
 const SEARCH_INDEX_OPTIONAL_ARGS: &[&str] = &[
@@ -2197,6 +2203,7 @@ const SEARCH_INDEX_OPTIONAL_ARGS: &[&str] = &[
     "extension",
     "symbol",
     "dependency",
+    "import",
     "file",
     "repo",
     "repo_filter",
@@ -2213,6 +2220,7 @@ const SEARCH_INDEX_OPTIONAL_ARGS: &[&str] = &[
     "exclude_symbol",
     "exclude_repo",
     "exclude_dependency",
+    "exclude_import",
 ];
 
 const PLAN_INDEX_OPTIONAL_ARGS: &[&str] = &[
@@ -2222,6 +2230,7 @@ const PLAN_INDEX_OPTIONAL_ARGS: &[&str] = &[
     "extension",
     "symbol",
     "dependency",
+    "import",
     "file",
     "repo",
     "repo_filter",
@@ -2235,6 +2244,7 @@ const PLAN_INDEX_OPTIONAL_ARGS: &[&str] = &[
     "exclude_symbol",
     "exclude_repo",
     "exclude_dependency",
+    "exclude_import",
 ];
 
 const SHARD_BUILD_OPTIONAL_ARGS: &[&str] = &[
@@ -2589,6 +2599,7 @@ fn search_filters(arguments: &Value, allow_repo_alias: bool) -> Result<SearchFil
         symbol: optional_string_arg(arguments, "symbol"),
         dependency: optional_string_arg(arguments, "dependency")
             .map(|value| value.to_ascii_lowercase()),
+        import: optional_string_arg(arguments, "import").map(|value| value.to_ascii_lowercase()),
         file: optional_string_arg(arguments, "file"),
         repo: if allow_repo_alias {
             optional_string_arg_any(arguments, &["repo", "repo_filter"])
@@ -2615,6 +2626,7 @@ fn search_filters(arguments: &Value, allow_repo_alias: bool) -> Result<SearchFil
         exclude_symbol: optional_string_list_arg(arguments, "exclude_symbol")?,
         exclude_repo: optional_string_list_arg(arguments, "exclude_repo")?,
         exclude_dependency: normalized_string_list_arg(arguments, "exclude_dependency")?,
+        exclude_import: normalized_string_list_arg(arguments, "exclude_import")?,
         ..SearchFilters::default()
     })
 }

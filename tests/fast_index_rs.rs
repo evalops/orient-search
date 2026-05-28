@@ -1366,7 +1366,7 @@ fn dependency_filters_scope_fallback_indexed_and_shard_search() {
     );
     write(
         &rust_repo.join("src/lib.rs"),
-        "pub fn issue_token() { let token = \"serde backed\"; }\n",
+        "use serde::Serialize;\npub fn issue_token() { let token = \"serde backed\"; }\n",
     );
     write(
         &react_repo.join("package.json"),
@@ -1374,12 +1374,12 @@ fn dependency_filters_scope_fallback_indexed_and_shard_search() {
     );
     write(
         &react_repo.join("src/lib.ts"),
-        "export function issueToken() { return 'react backed token'; }\n",
+        "import React from 'react';\nexport function issueToken() { return 'react backed token'; }\n",
     );
 
     let fallback = search_repo_fast_filtered(
         &rust_repo,
-        "dep:serde issue token",
+        "dep:serde import:serde issue token",
         10,
         &SearchFilters::default(),
     )
@@ -1388,7 +1388,7 @@ fn dependency_filters_scope_fallback_indexed_and_shard_search() {
     assert!(
         search_repo_fast_filtered(
             &rust_repo,
-            "dep:react issue token",
+            "import:react issue token",
             10,
             &SearchFilters::default()
         )
@@ -1400,7 +1400,7 @@ fn dependency_filters_scope_fallback_indexed_and_shard_search() {
     assert_eq!(
         index
             .search_filtered(
-                "dependency:serde issue token",
+                "dependency:serde module:serde issue token",
                 10,
                 &SearchFilters::default()
             )
@@ -1410,20 +1410,23 @@ fn dependency_filters_scope_fallback_indexed_and_shard_search() {
     );
     assert!(
         index
-            .search_filtered("-dep:serde issue token", 10, &SearchFilters::default())
+            .search_filtered("-import:serde issue token", 10, &SearchFilters::default())
             .unwrap()
             .is_empty()
     );
     let plan = index
-        .query_plan("dep:react issue token", &SearchFilters::default())
+        .query_plan("import:react issue token", &SearchFilters::default())
         .unwrap();
-    assert_eq!(plan.strategy, "dependency_filter_mismatch");
+    assert_eq!(plan.final_match_count, 0);
+    assert!(plan.active_filters.iter().any(|filter| {
+        filter.field == "import" && filter.value == "react" && filter.candidate_matches == Some(0)
+    }));
 
     let shard_dir = tempfile::tempdir().unwrap();
     build_shards(&[rust_repo.clone(), react_repo.clone()], shard_dir.path()).unwrap();
     let serde_results = search_shards(
         shard_dir.path(),
-        "dep:serde issue token",
+        "dep:serde import:serde issue token",
         10,
         &SearchFilters::default(),
     )
@@ -1431,7 +1434,7 @@ fn dependency_filters_scope_fallback_indexed_and_shard_search() {
     assert_eq!(serde_results[0].path, "rust-api/src/lib.rs");
     let react_results = search_shards(
         shard_dir.path(),
-        "dep:react issue token",
+        "dep:react import:react issue token",
         10,
         &SearchFilters::default(),
     )

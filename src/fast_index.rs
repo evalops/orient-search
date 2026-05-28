@@ -12,7 +12,7 @@ use crate::repo_index::{
     known_commands_from_hints, language_for, matches_filters, normalize_token,
     regular_file_metadata, related_stem_terms, repo_map_seed_paths, repo_matches,
     result_matches_all_tokens, result_matches_symbol_filters, round4, score_filter_only_path,
-    symbol_kind_rank, token_counts, tokenize,
+    source_import_filters_match, symbol_kind_rank, token_counts, tokenize,
 };
 use anyhow::{Context, Result};
 use ignore::WalkBuilder;
@@ -1046,7 +1046,7 @@ impl FastIndex {
             .filter(|file_id| {
                 self.files
                     .get(*file_id as usize)
-                    .is_some_and(|file| matches_filters(&file.path, &filters))
+                    .is_some_and(|file| indexed_file_matches_filters(file, &filters))
             })
             .collect::<Vec<_>>();
         let filtered_candidate_count = filtered_candidate_ids.len();
@@ -1164,7 +1164,10 @@ impl FastIndex {
                 let candidate_count = self
                     .files
                     .iter()
-                    .filter(|file| score_filter_only_path(&file.path, &filters, false).is_some())
+                    .filter(|file| {
+                        indexed_file_matches_filters(file, &filters)
+                            && score_filter_only_path(&file.path, &filters, false).is_some()
+                    })
                     .count();
                 return Ok(QueryPlan {
                     strategy: "filter_scan".to_string(),
@@ -1341,7 +1344,7 @@ impl FastIndex {
             .filter(|file_id| {
                 self.files
                     .get(*file_id as usize)
-                    .is_some_and(|file| matches_filters(&file.path, &filters))
+                    .is_some_and(|file| indexed_file_matches_filters(file, &filters))
             })
             .collect::<Vec<_>>();
         let filtered_candidate_count = filtered_candidate_ids.len();
@@ -1394,6 +1397,9 @@ impl FastIndex {
             .files
             .iter()
             .filter_map(|file| {
+                if !indexed_file_matches_filters(file, filters) {
+                    return None;
+                }
                 let matched = score_filter_only_path(&file.path, filters, filters.explain)?;
                 Some(filter_only_search_result(
                     &file.path,
@@ -1660,6 +1666,9 @@ fn query_plan_filters(filters: &SearchFilters) -> Vec<QueryPlanFilter> {
     if let Some(value) = &filters.dependency {
         active.push(plan_filter("dependency", value, false));
     }
+    if let Some(value) = &filters.import {
+        active.push(plan_filter("import", value, false));
+    }
     if let Some(value) = filters.test {
         active.push(plan_filter("test", &value.to_string(), false));
     }
@@ -1683,6 +1692,9 @@ fn query_plan_filters(filters: &SearchFilters) -> Vec<QueryPlanFilter> {
     }
     for value in &filters.exclude_dependency {
         active.push(plan_filter("dependency", value, true));
+    }
+    for value in &filters.exclude_import {
+        active.push(plan_filter("import", value, true));
     }
     active
 }
@@ -1748,6 +1760,7 @@ fn indexed_path_matches_plan_filter(file: &IndexedPath, filter: &QueryPlanFilter
                         .to_ascii_lowercase()
             }),
         "symbol" => indexed_path_matches_symbol_filter(file, &filter.value),
+        "import" => indexed_path_matches_import_filter(file, &filter.value),
         "test" => {
             let wanted = matches!(
                 filter.value.to_ascii_lowercase().as_str(),
@@ -1760,6 +1773,11 @@ fn indexed_path_matches_plan_filter(file: &IndexedPath, filter: &QueryPlanFilter
     matches != filter.negated
 }
 
+fn indexed_file_matches_filters(file: &IndexedPath, filters: &SearchFilters) -> bool {
+    matches_filters(&file.path, filters)
+        && source_import_filters_match(&file.path, &file.content, filters)
+}
+
 fn indexed_path_matches_symbol_filter(file: &IndexedPath, wanted: &str) -> bool {
     let wanted = normalize_token(wanted);
     !wanted.is_empty()
@@ -1767,6 +1785,17 @@ fn indexed_path_matches_symbol_filter(file: &IndexedPath, wanted: &str) -> bool 
             .symbols
             .iter()
             .any(|symbol| symbol.normalized == wanted || normalize_token(&symbol.name) == wanted)
+}
+
+fn indexed_path_matches_import_filter(file: &IndexedPath, wanted: &str) -> bool {
+    source_import_filters_match(
+        &file.path,
+        &file.content,
+        &SearchFilters {
+            import: Some(wanted.to_string()),
+            ..SearchFilters::default()
+        },
+    )
 }
 
 fn indexed_query_plan(

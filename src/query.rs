@@ -56,6 +56,9 @@ fn apply_filter(filters: &mut SearchFilters, token: &str, negated: bool) -> bool
         (false, "dep" | "deps" | "dependency" | "dependencies") => {
             filters.dependency = Some(value.to_ascii_lowercase())
         }
+        (false, "import" | "imports" | "module" | "modules" | "use" | "uses") => {
+            filters.import = Some(value.to_ascii_lowercase())
+        }
         (false, "test" | "tests") => filters.test = Some(parse_boolish(&value).unwrap_or(true)),
         (true, "file") => filters.exclude_file.push(value),
         (true, "path" | "dir" | "directory") => filters.exclude_path.push(value),
@@ -67,6 +70,9 @@ fn apply_filter(filters: &mut SearchFilters, token: &str, negated: bool) -> bool
         (true, "repo") => filters.exclude_repo.push(value),
         (true, "dep" | "deps" | "dependency" | "dependencies") => {
             filters.exclude_dependency.push(value.to_ascii_lowercase())
+        }
+        (true, "import" | "imports" | "module" | "modules" | "use" | "uses") => {
+            filters.exclude_import.push(value.to_ascii_lowercase())
         }
         (true, "test" | "tests") => filters.test = Some(false),
         _ => return false,
@@ -184,6 +190,9 @@ pub fn merge_filters(mut base: SearchFilters, parsed: SearchFilters) -> SearchFi
     if parsed.dependency.is_some() {
         base.dependency = parsed.dependency;
     }
+    if parsed.import.is_some() {
+        base.import = parsed.import;
+    }
     if parsed.test.is_some() {
         base.test = parsed.test;
     }
@@ -195,6 +204,7 @@ pub fn merge_filters(mut base: SearchFilters, parsed: SearchFilters) -> SearchFi
     base.exclude_symbol.extend(parsed.exclude_symbol);
     base.exclude_repo.extend(parsed.exclude_repo);
     base.exclude_dependency.extend(parsed.exclude_dependency);
+    base.exclude_import.extend(parsed.exclude_import);
     base
 }
 
@@ -233,11 +243,14 @@ mod tests {
 
     #[test]
     fn parses_dependency_filters() {
-        let parsed = parse_query("dep:serde dependency:tokio -deps:react symbol:Runtime");
+        let parsed = parse_query(
+            "dep:serde dependency:tokio import:crate::server -module:legacy symbol:Runtime",
+        );
 
         assert_eq!(parsed.terms, Vec::<String>::new());
         assert_eq!(parsed.filters.dependency.as_deref(), Some("tokio"));
-        assert_eq!(parsed.filters.exclude_dependency, vec!["react"]);
+        assert_eq!(parsed.filters.import.as_deref(), Some("crate::server"));
+        assert_eq!(parsed.filters.exclude_import, vec!["legacy"]);
         assert_eq!(parsed.filters.symbol.as_deref(), Some("Runtime"));
     }
 

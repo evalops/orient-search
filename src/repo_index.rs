@@ -188,6 +188,7 @@ pub struct SearchFilters {
     pub symbol: Option<String>,
     pub repo: Option<String>,
     pub dependency: Option<String>,
+    pub import: Option<String>,
     pub test: Option<bool>,
     pub require_all: bool,
     pub snippet: SnippetMode,
@@ -199,6 +200,7 @@ pub struct SearchFilters {
     pub exclude_symbol: Vec<String>,
     pub exclude_repo: Vec<String>,
     pub exclude_dependency: Vec<String>,
+    pub exclude_import: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -218,6 +220,7 @@ impl Default for SearchFilters {
             symbol: None,
             repo: None,
             dependency: None,
+            import: None,
             test: None,
             require_all: false,
             snippet: SnippetMode::Medium,
@@ -229,6 +232,7 @@ impl Default for SearchFilters {
             exclude_symbol: Vec::new(),
             exclude_repo: Vec::new(),
             exclude_dependency: Vec::new(),
+            exclude_import: Vec::new(),
         }
     }
 }
@@ -432,6 +436,15 @@ fn search_repo_filter_only(
             .strip_prefix(root)?
             .to_string_lossy()
             .replace('\\', "/");
+        if !matches_filters(&rel, filters) {
+            continue;
+        }
+        if import_filters_active(filters) {
+            let text = fs::read_to_string(path).unwrap_or_default();
+            if text.contains('\0') || !source_import_filters_match(&rel, &text, filters) {
+                continue;
+            }
+        }
         let Some(matched) = score_filter_only_path(&rel, filters, filters.explain) else {
             continue;
         };
@@ -454,6 +467,9 @@ fn search_repo_filter_only(
     for (path, matched) in candidates {
         let text = fs::read_to_string(root.join(&path)).unwrap_or_default();
         if text.contains('\0') {
+            continue;
+        }
+        if !source_import_filters_match(&path, &text, filters) {
             continue;
         }
         results.push(filter_only_search_result(
@@ -587,6 +603,12 @@ fn search_repo_ripgrep(
         {
             continue;
         }
+        if import_filters_active(filters) {
+            let text = fs::read_to_string(root.join(&path)).unwrap_or_default();
+            if text.contains('\0') || !source_import_filters_match(&path, &text, filters) {
+                continue;
+            }
+        }
         let Some(text) = data
             .get("lines")
             .and_then(|lines| lines.get("text"))
@@ -659,7 +681,7 @@ fn search_repo_streaming(
             .strip_prefix(&root)?
             .to_string_lossy()
             .replace('\\', "/");
-        if !matches_filters(&rel, filters) {
+        if !matches_filters(&rel, filters) || !source_import_filters_match(&rel, &text, filters) {
             continue;
         }
         if let Some(result) = score_text_file(
@@ -1579,6 +1601,35 @@ pub(crate) fn import_hints_from_source_texts<'a>(
     });
     hints.truncate(80);
     hints
+}
+
+pub(crate) fn import_filters_active(filters: &SearchFilters) -> bool {
+    filters.import.is_some() || !filters.exclude_import.is_empty()
+}
+
+pub(crate) fn source_import_filters_match(path: &str, text: &str, filters: &SearchFilters) -> bool {
+    if !import_filters_active(filters) {
+        return true;
+    }
+    let hints = import_hints_from_source_texts([(path, text)]);
+    import_filters_match(&hints, filters)
+}
+
+fn import_filters_match(hints: &[ImportHint], filters: &SearchFilters) -> bool {
+    let modules = hints
+        .iter()
+        .map(|hint| hint.module.to_ascii_lowercase())
+        .collect::<Vec<_>>();
+    if let Some(wanted) = &filters.import {
+        let wanted = wanted.to_ascii_lowercase();
+        if !modules.iter().any(|module| module.contains(&wanted)) {
+            return false;
+        }
+    }
+    !filters.exclude_import.iter().any(|excluded| {
+        let excluded = excluded.to_ascii_lowercase();
+        modules.iter().any(|module| module.contains(&excluded))
+    })
 }
 
 fn import_hint(
@@ -2770,6 +2821,7 @@ pub(crate) fn filter_only_query(filters: &SearchFilters) -> bool {
         || filters.extension.is_some()
         || filters.repo.is_some()
         || filters.dependency.is_some()
+        || filters.import.is_some()
         || filters.test.is_some()
 }
 
@@ -2856,6 +2908,17 @@ pub(crate) fn score_filter_only_path(
         add_filter_signal(
             "dependency_filter",
             dependency,
+            2.0,
+            explain,
+            &mut score,
+            &mut reasons,
+            &mut signals,
+        );
+    }
+    if let Some(import) = &filters.import {
+        add_filter_signal(
+            "import_filter",
+            import,
             2.0,
             explain,
             &mut score,
