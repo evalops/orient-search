@@ -779,11 +779,7 @@ fn result_matches_file_symbol_filters(
     result: &mut SearchResult,
     filters: &SearchFilters,
 ) -> bool {
-    let needs_file_check = filters
-        .symbol
-        .as_ref()
-        .is_some_and(|symbol| !reason_contains_symbol(&result.reason, symbol))
-        || !filters.exclude_symbol.is_empty();
+    let needs_file_check = filters.symbol.is_some() || !filters.exclude_symbol.is_empty();
     if !needs_file_check {
         return true;
     }
@@ -840,19 +836,13 @@ fn anchor_result_on_symbol(
     symbol: &Symbol,
     snippet_mode: SnippetMode,
 ) {
-    if result
-        .snippet
-        .to_ascii_lowercase()
-        .contains(&symbol.name.to_ascii_lowercase())
-    {
-        return;
-    }
     let (before, after) = snippet_mode.window();
     let start_line = symbol.line.saturating_sub(before).max(1);
     let line_count = before + after + 1;
     let range = file_range_from_text(&result.path, text, start_line, line_count);
     result.snippet = range.text.chars().take(snippet_mode.max_chars()).collect();
-    result.match_lines.push(symbol.line);
+    result.match_lines.retain(|line| *line != symbol.line);
+    result.match_lines.insert(0, symbol.line);
 }
 
 fn merge_match_result(

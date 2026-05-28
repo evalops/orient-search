@@ -67,6 +67,8 @@ Search results include:
 - `context`: optional attached file context when `context_lines` is set.
 - `explanation` and `query_plan` when `explain` is set.
 
+Explicit `symbol:` searches center snippets and read ranges on the matching definition line when the language extractor can identify it, even if earlier callers also match the same tokens.
+
 Search `limit` values must be positive and stay under `limit.maximum`; `context_lines`, read ranges, and non-empty batch arrays are bounded by the manifest too, so broad requests fail fast instead of expanding silently.
 
 ## Read Next

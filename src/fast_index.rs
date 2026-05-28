@@ -1119,6 +1119,7 @@ impl FastIndex {
                     &trigram_lists,
                     filters.snippet,
                     filters.explain,
+                    filters.symbol.as_deref(),
                     None,
                 )
             })
@@ -1402,6 +1403,7 @@ impl FastIndex {
                     &trigram_lists,
                     filters.snippet,
                     false,
+                    filters.symbol.as_deref(),
                     None,
                 )
             })
@@ -1491,6 +1493,7 @@ impl FastIndex {
         trigram_lists: &[(&str, &[Posting])],
         snippet_mode: SnippetMode,
         explain: bool,
+        symbol_filter: Option<&str>,
         query_plan: Option<&QueryPlan>,
     ) -> Option<SearchResult> {
         let file = self.files.get(file_id as usize)?;
@@ -1580,8 +1583,17 @@ impl FastIndex {
             return None;
         }
 
-        let snippet = indexed_snippet(&self.root, file, query_tokens, query_phrases, snippet_mode);
-        let match_lines = indexed_match_lines(file, query_tokens, query_phrases, 16);
+        let symbol_line = symbol_filter.and_then(|wanted| indexed_symbol_filter_line(file, wanted));
+        let snippet = symbol_line
+            .and_then(|line| indexed_symbol_filter_snippet(&self.root, file, line, snippet_mode))
+            .unwrap_or_else(|| {
+                indexed_snippet(&self.root, file, query_tokens, query_phrases, snippet_mode)
+            });
+        let mut match_lines = indexed_match_lines(file, query_tokens, query_phrases, 16);
+        if let Some(line) = symbol_line {
+            match_lines.retain(|match_line| *match_line != line);
+            match_lines.insert(0, line);
+        }
 
         Some(SearchResult {
             path: file.path.clone(),
@@ -2631,6 +2643,35 @@ fn indexed_snippet(
 
     let text = String::from_utf8_lossy(&bytes);
     best_snippet_for_path(&file.path, &text, query_tokens, mode)
+}
+
+fn indexed_symbol_filter_line(file: &IndexedPath, wanted: &str) -> Option<usize> {
+    let wanted = normalize_token(wanted);
+    if wanted.is_empty() {
+        return None;
+    }
+    file.symbols
+        .iter()
+        .find(|symbol| symbol.normalized == wanted)
+        .map(|symbol| symbol.line)
+}
+
+fn indexed_symbol_filter_snippet(
+    root: &Path,
+    file: &IndexedPath,
+    line: usize,
+    mode: SnippetMode,
+) -> Option<String> {
+    if file.line_offsets.is_empty() {
+        return None;
+    }
+    let live_bytes = fs::read(root.join(&file.path)).ok().filter(|bytes| {
+        bytes.len() as u64 == file.size && content_hash(bytes) == file.content_hash
+    });
+    let bytes = live_bytes
+        .as_deref()
+        .unwrap_or_else(|| file.content.as_bytes());
+    Some(render_indexed_window(bytes, &file.line_offsets, line, mode))
 }
 
 fn best_matching_line(

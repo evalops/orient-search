@@ -1280,6 +1280,46 @@ fn indexed_snippets_anchor_on_strongest_matching_line() {
 }
 
 #[test]
+fn symbol_filter_snippets_anchor_on_definition_line() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/lib.rs"),
+        r#"
+pub fn caller() {
+    target_symbol();
+}
+
+pub fn unrelated() {}
+
+pub fn target_symbol() {
+}
+"#,
+    );
+
+    let filters = SearchFilters {
+        snippet: SnippetMode::Short,
+        ..SearchFilters::default()
+    };
+    let fallback =
+        search_repo_fast_filtered(repo.path(), "symbol:target_symbol", 10, &filters).unwrap();
+    assert_eq!(fallback[0].path, "src/lib.rs");
+    assert!(fallback[0].snippet.contains("8: pub fn target_symbol()"));
+    assert!(!fallback[0].snippet.contains("3:     target_symbol();"));
+    assert_eq!(fallback[0].line_range.as_ref().unwrap().start_line, 8);
+    assert_eq!(fallback[0].match_lines[0], 8);
+
+    let index = FastIndex::build(repo.path()).unwrap();
+    let indexed = index
+        .search_filtered("symbol:target_symbol", 10, &filters)
+        .unwrap();
+    assert_eq!(indexed[0].path, "src/lib.rs");
+    assert!(indexed[0].snippet.contains("8: pub fn target_symbol()"));
+    assert!(!indexed[0].snippet.contains("3:     target_symbol();"));
+    assert_eq!(indexed[0].line_range.as_ref().unwrap().start_line, 8);
+    assert_eq!(indexed[0].match_lines[0], 8);
+}
+
+#[test]
 fn indexed_query_plan_dedupes_identifier_tokens() {
     let repo = tempfile::tempdir().unwrap();
     write(
