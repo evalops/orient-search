@@ -261,6 +261,8 @@ impl ToolRuntime {
 
     pub fn daemon_status(&self) -> Value {
         json!({
+            "process_cwd": process_cwd_status(),
+            "search_auto_default": self.search_auto_default_status(),
             "cached_indexes": self.cached_index_count(),
             "cached_index_paths": self.cached_index_paths(),
             "cached_index_details": self.cached_index_details(),
@@ -755,6 +757,7 @@ pub fn agent_guide(
         },
         "recommended_loop": [
             "Call tool_manifest or mcp_manifest once.",
+            "Call daemon_status when using a shared daemon; trust search_auto_default for no-target search_auto routing.",
             "Use repo_map, indexed_repo_map, or shard_repo_map before editing unfamiliar code.",
             "Search first, then use read_request, related_request, or related_symbols_request from results.",
             "Call a query-plan tool when results are empty, noisy, or overly broad."
@@ -891,6 +894,7 @@ Prefer the shared daemon when it is running: `orient client-jsonl --addr {addr}`
 For many local repos, bootstrap it with `orient ensure-shards --discover-root ~/Documents/Projects --output-dir {index_dir} --family-limit 2` and `orient serve-tcp --addr {addr} --index-dir {index_dir}`.\n\
 For one repo, bootstrap it with `orient ensure-index --repo {repo} --index {index}` and `orient serve-tcp --addr {addr} --index {index}`.\n\
 Start each session with `daemon_status` or `agent_guide`, then use `search_auto` for normal lookup and `search_auto_batch` for alternate query phrasings.\n\
+Trust `daemon_status.search_auto_default` to see whether no-target `search_auto` will use a warmed shard directory, warmed index, or the daemon current directory.\n\
 Use query filters directly: `file:`, `path:`, `lang:`, `ext:`, `symbol:`, `type:`, `repo:`, `test:`, quoted literals, and negative filters like `-path:vendor`.\n\
 After search, follow returned `read_batch_request`, `read_request`, `related_request`, and `related_symbols_request` instead of reopening files manually.\n\
 When results are empty, noisy, or suspicious, use the returned `query_plan_request` or inline `query_plan_result` before broadening the search.\n\
@@ -3140,6 +3144,36 @@ impl ToolRuntime {
         }
     }
 
+    fn search_auto_default_status(&self) -> Value {
+        if let Ok(index_dir) = self.single_cached_shard_manifest_path() {
+            return json!({
+                "surface": "shards",
+                "source": "single_warmed_shard_dir",
+                "target": index_dir.to_string_lossy()
+            });
+        }
+        if let Ok(index) = self.single_cached_index_path() {
+            return json!({
+                "surface": "indexed",
+                "source": "single_warmed_index",
+                "target": index.to_string_lossy()
+            });
+        }
+        match std::env::current_dir() {
+            Ok(repo) => json!({
+                "surface": "fallback",
+                "source": "process_current_dir",
+                "target": repo.to_string_lossy()
+            }),
+            Err(error) => json!({
+                "surface": "fallback",
+                "source": "process_current_dir",
+                "target": Value::Null,
+                "error": error.to_string()
+            }),
+        }
+    }
+
     fn search_auto(
         &self,
         arguments: &Value,
@@ -4988,6 +5022,18 @@ fn optional_string_arg(arguments: &Value, name: &str) -> Option<String> {
         .get(name)
         .and_then(Value::as_str)
         .map(String::from)
+}
+
+fn process_cwd_status() -> Value {
+    match std::env::current_dir() {
+        Ok(path) => json!({
+            "path": path.to_string_lossy()
+        }),
+        Err(error) => json!({
+            "path": Value::Null,
+            "error": error.to_string()
+        }),
+    }
 }
 
 fn optional_string_arg_any(arguments: &Value, names: &[&str]) -> Option<String> {

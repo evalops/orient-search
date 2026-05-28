@@ -48,6 +48,8 @@ Send JSON-lines requests through:
 
 Use `orient daemon-status --addr 127.0.0.1:8796` when a new agent session
 needs to confirm the shared daemon has the expected warmed index or shard set.
+Check `search_auto_default` in that response to see the exact target no-argument
+`search_auto` will use.
 
 Start with `agent_guide` or `tool_manifest` once, then use `search_auto`.
 Follow returned `read_batch_request`, `read_request`, `related_request`,

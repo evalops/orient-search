@@ -943,6 +943,13 @@ fn agent_guide_returns_local_agent_request_templates() {
             .unwrap()
             .contains("Use Orient as the first local code-discovery step")
     );
+    assert!(
+        guide["recommended_loop"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item.as_str().unwrap().contains("search_auto_default"))
+    );
 }
 
 #[test]
@@ -960,6 +967,7 @@ fn agent_instructions_returns_copyable_local_agent_rules() {
         "orient ensure-shards --discover-root ~/Documents/Projects --output-dir /tmp/orient-shards --family-limit 2",
         "orient ensure-index --repo /work/repo --index /tmp/repo.index",
         "search_auto_batch",
+        "daemon_status.search_auto_default",
         "`file:`, `path:`, `lang:`, `ext:`, `symbol:`, `type:`, `repo:`, `test:`",
         "no session analytics",
     ] {
@@ -1026,6 +1034,7 @@ fn runtime_serves_agent_instructions_for_local_rule_files() {
     let instructions = result["instructions"].as_str().unwrap();
     assert!(instructions.contains("orient client-jsonl --addr 127.0.0.1:9999"));
     assert!(instructions.contains("search_auto"));
+    assert!(instructions.contains("search_auto_default"));
     assert!(instructions.contains("read_batch_request"));
     assert!(instructions.contains("no session analytics"));
 }
@@ -3656,6 +3665,21 @@ fn runtime_warms_index_by_tool_request() {
     });
     let result = status.result.unwrap();
     assert_eq!(result["cached_indexes"], serde_json::json!(1));
+    assert_eq!(
+        result["search_auto_default"]["surface"],
+        serde_json::json!("indexed")
+    );
+    assert_eq!(
+        result["search_auto_default"]["source"],
+        serde_json::json!("single_warmed_index")
+    );
+    assert!(
+        result["search_auto_default"]["target"]
+            .as_str()
+            .unwrap()
+            .ends_with(".orient/index")
+    );
+    assert!(result["process_cwd"]["path"].as_str().is_some());
     assert!(
         result["cached_index_paths"]
             .as_array()
@@ -4964,6 +4988,19 @@ fn tcp_daemon_status_cli_reports_runtime_cache() {
     let status: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(status["cached_indexes"], serde_json::json!(0));
     assert_eq!(status["cached_shard_manifests"], serde_json::json!(0));
+    assert_eq!(
+        status["search_auto_default"]["surface"],
+        serde_json::json!("fallback")
+    );
+    assert_eq!(
+        status["search_auto_default"]["source"],
+        serde_json::json!("process_current_dir")
+    );
+    assert!(status["search_auto_default"]["target"].as_str().is_some());
+    assert_eq!(
+        status["search_auto_default"]["target"],
+        status["process_cwd"]["path"]
+    );
     assert!(status.get("id").is_none(), "{status}");
 }
 
@@ -5189,6 +5226,14 @@ fn tcp_daemon_starts_with_warmed_index() {
         startup_json["daemon_status"]["cached_shard_manifests"],
         serde_json::json!(0)
     );
+    assert_eq!(
+        startup_json["daemon_status"]["search_auto_default"]["surface"],
+        serde_json::json!("indexed")
+    );
+    assert_eq!(
+        startup_json["daemon_status"]["search_auto_default"]["source"],
+        serde_json::json!("single_warmed_index")
+    );
 
     let mut stream = TcpStream::connect(addr).unwrap();
     let mut reader = BufReader::new(stream.try_clone().unwrap());
@@ -5287,6 +5332,14 @@ fn tcp_daemon_can_ensure_and_warm_shards_on_startup() {
     assert_eq!(
         startup_json["daemon_status"]["cached_indexes"],
         serde_json::json!(1)
+    );
+    assert_eq!(
+        startup_json["daemon_status"]["search_auto_default"]["surface"],
+        serde_json::json!("shards")
+    );
+    assert_eq!(
+        startup_json["daemon_status"]["search_auto_default"]["source"],
+        serde_json::json!("single_warmed_shard_dir")
     );
 
     let response = tcp_tool_request(
@@ -5447,6 +5500,14 @@ fn tcp_daemon_starts_with_warmed_shards() {
     assert_eq!(
         startup_json["daemon_status"]["cached_shard_manifest_details"][0]["repos"][0]["aliases"][0],
         startup_json["daemon_status"]["cached_shard_manifest_details"][0]["repos"][0]["name"]
+    );
+    assert_eq!(
+        startup_json["daemon_status"]["search_auto_default"]["surface"],
+        serde_json::json!("shards")
+    );
+    assert_eq!(
+        startup_json["daemon_status"]["search_auto_default"]["target"],
+        serde_json::json!(shard_dir.path().canonicalize().unwrap().to_string_lossy())
     );
 
     let mut stream = TcpStream::connect(addr).unwrap();
