@@ -2804,14 +2804,32 @@ pub(crate) fn matches_filters_with_path_lower(
     path_lower: &str,
     filters: &SearchFilters,
 ) -> bool {
+    let file_name_lower = Path::new(path)
+        .file_name()
+        .map(|value| value.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
+    let extension_lower = Path::new(path)
+        .extension()
+        .map(|value| value.to_string_lossy().to_lowercase());
+    let language = language_for(Path::new(path));
+    matches_filters_with_path_metadata(
+        path_lower,
+        &file_name_lower,
+        extension_lower.as_deref(),
+        language.as_deref(),
+        filters,
+    )
+}
+
+pub(crate) fn matches_filters_with_path_metadata(
+    path_lower: &str,
+    file_name_lower: &str,
+    extension_lower: Option<&str>,
+    language: Option<&str>,
+    filters: &SearchFilters,
+) -> bool {
     if let Some(file_filter) = &filters.file {
-        let Some(file_name) = Path::new(path)
-            .file_name()
-            .map(|value| value.to_string_lossy().to_ascii_lowercase())
-        else {
-            return false;
-        };
-        if !file_name.contains(&file_filter.to_ascii_lowercase()) {
+        if !file_name_lower.contains(&file_filter.to_ascii_lowercase()) {
             return false;
         }
     }
@@ -2821,7 +2839,7 @@ pub(crate) fn matches_filters_with_path_lower(
         }
     }
     if let Some(language_filter) = &filters.language {
-        let Some(language) = language_for(Path::new(path)) else {
+        let Some(language) = language else {
             return false;
         };
         if language != language_filter.trim().to_lowercase() {
@@ -2833,10 +2851,7 @@ pub(crate) fn matches_filters_with_path_lower(
             .trim()
             .trim_start_matches('.')
             .to_lowercase();
-        let Some(extension) = Path::new(path)
-            .extension()
-            .map(|value| value.to_string_lossy().to_lowercase())
-        else {
+        let Some(extension) = extension_lower else {
             return false;
         };
         if extension != wanted {
@@ -2848,14 +2863,10 @@ pub(crate) fn matches_filters_with_path_lower(
             return false;
         }
     }
-    let file_name = Path::new(path)
-        .file_name()
-        .map(|value| value.to_string_lossy().to_ascii_lowercase())
-        .unwrap_or_default();
     if filters
         .exclude_file
         .iter()
-        .any(|filter| file_name.contains(&filter.to_ascii_lowercase()))
+        .any(|filter| file_name_lower.contains(&filter.to_ascii_lowercase()))
     {
         return false;
     }
@@ -2866,7 +2877,7 @@ pub(crate) fn matches_filters_with_path_lower(
     {
         return false;
     }
-    if let Some(language) = language_for(Path::new(path)) {
+    if let Some(language) = language {
         if filters
             .exclude_language
             .iter()
@@ -2875,10 +2886,7 @@ pub(crate) fn matches_filters_with_path_lower(
             return false;
         }
     }
-    if let Some(extension) = Path::new(path)
-        .extension()
-        .map(|value| value.to_string_lossy().to_lowercase())
-    {
+    if let Some(extension) = extension_lower {
         if filters
             .exclude_extension
             .iter()

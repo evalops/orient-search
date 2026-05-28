@@ -9,7 +9,7 @@ use crate::repo_index::{
     dependency_hints_from_manifest_texts, extract_symbols, file_range_from_text, filter_only_query,
     filter_only_search_result, finalize_results, import_hints_from_source_texts,
     is_entrypoint_path, is_ignored, is_important_file, is_manifest_file, is_test_path,
-    known_commands_from_hints, language_for, matches_filters_with_path_lower, normalize_token,
+    known_commands_from_hints, language_for, matches_filters_with_path_metadata, normalize_token,
     regular_file_metadata, related_stem_terms, repo_map_seed_paths, repo_matches,
     result_matches_all_tokens, result_matches_symbol_filters, round4, score_filter_only_path,
     source_content_filters_match, source_import_filters_match, symbol_kind_rank, token_counts,
@@ -65,6 +65,10 @@ pub struct IndexedPath {
     pub path: String,
     #[serde(default)]
     pub path_lower: String,
+    #[serde(skip)]
+    pub file_name_lower: String,
+    #[serde(skip)]
+    pub extension_lower: Option<String>,
     pub language: String,
     pub size: u64,
     pub content_hash: u64,
@@ -366,9 +370,7 @@ impl FastIndex {
 
     fn normalize_loaded(&mut self) {
         for file in &mut self.files {
-            if file.path_lower.is_empty() {
-                file.path_lower = file.path.to_ascii_lowercase();
-            }
+            refresh_indexed_path_metadata(file);
         }
         normalize_posting_map(&mut self.postings);
         normalize_posting_map(&mut self.path_postings);
@@ -2009,28 +2011,19 @@ fn query_plan_filters_for_candidates(
 
 fn indexed_path_matches_plan_filter(file: &IndexedPath, filter: &QueryPlanFilter) -> bool {
     let matches = match filter.field.as_str() {
-        "file" => std::path::Path::new(&file.path)
-            .file_name()
-            .map(|value| {
-                value
-                    .to_string_lossy()
-                    .to_ascii_lowercase()
-                    .contains(&filter.value.to_ascii_lowercase())
-            })
-            .unwrap_or(false),
+        "file" => file
+            .file_name_lower
+            .contains(&filter.value.to_ascii_lowercase()),
         "path" => file.path_lower.contains(&filter.value.to_ascii_lowercase()),
         "language" => file.language == filter.value.trim().to_ascii_lowercase(),
-        "extension" => std::path::Path::new(&file.path)
-            .extension()
-            .map(|value| value.to_string_lossy().to_ascii_lowercase())
-            .is_some_and(|extension| {
-                extension
-                    == filter
-                        .value
-                        .trim()
-                        .trim_start_matches('.')
-                        .to_ascii_lowercase()
-            }),
+        "extension" => file.extension_lower.as_deref().is_some_and(|extension| {
+            extension
+                == filter
+                    .value
+                    .trim()
+                    .trim_start_matches('.')
+                    .to_ascii_lowercase()
+        }),
         "symbol" => indexed_path_matches_symbol_filter(file, &filter.value),
         "symbol_kind" => indexed_path_matches_symbol_kind_filter(file, &filter.value),
         "import" => indexed_path_matches_import_filter(file, &filter.value),
@@ -2047,8 +2040,13 @@ fn indexed_path_matches_plan_filter(file: &IndexedPath, filter: &QueryPlanFilter
 }
 
 fn indexed_file_matches_filters(file: &IndexedPath, filters: &SearchFilters) -> bool {
-    matches_filters_with_path_lower(&file.path, &file.path_lower, filters)
-        && indexed_path_matches_symbol_kind_filters(file, filters)
+    matches_filters_with_path_metadata(
+        &file.path_lower,
+        &file.file_name_lower,
+        file.extension_lower.as_deref(),
+        Some(&file.language),
+        filters,
+    ) && indexed_path_matches_symbol_kind_filters(file, filters)
         && source_content_filters_match(&file.path, &file.content, filters)
 }
 
@@ -2416,6 +2414,8 @@ fn index_file(
     Some(IndexedPath {
         path: rel.to_string(),
         path_lower: rel.to_ascii_lowercase(),
+        file_name_lower: indexed_file_name_lower(rel),
+        extension_lower: indexed_extension_lower(rel),
         language,
         size,
         content_hash,
@@ -2438,6 +2438,8 @@ fn retarget_indexed_file(
 ) -> IndexedPath {
     previous.path = candidate.rel.clone();
     previous.path_lower = candidate.rel.to_ascii_lowercase();
+    previous.file_name_lower = indexed_file_name_lower(&candidate.rel);
+    previous.extension_lower = indexed_extension_lower(&candidate.rel);
     previous.language = candidate.language.clone();
     previous.size = candidate.size;
     previous.content_hash = content_hash(text.as_bytes());
@@ -2448,6 +2450,25 @@ fn retarget_indexed_file(
     previous.term_lines = indexed_term_lines(text);
     previous.content = text.to_string();
     previous
+}
+
+fn refresh_indexed_path_metadata(file: &mut IndexedPath) {
+    file.path_lower = file.path.to_ascii_lowercase();
+    file.file_name_lower = indexed_file_name_lower(&file.path);
+    file.extension_lower = indexed_extension_lower(&file.path);
+}
+
+fn indexed_file_name_lower(path: &str) -> String {
+    Path::new(path)
+        .file_name()
+        .map(|value| value.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default()
+}
+
+fn indexed_extension_lower(path: &str) -> Option<String> {
+    Path::new(path)
+        .extension()
+        .map(|value| value.to_string_lossy().to_ascii_lowercase())
 }
 
 fn indexed_term_lines(text: &str) -> Vec<IndexedTermLines> {
