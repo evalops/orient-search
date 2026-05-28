@@ -38,6 +38,16 @@ const GENERATED_DIRECTORY_SEGMENTS: &[&str] = &[
     "autogen",
     "auto-generated",
 ];
+const GENERATED_FILE_STEM_PREFIXES: &[&str] = &["generated_", "generated-"];
+const GENERATED_FILE_STEM_SUFFIXES: &[&str] = &[
+    "_generated",
+    "-generated",
+    ".generated",
+    ".gen",
+    "_gen",
+    "-gen",
+];
+const GENERATED_FILE_NAME_SUFFIXES: &[&str] = &[".pb.go", ".pb.rs", ".g.dart"];
 const GENERATED_FILE_GLOBS: &[&str] = &[
     "generated.*",
     "generated_*",
@@ -3893,37 +3903,34 @@ pub(crate) fn is_generated_path(path: &str) -> bool {
 
     let mut file_name = path;
     for part in path.split('/').filter(|part| !part.is_empty()) {
-        if matches!(
-            part,
-            "generated"
-                | "__generated__"
-                | "gen"
-                | "gensrc"
-                | "codegen"
-                | "autogen"
-                | "auto-generated"
-        ) {
+        if is_generated_directory_segment(part) {
             return true;
         }
         file_name = part;
     }
 
+    is_generated_file_name(file_name)
+}
+
+fn is_generated_directory_segment(segment: &str) -> bool {
+    GENERATED_DIRECTORY_SEGMENTS.contains(&segment)
+}
+
+fn is_generated_file_name(file_name: &str) -> bool {
     let stem = file_name
         .rsplit_once('.')
         .map(|(stem, _)| stem)
         .unwrap_or(file_name);
     stem == "generated"
-        || stem.starts_with("generated_")
-        || stem.starts_with("generated-")
-        || stem.ends_with("_generated")
-        || stem.ends_with("-generated")
-        || stem.ends_with(".generated")
-        || stem.ends_with(".gen")
-        || stem.ends_with("_gen")
-        || stem.ends_with("-gen")
-        || file_name.ends_with(".pb.go")
-        || file_name.ends_with(".pb.rs")
-        || file_name.ends_with(".g.dart")
+        || GENERATED_FILE_STEM_PREFIXES
+            .iter()
+            .any(|prefix| stem.starts_with(prefix))
+        || GENERATED_FILE_STEM_SUFFIXES
+            .iter()
+            .any(|suffix| stem.ends_with(suffix))
+        || GENERATED_FILE_NAME_SUFFIXES
+            .iter()
+            .any(|suffix| file_name.ends_with(suffix))
 }
 
 pub(crate) fn is_entrypoint_path(path: &str) -> bool {
@@ -5475,6 +5482,38 @@ mod tests {
             generated_ripgrep_globs(&SearchFilters::default()),
             Vec::<String>::new()
         );
+    }
+
+    #[test]
+    fn generated_path_detection_covers_directory_and_suffix_patterns() {
+        let generated_paths = [
+            "src/generated/cache.rs",
+            "src/__generated__/cache.ts",
+            "gen/schema.rs",
+            "codegen/client.ts",
+            "src/session.generated.rs",
+            "src/schema.pb.go",
+            "src/schema.pb.rs",
+            "src/models.g.dart",
+            "src/generated_client.rs",
+            "src/auth_gen.rs",
+            r"Src\AUTO-GENERATED\Client.ts",
+        ];
+        for path in generated_paths {
+            assert!(is_generated_path(path), "{path} should be generated");
+        }
+
+        let handwritten_paths = [
+            "src/general.rs",
+            "src/generator.rs",
+            "src/code_generation.rs",
+            "src/auth.test.rs",
+            "src/generation/auth.rs",
+            "src/progenitor/client.rs",
+        ];
+        for path in handwritten_paths {
+            assert!(!is_generated_path(path), "{path} should be handwritten");
+        }
     }
 
     #[test]

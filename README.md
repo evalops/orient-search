@@ -5,6 +5,8 @@ Claude Code, Amp, and other local agents repo maps, indexed search, query plans,
 and bounded file ranges so they stop burning runs on repeated `rg`, `find`,
 `ls`, and `cat`.
 
+## Run it
+
 ```bash
 cargo install --git https://github.com/evalops/orient-search
 
@@ -17,6 +19,8 @@ orient serve-tcp \
   --addr 127.0.0.1:8796 \
   --index-dir /tmp/orient-shards
 ```
+
+## Give it to agents
 
 Give an agent the generated local rule snippet:
 
@@ -32,6 +36,8 @@ repo map, search the warmed shard set, follow the returned `read_*` and
 noisy. Follow-up requests include replayable `cli`, `jsonl`, and `client_cli`
 hints for terminal-native agents.
 
+## Search locally
+
 For one-shot CLI use inside a repo:
 
 ```bash
@@ -42,6 +48,8 @@ orient search --index-dir /tmp/orient-shards "repo:api issue token"
 orient search --index-dir /tmp/orient-shards "branch:feature/auth origin:evalops/api issue token"
 orient read-range --index /tmp/repo.index src/lib.rs:40:80
 ```
+
+## Protocol
 
 JSON-lines requests look like this:
 
@@ -54,15 +62,21 @@ JSON-lines requests look like this:
 {"id":"read","tool":"read_ranges","arguments":{"index_dir":"/tmp/orient-shards","ranges":[{"path":"api/src/auth.rs","start":40,"lines":80}]}}
 ```
 
+## Filters
+
 Useful filters: `repo:`, `path:`/`dir:`, `file:`, `lang:`, `ext:`, `symbol:`,
 `kind:`/`type:`, `dep:`, `import:`, `test:`, `generated:`, `is:test`,
 `is:source`, `is:generated`, `content:`, quoted phrases, negative filters like
 `-path:vendor`, and `mode:any` for broad orientation.
 
+## Eval
+
 The adoption eval is the money chart: run the same repo-editing tasks with and
 without Orient, then compare time to first relevant file, local-search command
 count, wrong file opens, tool calls before edit, edit success rate, and
 wall-clock time.
+
+## Docs
 
 More detail:
 
