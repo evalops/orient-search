@@ -73,6 +73,7 @@ def test_issue_token_round_trip():
         .map(|item| item.path)
         .collect();
     assert!(test_related.contains(&"src/auth.py".to_string()));
+    assert!(index.related_files("src/missing_auth.py", 10).is_empty());
 
     let related_symbols = index.related_symbols(Some("src/auth.py"), Some("session token"), 10);
     assert_eq!(related_symbols[0].symbol.name, "SessionManager");

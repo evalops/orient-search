@@ -789,6 +789,9 @@ impl FastIndex {
         }
 
         let normalized = path.trim_start_matches('/').to_string();
+        if !self.files.iter().any(|file| file.path == normalized) {
+            return Vec::new();
+        }
         let stem = Path::new(&normalized)
             .file_stem()
             .map(|value| value.to_string_lossy().to_string())
