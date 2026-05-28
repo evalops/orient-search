@@ -152,7 +152,23 @@ fn is_generated_path(path: &str) -> bool {
             return true;
         }
     }
-    false
+    let file_name = path.rsplit('/').next().unwrap_or(path.as_str());
+    let stem = file_name
+        .rsplit_once('.')
+        .map(|(stem, _)| stem)
+        .unwrap_or(file_name);
+    stem == "generated"
+        || stem.starts_with("generated_")
+        || stem.starts_with("generated-")
+        || stem.ends_with("_generated")
+        || stem.ends_with("-generated")
+        || stem.ends_with(".generated")
+        || stem.ends_with(".gen")
+        || stem.ends_with("_gen")
+        || stem.ends_with("-gen")
+        || file_name.ends_with(".pb.go")
+        || file_name.ends_with(".pb.rs")
+        || file_name.ends_with(".g.dart")
 }
 
 fn file_name(path: &str) -> String {
@@ -182,6 +198,10 @@ fn fallback_scoped_search_matches_rg_content_set_for_agent_filters() {
         "src/notes.md",
         "src/auth.ts",
         "src/auth.test.ts",
+        "src/api.pb.go",
+        "src/generated_client.rs",
+        "src/auth_gen.rs",
+        "src/models.g.dart",
         "gen/schema.rs",
         "codegen/client.ts",
         "tests/auth_test.rs",

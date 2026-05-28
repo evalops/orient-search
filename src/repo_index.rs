@@ -38,6 +38,20 @@ const GENERATED_DIRECTORY_SEGMENTS: &[&str] = &[
     "autogen",
     "auto-generated",
 ];
+const GENERATED_FILE_GLOBS: &[&str] = &[
+    "generated.*",
+    "generated_*",
+    "generated-*",
+    "*_generated.*",
+    "*-generated.*",
+    "*.generated.*",
+    "*.gen.*",
+    "*_gen.*",
+    "*-gen.*",
+    "*.pb.go",
+    "*.pb.rs",
+    "*.g.dart",
+];
 static TOKEN_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[A-Za-z][A-Za-z0-9_]*").unwrap());
 static SYMBOL_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"\b(?:(?:pub|export|default|declare|async)\s+)*(fn|function|class|interface|struct|enum|trait|type|const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)").unwrap()
@@ -1035,6 +1049,9 @@ fn add_generated_filter_fd_excludes(command: &mut Command, filters: &SearchFilte
     for segment in GENERATED_DIRECTORY_SEGMENTS {
         command.arg("--exclude").arg(segment);
     }
+    for glob in GENERATED_FILE_GLOBS {
+        command.arg("--exclude").arg(glob);
+    }
 }
 
 fn add_generated_filter_ripgrep_globs(command: &mut Command, filters: &SearchFilters) {
@@ -1050,6 +1067,11 @@ fn generated_false_ripgrep_globs(filters: &SearchFilters) -> Vec<String> {
     GENERATED_DIRECTORY_SEGMENTS
         .iter()
         .map(|segment| format!("!**/{segment}/**"))
+        .chain(
+            GENERATED_FILE_GLOBS
+                .iter()
+                .map(|glob| format!("!**/{glob}")),
+        )
         .collect()
 }
 
@@ -5428,6 +5450,9 @@ mod tests {
         assert!(globs.contains(&"!**/generated/**".to_string()));
         assert!(globs.contains(&"!**/__generated__/**".to_string()));
         assert!(globs.contains(&"!**/codegen/**".to_string()));
+        assert!(globs.contains(&"!**/*.pb.go".to_string()));
+        assert!(globs.contains(&"!**/*.g.dart".to_string()));
+        assert!(globs.contains(&"!**/*_gen.*".to_string()));
         assert!(globs.iter().all(|glob| glob.starts_with("!**/")));
         assert_eq!(
             generated_false_ripgrep_globs(&SearchFilters {
