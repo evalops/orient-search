@@ -4,8 +4,8 @@ use crate::query::{merge_filters, normalize_phrase_text, parse_query, query_phra
 use crate::repo_index::{
     FileRange, MAX_READ_RANGE_LINES, QueryPlan, QueryPlanFilter, QueryPlanPosting,
     QueryPlanRepairHint, RankSignal, RelatedFile, RelatedSymbol, RepoBrief, RepoMap, SearchFilters,
-    SearchResult, SnippetMode, Symbol, apply_phrase_matches, best_snippet_for_path_with_phrases,
-    capped_search_limit, command_hints_from_manifest_texts, dependency_filters_match,
+    SearchResult, SnippetMode, Symbol, best_snippet_for_path_with_phrases, capped_search_limit,
+    command_hints_from_manifest_texts, dependency_filters_match,
     dependency_hints_from_manifest_texts, extract_symbols, filter_only_query,
     filter_only_search_result, filter_value_matches, finalize_results,
     import_hints_from_source_texts, is_entrypoint_path, is_ignored, is_important_file,
@@ -1673,12 +1673,12 @@ impl FastIndex {
             Some(candidate_ids) => candidate_ids
                 .iter()
                 .filter_map(|file_id| self.files.get(*file_id as usize))
-                .filter_map(|file| indexed_filter_only_result(&self.root, file, filters))
+                .filter_map(|file| indexed_filter_only_result(file, filters))
                 .collect::<Vec<_>>(),
             None => self
                 .files
                 .iter()
-                .filter_map(|file| indexed_filter_only_result(&self.root, file, filters))
+                .filter_map(|file| indexed_filter_only_result(file, filters))
                 .collect::<Vec<_>>(),
         };
         let final_match_count = results.len();
@@ -1743,9 +1743,8 @@ impl FastIndex {
         let mut score = 0.0;
         let mut reasons = Vec::new();
         let mut signals = Vec::new();
-        if !apply_phrase_matches(
-            &file.path,
-            &file.content,
+        if !indexed_apply_phrase_matches(
+            file,
             query_phrases,
             "content_phrase",
             16.0,
@@ -1818,10 +1817,8 @@ impl FastIndex {
 
         let symbol_line = symbol_filter.and_then(|wanted| indexed_symbol_filter_line(file, wanted));
         let snippet = symbol_line
-            .and_then(|line| indexed_symbol_filter_snippet(&self.root, file, line, snippet_mode))
-            .unwrap_or_else(|| {
-                indexed_snippet(&self.root, file, query_tokens, query_phrases, snippet_mode)
-            });
+            .and_then(|line| indexed_symbol_filter_snippet(file, line, snippet_mode))
+            .unwrap_or_else(|| indexed_snippet(file, query_tokens, query_phrases, snippet_mode));
         let mut match_lines = indexed_match_lines(file, query_tokens, query_phrases, 16);
         if let Some(line) = symbol_line {
             match_lines.retain(|match_line| *match_line != line);
@@ -2334,6 +2331,68 @@ fn indexed_path_matches_plan_filter(file: &IndexedPath, filter: &QueryPlanFilter
     matches != filter.negated
 }
 
+fn indexed_apply_phrase_matches(
+    file: &IndexedPath,
+    query_phrases: &[String],
+    content_signal_kind: &str,
+    content_score: f64,
+    score: &mut f64,
+    reasons: &mut Vec<String>,
+    signals: &mut Vec<RankSignal>,
+) -> bool {
+    if query_phrases.is_empty() {
+        return true;
+    }
+
+    let path_phrase_text = normalize_phrase_text(&file.path_lower);
+    let mut matches = Vec::with_capacity(query_phrases.len());
+    for phrase in query_phrases {
+        let path_match = path_phrase_text.contains(phrase);
+        let content_match = indexed_content_contains_phrase(file, phrase);
+        if !path_match && !content_match {
+            return false;
+        }
+        matches.push((phrase, path_match, content_match));
+    }
+
+    for (phrase, path_match, content_match) in matches {
+        let reason = format!("phrase:{phrase}");
+        if !reasons.contains(&reason) {
+            reasons.push(reason);
+        }
+        if path_match {
+            *score += 10.0;
+            signals.push(rank_signal("path_phrase", phrase, 10.0));
+        }
+        if content_match {
+            *score += content_score;
+            signals.push(rank_signal(content_signal_kind, phrase, content_score));
+        }
+    }
+    true
+}
+
+fn indexed_content_contains_phrase(file: &IndexedPath, phrase: &str) -> bool {
+    if file.term_lines.is_empty() || file.line_offsets.is_empty() {
+        return normalize_phrase_text(&file.content).contains(phrase);
+    }
+    let (lines, capped) = indexed_phrase_candidate_lines(file, phrase);
+    if lines.is_empty() {
+        return false;
+    }
+    if !indexed_phrase_match_lines_from_candidates(
+        file.content.as_bytes(),
+        &file.line_offsets,
+        phrase,
+        &lines,
+    )
+    .is_empty()
+    {
+        return true;
+    }
+    capped && normalize_phrase_text(&file.content).contains(phrase)
+}
+
 fn indexed_file_matches_filters(file: &IndexedPath, filters: &SearchFilters) -> bool {
     matches_filters_with_path_metadata(
         &file.path_lower,
@@ -2345,11 +2404,7 @@ fn indexed_file_matches_filters(file: &IndexedPath, filters: &SearchFilters) -> 
         && source_import_filters_match(&file.path, &file.content, filters)
 }
 
-fn indexed_filter_only_result(
-    root: &Path,
-    file: &IndexedPath,
-    filters: &SearchFilters,
-) -> Option<SearchResult> {
+fn indexed_filter_only_result(file: &IndexedPath, filters: &SearchFilters) -> Option<SearchResult> {
     if !indexed_file_matches_filters(file, filters) {
         return None;
     }
@@ -2367,7 +2422,7 @@ fn indexed_filter_only_result(
         .and_then(|kind| indexed_symbol_kind_filter_symbol(file, kind))
     {
         let line = symbol.line;
-        if let Some(snippet) = indexed_symbol_filter_snippet(root, file, line, filters.snippet) {
+        if let Some(snippet) = indexed_symbol_filter_snippet(file, line, filters.snippet) {
             result.snippet = snippet;
             result.match_lines = vec![line];
         }
@@ -3084,18 +3139,12 @@ fn content_hash(bytes: &[u8]) -> u64 {
 }
 
 fn indexed_snippet(
-    root: &Path,
     file: &IndexedPath,
     query_tokens: &[String],
     query_phrases: &[String],
     mode: SnippetMode,
 ) -> String {
-    let live_bytes = fs::read(root.join(&file.path)).ok().filter(|bytes| {
-        bytes.len() as u64 == file.size && content_hash(bytes) == file.content_hash
-    });
-    let bytes = live_bytes
-        .as_deref()
-        .unwrap_or_else(|| file.content.as_bytes());
+    let bytes = file.content.as_bytes();
     if bytes.is_empty() || file.line_offsets.is_empty() {
         return String::new();
     }
@@ -3153,7 +3202,6 @@ fn indexed_symbol_kind_filter_symbol<'a>(
 }
 
 fn indexed_symbol_filter_snippet(
-    root: &Path,
     file: &IndexedPath,
     line: usize,
     mode: SnippetMode,
@@ -3161,13 +3209,12 @@ fn indexed_symbol_filter_snippet(
     if file.line_offsets.is_empty() {
         return None;
     }
-    let live_bytes = fs::read(root.join(&file.path)).ok().filter(|bytes| {
-        bytes.len() as u64 == file.size && content_hash(bytes) == file.content_hash
-    });
-    let bytes = live_bytes
-        .as_deref()
-        .unwrap_or_else(|| file.content.as_bytes());
-    Some(render_indexed_window(bytes, &file.line_offsets, line, mode))
+    Some(render_indexed_window(
+        file.content.as_bytes(),
+        &file.line_offsets,
+        line,
+        mode,
+    ))
 }
 
 fn best_matching_line(
@@ -3202,18 +3249,25 @@ fn indexed_line_scores(
         }
     }
 
-    for phrase in query_phrases
-        .iter()
-        .filter(|phrase| phrase.split_whitespace().nth(1).is_some())
-    {
-        for (index, offset) in offsets.iter().enumerate() {
-            let start = *offset as usize;
-            let end = line_end(bytes, offsets, index);
-            let line = String::from_utf8_lossy(&bytes[start..end]);
-            let phrase_text = normalize_phrase_text(&line);
-            if phrase_text.contains(phrase) {
-                *scores.entry(index + 1).or_insert(0) += 100;
+    for phrase in query_phrases {
+        let mut phrase_lines = if file.term_lines.is_empty() {
+            indexed_phrase_match_lines_by_scan(bytes, offsets, phrase)
+        } else {
+            let (candidate_lines, capped) = indexed_phrase_candidate_lines(file, phrase);
+            let mut phrase_lines = indexed_phrase_match_lines_from_candidates(
+                bytes,
+                offsets,
+                phrase,
+                &candidate_lines,
+            );
+            if phrase_lines.is_empty() && capped {
+                phrase_lines = indexed_phrase_match_lines_by_scan(bytes, offsets, phrase);
             }
+            phrase_lines
+        };
+        phrase_lines.truncate(MAX_TERM_LINES_PER_TERM);
+        for line in phrase_lines {
+            *scores.entry(line).or_insert(0) += 100;
         }
     }
     let query_name = query_tokens.join("");
@@ -3231,6 +3285,72 @@ fn indexed_line_scores(
         }
     }
     scores
+}
+
+fn indexed_phrase_candidate_lines(file: &IndexedPath, phrase: &str) -> (Vec<u32>, bool) {
+    let mut best_lines: Option<&[u32]> = None;
+    let mut capped = false;
+    for token in tokenize(phrase) {
+        let Ok(index) = file
+            .term_lines
+            .binary_search_by(|entry| entry.term.as_str().cmp(token.as_str()))
+        else {
+            return (Vec::new(), false);
+        };
+        let lines = file.term_lines[index].lines.as_slice();
+        capped |= lines.len() >= MAX_TERM_LINES_PER_TERM;
+        if best_lines.is_none_or(|best| lines.len() < best.len()) {
+            best_lines = Some(lines);
+        }
+    }
+    (best_lines.unwrap_or_default().to_vec(), capped)
+}
+
+fn indexed_phrase_match_lines_from_candidates(
+    bytes: &[u8],
+    offsets: &[u32],
+    phrase: &str,
+    candidate_lines: &[u32],
+) -> Vec<usize> {
+    let mut matched = Vec::new();
+    for line in candidate_lines {
+        let Some(index) = (*line as usize).checked_sub(1) else {
+            continue;
+        };
+        if index >= offsets.len() {
+            continue;
+        }
+        let phrase_text = indexed_phrase_window_text(bytes, offsets, index);
+        if normalize_phrase_text(&phrase_text).contains(phrase) {
+            matched.push(index + 1);
+        }
+    }
+    matched.sort_unstable();
+    matched.dedup();
+    matched
+}
+
+fn indexed_phrase_match_lines_by_scan(bytes: &[u8], offsets: &[u32], phrase: &str) -> Vec<usize> {
+    let mut matched = Vec::new();
+    for index in 0..offsets.len() {
+        let phrase_text = indexed_phrase_window_text(bytes, offsets, index);
+        if normalize_phrase_text(&phrase_text).contains(phrase) {
+            matched.push(index + 1);
+        }
+    }
+    matched
+}
+
+fn indexed_phrase_window_text<'a>(
+    bytes: &'a [u8],
+    offsets: &[u32],
+    center_index: usize,
+) -> std::borrow::Cow<'a, str> {
+    let start_index = center_index.saturating_sub(1);
+    let end_index = (center_index + 1).min(offsets.len().saturating_sub(1));
+    let start = offsets[start_index] as usize;
+    let end = line_end(bytes, offsets, end_index);
+    String::from_utf8_lossy(&bytes[start..end])
 }
 
 fn render_indexed_window(
