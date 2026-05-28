@@ -82,6 +82,16 @@ fn golden_cases() -> Vec<GoldenCase> {
             filters: SearchFilters::default(),
         },
         GoldenCase {
+            query: "content:\"database connection refused\"",
+            expected_path: "src/errors.rs",
+            filters: SearchFilters::default(),
+        },
+        GoldenCase {
+            query: "text:gateway",
+            expected_path: "src/http_gateway.rs",
+            filters: SearchFilters::default(),
+        },
+        GoldenCase {
             query: "file:http_gateway.rs",
             expected_path: "src/http_gateway.rs",
             filters: SearchFilters::default(),

@@ -15,6 +15,10 @@ pub fn parse_query(input: &str) -> ParsedQuery {
             .strip_prefix('-')
             .map(|value| (true, value.to_string()))
             .unwrap_or((false, token));
+        if let Some(term) = content_term(&token, negated) {
+            terms.push(term);
+            continue;
+        }
         if apply_match_mode(&mut filters, &token, negated)
             || apply_filter(&mut filters, &token, negated)
         {
@@ -30,6 +34,24 @@ pub fn parse_query(input: &str) -> ParsedQuery {
     }
 
     ParsedQuery { terms, filters }
+}
+
+fn content_term(token: &str, negated: bool) -> Option<String> {
+    if negated {
+        return None;
+    }
+    let (key, value) = token.split_once(':')?;
+    if !matches!(
+        key.to_ascii_lowercase().as_str(),
+        "content" | "text" | "term"
+    ) {
+        return None;
+    }
+    let value = value.trim();
+    if value.is_empty() {
+        return None;
+    }
+    Some(value.to_string())
 }
 
 fn apply_match_mode(filters: &mut SearchFilters, token: &str, negated: bool) -> bool {
@@ -329,6 +351,25 @@ mod tests {
         let unknown = parse_query("is:generated issue token");
         assert_eq!(unknown.terms, vec!["is:generated", "issue", "token"]);
         assert_eq!(unknown.filters.test, None);
+    }
+
+    #[test]
+    fn parses_content_text_and_term_aliases_as_query_terms() {
+        let parsed = parse_query(
+            r#"content:"database connection refused" text:gateway term:SessionManager"#,
+        );
+        assert_eq!(
+            parsed.terms,
+            vec!["database connection refused", "gateway", "SessionManager"]
+        );
+        assert!(parsed.filters.file.is_none());
+
+        let mode = parse_query("terms:any content:roadmap compression");
+        assert!(mode.filters.match_any);
+        assert_eq!(mode.terms, vec!["roadmap", "compression"]);
+
+        let negated = parse_query("-content:generated issue token");
+        assert_eq!(negated.terms, vec!["issue", "token"]);
     }
 
     #[test]
