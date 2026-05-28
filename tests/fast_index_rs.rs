@@ -395,11 +395,11 @@ fn indexed_repo_map_returns_orientation_from_persisted_metadata() {
     );
     write(
         &repo.path().join("Cargo.toml"),
-        "[package]\nname='sample'\nversion='0.1.0'\nedition='2024'\n",
+        "[package]\nname='sample'\nversion='0.1.0'\nedition='2024'\n[dependencies]\nserde='1'\n[dev-dependencies]\ninsta='1'\n",
     );
     write(
         &repo.path().join("package.json"),
-        r#"{"scripts":{"test":"vitest run","lint":"eslint .","build":"vite build"}}"#,
+        r#"{"scripts":{"test":"vitest run","lint":"eslint .","build":"vite build"},"dependencies":{"react":"latest"},"devDependencies":{"vite":"latest"}}"#,
     );
     write(&repo.path().join("yarn.lock"), "# yarn lockfile\n");
 
@@ -430,6 +430,18 @@ fn indexed_repo_map_returns_orientation_from_persisted_metadata() {
     }));
     assert!(map.brief.command_hints.iter().any(|hint| {
         hint.command == "cargo test" && hint.kind == "test" && hint.source == "Cargo.toml"
+    }));
+    assert!(map.brief.dependency_hints.iter().any(|hint| {
+        hint.name == "serde" && hint.kind == "dependency" && hint.source == "Cargo.toml"
+    }));
+    assert!(map.brief.dependency_hints.iter().any(|hint| {
+        hint.name == "insta" && hint.kind == "dev_dependency" && hint.source == "Cargo.toml"
+    }));
+    assert!(map.brief.dependency_hints.iter().any(|hint| {
+        hint.name == "react" && hint.kind == "dependency" && hint.source == "package.json"
+    }));
+    assert!(map.brief.dependency_hints.iter().any(|hint| {
+        hint.name == "vite" && hint.kind == "dev_dependency" && hint.source == "package.json"
     }));
     assert_eq!(map.top_symbols[0].name, "SessionManager");
     assert!(

@@ -251,6 +251,8 @@ pub struct RepoBrief {
     pub known_commands: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub command_hints: Vec<CommandHint>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dependency_hints: Vec<DependencyHint>,
     pub manifest_files: Vec<String>,
     pub important_files: Vec<String>,
 }
@@ -258,6 +260,13 @@ pub struct RepoBrief {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CommandHint {
     pub command: String,
+    pub kind: String,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DependencyHint {
+    pub name: String,
     pub kind: String,
     pub source: String,
 }
@@ -1157,6 +1166,7 @@ impl RepoIndex {
 
         let command_hints = self.command_hints();
         let known_commands = known_commands_from_hints(&command_hints);
+        let dependency_hints = self.dependency_hints();
 
         RepoBrief {
             root_name: self
@@ -1168,6 +1178,7 @@ impl RepoIndex {
             language_counts,
             known_commands,
             command_hints,
+            dependency_hints,
             manifest_files,
             important_files,
         }
@@ -1281,6 +1292,14 @@ impl RepoIndex {
 
     fn command_hints(&self) -> Vec<CommandHint> {
         command_hints_from_manifest_texts(
+            self.files
+                .iter()
+                .map(|(path, file)| (path.as_str(), file.text.as_str())),
+        )
+    }
+
+    fn dependency_hints(&self) -> Vec<DependencyHint> {
+        dependency_hints_from_manifest_texts(
             self.files
                 .iter()
                 .map(|(path, file)| (path.as_str(), file.text.as_str())),
@@ -1448,6 +1467,211 @@ pub(crate) fn known_commands_from_hints(hints: &[CommandHint]) -> Vec<String> {
     commands.sort();
     commands.dedup();
     commands
+}
+
+pub(crate) fn dependency_hints_from_manifest_texts<'a>(
+    files: impl IntoIterator<Item = (&'a str, &'a str)>,
+) -> Vec<DependencyHint> {
+    let mut hints = Vec::new();
+    for (path, text) in files {
+        let file_name = Path::new(path)
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or(path);
+        match file_name {
+            "Cargo.toml" => hints.extend(cargo_dependency_hints(text, path)),
+            "package.json" => hints.extend(package_json_dependency_hints(text, path)),
+            "pyproject.toml" => hints.extend(pyproject_dependency_hints(text, path)),
+            "go.mod" => hints.extend(go_mod_dependency_hints(text, path)),
+            _ => {}
+        }
+    }
+    hints.sort_by(|left, right| {
+        dependency_kind_rank(&left.kind)
+            .cmp(&dependency_kind_rank(&right.kind))
+            .then_with(|| left.name.cmp(&right.name))
+            .then_with(|| left.source.cmp(&right.source))
+    });
+    hints.dedup_by(|left, right| {
+        left.name == right.name && left.kind == right.kind && left.source == right.source
+    });
+    hints.truncate(40);
+    hints
+}
+
+fn dependency_hint(
+    name: impl Into<String>,
+    kind: impl Into<String>,
+    source: impl Into<String>,
+) -> DependencyHint {
+    DependencyHint {
+        name: name.into(),
+        kind: kind.into(),
+        source: source.into(),
+    }
+}
+
+fn dependency_kind_rank(kind: &str) -> usize {
+    match kind {
+        "dependency" => 0,
+        "dev_dependency" => 1,
+        "build_dependency" => 2,
+        _ => 3,
+    }
+}
+
+fn cargo_dependency_hints(manifest: &str, source: &str) -> Vec<DependencyHint> {
+    let mut hints = Vec::new();
+    let mut section = "";
+    for line in manifest.lines() {
+        let line = line.trim();
+        if line.starts_with('[') && line.ends_with(']') {
+            section = line.trim_matches(&['[', ']'][..]);
+            continue;
+        }
+        let kind = match section {
+            "dependencies" | "workspace.dependencies" => "dependency",
+            "dev-dependencies" | "workspace.dev-dependencies" => "dev_dependency",
+            "build-dependencies" | "workspace.build-dependencies" => "build_dependency",
+            _ => continue,
+        };
+        let Some((name, _)) = line.split_once('=') else {
+            continue;
+        };
+        let name = name.trim().trim_matches('"').trim_matches('\'');
+        if is_dependency_name(name) {
+            hints.push(dependency_hint(name, kind, source));
+        }
+    }
+    hints
+}
+
+fn package_json_dependency_hints(package_json: &str, source: &str) -> Vec<DependencyHint> {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(package_json) else {
+        return Vec::new();
+    };
+    let mut hints = Vec::new();
+    for (field, kind) in [
+        ("dependencies", "dependency"),
+        ("devDependencies", "dev_dependency"),
+        ("peerDependencies", "peer_dependency"),
+    ] {
+        if let Some(dependencies) = value.get(field).and_then(|value| value.as_object()) {
+            hints.extend(
+                dependencies
+                    .keys()
+                    .filter(|name| is_dependency_name(name))
+                    .map(|name| dependency_hint(name, kind, source)),
+            );
+        }
+    }
+    hints
+}
+
+fn pyproject_dependency_hints(manifest: &str, source: &str) -> Vec<DependencyHint> {
+    let mut hints = Vec::new();
+    let mut section = "";
+    let mut in_dependencies_array = false;
+    for line in manifest.lines() {
+        let line = line.trim();
+        if line.starts_with('[') && line.ends_with(']') {
+            section = line.trim_matches(&['[', ']'][..]);
+            in_dependencies_array = false;
+            continue;
+        }
+        if section == "project" && line.starts_with("dependencies") {
+            in_dependencies_array = line.contains('[') && !line.contains(']');
+            hints.extend(quoted_dependency_names(line).map(|name| {
+                dependency_hint(normalize_python_requirement(&name), "dependency", source)
+            }));
+            continue;
+        }
+        if in_dependencies_array {
+            hints.extend(quoted_dependency_names(line).map(|name| {
+                dependency_hint(normalize_python_requirement(&name), "dependency", source)
+            }));
+            if line.contains(']') {
+                in_dependencies_array = false;
+            }
+            continue;
+        }
+        if section == "tool.poetry.dependencies" || section == "tool.poetry.group.dev.dependencies"
+        {
+            let kind = if section.contains(".dev.") {
+                "dev_dependency"
+            } else {
+                "dependency"
+            };
+            let Some((name, _)) = line.split_once('=') else {
+                continue;
+            };
+            let name = name.trim().trim_matches('"').trim_matches('\'');
+            if is_dependency_name(name) && name != "python" {
+                hints.push(dependency_hint(name, kind, source));
+            }
+        }
+    }
+    hints
+}
+
+fn quoted_dependency_names(line: &str) -> impl Iterator<Item = String> + '_ {
+    static QUOTED_RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r#""([^"]+)"|'([^']+)'"#).unwrap());
+    QUOTED_RE.captures_iter(line).filter_map(|capture| {
+        capture
+            .get(1)
+            .or_else(|| capture.get(2))
+            .map(|value| value.as_str().to_string())
+    })
+}
+
+fn normalize_python_requirement(requirement: &str) -> String {
+    requirement
+        .split(|ch: char| {
+            ch == '<'
+                || ch == '>'
+                || ch == '='
+                || ch == '~'
+                || ch == '!'
+                || ch == '['
+                || ch.is_whitespace()
+        })
+        .next()
+        .unwrap_or(requirement)
+        .to_string()
+}
+
+fn go_mod_dependency_hints(manifest: &str, source: &str) -> Vec<DependencyHint> {
+    let mut hints = Vec::new();
+    let mut in_require_block = false;
+    for line in manifest.lines() {
+        let line = line.trim();
+        if line.starts_with("require (") {
+            in_require_block = true;
+            continue;
+        }
+        if in_require_block && line == ")" {
+            in_require_block = false;
+            continue;
+        }
+        let dependency = if in_require_block {
+            line.split_whitespace().next()
+        } else {
+            line.strip_prefix("require ")
+                .and_then(|line| line.split_whitespace().next())
+        };
+        if let Some(name) = dependency.filter(|name| is_dependency_name(name)) {
+            hints.push(dependency_hint(name, "dependency", source));
+        }
+    }
+    hints
+}
+
+fn is_dependency_name(name: &str) -> bool {
+    !name.is_empty()
+        && !name.starts_with('#')
+        && !name.starts_with("//")
+        && name.chars().any(|ch| ch.is_alphanumeric())
 }
 
 fn manifest_path_in_files(files: &[(&str, &str)], name: &str) -> Option<String> {

@@ -37,7 +37,7 @@ impl SessionManager {
     );
     write(
         &temp.path().join("Cargo.toml"),
-        "[package]\nname='sample'\nversion='0.1.0'\nedition='2024'\n",
+        "[package]\nname='sample'\nversion='0.1.0'\nedition='2024'\n[dependencies]\nserde='1'\n",
     );
     temp
 }
@@ -641,6 +641,7 @@ fn cli_outputs_repo_map_and_reads_ranges() {
         .stdout(predicate::str::contains("\"entrypoints\""))
         .stdout(predicate::str::contains("\"manifest_files\""))
         .stdout(predicate::str::contains("\"command_hints\""))
+        .stdout(predicate::str::contains("\"dependency_hints\""))
         .stdout(predicate::str::contains("\"command\":\"cargo test\""))
         .stdout(predicate::str::contains("\"source\":\"Cargo.toml\""))
         .stdout(predicate::str::contains("\"related_files\""))

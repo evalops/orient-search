@@ -36,11 +36,11 @@ def test_issue_token_round_trip():
     );
     write(
         &temp.path().join("pyproject.toml"),
-        "[project]\nname='sample'\n",
+        "[project]\nname='sample'\ndependencies=['fastapi>=0.100', 'pydantic']\n",
     );
     write(
         &temp.path().join("package.json"),
-        r#"{"scripts":{"test":"vitest run","lint":"eslint .","typecheck":"tsc --noEmit"}}"#,
+        r#"{"scripts":{"test":"vitest run","lint":"eslint .","typecheck":"tsc --noEmit"},"dependencies":{"react":"latest"},"devDependencies":{"typescript":"latest"}}"#,
     );
     write(
         &temp.path().join("pnpm-lock.yaml"),
@@ -107,6 +107,15 @@ def test_issue_token_round_trip():
     }));
     assert!(brief.command_hints.iter().any(|hint| {
         hint.command == "pytest" && hint.kind == "test" && hint.source == "pyproject.toml"
+    }));
+    assert!(brief.dependency_hints.iter().any(|hint| {
+        hint.name == "fastapi" && hint.kind == "dependency" && hint.source == "pyproject.toml"
+    }));
+    assert!(brief.dependency_hints.iter().any(|hint| {
+        hint.name == "react" && hint.kind == "dependency" && hint.source == "package.json"
+    }));
+    assert!(brief.dependency_hints.iter().any(|hint| {
+        hint.name == "typescript" && hint.kind == "dev_dependency" && hint.source == "package.json"
     }));
     assert!(brief.manifest_files.contains(&"pyproject.toml".to_string()));
     assert!(
