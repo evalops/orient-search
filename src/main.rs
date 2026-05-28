@@ -1535,7 +1535,8 @@ fn run() -> Result<()> {
                 });
                 insert_optional_json_field(&mut output, "query_plan_result", query_plan_result);
                 println!("{}", serde_json::to_string(&output)?);
-            } else if let Some(repo) = repo {
+            } else {
+                let repo = repo.unwrap_or_else(|| PathBuf::from("."));
                 let filters = search_filters_from_args(&filters, repo_filter)?;
                 let mut results = search_repo_fast_filtered(&repo, &query, limit, &filters)?;
                 attach_result_context(&mut results, context_lines, |path, start, lines| {
@@ -1589,8 +1590,6 @@ fn run() -> Result<()> {
                 });
                 insert_optional_json_field(&mut output, "query_plan_result", query_plan_result);
                 println!("{}", serde_json::to_string(&output)?);
-            } else {
-                bail!("search-auto needs --index-dir, --index, or --repo");
             }
         }
         Commands::SearchAutoBatch {
@@ -1716,7 +1715,8 @@ fn run() -> Result<()> {
                     insert_optional_json_field(&mut item, "query_plan_result", query_plan_result);
                     batch.push(item);
                 }
-            } else if let Some(repo) = repo {
+            } else {
+                let repo = repo.unwrap_or_else(|| PathBuf::from("."));
                 let filters = search_filters_from_args(&filters, repo_filter)?;
                 for query in queries {
                     let mut results = search_repo_fast_filtered(&repo, &query, limit, &filters)?;
@@ -1772,8 +1772,6 @@ fn run() -> Result<()> {
                     insert_optional_json_field(&mut item, "query_plan_result", query_plan_result);
                     batch.push(item);
                 }
-            } else {
-                bail!("search-auto-batch needs --index-dir, --index, or --repo");
             }
             println!("{}", serde_json::to_string(&batch)?);
         }

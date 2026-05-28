@@ -47,6 +47,11 @@ If Orient is unavailable or returns no useful plan, fall back to normal shell
 search.
 ```
 
+For one-shot CLI use from inside a repo, start with
+`orient search-auto "query"` or `orient search-auto-batch "query one" "query two"`.
+Pass `--index`, `--index-dir`, or `--repo` only when the current directory is
+not the desired live search target.
+
 ## Copyable Requests
 
 ```bash

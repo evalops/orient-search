@@ -223,6 +223,16 @@ fn cli_search_auto_selects_live_indexed_and_shard_surfaces() {
     .stdout(predicate::str::contains("\"tool\":\"read_ranges\""))
     .stdout(predicate::str::contains("\"tool\":\"read_range\""));
 
+    let mut live_default = Command::cargo_bin("orient").unwrap();
+    live_default
+        .current_dir(repo.path())
+        .args(["search-auto", "issue_token"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"surface\":\"fallback\""))
+        .stdout(predicate::str::contains("\"tool\":\"search_query_plan\""))
+        .stdout(predicate::str::contains("\"tool\":\"read_ranges\""));
+
     let mut indexed = Command::cargo_bin("orient").unwrap();
     indexed
         .args([
@@ -318,6 +328,17 @@ fn cli_search_auto_batch_returns_query_surfaces() {
         .success()
         .stdout(predicate::str::contains("\"query_plan_result\""))
         .stdout(predicate::str::contains("\"tool\":\"indexed_search_code\""));
+
+    let mut default_live_batch = Command::cargo_bin("orient").unwrap();
+    default_live_batch
+        .current_dir(repo.path())
+        .args(["search-auto-batch", "issue_token", "SessionManager"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"query\":\"issue_token\""))
+        .stdout(predicate::str::contains("\"query\":\"SessionManager\""))
+        .stdout(predicate::str::contains("\"surface\":\"fallback\""))
+        .stdout(predicate::str::contains("\"tool\":\"search_query_plan\""));
 }
 
 #[test]

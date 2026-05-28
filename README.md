@@ -25,6 +25,12 @@ orient agent-guide --index-dir /tmp/orient-shards
 orient client-jsonl --addr 127.0.0.1:8796
 ```
 
+For one-shot local use inside a repo, agents can start with:
+
+```bash
+orient search-auto "symbol:AuthSession token"
+```
+
 ```jsonl
 {"id":"tools","tool":"tool_manifest","arguments":{}}
 {"id":"guide","tool":"agent_guide","arguments":{"index_dir":"/tmp/orient-shards"}}
@@ -40,7 +46,8 @@ search the shard set, read the returned `read_range` objects, and inspect the
 query plan when results are empty or noisy. See [Agent adoption](docs/agent-adoption.md)
 for copyable Codex, Claude Code, and Amp instructions.
 Once a daemon has exactly one shard directory or index warmed, `search_auto`
-lets wrappers search that target with just a query.
+lets wrappers search that target with just a query. The CLI form defaults to
+the current directory when no `--index-dir`, `--index`, or `--repo` is supplied.
 Use `search_auto_batch` when an agent wants to try several query formulations in
 one daemon round trip.
 Both return a `query_plan_request` for noisy result sets and inline
