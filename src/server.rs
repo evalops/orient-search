@@ -713,20 +713,26 @@ fn argument_schema(tool_name: &str, name: &str) -> Value {
             );
         }
         "ranges" => {
-            schema.insert("type".to_string(), json!("array"));
-            schema.insert("minItems".to_string(), json!(1));
-            schema.insert("maxItems".to_string(), json!(MAX_BATCH_RANGES));
+            let range_schema = json!({
+                "type": "object",
+                "required": ["path"],
+                "properties": {
+                    "path": {"type": "string"},
+                    "start": {"type": "integer", "minimum": 1, "default": 1},
+                    "lines": {"type": "integer", "minimum": 1, "maximum": MAX_READ_RANGE_LINES, "default": 80}
+                }
+            });
             schema.insert(
-                "items".to_string(),
-                json!({
-                    "type": "object",
-                    "required": ["path"],
-                    "properties": {
-                        "path": {"type": "string"},
-                        "start": {"type": "integer", "minimum": 1, "default": 1},
-                        "lines": {"type": "integer", "minimum": 1, "maximum": MAX_READ_RANGE_LINES, "default": 80}
+                "oneOf".to_string(),
+                json!([
+                    range_schema.clone(),
+                    {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": MAX_BATCH_RANGES,
+                        "items": range_schema
                     }
-                }),
+                ]),
             );
         }
         "queries" => {
@@ -855,7 +861,7 @@ fn argument_type(name: &str) -> &'static str {
         | "exclude_repo"
         | "exclude_dependency"
         | "exclude_import" => "string|string[]",
-        "ranges" => "range[]",
+        "ranges" => "range|range[]",
         "repos" | "discover_roots" | "queries" => "string[]",
         _ => "string",
     }
@@ -937,7 +943,7 @@ fn argument_description(name: &str) -> &'static str {
         "queries" => "Agent query strings to run as one batch against the same search target.",
         "path" => "Repository-relative, index-relative, or shard-prefixed result path.",
         "dir" => "Alias for path when filtering search results to a directory or path substring.",
-        "ranges" => "Array of {path,start,lines} objects for batch range reads.",
+        "ranges" => "A {path,start,lines} object or array of them for batch range reads.",
         "limit" => "Maximum number of results to return.",
         "language" => "Detected language filter, such as rust, python, or typescript.",
         "extension" => "File extension filter with or without a leading dot.",
@@ -2399,10 +2405,18 @@ struct RangeArg {
 }
 
 fn range_args(arguments: &Value) -> Result<Vec<RangeArg>> {
-    let values = arguments
+    let value = arguments
         .get("ranges")
-        .and_then(Value::as_array)
-        .ok_or_else(|| anyhow!("missing ranges array argument"))?;
+        .ok_or_else(|| anyhow!("missing ranges argument"))?;
+    let owned_single;
+    let values = if let Some(values) = value.as_array() {
+        values
+    } else if value.is_object() {
+        owned_single = vec![value.clone()];
+        &owned_single
+    } else {
+        return Err(anyhow!("argument ranges must be an object or array"));
+    };
     if values.is_empty() {
         return Err(anyhow!("argument ranges must not be empty"));
     }

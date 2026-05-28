@@ -278,22 +278,27 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
     assert_eq!(index_status["required"], serde_json::json!(["index"]));
     assert_eq!(shard_status["required"], serde_json::json!(["index_dir"]));
     assert_eq!(
-        read_ranges["input_schema"]["properties"]["ranges"]["items"]["properties"]["lines"]["default"],
+        read_ranges["input_schema"]["properties"]["ranges"]["oneOf"][0]["properties"]["lines"]["default"],
         80
     );
     assert_eq!(
-        read_ranges["input_schema"]["properties"]["ranges"]["items"]["properties"]["lines"]["maximum"],
+        read_ranges["input_schema"]["properties"]["ranges"]["oneOf"][0]["properties"]["lines"]["maximum"],
         serde_json::json!(MAX_READ_RANGE_LINES)
     );
     assert_eq!(
-        read_ranges["input_schema"]["properties"]["ranges"]["maxItems"],
+        read_ranges["input_schema"]["properties"]["ranges"]["oneOf"][1]["maxItems"],
         serde_json::json!(MAX_BATCH_RANGES)
     );
     assert_eq!(
-        read_ranges["input_schema"]["properties"]["ranges"]["minItems"],
+        read_ranges["input_schema"]["properties"]["ranges"]["oneOf"][1]["minItems"],
         serde_json::json!(1)
     );
-    assert_eq!(read_ranges["arguments"][1]["type"], "range[]");
+    assert_eq!(
+        read_ranges["input_schema"]["properties"]["ranges"]["oneOf"][1]["items"]["properties"]["path"]
+            ["type"],
+        "string"
+    );
+    assert_eq!(read_ranges["arguments"][1]["type"], "range|range[]");
     assert_eq!(
         read_ranges["arguments"][1]["max_items"],
         serde_json::json!(MAX_BATCH_RANGES)
@@ -376,7 +381,7 @@ fn server_reports_tool_manifest_for_agent_wrappers() {
     assert!(stdout.contains("\"type\":\"integer\""));
     assert!(stdout.contains("\"default\":10"));
     assert!(stdout.contains("\"enum\":[\"short\",\"medium\",\"block\",\"symbol\"]"));
-    assert!(stdout.contains("\"type\":\"range[]\""));
+    assert!(stdout.contains("\"type\":\"range|range[]\""));
     assert!(stdout.contains("exclude_path"));
     assert!(stdout.contains("exclude_symbol"));
     assert!(stdout.contains("open_range"));
@@ -3213,10 +3218,7 @@ fn server_handles_indexed_search_request() {
         "tool": "read_index_ranges",
         "arguments": {
             "index": index_path,
-            "ranges": [
-                {"path": "src/auth.rs", "start": 1, "lines": 1},
-                {"path": "tests/auth_test.rs", "start": 1, "lines": 2}
-            ]
+            "ranges": {"path": "src/auth.rs", "start": 1, "lines": 1}
         }
     });
     let symbol_request = serde_json::json!({
@@ -3388,10 +3390,7 @@ fn server_handles_shard_index_search_and_read_requests() {
         "tool": "read_shard_ranges",
         "arguments": {
             "index_dir": parent.path().join(".orient-shards"),
-            "ranges": [
-                {"path": "billing/src/billing.rs", "start": 1, "lines": 1},
-                {"path": "billing/tests/billing_test.rs", "start": 1, "lines": 2}
-            ]
+            "ranges": {"path": "billing/src/billing.rs", "start": 1, "lines": 1}
         }
     });
     let symbol_request = serde_json::json!({
@@ -3634,10 +3633,7 @@ fn server_handles_repo_map_and_read_range_requests() {
         "tool": "open_ranges",
         "arguments": {
             "repo": repo.path(),
-            "ranges": [
-                {"path": "src/auth.rs", "start": 1, "lines": 1},
-                {"path": "tests/auth_test.rs", "start": 1, "lines": 2}
-            ]
+            "ranges": {"path": "src/auth.rs", "start": 1, "lines": 1}
         }
     });
     let symbols_request = serde_json::json!({

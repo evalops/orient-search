@@ -75,13 +75,14 @@ For most agents, the handoff is:
 
 1. Call search.
 2. Collect one or more `read_range` objects from results.
-3. Pass them directly to the matching batch read tool.
+3. Pass one object or an array of objects directly to the matching batch read tool.
 
 `open_range`, `open_index_range`, and `open_shard_range` are aliases for agents that phrase context fetches as opening a file range.
 
 Examples:
 
 ```json
+{"id":"read-one","tool":"read_index_ranges","arguments":{"index":"/tmp/orient.index","ranges":{"path":"src/auth.rs","start":1,"lines":80}}}
 {"id":"read","tool":"read_index_ranges","arguments":{"index":"/tmp/orient.index","ranges":[{"path":"src/auth.rs","start":1,"lines":80}]}}
 {"id":"read-shards","tool":"read_shard_ranges","arguments":{"index_dir":"/tmp/orient-shards","ranges":[{"path":"platform/src/auth.rs","start":40,"lines":80}]}}
 ```
