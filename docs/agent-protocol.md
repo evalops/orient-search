@@ -23,6 +23,7 @@ Each request is one JSON object per line:
 
 Responses preserve `id` and return either `result` or `error`. Use `tool_manifest` for the complete tool list, argument metadata, daemon-default hints, defaults, enums, and JSON-schema-like input schemas.
 Adapters that want MCP-shaped definitions can call `mcp_manifest` or `orient mcp-manifest`; it returns `tools` entries with `name`, `description`, `inputSchema`, and `annotations`. Search, read, map, status, and plan tools are marked read-only. Index/shard build, refresh, and warm-cache tools are marked non-destructive but not read-only.
+Agents and wrappers that want a compact first-use recipe can call `agent_guide` or run `orient agent-guide`; it returns the recommended search loop, request templates for live/indexed/shard modes, transport commands, query-language examples, and follow-up guidance without exposing any session analytics surface.
 
 ## Bootstrap
 
@@ -38,6 +39,7 @@ For many repos:
 ```json
 {"id":"ensure-shards","tool":"ensure_shards","arguments":{"output_dir":"/tmp/orient-shards","discover_roots":["/Users/jonathanhaas/Documents/Projects"],"max_depth":4,"discover_limit":500,"family_limit":2}}
 {"id":"status","tool":"daemon_status","arguments":{}}
+{"id":"guide","tool":"agent_guide","arguments":{"index_dir":"/tmp/orient-shards"}}
 ```
 
 `daemon_status` reports warmed index and shard details so multiple local agents can confirm they share the intended codebase set. When exactly one index or shard directory is warmed, indexed and shard tools marked with `daemon_default.source` may omit `index` or `index_dir`; if zero or multiple targets are warmed, pass the path explicitly. Orient does not expose session analytics.

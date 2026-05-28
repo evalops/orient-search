@@ -21,11 +21,13 @@ orient serve-tcp \
 Agents can talk JSON-lines over TCP, Unix sockets, or stdio:
 
 ```bash
+orient agent-guide --index-dir /tmp/orient-shards
 orient client-jsonl --addr 127.0.0.1:8796
 ```
 
 ```jsonl
 {"id":"tools","tool":"tool_manifest","arguments":{}}
+{"id":"guide","tool":"agent_guide","arguments":{"index_dir":"/tmp/orient-shards"}}
 {"id":"map","tool":"shard_repo_map","arguments":{"symbols":25,"tests":25}}
 {"id":"search","tool":"search_shards","arguments":{"query":"repo:api symbol:AuthSession token","limit":10,"explain":true}}
 {"id":"read","tool":"read_shard_ranges","arguments":{"ranges":[{"path":"api/src/auth.rs","start":40,"lines":80}]}}

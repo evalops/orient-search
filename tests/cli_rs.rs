@@ -71,6 +71,7 @@ fn cli_outputs_tool_manifest() {
         .stdout(predicate::str::contains("\"name\":\"index_plan\""))
         .stdout(predicate::str::contains("\"name\":\"shard_plan\""))
         .stdout(predicate::str::contains("\"name\":\"mcp_manifest\""))
+        .stdout(predicate::str::contains("\"name\":\"agent_guide\""))
         .stdout(predicate::str::contains(
             "\"required\":[\"repo\",\"query\"]",
         ))
@@ -135,6 +136,7 @@ fn cli_outputs_mcp_manifest() {
         .success()
         .stdout(predicate::str::contains("\"tools\""))
         .stdout(predicate::str::contains("\"name\":\"search_code\""))
+        .stdout(predicate::str::contains("\"name\":\"agent_guide\""))
         .stdout(predicate::str::contains("\"inputSchema\""))
         .stdout(predicate::str::contains("\"annotations\""))
         .stdout(predicate::str::contains("\"readOnlyHint\":true"))
@@ -143,6 +145,33 @@ fn cli_outputs_mcp_manifest() {
             "\"required\":[\"repo\",\"query\"]",
         ))
         .stdout(predicate::str::contains("\"input_schema\"").not());
+}
+
+#[test]
+fn cli_outputs_agent_guide() {
+    let mut cmd = Command::cargo_bin("orient").unwrap();
+    cmd.args([
+        "agent-guide",
+        "--repo",
+        "/work/repo",
+        "--index",
+        "/tmp/repo.index",
+        "--index-dir",
+        "/tmp/orient-shards",
+        "--addr",
+        "127.0.0.1:9999",
+    ])
+    .assert()
+    .success()
+    .stdout(predicate::str::contains("\"purpose\""))
+    .stdout(predicate::str::contains("no session analytics"))
+    .stdout(predicate::str::contains("\"tool\":\"search_shards\""))
+    .stdout(predicate::str::contains("\"tool\":\"indexed_search_code\""))
+    .stdout(predicate::str::contains("\"tool\":\"search_code\""))
+    .stdout(predicate::str::contains("read_request"))
+    .stdout(predicate::str::contains("127.0.0.1:9999"))
+    .stdout(predicate::str::contains("/work/repo"))
+    .stdout(predicate::str::contains("/tmp/repo.index"));
 }
 
 #[test]

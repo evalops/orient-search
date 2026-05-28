@@ -10,7 +10,7 @@ use orient::repo_index::{
     attach_result_related_symbol_requests, read_file_range, search_repo_fast_filtered,
 };
 use orient::server::{
-    MAX_BATCH_QUERIES, MAX_BATCH_RANGES, ToolRuntime, mcp_tool_manifest, serve_jsonl,
+    MAX_BATCH_QUERIES, MAX_BATCH_RANGES, ToolRuntime, agent_guide, mcp_tool_manifest, serve_jsonl,
     serve_jsonl_stream, serve_tcp, tool_manifest,
 };
 use orient::shards::{
@@ -519,6 +519,16 @@ enum Commands {
     },
     ToolManifest,
     McpManifest,
+    AgentGuide {
+        #[arg(long)]
+        repo: Option<String>,
+        #[arg(long)]
+        index: Option<String>,
+        #[arg(long)]
+        index_dir: Option<String>,
+        #[arg(long, default_value = "127.0.0.1:8796")]
+        addr: String,
+    },
     ServeJsonl,
     ServeTcp {
         #[arg(long, default_value = "127.0.0.1:8796")]
@@ -1513,6 +1523,22 @@ fn run() -> Result<()> {
         }
         Commands::McpManifest => {
             println!("{}", serde_json::to_string(&mcp_tool_manifest())?);
+        }
+        Commands::AgentGuide {
+            repo,
+            index,
+            index_dir,
+            addr,
+        } => {
+            println!(
+                "{}",
+                serde_json::to_string(&agent_guide(
+                    repo.as_deref(),
+                    index.as_deref(),
+                    index_dir.as_deref(),
+                    Some(&addr),
+                ))?
+            );
         }
         Commands::ServeJsonl => {
             let stdin = io::stdin();

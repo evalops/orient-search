@@ -11,7 +11,8 @@ use std::thread;
 use orient::fast_index::FastIndex;
 use orient::repo_index::{MAX_ATTACHED_CONTEXT_LINES, MAX_READ_RANGE_LINES, MAX_SEARCH_RESULTS};
 use orient::server::{
-    MAX_BATCH_QUERIES, MAX_BATCH_RANGES, ToolRequest, ToolRuntime, mcp_tool_manifest, tool_manifest,
+    MAX_BATCH_QUERIES, MAX_BATCH_RANGES, ToolRequest, ToolRuntime, agent_guide, mcp_tool_manifest,
+    tool_manifest,
 };
 use orient::shards::{build_shards, refresh_shards};
 
@@ -103,6 +104,10 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
     let read_index_range = tools
         .iter()
         .find(|tool| tool["name"] == "read_index_range")
+        .unwrap();
+    let agent_guide_tool = tools
+        .iter()
+        .find(|tool| tool["name"] == "agent_guide")
         .unwrap();
 
     assert_eq!(search["required"], serde_json::json!(["repo", "query"]));
@@ -361,6 +366,11 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         read_index_range["input_schema"]["properties"]["path"]["description"],
         "Index-relative result path, such as src/lib.rs."
     );
+    assert_eq!(agent_guide_tool["required"], serde_json::json!([]));
+    assert_eq!(
+        agent_guide_tool["input_schema"]["properties"]["addr"]["default"],
+        "127.0.0.1:8796"
+    );
     assert_eq!(
         search["input_schema"]["properties"]["context_lines"]["maximum"],
         serde_json::json!(MAX_ATTACHED_CONTEXT_LINES)
@@ -432,6 +442,7 @@ fn server_reports_tool_manifest_for_agent_wrappers() {
     assert!(stdout.contains("\"name\":\"index_plan\""));
     assert!(stdout.contains("\"name\":\"shard_plan\""));
     assert!(stdout.contains("\"name\":\"mcp_manifest\""));
+    assert!(stdout.contains("\"name\":\"agent_guide\""));
     assert!(stdout.contains("\"required\":[\"repo\",\"query\"]"));
     assert!(stdout.contains("\"optional\""));
     assert!(stdout.contains("\"arguments\""));
@@ -487,6 +498,10 @@ fn mcp_manifest_exposes_input_schema_for_adapter_wrappers() {
         .iter()
         .find(|tool| tool["name"] == "mcp_manifest")
         .unwrap();
+    let agent_guide_tool = tools
+        .iter()
+        .find(|tool| tool["name"] == "agent_guide")
+        .unwrap();
     let ensure_index = tools
         .iter()
         .find(|tool| tool["name"] == "ensure_index")
@@ -513,6 +528,11 @@ fn mcp_manifest_exposes_input_schema_for_adapter_wrappers() {
         mcp_manifest["inputSchema"]["properties"],
         serde_json::json!({})
     );
+    assert_eq!(
+        agent_guide_tool["inputSchema"]["properties"]["addr"]["default"],
+        "127.0.0.1:8796"
+    );
+    assert_eq!(agent_guide_tool["annotations"]["readOnlyHint"], true);
     assert_eq!(search["annotations"]["readOnlyHint"], true);
     assert_eq!(search["annotations"]["destructiveHint"], false);
     assert_eq!(search["annotations"]["idempotentHint"], true);
@@ -531,6 +551,83 @@ fn mcp_manifest_exposes_input_schema_for_adapter_wrappers() {
     assert_eq!(ensure_index["annotations"]["destructiveHint"], false);
     assert_eq!(ensure_index["annotations"]["idempotentHint"], false);
     assert_eq!(ensure_index["annotations"]["openWorldHint"], false);
+}
+
+#[test]
+fn agent_guide_returns_local_agent_request_templates() {
+    let guide = agent_guide(
+        Some("/work/repo"),
+        Some("/tmp/repo.index"),
+        Some("/tmp/orient-shards"),
+        Some("127.0.0.1:9999"),
+    );
+    assert_eq!(
+        guide["preferred_surfaces"]["many_local_repos"],
+        "search_shards"
+    );
+    assert_eq!(
+        guide["request_templates"]["shard_search"]["tool"],
+        "search_shards"
+    );
+    assert_eq!(
+        guide["request_templates"]["live_search"]["arguments"]["repo"],
+        "/work/repo"
+    );
+    assert_eq!(
+        guide["request_templates"]["indexed_search"]["arguments"]["index"],
+        "/tmp/repo.index"
+    );
+    assert_eq!(
+        guide["request_templates"]["live_query_plan"]["tool"],
+        "search_query_plan"
+    );
+    assert_eq!(
+        guide["request_templates"]["indexed_query_plan"]["tool"],
+        "indexed_query_plan"
+    );
+    assert_eq!(
+        guide["request_templates"]["shard_query_plan"]["tool"],
+        "shard_query_plan"
+    );
+    assert!(
+        guide["transports"]["tcp_daemon"]
+            .as_str()
+            .unwrap()
+            .contains("127.0.0.1:9999")
+    );
+    assert!(
+        guide["purpose"]
+            .as_str()
+            .unwrap()
+            .contains("no session analytics")
+    );
+}
+
+#[test]
+fn runtime_serves_agent_guide_for_json_lines_wrappers() {
+    let runtime = ToolRuntime::default();
+    let response = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("guide"),
+        tool: "agent_guide".to_string(),
+        arguments: serde_json::json!({
+            "repo": "/work/repo",
+            "index_dir": "/tmp/orient-shards"
+        }),
+    });
+    assert!(response.error.is_none(), "{:?}", response.error);
+    let guide = response.result.unwrap();
+    assert_eq!(
+        guide["request_templates"]["manifest"]["tool"],
+        "tool_manifest"
+    );
+    assert_eq!(
+        guide["request_templates"]["shard_repo_map"]["arguments"]["index_dir"],
+        "/tmp/orient-shards"
+    );
+    assert_eq!(
+        guide["result_followups"][0],
+        "Use result.read_request for one bounded file range."
+    );
 }
 
 #[test]

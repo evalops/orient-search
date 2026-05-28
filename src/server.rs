@@ -289,6 +289,12 @@ pub fn tool_manifest() -> Value {
             &[],
         ),
         tool_entry(
+            "agent_guide",
+            "Return a compact Orient workflow guide and request templates for local coding agents.",
+            &[],
+            &["repo", "index", "index_dir", "addr"],
+        ),
+        tool_entry(
             "daemon_status",
             "Return local daemon runtime cache status for warm-index clients.",
             &[],
@@ -645,6 +651,125 @@ pub fn mcp_tool_manifest() -> Value {
     })
 }
 
+pub fn agent_guide(
+    repo: Option<&str>,
+    index: Option<&str>,
+    index_dir: Option<&str>,
+    addr: Option<&str>,
+) -> Value {
+    let repo = repo.unwrap_or("/path/to/repo");
+    let index = index.unwrap_or("/tmp/orient.index");
+    let index_dir = index_dir.unwrap_or("/tmp/orient-shards");
+    let addr = addr.unwrap_or("127.0.0.1:8796");
+    json!({
+        "name": "Orient Search",
+        "purpose": "Fast local code search for coding agents; no session analytics.",
+        "recommended_loop": [
+            "Call tool_manifest or mcp_manifest once.",
+            "Use repo_map, indexed_repo_map, or shard_repo_map before editing unfamiliar code.",
+            "Search first, then use read_request, related_request, or related_symbols_request from results.",
+            "Call a query-plan tool when results are empty, noisy, or overly broad."
+        ],
+        "preferred_surfaces": {
+            "one_live_repo": "search_code",
+            "one_persistent_repo": "indexed_search_code",
+            "many_local_repos": "search_shards"
+        },
+        "query_language": [
+            "repo:platform",
+            "path:src/auth or dir:src/auth",
+            "file:auth.rs or file:*.rs",
+            "lang:rust",
+            "ext:rs",
+            "symbol:SessionManager",
+            "kind:function or type:function",
+            "dep:serde",
+            "import:crate::auth",
+            "test:false, is:test, or is:source",
+            "-path:docs",
+            "\"quoted literal\"",
+            "mode:any for exploratory searches"
+        ],
+        "transports": {
+            "stdio": "orient serve-jsonl",
+            "tcp_daemon": format!("orient serve-tcp --addr {addr} --index-dir {index_dir}"),
+            "tcp_client": format!("orient client-jsonl --addr {addr}")
+        },
+        "setup_commands": {
+            "single_repo": [
+                format!("orient ensure-index --repo {repo} --index {index}"),
+                format!("orient serve-tcp --addr {addr} --index {index}")
+            ],
+            "multi_repo_shards": [
+                format!("orient ensure-shards --discover-root ~/Documents/Projects --output-dir {index_dir} --family-limit 2"),
+                format!("orient serve-tcp --addr {addr} --index-dir {index_dir}")
+            ]
+        },
+        "request_templates": {
+            "manifest": {"id": "tools", "tool": "tool_manifest", "arguments": {}},
+            "daemon_status": {"id": "status", "tool": "daemon_status", "arguments": {}},
+            "live_repo_map": {
+                "id": "map",
+                "tool": "repo_map",
+                "arguments": {"repo": repo, "symbols": 50, "tests": 50}
+            },
+            "live_search": {
+                "id": "search",
+                "tool": "search_code",
+                "arguments": {"repo": repo, "query": "symbol:SessionManager token", "limit": 10, "explain": true}
+            },
+            "indexed_repo_map": {
+                "id": "map",
+                "tool": "indexed_repo_map",
+                "arguments": {"index": index, "symbols": 50, "tests": 50}
+            },
+            "indexed_search": {
+                "id": "search",
+                "tool": "indexed_search_code",
+                "arguments": {"index": index, "query": "path:src symbol:SessionManager token", "limit": 10, "refresh_if_stale": true}
+            },
+            "shard_repo_map": {
+                "id": "map",
+                "tool": "shard_repo_map",
+                "arguments": {"index_dir": index_dir, "symbols": 50, "tests": 50}
+            },
+            "shard_search": {
+                "id": "search",
+                "tool": "search_shards",
+                "arguments": {"index_dir": index_dir, "query": "repo:platform symbol:SessionManager token", "limit": 10, "explain": true, "refresh_if_stale": true}
+            },
+            "live_query_plan": {
+                "id": "plan",
+                "tool": "search_query_plan",
+                "arguments": {"repo": repo, "query": "symbol:SessionManager token"}
+            },
+            "indexed_query_plan": {
+                "id": "plan",
+                "tool": "indexed_query_plan",
+                "arguments": {"index": index, "query": "path:src symbol:SessionManager token"}
+            },
+            "shard_query_plan": {
+                "id": "plan",
+                "tool": "shard_query_plan",
+                "arguments": {"index_dir": index_dir, "query": "repo:platform symbol:SessionManager token"}
+            }
+        },
+        "result_followups": [
+            "Use result.read_request for one bounded file range.",
+            "Batch several result.read_range objects with read_ranges, read_index_ranges, or read_shard_ranges.",
+            "Use result.related_request for source/test siblings.",
+            "Use result.related_symbols_request for nearby definitions and types."
+        ],
+        "hard_limits": {
+            "max_results": MAX_SEARCH_RESULTS,
+            "max_batch_queries": MAX_BATCH_QUERIES,
+            "max_batch_ranges": MAX_BATCH_RANGES,
+            "max_range_lines": MAX_READ_RANGE_LINES,
+            "max_attached_context_lines": MAX_ATTACHED_CONTEXT_LINES
+        }
+    })
+}
+
 fn mcp_tool_annotations(name: &str) -> Value {
     let mutating = matches!(
         name,
@@ -940,6 +1065,7 @@ fn argument_default(tool_name: &str, name: &str) -> Option<Value> {
         (_, "lines") => Some(json!(80)),
         (_, "snippet") => Some(json!("medium")),
         (_, "context_lines") => Some(json!(0)),
+        ("agent_guide", "addr") => Some(json!("127.0.0.1:8796")),
         (
             _,
             "explain" | "require_all" | "any_terms" | "refresh_if_stale" | "git_metadata"
@@ -997,6 +1123,7 @@ fn argument_description(tool_name: &str, name: &str) -> &'static str {
         "index_dir" => {
             "Path to a local multi-repo shard directory. Daemon tools may omit this when exactly one shard directory is warmed."
         }
+        "addr" => "Local TCP daemon address for generated setup and client commands.",
         "output_dir" => "Directory where shard indexes and manifest.json should be written.",
         "query" => "Agent query string with filters, quoted phrases, and normal search terms.",
         "queries" => "Agent query strings to run as one batch against the same search target.",
@@ -1124,6 +1251,12 @@ fn read_request_args<T: Serialize>(name: &str, value: T) -> Map<String, Value> {
 impl ToolRuntime {
     fn dispatch_result(&self, request: &ToolRequest) -> Result<Value> {
         match request.tool.as_str() {
+            "agent_guide" => Ok(agent_guide(
+                optional_string_arg(&request.arguments, "repo").as_deref(),
+                optional_string_arg(&request.arguments, "index").as_deref(),
+                optional_string_arg(&request.arguments, "index_dir").as_deref(),
+                optional_string_arg(&request.arguments, "addr").as_deref(),
+            )),
             "discover_repos" => {
                 let root = path_arg(&request.arguments, "root")?;
                 let max_depth = positive_usize_arg(&request.arguments, "max_depth", 4)?;
