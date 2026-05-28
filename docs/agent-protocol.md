@@ -75,7 +75,7 @@ Search results include:
 - `context`: optional attached file context when `context_lines` is set.
 - `explanation` and `query_plan` when `explain` is set.
 
-`search_auto` and each `search_auto_batch` item also include `query_plan_request`, a ready-to-send plan request for the chosen live, indexed, or shard surface. Use it when the result set is empty or suspicious. They also include `repo_map_request` for the matching map tool when the agent needs entrypoints, tests, commands, or top symbols before editing.
+`search_auto` and each `search_auto_batch` item also include `query_plan_request`, a ready-to-send plan request for the chosen live, indexed, or shard surface. Use it when the result set is empty or suspicious. They also include `repo_map_request` for the matching map tool when the agent needs entrypoints, tests, commands, or top symbols before editing, plus `read_batch_request` when there are results to read in one batch call. Batch search items from `search_batch`, `indexed_search_batch`, and `search_shards_batch` include the same `read_batch_request` shape.
 
 Explicit `symbol:` searches center snippets and read ranges on the matching definition line when the language extractor can identify it, even if earlier callers also match the same tokens.
 
@@ -87,7 +87,7 @@ For most agents, the handoff is:
 
 1. Call search.
 2. Collect one or more `read_range` objects from results.
-3. Pass one object or an array of objects directly to the matching batch read tool, or send a result's `read_request` when the wrapper wants a single ready-made follow-up call.
+3. Send `read_batch_request` when it is present, pass one object or an array of `read_range` objects directly to the matching batch read tool, or send a result's `read_request` when the wrapper wants a single ready-made follow-up call.
 4. Use `related_request` when the likely next step is finding nearby tests, source counterparts, or sibling files for a hit.
 5. Use `related_symbols_request` when the likely next step is finding nearby definitions, types, or other symbols for a hit.
 

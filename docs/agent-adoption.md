@@ -38,9 +38,9 @@ Send JSON-lines requests through:
 `orient client-jsonl --addr 127.0.0.1:8796`
 
 Start with `agent_guide` or `tool_manifest` once, then use `search_auto`.
-Follow returned `read_request`, `related_request`, `related_symbols_request`,
-`query_plan_request`, `repo_map_request`, and query-plan `retry_requests`
-objects directly.
+Follow returned `read_batch_request`, `read_request`, `related_request`,
+`related_symbols_request`, `query_plan_request`, `repo_map_request`, and
+query-plan `retry_requests` objects directly.
 Use `refresh_if_stale:true` for indexed or shard searches when live files may
 have changed.
 If Orient is unavailable or returns no useful plan, fall back to normal shell
@@ -76,7 +76,8 @@ simple JSON-lines over stdio, TCP, or Unix sockets.
 
 1. Call `agent_guide` or `tool_manifest`.
 2. Call `search_auto` or `search_auto_batch`.
-3. Use result-level `read_request` objects for bounded file reads.
+3. Use `read_batch_request` for top ranges, or result-level `read_request`
+   objects for one bounded file read.
 4. Use `related_request` and `related_symbols_request` before opening random
    neighboring files.
 5. Use `query_plan_request` when results are empty, noisy, or suspicious, then

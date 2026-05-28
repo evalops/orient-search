@@ -673,6 +673,10 @@ fn runtime_serves_agent_guide_for_json_lines_wrappers() {
     );
     assert_eq!(
         guide["result_followups"][2],
+        "Use search_auto.read_batch_request, a search_auto_batch item read_batch_request, or a search batch item read_batch_request to read top ranges in one call."
+    );
+    assert_eq!(
+        guide["result_followups"][3],
         "Use result.read_request for one bounded file range."
     );
 }
@@ -709,6 +713,26 @@ fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
         "issue_token"
     );
     assert_eq!(live["results"][0]["read_request"]["tool"], "read_range");
+    assert_eq!(live["read_batch_request"]["tool"], "read_ranges");
+    assert_eq!(
+        live["read_batch_request"]["arguments"]["ranges"][0]["path"],
+        "src/auth.rs"
+    );
+    let read_batch = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("read-live-batch"),
+        tool: live["read_batch_request"]["tool"]
+            .as_str()
+            .unwrap()
+            .to_string(),
+        arguments: live["read_batch_request"]["arguments"].clone(),
+    });
+    assert!(read_batch.error.is_none(), "{:?}", read_batch.error);
+    assert!(
+        read_batch.result.unwrap()[0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("issue_token")
+    );
 
     let index_path = repo.path().join("orient.index");
     let ensure = runtime.dispatch(ToolRequest {
@@ -738,6 +762,7 @@ fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
         indexed["results"][0]["read_request"]["tool"],
         "read_index_range"
     );
+    assert_eq!(indexed["read_batch_request"]["tool"], "read_index_ranges");
     let map_request = indexed["repo_map_request"].clone();
     let map = runtime.dispatch(ToolRequest {
         id: serde_json::json!("map"),
@@ -786,6 +811,8 @@ fn runtime_search_auto_batch_uses_single_warmed_index() {
         batch[0]["results"][0]["read_request"]["tool"],
         "read_index_range"
     );
+    assert_eq!(batch[0]["read_batch_request"]["tool"], "read_index_ranges");
+    assert!(batch[0]["read_batch_request"]["arguments"]["ranges"].is_array());
     assert_eq!(batch[1]["query"], "SessionManager");
     assert_eq!(batch[1]["surface"], "indexed");
 }

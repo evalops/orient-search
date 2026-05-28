@@ -19,6 +19,7 @@ const MAX_FILE_BYTES: u64 = 512_000;
 pub const MAX_ATTACHED_CONTEXT_LINES: usize = 500;
 pub const MAX_READ_RANGE_LINES: usize = 1_000;
 pub const MAX_SEARCH_RESULTS: usize = 100;
+const MAX_RESULT_READ_BATCH_RANGES: usize = 64;
 const DEFAULT_RESULT_READ_LINES: usize = 80;
 const RIPGREP_TIMEOUT: Duration = Duration::from_millis(250);
 const RIPGREP_POLL_INTERVAL: Duration = Duration::from_millis(5);
@@ -3419,6 +3420,33 @@ pub fn attach_result_read_requests(
             arguments: serde_json::Value::Object(arguments),
         });
     }
+}
+
+pub fn result_read_batch_request(
+    results: &[SearchResult],
+    tool: &str,
+    mut base_arguments: serde_json::Map<String, serde_json::Value>,
+) -> Option<ResultToolRequest> {
+    let ranges = results
+        .iter()
+        .filter_map(|result| result.read_range.as_ref())
+        .take(MAX_RESULT_READ_BATCH_RANGES)
+        .map(|read_range| {
+            serde_json::json!({
+                "path": read_range.path,
+                "start": read_range.start,
+                "lines": read_range.lines
+            })
+        })
+        .collect::<Vec<_>>();
+    if ranges.is_empty() {
+        return None;
+    }
+    base_arguments.insert("ranges".to_string(), serde_json::Value::Array(ranges));
+    Some(ResultToolRequest {
+        tool: tool.to_string(),
+        arguments: serde_json::Value::Object(base_arguments),
+    })
 }
 
 pub fn attach_result_related_requests(

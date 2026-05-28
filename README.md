@@ -45,7 +45,8 @@ Use `search_auto_batch` when an agent wants to try several query formulations in
 one daemon round trip.
 Both return a `query_plan_request` for empty or noisy result sets.
 They also return a `repo_map_request` for quick orientation on the chosen
-search surface.
+search surface and a `read_batch_request` when results can be opened in one
+bounded batch read.
 
 For a repo without a saved index, use `orient search-plan --repo . "query"` or
 the JSON-lines `search_query_plan` tool to get the same missing-term and retry

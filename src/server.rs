@@ -8,7 +8,7 @@ use crate::repo_index::{
     ResultToolRequest, SearchFilters, SearchResult, SnippetMode, Symbol, attach_result_context,
     attach_result_read_requests, attach_result_related_requests,
     attach_result_related_symbol_requests, finalize_results, normalize_token, read_file_range,
-    search_repo_fast_filtered,
+    result_read_batch_request, search_repo_fast_filtered,
 };
 use crate::shards::{
     ShardEntry, ShardManifest, ShardQueryPlan, ShardRepoMap, ShardSearchScope, build_shards,
@@ -48,6 +48,8 @@ pub struct ToolResponse {
 #[derive(Debug, Serialize)]
 struct SearchBatchResult {
     query: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    read_batch_request: Option<ResultToolRequest>,
     results: Vec<SearchResult>,
 }
 
@@ -58,6 +60,8 @@ struct SearchAutoResult {
     target: String,
     query_plan_request: ResultToolRequest,
     repo_map_request: ResultToolRequest,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    read_batch_request: Option<ResultToolRequest>,
     results: Vec<SearchResult>,
 }
 
@@ -790,6 +794,7 @@ pub fn agent_guide(
         "result_followups": [
             "Use search_auto.query_plan_request or a search_auto_batch item query_plan_request when results are empty or noisy.",
             "Use search_auto.repo_map_request or a search_auto_batch item repo_map_request when the agent needs entrypoints, tests, commands, or top symbols for the chosen surface.",
+            "Use search_auto.read_batch_request, a search_auto_batch item read_batch_request, or a search batch item read_batch_request to read top ranges in one call.",
             "Use result.read_request for one bounded file range.",
             "Batch several result.read_range objects with read_ranges, read_index_ranges, or read_shard_ranges.",
             "Use result.related_request for source/test siblings.",
@@ -1634,7 +1639,16 @@ impl ToolRuntime {
                         "related_symbols",
                         read_request_args("repo", &repo),
                     );
-                    batch.push(SearchBatchResult { query, results });
+                    let read_batch_request = result_read_batch_request(
+                        &results,
+                        "read_ranges",
+                        read_request_args("repo", &repo),
+                    );
+                    batch.push(SearchBatchResult {
+                        query,
+                        read_batch_request,
+                        results,
+                    });
                 }
                 Ok(serde_json::to_value(batch)?)
             }
@@ -1732,7 +1746,16 @@ impl ToolRuntime {
                         "related_index_symbols",
                         read_request_args("index", &index_path),
                     );
-                    batch.push(SearchBatchResult { query, results });
+                    let read_batch_request = result_read_batch_request(
+                        &results,
+                        "read_index_ranges",
+                        read_request_args("index", &index_path),
+                    );
+                    batch.push(SearchBatchResult {
+                        query,
+                        read_batch_request,
+                        results,
+                    });
                 }
                 Ok(serde_json::to_value(batch)?)
             }
@@ -1863,7 +1886,16 @@ impl ToolRuntime {
                         &filters,
                         context_lines,
                     )?;
-                    batch.push(SearchBatchResult { query, results });
+                    let read_batch_request = result_read_batch_request(
+                        &results,
+                        "read_shard_ranges",
+                        read_request_args("index_dir", &index_dir),
+                    );
+                    batch.push(SearchBatchResult {
+                        query,
+                        read_batch_request,
+                        results,
+                    });
                 }
                 Ok(serde_json::to_value(batch)?)
             }
@@ -2179,6 +2211,11 @@ impl ToolRuntime {
                     query,
                 ),
                 repo_map_request: auto_repo_map_request("repo_map", "repo", &repo, arguments),
+                read_batch_request: result_read_batch_request(
+                    &results,
+                    "read_ranges",
+                    read_request_args("repo", &repo),
+                ),
                 results,
             });
         }
@@ -2222,6 +2259,11 @@ impl ToolRuntime {
                 "index_dir",
                 &index_dir,
                 arguments,
+            ),
+            read_batch_request: result_read_batch_request(
+                &results,
+                "read_shard_ranges",
+                read_request_args("index_dir", &index_dir),
             ),
             results,
         })
@@ -2272,6 +2314,11 @@ impl ToolRuntime {
                 "index",
                 &index_path,
                 arguments,
+            ),
+            read_batch_request: result_read_batch_request(
+                &results,
+                "read_index_ranges",
+                read_request_args("index", &index_path),
             ),
             results,
         })

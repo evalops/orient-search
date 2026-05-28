@@ -8,7 +8,8 @@ use orient::fast_index::{FastIndex, RefreshStats};
 use orient::repo_index::{
     QueryPlan, RepoIndexer, ResultToolRequest, SearchFilters, SearchResult, SnippetMode,
     attach_result_context, attach_result_read_requests, attach_result_related_requests,
-    attach_result_related_symbol_requests, read_file_range, search_repo_fast_filtered,
+    attach_result_related_symbol_requests, read_file_range, result_read_batch_request,
+    search_repo_fast_filtered,
 };
 use orient::server::{
     MAX_BATCH_QUERIES, MAX_BATCH_RANGES, ToolRuntime, agent_guide, mcp_tool_manifest, serve_jsonl,
@@ -766,6 +767,8 @@ struct QueryBench {
 #[derive(Debug, Clone, Serialize)]
 struct SearchBatchResult {
     query: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    read_batch_request: Option<ResultToolRequest>,
     results: Vec<SearchResult>,
 }
 
@@ -1123,7 +1126,16 @@ fn run() -> Result<()> {
                     "related_shard_symbols",
                     read_request_args("index_dir", &index_dir),
                 );
-                batch.push(SearchBatchResult { query, results });
+                let read_batch_request = result_read_batch_request(
+                    &results,
+                    "read_shard_ranges",
+                    read_request_args("index_dir", &index_dir),
+                );
+                batch.push(SearchBatchResult {
+                    query,
+                    read_batch_request,
+                    results,
+                });
             }
             println!("{}", serde_json::to_string(&batch)?);
         }
@@ -1449,6 +1461,11 @@ fn run() -> Result<()> {
                             "tool": "shard_repo_map",
                             "arguments": {"index_dir": index_dir}
                         },
+                        "read_batch_request": result_read_batch_request(
+                            &results,
+                            "read_shard_ranges",
+                            read_request_args("index_dir", &index_dir)
+                        ),
                         "results": results
                     }))?
                 );
@@ -1488,6 +1505,11 @@ fn run() -> Result<()> {
                             "tool": "indexed_repo_map",
                             "arguments": {"index": index_path}
                         },
+                        "read_batch_request": result_read_batch_request(
+                            &results,
+                            "read_index_ranges",
+                            read_request_args("index", &index_path)
+                        ),
                         "results": results
                     }))?
                 );
@@ -1526,6 +1548,11 @@ fn run() -> Result<()> {
                             "tool": "repo_map",
                             "arguments": {"repo": repo}
                         },
+                        "read_batch_request": result_read_batch_request(
+                            &results,
+                            "read_ranges",
+                            read_request_args("repo", &repo)
+                        ),
                         "results": results
                     }))?
                 );
@@ -1583,6 +1610,11 @@ fn run() -> Result<()> {
                             "tool": "shard_repo_map",
                             "arguments": {"index_dir": index_dir}
                         },
+                        "read_batch_request": result_read_batch_request(
+                            &results,
+                            "read_shard_ranges",
+                            read_request_args("index_dir", &index_dir)
+                        ),
                         "results": results
                     }));
                 }
@@ -1621,6 +1653,11 @@ fn run() -> Result<()> {
                             "tool": "indexed_repo_map",
                             "arguments": {"index": index_path}
                         },
+                        "read_batch_request": result_read_batch_request(
+                            &results,
+                            "read_index_ranges",
+                            read_request_args("index", &index_path)
+                        ),
                         "results": results
                     }));
                 }
@@ -1658,6 +1695,11 @@ fn run() -> Result<()> {
                             "tool": "repo_map",
                             "arguments": {"repo": repo}
                         },
+                        "read_batch_request": result_read_batch_request(
+                            &results,
+                            "read_ranges",
+                            read_request_args("repo", &repo)
+                        ),
                         "results": results
                     }));
                 }
@@ -1697,7 +1739,16 @@ fn run() -> Result<()> {
                     "related_symbols",
                     read_request_args("repo", &repo),
                 );
-                batch.push(SearchBatchResult { query, results });
+                let read_batch_request = result_read_batch_request(
+                    &results,
+                    "read_ranges",
+                    read_request_args("repo", &repo),
+                );
+                batch.push(SearchBatchResult {
+                    query,
+                    read_batch_request,
+                    results,
+                });
             }
             println!("{}", serde_json::to_string(&batch)?);
         }
@@ -1768,7 +1819,16 @@ fn run() -> Result<()> {
                     "related_index_symbols",
                     read_request_args("index", &index_path),
                 );
-                batch.push(SearchBatchResult { query, results });
+                let read_batch_request = result_read_batch_request(
+                    &results,
+                    "read_index_ranges",
+                    read_request_args("index", &index_path),
+                );
+                batch.push(SearchBatchResult {
+                    query,
+                    read_batch_request,
+                    results,
+                });
             }
             println!("{}", serde_json::to_string(&batch)?);
         }
