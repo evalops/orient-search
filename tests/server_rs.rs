@@ -4749,6 +4749,28 @@ fn runtime_filters_shard_search_by_nested_repo_alias() {
         search_result[0]["related_symbols_request"]["arguments"]["index_dir"],
         serde_json::json!(shard_dir.path())
     );
+    let related_symbols = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("related-symbols"),
+        tool: search_result[0]["related_symbols_request"]["tool"]
+            .as_str()
+            .unwrap()
+            .to_string(),
+        arguments: search_result[0]["related_symbols_request"]["arguments"].clone(),
+    });
+    assert!(
+        related_symbols.error.is_none(),
+        "{:?}",
+        related_symbols.error
+    );
+    let related_symbols = serde_json::to_string(&related_symbols.result).unwrap();
+    assert!(
+        related_symbols.contains("\"path\":\"billing/src/billing.rs\""),
+        "{related_symbols}"
+    );
+    assert!(
+        related_symbols.contains("invoice_total"),
+        "{related_symbols}"
+    );
     let result = serde_json::to_string(&search.result).unwrap();
     assert!(result.contains("billing/src/billing.rs"), "{result}");
     assert!(!result.contains("auth/src/auth.rs"), "{result}");

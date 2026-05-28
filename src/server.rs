@@ -17,8 +17,8 @@ use crate::repo_index::{
 use crate::shards::{
     ShardEntry, ShardManifest, ShardQueryPlan, ShardRepoMap, ShardSearchScope, build_shards,
     ensure_shards, filter_repo_map_by_prefix, filters_for_shard_scope, load_manifest,
-    refresh_shards, resolve_shard_path_from_manifest, shard_search_scopes,
-    shard_selection_miss_plan, shard_status,
+    refresh_shards, related_query_without_shard_selectors, resolve_shard_path_from_manifest,
+    shard_search_scopes, shard_selection_miss_plan, shard_status,
 };
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use anyhow::{Context, Result, anyhow};
@@ -3972,9 +3972,10 @@ impl ToolRuntime {
     ) -> Result<Vec<crate::repo_index::RelatedSymbol>> {
         let resolved = self.resolve_shard_path_cached(index_dir, path)?;
         let index = self.cached_index(index_dir.join(&resolved.index))?;
+        let query = related_query_without_shard_selectors(query);
         let mut related = index.related_symbols(
             Some(&resolved.relative_path),
-            query,
+            query.as_deref(),
             limit.saturating_mul(4).max(10),
         );
         related.retain(|symbol| resolved.contains_actual_path(&symbol.symbol.path));

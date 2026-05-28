@@ -270,6 +270,84 @@ pub fn query_text(terms: &[String], filters: &SearchFilters) -> String {
     pieces.join(" ")
 }
 
+pub fn query_with_filters_text(terms: &[String], filters: &SearchFilters) -> String {
+    let mut pieces = terms
+        .iter()
+        .map(|term| query_token_text(term))
+        .collect::<Vec<_>>();
+    push_query_filter(&mut pieces, "file", filters.file.as_deref(), false);
+    push_query_filter(&mut pieces, "path", filters.path.as_deref(), false);
+    push_query_filter(&mut pieces, "lang", filters.language.as_deref(), false);
+    push_query_filter(&mut pieces, "ext", filters.extension.as_deref(), false);
+    push_query_filter(&mut pieces, "symbol", filters.symbol.as_deref(), false);
+    push_query_filter(&mut pieces, "kind", filters.symbol_kind.as_deref(), false);
+    push_query_filter(&mut pieces, "repo", filters.repo.as_deref(), false);
+    push_query_filter(&mut pieces, "branch", filters.branch.as_deref(), false);
+    push_query_filter(&mut pieces, "origin", filters.origin.as_deref(), false);
+    push_query_filter(&mut pieces, "dep", filters.dependency.as_deref(), false);
+    push_query_filter(&mut pieces, "import", filters.import.as_deref(), false);
+    if let Some(test) = filters.test {
+        pieces.push(format!("test:{test}"));
+    }
+    for value in &filters.exclude_file {
+        push_query_filter(&mut pieces, "file", Some(value), true);
+    }
+    for value in &filters.exclude_path {
+        push_query_filter(&mut pieces, "path", Some(value), true);
+    }
+    for value in &filters.exclude_language {
+        push_query_filter(&mut pieces, "lang", Some(value), true);
+    }
+    for value in &filters.exclude_extension {
+        push_query_filter(&mut pieces, "ext", Some(value), true);
+    }
+    for value in &filters.exclude_symbol {
+        push_query_filter(&mut pieces, "symbol", Some(value), true);
+    }
+    for value in &filters.exclude_symbol_kind {
+        push_query_filter(&mut pieces, "kind", Some(value), true);
+    }
+    for value in &filters.exclude_repo {
+        push_query_filter(&mut pieces, "repo", Some(value), true);
+    }
+    for value in &filters.exclude_branch {
+        push_query_filter(&mut pieces, "branch", Some(value), true);
+    }
+    for value in &filters.exclude_origin {
+        push_query_filter(&mut pieces, "origin", Some(value), true);
+    }
+    for value in &filters.exclude_dependency {
+        push_query_filter(&mut pieces, "dep", Some(value), true);
+    }
+    for value in &filters.exclude_import {
+        push_query_filter(&mut pieces, "import", Some(value), true);
+    }
+    pieces.join(" ")
+}
+
+fn push_query_filter(pieces: &mut Vec<String>, key: &str, value: Option<&str>, negated: bool) {
+    let Some(value) = value else {
+        return;
+    };
+    if value.trim().is_empty() {
+        return;
+    }
+    let prefix = if negated { "-" } else { "" };
+    pieces.push(format!("{prefix}{key}:{}", query_token_text(value)));
+}
+
+fn query_token_text(value: &str) -> String {
+    if value
+        .chars()
+        .any(|ch| ch.is_whitespace() || matches!(ch, '"' | '\'' | '\\'))
+    {
+        let escaped = value.replace('\\', "\\\\").replace('"', "\\\"");
+        format!("\"{escaped}\"")
+    } else {
+        value.to_string()
+    }
+}
+
 pub fn query_phrases(terms: &[String]) -> Vec<String> {
     let mut phrases = terms
         .iter()
@@ -408,6 +486,22 @@ mod tests {
         assert_eq!(parsed.filters.exclude_symbol_kind, vec!["class"]);
         assert_eq!(parsed.filters.exclude_import, vec!["legacy"]);
         assert_eq!(parsed.filters.symbol.as_deref(), Some("Runtime"));
+    }
+
+    #[test]
+    fn serializes_query_text_with_filters_for_followups() {
+        let parsed = parse_query(
+            r#"path:'src auth' lang:Rust symbol:SessionManager -branch:wip -origin:legacy "issue token""#,
+        );
+
+        let text = query_with_filters_text(&parsed.terms, &parsed.filters);
+        let reparsed = parse_query(&text);
+        assert_eq!(reparsed.terms, vec!["issue token"]);
+        assert_eq!(reparsed.filters.path.as_deref(), Some("src auth"));
+        assert_eq!(reparsed.filters.language.as_deref(), Some("rust"));
+        assert_eq!(reparsed.filters.symbol.as_deref(), Some("SessionManager"));
+        assert_eq!(reparsed.filters.exclude_branch, vec!["wip"]);
+        assert_eq!(reparsed.filters.exclude_origin, vec!["legacy"]);
     }
 
     #[test]

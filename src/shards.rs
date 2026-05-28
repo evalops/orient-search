@@ -2,7 +2,7 @@
 
 use crate::discover::{RepoGitMetadata, git_metadata_for_repo};
 use crate::fast_index::{FastIndex, IndexFreshness, IndexStats};
-use crate::query::{merge_filters, parse_query, query_text};
+use crate::query::{merge_filters, parse_query, query_text, query_with_filters_text};
 use crate::repo_index::{
     CommandHint, FileRange, QueryPlan, QueryPlanFilter, QueryPlanRepairHint, RelatedFile,
     RelatedSymbol, RepoMap, RepoMapDetail, SearchFilters, SearchResult, Symbol, finalize_results,
@@ -928,9 +928,10 @@ pub fn related_shard_symbols(
     let resolved = resolve_shard_path(index_dir.as_ref(), shard_path)?;
     let index = FastIndex::load(index_dir.as_ref().join(&resolved.index))
         .with_context(|| format!("load shard {}", resolved.index))?;
+    let query = related_query_without_shard_selectors(query);
     let mut related = index.related_symbols(
         Some(&resolved.relative_path),
-        query,
+        query.as_deref(),
         limit.saturating_mul(4).max(10),
     );
     related.retain(|symbol| resolved.contains_actual_path(&symbol.symbol.path));
@@ -939,6 +940,20 @@ pub fn related_shard_symbols(
     }
     related.truncate(limit);
     Ok(related)
+}
+
+pub(crate) fn related_query_without_shard_selectors(query: Option<&str>) -> Option<String> {
+    let query = query?;
+    let parsed = parse_query(query);
+    let mut filters = parsed.filters;
+    filters.repo = None;
+    filters.branch = None;
+    filters.origin = None;
+    filters.exclude_repo.clear();
+    filters.exclude_branch.clear();
+    filters.exclude_origin.clear();
+    let query = query_with_filters_text(&parsed.terms, &filters);
+    (!query.trim().is_empty()).then_some(query)
 }
 
 pub(crate) struct ResolvedShardRead {

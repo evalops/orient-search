@@ -3259,7 +3259,7 @@ fn cli_filters_shard_search_by_nested_repo_alias() {
             "--path",
             "billing/src/billing.rs",
             "--query",
-            "invoice total",
+            "repo:billing invoice total",
         ])
         .assert()
         .success()
