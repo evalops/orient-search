@@ -50,7 +50,7 @@ Use `index_status` or `shard_status` when live files may have changed since inde
 
 Use the fastest surface that matches your setup:
 
-- `search_auto` when a daemon has exactly one warmed shard directory or index, or when the request supplies `index_dir`, `index`, or a live `repo`. It returns `{surface,target,results}` and keeps result follow-up requests aligned with the chosen surface.
+- `search_auto` when a daemon has exactly one warmed shard directory or index, or when the request supplies `index_dir`, `index`, or a live `repo`. It returns `{query,surface,target,query_plan_request,results}` and keeps result follow-up requests aligned with the chosen surface.
 - `search_code` for a live repo without a prebuilt index.
 - `indexed_search_code` for one persistent repo index.
 - `search_shards` for a multi-repo shard directory.
@@ -74,6 +74,8 @@ Search results include:
 - `related_symbols_request`: a ready-to-send JSON-lines request body for nearby definitions/types using the matching live, indexed, or shard related-symbol tool.
 - `context`: optional attached file context when `context_lines` is set.
 - `explanation` and `query_plan` when `explain` is set.
+
+`search_auto` and each `search_auto_batch` item also include `query_plan_request`, a ready-to-send plan request for the chosen live, indexed, or shard surface. Use it when the result set is empty or suspicious.
 
 Explicit `symbol:` searches center snippets and read ranges on the matching definition line when the language extractor can identify it, even if earlier callers also match the same tokens.
 

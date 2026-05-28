@@ -5,7 +5,7 @@ use crate::fast_index::{FastIndex, RefreshStats};
 use crate::query::{merge_filters, parse_query, query_text};
 use crate::repo_index::{
     MAX_ATTACHED_CONTEXT_LINES, MAX_READ_RANGE_LINES, MAX_SEARCH_RESULTS, QueryPlan, RepoIndexer,
-    SearchFilters, SearchResult, SnippetMode, Symbol, attach_result_context,
+    ResultToolRequest, SearchFilters, SearchResult, SnippetMode, Symbol, attach_result_context,
     attach_result_read_requests, attach_result_related_requests,
     attach_result_related_symbol_requests, finalize_results, normalize_token, read_file_range,
     search_repo_fast_filtered,
@@ -56,6 +56,7 @@ struct SearchAutoResult {
     query: String,
     surface: String,
     target: String,
+    query_plan_request: ResultToolRequest,
     results: Vec<SearchResult>,
 }
 
@@ -786,6 +787,7 @@ pub fn agent_guide(
             }
         },
         "result_followups": [
+            "Use search_auto.query_plan_request or a search_auto_batch item query_plan_request when results are empty or noisy.",
             "Use result.read_request for one bounded file range.",
             "Batch several result.read_range objects with read_ranges, read_index_ranges, or read_shard_ranges.",
             "Use result.related_request for source/test siblings.",
@@ -1279,6 +1281,48 @@ fn read_request_args<T: Serialize>(name: &str, value: T) -> Map<String, Value> {
     let mut arguments = Map::new();
     arguments.insert(name.to_string(), json!(value));
     arguments
+}
+
+fn auto_query_plan_request<T: Serialize>(
+    tool: &str,
+    target_name: &str,
+    target_value: T,
+    source_arguments: &Value,
+    query: &str,
+) -> ResultToolRequest {
+    let mut arguments = Map::new();
+    if let Some(source) = source_arguments.as_object() {
+        for (name, value) in source {
+            if auto_query_plan_passthrough_arg(name, target_name) {
+                arguments.insert(name.clone(), value.clone());
+            }
+        }
+    }
+    arguments.insert(target_name.to_string(), json!(target_value));
+    arguments.insert("query".to_string(), json!(query));
+    ResultToolRequest {
+        tool: tool.to_string(),
+        arguments: Value::Object(arguments),
+    }
+}
+
+fn auto_query_plan_passthrough_arg(name: &str, target_name: &str) -> bool {
+    if matches!(
+        name,
+        "query" | "queries" | "limit" | "context_lines" | "snippet" | "explain"
+    ) {
+        return false;
+    }
+    if name == target_name {
+        return false;
+    }
+    if matches!(target_name, "index" | "index_dir") && matches!(name, "index" | "index_dir") {
+        return false;
+    }
+    if target_name == "repo" && name == "repo" {
+        return false;
+    }
+    true
 }
 
 impl ToolRuntime {
@@ -1968,6 +2012,13 @@ impl ToolRuntime {
                 query: query.to_string(),
                 surface: "fallback".to_string(),
                 target: repo.to_string_lossy().to_string(),
+                query_plan_request: auto_query_plan_request(
+                    "search_query_plan",
+                    "repo",
+                    &repo,
+                    arguments,
+                    query,
+                ),
                 results,
             });
         }
@@ -1999,6 +2050,13 @@ impl ToolRuntime {
             query: query.to_string(),
             surface: "shards".to_string(),
             target: index_dir.to_string_lossy().to_string(),
+            query_plan_request: auto_query_plan_request(
+                "shard_query_plan",
+                "index_dir",
+                &index_dir,
+                arguments,
+                query,
+            ),
             results,
         })
     }
@@ -2036,6 +2094,13 @@ impl ToolRuntime {
             query: query.to_string(),
             surface: "indexed".to_string(),
             target: index_path.to_string_lossy().to_string(),
+            query_plan_request: auto_query_plan_request(
+                "indexed_query_plan",
+                "index",
+                &index_path,
+                arguments,
+                query,
+            ),
             results,
         })
     }

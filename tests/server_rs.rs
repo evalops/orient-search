@@ -665,6 +665,10 @@ fn runtime_serves_agent_guide_for_json_lines_wrappers() {
     );
     assert_eq!(
         guide["result_followups"][0],
+        "Use search_auto.query_plan_request or a search_auto_batch item query_plan_request when results are empty or noisy."
+    );
+    assert_eq!(
+        guide["result_followups"][1],
         "Use result.read_request for one bounded file range."
     );
 }
@@ -690,6 +694,11 @@ fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
     assert!(live.error.is_none(), "{:?}", live.error);
     let live = live.result.unwrap();
     assert_eq!(live["surface"], "fallback");
+    assert_eq!(live["query_plan_request"]["tool"], "search_query_plan");
+    assert_eq!(
+        live["query_plan_request"]["arguments"]["query"],
+        "issue_token"
+    );
     assert_eq!(live["results"][0]["read_request"]["tool"], "read_range");
 
     let index_path = repo.path().join("orient.index");
@@ -714,6 +723,7 @@ fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
     assert!(indexed.error.is_none(), "{:?}", indexed.error);
     let indexed = indexed.result.unwrap();
     assert_eq!(indexed["surface"], "indexed");
+    assert_eq!(indexed["query_plan_request"]["tool"], "indexed_query_plan");
     assert_eq!(
         indexed["results"][0]["read_request"]["tool"],
         "read_index_range"
@@ -752,6 +762,7 @@ fn runtime_search_auto_batch_uses_single_warmed_index() {
     assert_eq!(batch.as_array().unwrap().len(), 2);
     assert_eq!(batch[0]["query"], "issue_token");
     assert_eq!(batch[0]["surface"], "indexed");
+    assert_eq!(batch[0]["query_plan_request"]["tool"], "indexed_query_plan");
     assert_eq!(
         batch[0]["results"][0]["read_request"]["tool"],
         "read_index_range"

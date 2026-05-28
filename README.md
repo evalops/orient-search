@@ -42,6 +42,7 @@ Once a daemon has exactly one shard directory or index warmed, `search_auto`
 lets wrappers search that target with just a query.
 Use `search_auto_batch` when an agent wants to try several query formulations in
 one daemon round trip.
+Both return a `query_plan_request` for empty or noisy result sets.
 
 For a repo without a saved index, use `orient search-plan --repo . "query"` or
 the JSON-lines `search_query_plan` tool to get the same missing-term and retry

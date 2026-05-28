@@ -1292,6 +1292,10 @@ fn run() -> Result<()> {
                         "query": query,
                         "surface": "shards",
                         "target": index_dir,
+                        "query_plan_request": {
+                            "tool": "shard_query_plan",
+                            "arguments": {"index_dir": index_dir, "query": query}
+                        },
                         "results": results
                     }))?
                 );
@@ -1323,6 +1327,10 @@ fn run() -> Result<()> {
                         "query": query,
                         "surface": "indexed",
                         "target": index_path,
+                        "query_plan_request": {
+                            "tool": "indexed_query_plan",
+                            "arguments": {"index": index_path, "query": query}
+                        },
                         "results": results
                     }))?
                 );
@@ -1353,6 +1361,10 @@ fn run() -> Result<()> {
                         "query": query,
                         "surface": "fallback",
                         "target": repo,
+                        "query_plan_request": {
+                            "tool": "search_query_plan",
+                            "arguments": {"repo": repo, "query": query}
+                        },
                         "results": results
                     }))?
                 );
@@ -1402,6 +1414,10 @@ fn run() -> Result<()> {
                         "query": query,
                         "surface": "shards",
                         "target": index_dir,
+                        "query_plan_request": {
+                            "tool": "shard_query_plan",
+                            "arguments": {"index_dir": index_dir, "query": query}
+                        },
                         "results": results
                     }));
                 }
@@ -1432,6 +1448,10 @@ fn run() -> Result<()> {
                         "query": query,
                         "surface": "indexed",
                         "target": index_path,
+                        "query_plan_request": {
+                            "tool": "indexed_query_plan",
+                            "arguments": {"index": index_path, "query": query}
+                        },
                         "results": results
                     }));
                 }
@@ -1461,6 +1481,10 @@ fn run() -> Result<()> {
                         "query": query,
                         "surface": "fallback",
                         "target": repo,
+                        "query_plan_request": {
+                            "tool": "search_query_plan",
+                            "arguments": {"repo": repo, "query": query}
+                        },
                         "results": results
                     }));
                 }
