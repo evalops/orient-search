@@ -28,7 +28,8 @@ use std::path::{Component, Path, PathBuf};
 use std::process;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const INDEX_VERSION: u32 = 10;
+const INDEX_VERSION: u32 = 11;
+const PREVIOUS_DISK_INDEX_VERSION: u32 = 10;
 const LEGACY_RAW_INDEX_VERSION: u32 = 9;
 const INDEX_MAGIC: &[u8] = b"ORIENTIDX\0";
 const INDEX_HEADER_LEN: usize = INDEX_MAGIC.len() + std::mem::size_of::<u32>();
@@ -44,6 +45,8 @@ pub struct FastIndex {
     pub postings: HashMap<String, Vec<Posting>>,
     pub path_postings: HashMap<String, Vec<Posting>>,
     pub trigram_postings: HashMap<String, Vec<Posting>>,
+    #[serde(default)]
+    pub symbol_postings: HashMap<String, Vec<Posting>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -54,6 +57,8 @@ struct FastIndexDisk {
     postings: HashMap<String, CompressedPostingList>,
     path_postings: HashMap<String, CompressedPostingList>,
     trigram_postings: HashMap<String, CompressedPostingList>,
+    #[serde(default)]
+    symbol_postings: HashMap<String, CompressedPostingList>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -303,6 +308,7 @@ impl FastIndex {
         let postings = rebuild_postings(&files, |file| &file.terms);
         let path_postings = rebuild_postings(&files, |file| &file.path_terms);
         let trigram_postings = rebuild_postings(&files, |file| &file.trigrams);
+        let symbol_postings = rebuild_symbol_postings(&files);
         Ok(Self {
             version: INDEX_VERSION,
             root,
@@ -310,6 +316,7 @@ impl FastIndex {
             postings,
             path_postings,
             trigram_postings,
+            symbol_postings,
         })
         .map(|index| RefreshOutcome {
             index,
@@ -339,10 +346,12 @@ impl FastIndex {
         let (payload, header_version) = index_payload(bytes)
             .with_context(|| format!("parse index header {}", path.display()))?;
         let mut index = match header_version {
-            Some(INDEX_VERSION) => bincode::deserialize::<FastIndexDisk>(payload)
-                .with_context(|| format!("parse index {}", path.display()))?
-                .into_index()
-                .with_context(|| format!("decode index {}", path.display()))?,
+            Some(INDEX_VERSION | PREVIOUS_DISK_INDEX_VERSION) => {
+                bincode::deserialize::<FastIndexDisk>(payload)
+                    .with_context(|| format!("parse index {}", path.display()))?
+                    .into_index()
+                    .with_context(|| format!("decode index {}", path.display()))?
+            }
             Some(LEGACY_RAW_INDEX_VERSION) | None => load_raw_index(payload)
                 .with_context(|| format!("parse index {}", path.display()))?,
             Some(version) => anyhow::bail!("unsupported index version {}", version),
@@ -375,10 +384,12 @@ impl FastIndex {
             trigrams: self.trigram_postings.len(),
             posting_entries: total_posting_entries(&self.postings)
                 + total_posting_entries(&self.path_postings)
-                + total_posting_entries(&self.trigram_postings),
+                + total_posting_entries(&self.trigram_postings)
+                + total_posting_entries(&self.symbol_postings),
             compressed_posting_bytes: total_compressed_posting_bytes(&self.postings)
                 + total_compressed_posting_bytes(&self.path_postings)
-                + total_compressed_posting_bytes(&self.trigram_postings),
+                + total_compressed_posting_bytes(&self.trigram_postings)
+                + total_compressed_posting_bytes(&self.symbol_postings),
             symbols: self.files.iter().map(|file| file.symbols.len()).sum(),
         }
     }
@@ -390,6 +401,11 @@ impl FastIndex {
         normalize_posting_map(&mut self.postings);
         normalize_posting_map(&mut self.path_postings);
         normalize_posting_map(&mut self.trigram_postings);
+        if self.symbol_postings.is_empty() {
+            self.symbol_postings = rebuild_symbol_postings(&self.files);
+        } else {
+            normalize_posting_map(&mut self.symbol_postings);
+        }
     }
 
     pub fn refresh_stats(&self, outcome: &RefreshOutcome) -> RefreshStats {
@@ -403,10 +419,12 @@ impl FastIndex {
             trigrams: self.trigram_postings.len(),
             posting_entries: total_posting_entries(&self.postings)
                 + total_posting_entries(&self.path_postings)
-                + total_posting_entries(&self.trigram_postings),
+                + total_posting_entries(&self.trigram_postings)
+                + total_posting_entries(&self.symbol_postings),
             compressed_posting_bytes: total_compressed_posting_bytes(&self.postings)
                 + total_compressed_posting_bytes(&self.path_postings)
-                + total_compressed_posting_bytes(&self.trigram_postings),
+                + total_compressed_posting_bytes(&self.trigram_postings)
+                + total_compressed_posting_bytes(&self.symbol_postings),
             symbols: self.files.iter().map(|file| file.symbols.len()).sum(),
             reused_files: outcome.reused_files,
             renamed_files: outcome.renamed_files,
@@ -991,10 +1009,20 @@ impl FastIndex {
         if query_tokens.len() > 1 && !filters.match_any {
             filters.require_all = true;
         }
+        let exact_symbol_query = exact_symbol_query_name(&parsed.terms, filters.symbol.as_deref());
 
         let mut token_postings = query_tokens
             .iter()
             .filter_map(|token| self.postings.get(token).map(|postings| (token, postings)))
+            .collect::<Vec<_>>();
+        let symbol_postings = exact_symbol_query
+            .as_ref()
+            .and_then(|symbol| {
+                self.symbol_postings
+                    .get(symbol)
+                    .map(|postings| (symbol, postings))
+            })
+            .into_iter()
             .collect::<Vec<_>>();
         let mut path_postings = query_tokens
             .iter()
@@ -1043,6 +1071,7 @@ impl FastIndex {
         let mut planned_postings = token_postings
             .iter()
             .map(|(_, postings)| *postings)
+            .chain(symbol_postings.iter().map(|(_, postings)| *postings))
             .chain(path_plan_postings.iter().map(|(_, postings)| *postings))
             .chain(
                 trigram_postings
@@ -1146,6 +1175,7 @@ impl FastIndex {
                 &query_phrases,
                 &query_trigrams,
                 &token_postings,
+                &symbol_postings,
                 &path_postings,
                 &trigram_postings,
                 &missing_terms,
@@ -1227,6 +1257,7 @@ impl FastIndex {
         if query_tokens.len() > 1 && !filters.match_any {
             filters.require_all = true;
         }
+        let exact_symbol_query = exact_symbol_query_name(&parsed.terms, filters.symbol.as_deref());
         if query_tokens.is_empty() && query_trigrams.is_empty() {
             if filter_only_query(&filters) {
                 let candidate_count = self
@@ -1286,6 +1317,15 @@ impl FastIndex {
             .iter()
             .filter_map(|token| self.postings.get(token).map(|postings| (token, postings)))
             .collect::<Vec<_>>();
+        let symbol_postings = exact_symbol_query
+            .as_ref()
+            .and_then(|symbol| {
+                self.symbol_postings
+                    .get(symbol)
+                    .map(|postings| (symbol, postings))
+            })
+            .into_iter()
+            .collect::<Vec<_>>();
         let mut path_postings = query_tokens
             .iter()
             .filter_map(|token| {
@@ -1329,6 +1369,7 @@ impl FastIndex {
         let mut planned_postings = token_postings
             .iter()
             .map(|(_, postings)| *postings)
+            .chain(symbol_postings.iter().map(|(_, postings)| *postings))
             .chain(path_plan_postings.iter().map(|(_, postings)| *postings))
             .chain(
                 trigram_postings
@@ -1430,6 +1471,7 @@ impl FastIndex {
             &query_phrases,
             &query_trigrams,
             &token_postings,
+            &symbol_postings,
             &path_postings,
             &trigram_postings,
             &missing_terms,
@@ -1624,22 +1666,24 @@ impl FastIndexDisk {
             postings: compress_posting_map(&index.postings),
             path_postings: compress_posting_map(&index.path_postings),
             trigram_postings: compress_posting_map(&index.trigram_postings),
+            symbol_postings: compress_posting_map(&index.symbol_postings),
         }
     }
 
     fn into_index(self) -> Result<FastIndex> {
         anyhow::ensure!(
-            self.version == INDEX_VERSION,
+            self.version == INDEX_VERSION || self.version == PREVIOUS_DISK_INDEX_VERSION,
             "unsupported index version {}",
             self.version
         );
         Ok(FastIndex {
-            version: self.version,
+            version: INDEX_VERSION,
             root: self.root,
             files: self.files,
             postings: decompress_posting_map(self.postings)?,
             path_postings: decompress_posting_map(self.path_postings)?,
             trigram_postings: decompress_posting_map(self.trigram_postings)?,
+            symbol_postings: decompress_posting_map(self.symbol_postings)?,
         })
     }
 }
@@ -1652,6 +1696,9 @@ fn load_raw_index(payload: &[u8]) -> Result<FastIndex> {
         index.version
     );
     index.version = INDEX_VERSION;
+    if index.symbol_postings.is_empty() {
+        index.symbol_postings = rebuild_symbol_postings(&index.files);
+    }
     Ok(index)
 }
 
@@ -2119,6 +2166,7 @@ fn indexed_query_plan(
     query_phrases: &[String],
     query_trigrams: &[String],
     token_postings: &[(&String, &Vec<Posting>)],
+    symbol_postings: &[(&String, &Vec<Posting>)],
     path_postings: &[(&String, &Vec<Posting>)],
     trigram_postings: &[(&String, &Vec<Posting>)],
     missing_terms: &[String],
@@ -2136,6 +2184,11 @@ fn indexed_query_plan(
     let mut planned_postings = token_postings
         .iter()
         .map(|(token, postings)| plan_posting("content", token, postings))
+        .chain(
+            symbol_postings
+                .iter()
+                .map(|(symbol, postings)| plan_posting("symbol", symbol, postings)),
+        )
         .chain(
             path_postings
                 .iter()
@@ -2369,6 +2422,35 @@ fn missing_query_trigrams(
         })
         .cloned()
         .collect()
+}
+
+fn exact_symbol_query_name(
+    terms: &[String],
+    explicit_symbol_filter: Option<&str>,
+) -> Option<String> {
+    if explicit_symbol_filter.is_some() || terms.len() != 1 {
+        return None;
+    }
+    let term = terms.first()?.trim();
+    if !identifier_shaped_query_term(term) {
+        return None;
+    }
+    let normalized = normalize_token(term);
+    (normalized.len() >= 3).then_some(normalized)
+}
+
+fn identifier_shaped_query_term(term: &str) -> bool {
+    let mut previous = None;
+    for ch in term.chars() {
+        if matches!(ch, '_' | ':' | '.' | '#' | '-' | '/') {
+            return true;
+        }
+        if previous.is_some_and(|prev: char| prev.is_ascii_lowercase() && ch.is_ascii_uppercase()) {
+            return true;
+        }
+        previous = Some(ch);
+    }
+    false
 }
 
 fn has_unsatisfied_missing_terms(missing_terms: &[String], filters: &SearchFilters) -> bool {
@@ -2822,6 +2904,30 @@ fn rebuild_postings(
                     file_id: file_id as u32,
                     count: term.count,
                 });
+        }
+    }
+    for values in postings.values_mut() {
+        values.sort_unstable_by_key(|posting| posting.file_id);
+    }
+    postings
+}
+
+fn rebuild_symbol_postings(files: &[IndexedPath]) -> HashMap<String, Vec<Posting>> {
+    let mut postings: HashMap<String, Vec<Posting>> = HashMap::new();
+    for (file_id, file) in files.iter().enumerate() {
+        let mut counts: HashMap<String, u16> = HashMap::new();
+        for symbol in &file.symbols {
+            if symbol.normalized.is_empty() {
+                continue;
+            }
+            let count = counts.entry(symbol.normalized.clone()).or_default();
+            *count = count.saturating_add(1);
+        }
+        for (symbol, count) in counts {
+            postings.entry(symbol).or_default().push(Posting {
+                file_id: file_id as u32,
+                count,
+            });
         }
     }
     for values in postings.values_mut() {

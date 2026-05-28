@@ -1527,6 +1527,53 @@ fn indexed_search_uses_path_postings_for_path_only_matches() {
 }
 
 #[test]
+fn indexed_search_uses_symbol_postings_for_identifier_queries() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/lib.rs"),
+        "pub fn agent_instructions() -> &'static str { \"ok\" }\n",
+    );
+    for index in 0..120 {
+        write(
+            &repo
+                .path()
+                .join(format!("docs/agent-instructions-{index}.md")),
+            "agent instructions orient search guide\n",
+        );
+    }
+
+    let index = FastIndex::build(repo.path()).unwrap();
+    assert!(index.symbol_postings.contains_key("agentinstructions"));
+
+    let results = index
+        .search_filtered(
+            "agent_instructions",
+            5,
+            &SearchFilters {
+                explain: true,
+                ..SearchFilters::default()
+            },
+        )
+        .unwrap();
+
+    assert_eq!(results[0].path, "src/lib.rs");
+    assert!(results[0].reason.contains("symbol:agent_instructions"));
+    let plan = results[0].query_plan.as_ref().unwrap();
+    assert!(
+        plan.planned_postings
+            .iter()
+            .any(|posting| posting.kind == "symbol" && posting.value == "agentinstructions"),
+        "{:?}",
+        plan.planned_postings
+    );
+    assert!(
+        plan.candidate_count < 10,
+        "symbol postings should keep exact identifier candidates tight: {:?}",
+        plan
+    );
+}
+
+#[test]
 fn indexed_search_caps_broad_candidates_after_rank_aware_prefilter() {
     let repo = tempfile::tempdir().unwrap();
     for index in 0..1100 {
