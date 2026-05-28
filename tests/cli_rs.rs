@@ -368,6 +368,65 @@ fn cli_search_auto_selects_live_indexed_and_shard_surfaces() {
 }
 
 #[test]
+fn cli_search_accepts_index_and_shard_targets() {
+    let repo = sample_repo();
+    let index_path = repo.path().join("orient.index");
+    let shard_dir = repo.path().join("shards");
+
+    let mut index = Command::cargo_bin("orient").unwrap();
+    index
+        .args([
+            "index",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--output",
+            index_path.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let mut shards = Command::cargo_bin("orient").unwrap();
+    shards
+        .args([
+            "ensure-shards",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--output-dir",
+            shard_dir.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let mut indexed = Command::cargo_bin("orient").unwrap();
+    indexed
+        .args([
+            "search",
+            "--index",
+            index_path.to_str().unwrap(),
+            "issue_token",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"path\":\"src/auth.rs\""))
+        .stdout(predicate::str::contains("\"tool\":\"read_index_range\""))
+        .stdout(predicate::str::contains("\"tool\":\"related_index_files\""));
+
+    let mut shard = Command::cargo_bin("orient").unwrap();
+    shard
+        .args([
+            "search",
+            "--index-dir",
+            shard_dir.to_str().unwrap(),
+            "issue_token",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("src/auth.rs"))
+        .stdout(predicate::str::contains("\"tool\":\"read_shard_range\""))
+        .stdout(predicate::str::contains("\"tool\":\"related_shard_files\""));
+}
+
+#[test]
 fn cli_search_auto_batch_returns_query_surfaces() {
     let repo = sample_repo();
     let index_path = repo.path().join("orient.index");

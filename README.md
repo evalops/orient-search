@@ -33,6 +33,15 @@ For one-shot local use inside a repo, agents can start with:
 orient search-auto "symbol:AuthSession token"
 ```
 
+For direct CLI search, the same `search` command works across live repos,
+single indexes, and shard directories:
+
+```bash
+orient search --repo . "issue token"
+orient search --index /tmp/repo.index "issue token"
+orient search --index-dir /tmp/orient-shards "repo:api issue token"
+```
+
 ```jsonl
 {"id":"tools","tool":"tool_manifest","arguments":{}}
 {"id":"guide","tool":"agent_guide","arguments":{"index_dir":"/tmp/orient-shards"}}

@@ -62,6 +62,9 @@ Use the fastest surface that matches your setup:
 
 CLI-style JSON-lines aliases are accepted for the most guessable names: `search` for `search_code`, `search_plan` for `search_query_plan`, `indexed_search` for `indexed_search_code`, `index_plan` for `indexed_query_plan`, and `shard_plan` for `shard_query_plan`.
 The CLI equivalent for automatic target selection is `orient search-auto`; when no target flag is supplied it searches the current directory as a live repo.
+The plain CLI `orient search` command also accepts `--index` and `--index-dir`
+as convenience target flags for agents that reach first for `search` and then
+add the available search surface.
 
 Query strings support filters such as `repo:platform`, `path:src/auth` or `dir:src/auth` / `folder:src/auth`, `file:auth.rs` or `filename:auth.rs`, `file:*.rs`, `path:src/*gateway.rs`, `path:src\auth.rs`, `lang:rust` or shorthand `lang:rs` / `lang:ts` / `lang:py`, `ext:rs`, `symbol:SessionManager`, `kind:function`, `type:function`, `dep:react`, `import:crate::auth`, `test:false`, `is:test`, `is:source`, positive content aliases like `content:"issue token"` or `text:gateway`, negative filters like `-path:docs`, `-file:*test.rs`, `-folder:vendor`, `-lang:md`, `-kind:class`, `-dep:legacy`, or `-import:old_api`, and quoted phrases like `"issue token"`. Multi-token queries use AND behavior by default; use `mode:any` in the query or `any_terms:true` in JSON-lines calls for broad orientation searches. Indexed search plans `symbol:` and `kind:` filters through symbol postings and also treats identifier-shaped raw terms such as `SessionManager` and `agent_instructions` as symbol planning hints when a matching symbol exists, while ordinary spaced concept queries stay broad.
 Use `content:` / `text:` / `term:` when an identifier-shaped string should stay a content lookup instead of narrowing indexed search through implicit symbol postings.
