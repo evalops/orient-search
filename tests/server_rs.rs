@@ -5047,12 +5047,33 @@ fn tcp_daemon_serves_json_lines_requests() {
     writeln!(stream, "{request}").unwrap();
     let mut response = String::new();
     reader.read_line(&mut response).unwrap();
+    let search_request = serde_json::json!({
+        "id": "search",
+        "tool": "search_auto",
+        "arguments": {
+            "repo": ".",
+            "query": "client_cli",
+            "limit": 2
+        }
+    });
+    writeln!(stream, "{search_request}").unwrap();
+    let mut search_response = String::new();
+    reader.read_line(&mut search_response).unwrap();
 
     child.kill().unwrap();
     let _ = child.wait();
 
     assert!(response.contains("\"id\":\"status\""));
     assert!(response.contains("\"cached_indexes\":0"));
+    let search_response: serde_json::Value = serde_json::from_str(&search_response).unwrap();
+    assert_eq!(search_response["id"], serde_json::json!("search"));
+    assert!(
+        search_response["result"]["read_batch_request"]["client_cli"]
+            .as_str()
+            .unwrap()
+            .contains(&format!("| orient client-jsonl --addr {addr}")),
+        "{search_response}"
+    );
 }
 
 #[test]
@@ -5202,12 +5223,36 @@ fn unix_daemon_serves_json_lines_requests() {
     writeln!(stream, "{request}").unwrap();
     let mut response = String::new();
     reader.read_line(&mut response).unwrap();
+    let search_request = serde_json::json!({
+        "id": "search",
+        "tool": "search_auto",
+        "arguments": {
+            "repo": ".",
+            "query": "client_cli",
+            "limit": 2
+        }
+    });
+    writeln!(stream, "{search_request}").unwrap();
+    let mut search_response = String::new();
+    reader.read_line(&mut search_response).unwrap();
 
     child.kill().unwrap();
     let _ = child.wait();
 
     assert!(response.contains("\"id\":\"status\""));
     assert!(response.contains("\"cached_indexes\":0"));
+    let search_response: serde_json::Value = serde_json::from_str(&search_response).unwrap();
+    assert_eq!(search_response["id"], serde_json::json!("search"));
+    assert!(
+        search_response["result"]["read_batch_request"]["client_cli"]
+            .as_str()
+            .unwrap()
+            .contains(&format!(
+                "| orient client-jsonl --socket {}",
+                socket.to_str().unwrap()
+            )),
+        "{search_response}"
+    );
 }
 
 #[cfg(unix)]

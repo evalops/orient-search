@@ -17,7 +17,9 @@ use orient::repo_index::{
 };
 use orient::server::{
     MAX_BATCH_QUERIES, MAX_BATCH_RANGES, ToolRuntime, agent_guide, agent_instructions,
-    mcp_tool_manifest, serve_jsonl, serve_jsonl_stream, serve_tcp, tool_manifest,
+    mcp_tool_manifest, retarget_client_cli_commands, serve_jsonl,
+    serve_jsonl_stream_with_client_command, serve_tcp, tcp_client_command, tool_manifest,
+    unix_client_command,
 };
 use orient::shards::{
     ShardQueryPlan, build_shards, ensure_shards, find_shard_symbol, read_shard_range,
@@ -3135,7 +3137,7 @@ fn run() -> Result<()> {
             retarget_client_cli_commands(&mut startup, &unix_client_command(&socket));
             println!("{}", serde_json::to_string(&startup)?);
             io::stdout().flush()?;
-            serve_unix(listener, runtime)?;
+            serve_unix(listener, socket, runtime)?;
         }
         Commands::ClientJsonl { socket, addr } => {
             if let Some(socket) = socket {
@@ -3233,62 +3235,6 @@ fn daemon_status_stream(stream: impl Read + Write) -> Result<Value> {
         .ok_or_else(|| anyhow::anyhow!("daemon response did not include result"))
 }
 
-fn retarget_client_cli_commands(value: &mut Value, client_command: &str) {
-    match value {
-        Value::Object(object) => {
-            let jsonl = object
-                .get("jsonl")
-                .and_then(Value::as_str)
-                .map(str::to_string);
-            if let Some(jsonl) = jsonl {
-                object.insert(
-                    "client_cli".to_string(),
-                    Value::String(jsonl_client_cli(&jsonl, client_command)),
-                );
-            }
-            for value in object.values_mut() {
-                retarget_client_cli_commands(value, client_command);
-            }
-        }
-        Value::Array(values) => {
-            for value in values {
-                retarget_client_cli_commands(value, client_command);
-            }
-        }
-        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
-    }
-}
-
-fn jsonl_client_cli(jsonl: &str, client_command: &str) -> String {
-    format!("printf '%s\\n' {} | {client_command}", shell_quote(jsonl))
-}
-
-fn tcp_client_command(addr: &str) -> String {
-    if addr == DEFAULT_DAEMON_ADDR {
-        "orient client-jsonl".to_string()
-    } else {
-        format!("orient client-jsonl --addr {}", shell_quote(addr))
-    }
-}
-
-fn unix_client_command(socket: &Path) -> String {
-    format!(
-        "orient client-jsonl --socket {}",
-        shell_quote(&socket.to_string_lossy())
-    )
-}
-
-fn shell_quote(value: &str) -> String {
-    if !value.is_empty()
-        && value
-            .bytes()
-            .all(|byte| matches!(byte, b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'_' | b'-' | b'.' | b'/' | b':' | b'@' | b'%' | b'+' | b'=' | b','))
-    {
-        return value.to_string();
-    }
-    format!("'{}'", value.replace('\'', "'\\''"))
-}
-
 fn client_jsonl_stream(stream: impl Read + Write) -> Result<()> {
     let mut reader = BufReader::new(stream);
     let stdin = io::stdin();
@@ -3315,13 +3261,15 @@ fn client_jsonl_stream(stream: impl Read + Write) -> Result<()> {
 }
 
 #[cfg(unix)]
-fn serve_unix(listener: UnixListener, runtime: ToolRuntime) -> Result<()> {
+fn serve_unix(listener: UnixListener, socket: PathBuf, runtime: ToolRuntime) -> Result<()> {
     let runtime = Arc::new(runtime);
+    let client_command = unix_client_command(&socket);
     for stream in listener.incoming() {
         let stream = stream?;
         let runtime = Arc::clone(&runtime);
+        let client_command = client_command.clone();
         std::thread::spawn(move || {
-            let _ = serve_jsonl_stream(stream, runtime);
+            let _ = serve_jsonl_stream_with_client_command(stream, runtime, Some(client_command));
         });
     }
     Ok(())

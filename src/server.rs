@@ -125,15 +125,27 @@ pub fn serve_tcp(listener: TcpListener, runtime: ToolRuntime) -> Result<()> {
     let runtime = Arc::new(runtime);
     for stream in listener.incoming() {
         let stream = stream?;
+        let client_command = stream
+            .local_addr()
+            .ok()
+            .map(|addr| tcp_client_command(&addr.to_string()));
         let runtime = Arc::clone(&runtime);
         thread::spawn(move || {
-            let _ = serve_jsonl_stream(stream, runtime);
+            let _ = serve_jsonl_stream_with_client_command(stream, runtime, client_command);
         });
     }
     Ok(())
 }
 
 pub fn serve_jsonl_stream(stream: impl Read + Write, runtime: Arc<ToolRuntime>) -> Result<()> {
+    serve_jsonl_stream_with_client_command(stream, runtime, None)
+}
+
+pub fn serve_jsonl_stream_with_client_command(
+    stream: impl Read + Write,
+    runtime: Arc<ToolRuntime>,
+    client_command: Option<String>,
+) -> Result<()> {
     let mut reader = BufReader::new(stream);
     let mut line = String::new();
     loop {
@@ -144,7 +156,12 @@ pub fn serve_jsonl_stream(stream: impl Read + Write, runtime: Arc<ToolRuntime>) 
         if line.trim().is_empty() {
             continue;
         }
-        let response = runtime.dispatch_line(&line);
+        let mut response = runtime.dispatch_line(&line);
+        if let (Some(result), Some(client_command)) =
+            (response.result.as_mut(), client_command.as_deref())
+        {
+            retarget_client_cli_commands(result, client_command);
+        }
         writeln!(reader.get_mut(), "{}", serde_json::to_string(&response)?)?;
         reader.get_mut().flush()?;
     }
@@ -908,20 +925,68 @@ Orient is local code search only and exposes no session analytics."
     )
 }
 
-fn tcp_client_command(addr: &str) -> String {
+pub fn retarget_client_cli_commands(value: &mut Value, client_command: &str) {
+    match value {
+        Value::Object(object) => {
+            let jsonl = object
+                .get("jsonl")
+                .and_then(Value::as_str)
+                .map(str::to_string);
+            if let Some(jsonl) = jsonl {
+                object.insert(
+                    "client_cli".to_string(),
+                    Value::String(jsonl_client_cli(&jsonl, client_command)),
+                );
+            }
+            for value in object.values_mut() {
+                retarget_client_cli_commands(value, client_command);
+            }
+        }
+        Value::Array(values) => {
+            for value in values {
+                retarget_client_cli_commands(value, client_command);
+            }
+        }
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
+    }
+}
+
+fn jsonl_client_cli(jsonl: &str, client_command: &str) -> String {
+    format!("printf '%s\\n' {} | {client_command}", shell_quote(jsonl))
+}
+
+pub fn tcp_client_command(addr: &str) -> String {
     if addr == DEFAULT_DAEMON_ADDR {
         "orient client-jsonl".to_string()
     } else {
-        format!("orient client-jsonl --addr {addr}")
+        format!("orient client-jsonl --addr {}", shell_quote(addr))
     }
+}
+
+pub fn unix_client_command(socket: &Path) -> String {
+    format!(
+        "orient client-jsonl --socket {}",
+        shell_quote(&socket.to_string_lossy())
+    )
 }
 
 fn daemon_status_command(addr: &str) -> String {
     if addr == DEFAULT_DAEMON_ADDR {
         "orient daemon-status".to_string()
     } else {
-        format!("orient daemon-status --addr {addr}")
+        format!("orient daemon-status --addr {}", shell_quote(addr))
     }
+}
+
+fn shell_quote(value: &str) -> String {
+    if !value.is_empty()
+        && value
+            .bytes()
+            .all(|byte| matches!(byte, b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'_' | b'-' | b'.' | b'/' | b':' | b'@' | b'%' | b'+' | b'=' | b','))
+    {
+        return value.to_string();
+    }
+    format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 fn mcp_tool_annotations(name: &str) -> Value {

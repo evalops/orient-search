@@ -53,7 +53,8 @@ exact target no-argument `search_auto` will use and copy the right first
 repo-map/search/query-plan requests. Each default request also includes `jsonl`
 and `client_cli` fields for direct terminal use. When you call
 `daemon-status --addr` or `daemon-status --socket`, those `client_cli` commands
-target that same daemon transport.
+target that same daemon transport. Responses served over TCP or Unix sockets do
+the same for generated search/read/related follow-up requests.
 
 Start with `agent_guide` or `tool_manifest` once, then use `search_auto`.
 Follow returned `read_batch_request`, `read_request`, `related_request`,
