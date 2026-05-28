@@ -66,6 +66,50 @@ jobs:
             "indexed search symbol filters" \
             "read range tool manifest"
 
+      - name: Gate indexed search beats fallback
+        run: |
+          target/release/orient bench-search \
+            --repo . \
+            --runs 7 \
+            --warmup 2 \
+            --limit 10 \
+            "indexed search symbol filters" \
+            "read range tool manifest" \
+            > /tmp/orient-fallback-bench.json
+          target/release/orient bench-search \
+            --repo . \
+            --index /tmp/orient.index \
+            --runs 7 \
+            --warmup 2 \
+            --limit 10 \
+            "indexed search symbol filters" \
+            "read range tool manifest" \
+            > /tmp/orient-indexed-bench.json
+          python3 - <<'PY'
+          import json
+          import sys
+
+          with open("/tmp/orient-fallback-bench.json", "r", encoding="utf-8") as handle:
+              fallback = json.load(handle)
+          with open("/tmp/orient-indexed-bench.json", "r", encoding="utf-8") as handle:
+              indexed = json.load(handle)
+
+          fallback_by_query = {item["query"]: item for item in fallback["queries"]}
+          failures = []
+          for item in indexed["queries"]:
+              query = item["query"]
+              fallback_item = fallback_by_query[query]
+              if item["p95_ms"] >= fallback_item["p95_ms"]:
+                  failures.append(
+                      f"{query}: indexed p95 {item['p95_ms']}ms >= fallback p95 {fallback_item['p95_ms']}ms"
+                  )
+          if failures:
+              print("indexed search did not beat fallback:", file=sys.stderr)
+              for failure in failures:
+                  print(f"  {failure}", file=sys.stderr)
+              sys.exit(1)
+          PY
+
       - name: Gate shard search latency
         run: |
           target/release/orient ensure-shards \
