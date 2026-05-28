@@ -260,6 +260,25 @@ enum Commands {
         #[arg(long)]
         refresh_if_stale: bool,
     },
+    SearchPlan {
+        #[arg(long, default_value = ".")]
+        repo: PathBuf,
+        query: String,
+        #[arg(long = "repo-filter")]
+        repo_filter: Option<String>,
+        #[command(flatten)]
+        filters: CommonSearchArgs,
+    },
+    SearchPlanBatch {
+        #[arg(long, default_value = ".")]
+        repo: PathBuf,
+        #[arg(required = true)]
+        queries: Vec<String>,
+        #[arg(long = "repo-filter")]
+        repo_filter: Option<String>,
+        #[command(flatten)]
+        filters: CommonSearchArgs,
+    },
     #[command(alias = "open-range")]
     ReadRange {
         #[arg(long, default_value = ".")]
@@ -693,6 +712,12 @@ struct IndexedQueryPlanBatchResult {
 }
 
 #[derive(Debug, Clone, Serialize)]
+struct QueryPlanBatchResult {
+    query: String,
+    plan: QueryPlan,
+}
+
+#[derive(Debug, Clone, Serialize)]
 struct ShardQueryPlanBatchResult {
     query: String,
     plans: Vec<ShardQueryPlan>,
@@ -997,6 +1022,36 @@ fn main() -> Result<()> {
             for query in queries {
                 let plan = index.query_plan(&query, &filters)?;
                 batch.push(IndexedQueryPlanBatchResult { query, plan });
+            }
+            println!("{}", serde_json::to_string(&batch)?);
+        }
+        Commands::SearchPlan {
+            repo,
+            query,
+            repo_filter,
+            filters,
+        } => {
+            let index = FastIndex::build(repo)?;
+            println!(
+                "{}",
+                serde_json::to_string(
+                    &index.query_plan(&query, &search_filters_from_args(&filters, repo_filter)?,)?
+                )?
+            );
+        }
+        Commands::SearchPlanBatch {
+            repo,
+            queries,
+            repo_filter,
+            filters,
+        } => {
+            let queries = cli_batch_queries(queries)?;
+            let index = FastIndex::build(repo)?;
+            let filters = search_filters_from_args(&filters, repo_filter)?;
+            let mut batch = Vec::new();
+            for query in queries {
+                let plan = index.query_plan(&query, &filters)?;
+                batch.push(QueryPlanBatchResult { query, plan });
             }
             println!("{}", serde_json::to_string(&batch)?);
         }

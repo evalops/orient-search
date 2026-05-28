@@ -56,6 +56,12 @@ struct IndexedQueryPlanBatchResult {
 }
 
 #[derive(Debug, Serialize)]
+struct QueryPlanBatchResult {
+    query: String,
+    plan: QueryPlan,
+}
+
+#[derive(Debug, Serialize)]
 struct ShardQueryPlanBatchResult {
     query: String,
     plans: Vec<ShardQueryPlan>,
@@ -388,6 +394,30 @@ pub fn tool_manifest() -> Value {
             "Run several fast fallback searches against one local repository in a single request.",
             &["repo", "queries"],
             SEARCH_OPTIONAL_ARGS,
+        ),
+        tool_entry(
+            "search_query_plan",
+            "Build a transient live-repo query plan with missing postings and repair hints.",
+            &["repo", "query"],
+            PLAN_OPTIONAL_ARGS,
+        ),
+        tool_entry(
+            "search_plan",
+            "Alias for search_query_plan for CLI-style JSON-lines clients.",
+            &["repo", "query"],
+            PLAN_OPTIONAL_ARGS,
+        ),
+        tool_entry(
+            "search_query_plan_batch",
+            "Build transient live-repo query plans for several searches in one request.",
+            &["repo", "queries"],
+            PLAN_OPTIONAL_ARGS,
+        ),
+        tool_entry(
+            "search_plan_batch",
+            "Alias for search_query_plan_batch for CLI-style JSON-lines clients.",
+            &["repo", "queries"],
+            PLAN_OPTIONAL_ARGS,
         ),
         tool_entry(
             "indexed_search_code",
@@ -1129,6 +1159,27 @@ impl ToolRuntime {
                         read_file_range(&repo, path, start, lines)
                     })?;
                     batch.push(SearchBatchResult { query, results });
+                }
+                Ok(serde_json::to_value(batch)?)
+            }
+            "search_query_plan" | "search_plan" => {
+                let repo = path_arg(&request.arguments, "repo")?;
+                let query = string_arg(&request.arguments, "query")?;
+                let index = FastIndex::build(repo)?;
+                Ok(serde_json::to_value(index.query_plan(
+                    &query,
+                    &search_filters(&request.arguments, false)?,
+                )?)?)
+            }
+            "search_query_plan_batch" | "search_plan_batch" => {
+                let repo = path_arg(&request.arguments, "repo")?;
+                let queries = string_array_arg(&request.arguments, "queries")?;
+                let index = FastIndex::build(repo)?;
+                let filters = search_filters(&request.arguments, false)?;
+                let mut batch = Vec::new();
+                for query in queries {
+                    let plan = index.query_plan(&query, &filters)?;
+                    batch.push(QueryPlanBatchResult { query, plan });
                 }
                 Ok(serde_json::to_value(batch)?)
             }
@@ -2273,6 +2324,31 @@ const SEARCH_INDEX_OPTIONAL_ARGS: &[&str] = &[
     "any_terms",
     "context_lines",
     "refresh_if_stale",
+    "exclude_file",
+    "exclude_path",
+    "exclude_language",
+    "exclude_extension",
+    "exclude_symbol",
+    "exclude_symbol_kind",
+    "exclude_repo",
+    "exclude_dependency",
+    "exclude_import",
+];
+
+const PLAN_OPTIONAL_ARGS: &[&str] = &[
+    "path",
+    "dir",
+    "language",
+    "extension",
+    "symbol",
+    "symbol_kind",
+    "dependency",
+    "import",
+    "file",
+    "repo_filter",
+    "test",
+    "require_all",
+    "any_terms",
     "exclude_file",
     "exclude_path",
     "exclude_language",

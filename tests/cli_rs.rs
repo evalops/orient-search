@@ -64,6 +64,8 @@ fn cli_outputs_tool_manifest() {
         .stdout(predicate::str::contains("\"name\":\"discover_repos\""))
         .stdout(predicate::str::contains("\"name\":\"search_code\""))
         .stdout(predicate::str::contains("\"name\":\"search\""))
+        .stdout(predicate::str::contains("\"name\":\"search_query_plan\""))
+        .stdout(predicate::str::contains("\"name\":\"search_plan\""))
         .stdout(predicate::str::contains("\"name\":\"indexed_search\""))
         .stdout(predicate::str::contains("\"name\":\"index_plan\""))
         .stdout(predicate::str::contains("\"name\":\"shard_plan\""))
@@ -80,6 +82,7 @@ fn cli_outputs_tool_manifest() {
         .stdout(predicate::str::contains("read_ranges"))
         .stdout(predicate::str::contains("open_index_range"))
         .stdout(predicate::str::contains("search_batch"))
+        .stdout(predicate::str::contains("search_plan_batch"))
         .stdout(predicate::str::contains("read_index_ranges"))
         .stdout(predicate::str::contains("indexed_search_batch"))
         .stdout(predicate::str::contains("indexed_query_plan_batch"))
@@ -952,6 +955,44 @@ fn cli_search_surfaces_accept_structured_filters() {
         .success()
         .stdout(predicate::str::contains("tests/auth_test.rs"))
         .stdout(predicate::str::contains("filter_scan"));
+
+    let mut search_plan = Command::cargo_bin("orient").unwrap();
+    search_plan
+        .args([
+            "search-plan",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "SessionManager definitely_missing",
+            "--dir",
+            "src",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"active_filters\""))
+        .stdout(predicate::str::contains("\"missing_terms\""))
+        .stdout(predicate::str::contains("definitely"))
+        .stdout(predicate::str::contains("missing"))
+        .stdout(predicate::str::contains("drop_missing_terms"));
+
+    let mut search_plan_batch = Command::cargo_bin("orient").unwrap();
+    search_plan_batch
+        .args([
+            "search-plan-batch",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "SessionManager definitely_missing",
+            "issue absentterm",
+            "--require-all",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "\"query\":\"SessionManager definitely_missing\"",
+        ))
+        .stdout(predicate::str::contains("\"query\":\"issue absentterm\""))
+        .stdout(predicate::str::contains("\"missing_terms\""))
+        .stdout(predicate::str::contains("absentterm"))
+        .stdout(predicate::str::contains("drop_missing_terms"));
 
     let mut index_plan = Command::cargo_bin("orient").unwrap();
     index_plan

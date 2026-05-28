@@ -76,6 +76,14 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         .iter()
         .find(|tool| tool["name"] == "search_batch")
         .unwrap();
+    let search_plan = tools
+        .iter()
+        .find(|tool| tool["name"] == "search_query_plan")
+        .unwrap();
+    let search_plan_batch = tools
+        .iter()
+        .find(|tool| tool["name"] == "search_query_plan_batch")
+        .unwrap();
     let indexed_plan_batch = tools
         .iter()
         .find(|tool| tool["name"] == "indexed_query_plan_batch")
@@ -216,6 +224,23 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
     );
     assert_eq!(
         search_batch["arguments"][1]["max_items"],
+        serde_json::json!(MAX_BATCH_QUERIES)
+    );
+    assert_eq!(
+        search_plan["required"],
+        serde_json::json!(["repo", "query"])
+    );
+    assert!(
+        search_plan["input_schema"]["properties"]
+            .get("refresh_if_stale")
+            .is_none()
+    );
+    assert_eq!(
+        search_plan_batch["required"],
+        serde_json::json!(["repo", "queries"])
+    );
+    assert_eq!(
+        search_plan_batch["input_schema"]["properties"]["queries"]["maxItems"],
         serde_json::json!(MAX_BATCH_QUERIES)
     );
     assert_eq!(
@@ -652,6 +677,46 @@ fn runtime_batches_searches_and_query_plans_against_repo_index_and_shards() {
     let result = serde_json::to_string(&indexed.result).unwrap();
     assert!(result.contains("src/auth.rs"), "{result}");
     assert!(result.contains("src/billing.rs"), "{result}");
+
+    let live_plan = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("live-plan"),
+        tool: "search_plan".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "query": "SessionManager missingterm",
+            "require_all": true
+        }),
+    });
+    assert!(live_plan.error.is_none(), "{:?}", live_plan.error);
+    let result = serde_json::to_string(&live_plan.result).unwrap();
+    assert!(result.contains("\"missing_terms\""), "{result}");
+    assert!(result.contains("missingterm"), "{result}");
+    assert!(result.contains("drop_missing_terms"), "{result}");
+
+    let live_plan_batch = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("live-plan-batch"),
+        tool: "search_query_plan_batch".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "queries": ["SessionManager missingterm", "invoice absentterm"],
+            "require_all": true
+        }),
+    });
+    assert!(
+        live_plan_batch.error.is_none(),
+        "{:?}",
+        live_plan_batch.error
+    );
+    let result = serde_json::to_string(&live_plan_batch.result).unwrap();
+    assert!(
+        result.contains("\"query\":\"SessionManager missingterm\""),
+        "{result}"
+    );
+    assert!(
+        result.contains("\"query\":\"invoice absentterm\""),
+        "{result}"
+    );
+    assert!(result.contains("drop_missing_terms"), "{result}");
 
     let indexed_plans = runtime.dispatch(ToolRequest {
         id: serde_json::json!("indexed-plan-batch"),

@@ -35,6 +35,10 @@ The intended agent loop is simple: ask for the tool manifest, get a repo map,
 search the shard set, read the returned `read_range` objects, and inspect the
 query plan when results are empty or noisy.
 
+For a repo without a saved index, use `orient search-plan --repo . "query"` or
+the JSON-lines `search_query_plan` tool to get the same missing-term and retry
+diagnostics from a transient local index.
+
 Filters: `repo:`, `path:`/`dir:`, `file:`, `lang:`, `ext:`, `symbol:`,
 `kind:`/`type:`, `dep:`, `import:`, `test:`, `is:test`, `is:source`,
 `content:`, `text:`, `-path:docs`, quoted phrases, and `mode:any`.
