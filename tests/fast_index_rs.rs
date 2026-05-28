@@ -1170,6 +1170,7 @@ fn indexed_snippets_anchor_on_strongest_matching_line() {
     assert_eq!(results[0].path, "src/shards.rs");
     assert!(results[0].snippet.contains("90: pub fn shard_status_jobs"));
     assert!(!results[0].snippet.contains("1: //! Multi-repo shard"));
+    assert_eq!(results[0].match_lines[0], 90);
     assert_eq!(results[0].read_range.as_ref().unwrap().start, 64);
 }
 

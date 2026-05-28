@@ -2453,34 +2453,17 @@ fn indexed_match_lines(
     if (query_tokens.is_empty() && query_phrases.is_empty()) || limit == 0 {
         return Vec::new();
     }
-    let mut lines = query_tokens
-        .iter()
-        .filter_map(|token| {
-            file.term_lines
-                .binary_search_by(|entry| entry.term.as_str().cmp(token.as_str()))
-                .ok()
-                .map(|index| file.term_lines[index].lines.as_slice())
-        })
-        .flat_map(|lines| lines.iter().copied())
-        .map(|line| line as usize)
-        .collect::<Vec<_>>();
-    let multi_word_phrases = query_phrases
-        .iter()
-        .filter(|phrase| phrase.split_whitespace().nth(1).is_some())
-        .collect::<Vec<_>>();
-    if !multi_word_phrases.is_empty() {
-        for (index, line) in file.content.lines().enumerate() {
-            let line_lower = normalize_phrase_text(line);
-            if multi_word_phrases
-                .iter()
-                .any(|phrase| line_lower.contains(phrase.as_str()))
-            {
-                lines.push(index + 1);
-            }
-        }
-    }
-    lines.sort_unstable();
-    lines.dedup();
+    let mut lines = indexed_line_scores(
+        file,
+        file.content.as_bytes(),
+        &file.line_offsets,
+        query_tokens,
+        query_phrases,
+    )
+    .into_iter()
+    .collect::<Vec<_>>();
+    lines.sort_by_key(|(line, score)| (std::cmp::Reverse(*score), *line));
+    let mut lines = lines.into_iter().map(|(line, _)| line).collect::<Vec<_>>();
     lines.truncate(limit);
     lines
 }
@@ -2598,6 +2581,19 @@ fn best_matching_line(
     query_tokens: &[String],
     query_phrases: &[String],
 ) -> Option<usize> {
+    indexed_line_scores(file, bytes, offsets, query_tokens, query_phrases)
+        .into_iter()
+        .max_by_key(|(line, score)| (*score, std::cmp::Reverse(*line)))
+        .map(|(line, _)| line)
+}
+
+fn indexed_line_scores(
+    file: &IndexedPath,
+    bytes: &[u8],
+    offsets: &[u32],
+    query_tokens: &[String],
+    query_phrases: &[String],
+) -> HashMap<usize, usize> {
     let mut scores = HashMap::<usize, usize>::new();
     for token in query_tokens {
         if let Ok(index) = file
@@ -2624,11 +2620,7 @@ fn best_matching_line(
             }
         }
     }
-
     scores
-        .into_iter()
-        .max_by_key(|(line, score)| (*score, std::cmp::Reverse(*line)))
-        .map(|(line, _)| line)
 }
 
 fn render_indexed_window(

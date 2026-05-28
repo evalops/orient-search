@@ -2719,8 +2719,8 @@ pub(crate) fn match_lines_from_text(
 }
 
 fn compact_match_lines(lines: &mut Vec<usize>) {
-    lines.sort_unstable();
-    lines.dedup();
+    let mut seen = HashSet::new();
+    lines.retain(|line| seen.insert(*line));
     lines.truncate(16);
 }
 
