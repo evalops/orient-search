@@ -445,9 +445,9 @@ pub fn tool_manifest() -> Value {
         ),
         tool_entry(
             "search_batch",
-            "Run several fast fallback searches against one local repository in a single request.",
-            &["repo", "queries"],
-            SEARCH_OPTIONAL_ARGS,
+            "Run several searches against one live repo, persistent index, or shard directory in a single request.",
+            &["queries"],
+            SEARCH_TARGET_OPTIONAL_ARGS,
         ),
         tool_entry(
             "search_query_plan",
@@ -1914,12 +1914,96 @@ impl ToolRuntime {
                 Ok(serde_json::to_value(batch)?)
             }
             "search_batch" => {
-                let repo = path_arg(&request.arguments, "repo")?;
                 let queries = string_array_arg(&request.arguments, "queries")?;
                 let limit = search_limit_arg(&request.arguments)?;
                 let context_lines = context_lines_arg(&request.arguments)?;
-                let filters = search_filters(&request.arguments, false)?;
+                if request.arguments.get("index").is_some()
+                    && request.arguments.get("index_dir").is_some()
+                {
+                    return Err(anyhow!(
+                        "search_batch accepts only one of index or index_dir"
+                    ));
+                }
                 let mut batch = Vec::new();
+                if let Some(index_dir) =
+                    optional_string_arg(&request.arguments, "index_dir").map(PathBuf::from)
+                {
+                    if bool_arg(&request.arguments, "refresh_if_stale") {
+                        self.refresh_shards_if_stale(&index_dir)?;
+                    }
+                    let filters = search_filters(&request.arguments, true)?;
+                    for query in queries {
+                        let results = self.search_shards_cached(
+                            &index_dir,
+                            &query,
+                            limit,
+                            &filters,
+                            context_lines,
+                        )?;
+                        let read_batch_request = result_read_batch_request(
+                            &results,
+                            "read_shard_ranges",
+                            read_request_args("index_dir", &index_dir),
+                        );
+                        batch.push(SearchBatchResult {
+                            query,
+                            read_batch_request,
+                            results,
+                        });
+                    }
+                    return Ok(serde_json::to_value(batch)?);
+                }
+                if let Some(index_path) =
+                    optional_string_arg(&request.arguments, "index").map(PathBuf::from)
+                {
+                    let refresh_if_stale = bool_arg(&request.arguments, "refresh_if_stale");
+                    let index =
+                        self.cached_index_maybe_refresh(index_path.clone(), refresh_if_stale)?;
+                    let filters = search_filters(&request.arguments, true)?;
+                    for query in queries {
+                        let mut results = index.search_filtered(&query, limit, &filters)?;
+                        attach_result_context(
+                            &mut results,
+                            context_lines,
+                            |path, start, lines| index.read_range(path, start, lines),
+                        )?;
+                        attach_result_read_requests(
+                            &mut results,
+                            "read_index_range",
+                            read_request_args("index", &index_path),
+                        );
+                        attach_result_related_requests(
+                            &mut results,
+                            "related_index_files",
+                            read_request_args("index", &index_path),
+                        );
+                        attach_result_related_symbol_requests(
+                            &mut results,
+                            "related_index_symbols",
+                            Some(&query),
+                            read_request_args("index", &index_path),
+                        );
+                        let read_batch_request = result_read_batch_request(
+                            &results,
+                            "read_index_ranges",
+                            read_request_args("index", &index_path),
+                        );
+                        batch.push(SearchBatchResult {
+                            query,
+                            read_batch_request,
+                            results,
+                        });
+                    }
+                    return Ok(serde_json::to_value(batch)?);
+                }
+                let repo = optional_string_arg(&request.arguments, "repo")
+                    .map(PathBuf::from)
+                    .map(Ok)
+                    .unwrap_or_else(|| {
+                        std::env::current_dir()
+                            .context("resolve current directory for search_batch")
+                    })?;
+                let filters = search_filters(&request.arguments, false)?;
                 for query in queries {
                     let mut results = search_repo_fast_filtered(&repo, &query, limit, &filters)?;
                     attach_result_context(&mut results, context_lines, |path, start, lines| {

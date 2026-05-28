@@ -57,7 +57,7 @@ Use the fastest surface that matches your setup:
 - `search_code` for a live repo without a prebuilt index.
 - `indexed_search_code` for one persistent repo index.
 - `search_shards` for a multi-repo shard directory.
-- `search_auto_batch`, `search_batch`, `indexed_search_batch`, or `search_shards_batch` when an agent wants to try several query formulations in one round trip. CLI equivalents are `search-auto-batch`, `search-batch`, `indexed-search-batch`, and `search-shards-batch`.
+- `search_auto_batch`, `search_batch`, `indexed_search_batch`, or `search_shards_batch` when an agent wants to try several query formulations in one round trip. The JSON-lines `search_batch` tool accepts `repo`, `index`, or `index_dir` for the same target-aware plain result shape as `search`; the indexed and shard-specific batch tools remain available for explicit adapters. CLI equivalents are `search-auto-batch`, `search-batch`, `indexed-search-batch`, and `search-shards-batch`.
 - `search_query_plan`, `indexed_query_plan`, or `shard_query_plan` when a search returns empty or suspicious results and the agent needs missing terms plus retry hints. Plans include ready-to-send `retry_requests` when a repair hint has a suggested query. CLI equivalents are `search-plan`, `index-plan`, and `shard-plan`.
 
 CLI-style JSON-lines aliases are accepted for the most guessable names:

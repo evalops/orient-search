@@ -47,6 +47,7 @@ orient search --index-dir /tmp/orient-shards "repo:api issue token"
 {"id":"guide","tool":"agent_guide","arguments":{"index_dir":"/tmp/orient-shards"}}
 {"id":"map","tool":"shard_repo_map","arguments":{"symbols":25,"tests":25,"detail":"compact","read_limit":16}}
 {"id":"search","tool":"search","arguments":{"index_dir":"/tmp/orient-shards","query":"repo:api issue token","limit":10}}
+{"id":"batch","tool":"search_batch","arguments":{"index_dir":"/tmp/orient-shards","queries":["repo:api issue token","repo:api path:auth token"],"limit":10}}
 {"id":"auto","tool":"search_auto","arguments":{"query":"repo:api symbol:AuthSession token","limit":10,"explain":true}}
 {"id":"autos","tool":"search_auto_batch","arguments":{"queries":["repo:api symbol:AuthSession token","repo:api path:auth token"],"limit":10}}
 {"id":"shards","tool":"search_shards","arguments":{"query":"repo:api symbol:AuthSession token","limit":10,"explain":true}}

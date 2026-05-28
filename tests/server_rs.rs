@@ -304,9 +304,14 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         serde_json::json!("single_warmed_shard_dir")
     );
     assert!(search.get("daemon_default").is_none());
+    assert_eq!(search_batch["required"], serde_json::json!(["queries"]));
     assert_eq!(
-        search_batch["required"],
-        serde_json::json!(["repo", "queries"])
+        search_batch["input_schema"]["properties"]["index"]["type"],
+        "string"
+    );
+    assert_eq!(
+        search_batch["input_schema"]["properties"]["index_dir"]["type"],
+        "string"
     );
     assert_eq!(
         search_batch["input_schema"]["properties"]["queries"]["items"]["type"],
@@ -321,7 +326,12 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         serde_json::json!(1)
     );
     assert_eq!(
-        search_batch["arguments"][1]["max_items"],
+        search_batch["arguments"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|argument| argument["name"] == "queries")
+            .unwrap()["max_items"],
         serde_json::json!(MAX_BATCH_QUERIES)
     );
     assert_eq!(
@@ -1288,6 +1298,85 @@ fn runtime_search_alias_accepts_live_index_and_shard_targets() {
             .contains("only one of index or index_dir"),
         "{:?}",
         conflicted.error
+    );
+
+    let live_batch = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("live-batch"),
+        tool: "search_batch".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "queries": ["issue token", "SessionManager"],
+            "limit": 3,
+            "require_all": true
+        }),
+    });
+    assert!(live_batch.error.is_none(), "{:?}", live_batch.error);
+    let live_batch = live_batch.result.unwrap();
+    assert_eq!(live_batch[0]["read_batch_request"]["tool"], "read_ranges");
+    assert_eq!(
+        live_batch[0]["results"][0]["read_request"]["tool"],
+        "read_range"
+    );
+
+    let indexed_batch = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("indexed-batch"),
+        tool: "search_batch".to_string(),
+        arguments: serde_json::json!({
+            "index": repo.path().join(".orient/index"),
+            "queries": ["issue token", "SessionManager"],
+            "limit": 3,
+            "require_all": true
+        }),
+    });
+    assert!(indexed_batch.error.is_none(), "{:?}", indexed_batch.error);
+    let indexed_batch = indexed_batch.result.unwrap();
+    assert_eq!(
+        indexed_batch[0]["read_batch_request"]["tool"],
+        "read_index_ranges"
+    );
+    assert_eq!(
+        indexed_batch[0]["results"][0]["read_request"]["tool"],
+        "read_index_range"
+    );
+
+    let shard_batch = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("shard-batch"),
+        tool: "search_batch".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": repo.path().join(".orient-shards"),
+            "queries": ["issue token", "SessionManager"],
+            "limit": 3,
+            "require_all": true
+        }),
+    });
+    assert!(shard_batch.error.is_none(), "{:?}", shard_batch.error);
+    let shard_batch = shard_batch.result.unwrap();
+    assert_eq!(
+        shard_batch[0]["read_batch_request"]["tool"],
+        "read_shard_ranges"
+    );
+    assert_eq!(
+        shard_batch[0]["results"][0]["read_request"]["tool"],
+        "read_shard_range"
+    );
+
+    let conflicted_batch = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("conflicted-batch"),
+        tool: "search_batch".to_string(),
+        arguments: serde_json::json!({
+            "index": repo.path().join(".orient/index"),
+            "index_dir": repo.path().join(".orient-shards"),
+            "queries": ["issue token"]
+        }),
+    });
+    assert!(
+        conflicted_batch
+            .error
+            .as_ref()
+            .unwrap()
+            .contains("only one of index or index_dir"),
+        "{:?}",
+        conflicted_batch.error
     );
 }
 
