@@ -375,6 +375,8 @@ pub struct RepoMap {
     pub top_symbols: Vec<Symbol>,
     pub related_files: Vec<RepoMapRelatedFile>,
     pub related_symbols: Vec<RepoMapRelatedSymbol>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub read_batch_request: Option<ResultToolRequest>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1850,6 +1852,7 @@ impl RepoIndex {
             top_symbols,
             related_files,
             related_symbols,
+            read_batch_request: None,
         }
     }
 
@@ -3607,6 +3610,15 @@ pub fn related_symbol_lookup_results(
         .collect()
 }
 
+pub fn attach_repo_map_read_batch_request(
+    map: &mut RepoMap,
+    tool: &str,
+    base_arguments: serde_json::Map<String, serde_json::Value>,
+) {
+    map.read_batch_request =
+        read_batch_request_from_ranges(repo_map_read_ranges(map), tool, base_arguments);
+}
+
 fn read_request_from_range(
     tool: &str,
     base_arguments: &serde_json::Map<String, serde_json::Value>,
@@ -3625,14 +3637,13 @@ fn read_request_from_range(
     }
 }
 
-pub fn result_read_batch_request(
-    results: &[SearchResult],
+fn read_batch_request_from_ranges(
+    ranges: Vec<ResultReadRange>,
     tool: &str,
     mut base_arguments: serde_json::Map<String, serde_json::Value>,
 ) -> Option<ResultToolRequest> {
-    let ranges = results
-        .iter()
-        .filter_map(|result| result.read_range.as_ref())
+    let ranges = ranges
+        .into_iter()
         .take(MAX_RESULT_READ_BATCH_RANGES)
         .map(|read_range| {
             serde_json::json!({
@@ -3650,6 +3661,19 @@ pub fn result_read_batch_request(
         tool: tool.to_string(),
         arguments: serde_json::Value::Object(base_arguments),
     })
+}
+
+pub fn result_read_batch_request(
+    results: &[SearchResult],
+    tool: &str,
+    base_arguments: serde_json::Map<String, serde_json::Value>,
+) -> Option<ResultToolRequest> {
+    let ranges = results
+        .iter()
+        .filter_map(|result| result.read_range.as_ref())
+        .cloned()
+        .collect::<Vec<_>>();
+    read_batch_request_from_ranges(ranges, tool, base_arguments)
 }
 
 pub fn attach_result_related_requests(
@@ -3733,6 +3757,57 @@ fn related_file_read_range(related: &RelatedFile) -> ResultReadRange {
         path: related.path.clone(),
         start: 1,
         lines: DEFAULT_RELATED_FILE_READ_LINES,
+    }
+}
+
+fn repo_map_read_ranges(map: &RepoMap) -> Vec<ResultReadRange> {
+    let mut ranges = Vec::new();
+    let mut seen = HashSet::new();
+
+    for path in map
+        .brief
+        .important_files
+        .iter()
+        .chain(map.brief.manifest_files.iter())
+        .chain(map.entrypoints.iter())
+        .chain(map.test_files.iter())
+        .chain(map.related_files.iter().map(|related| &related.source_path))
+        .chain(map.related_files.iter().map(|related| &related.path))
+        .chain(
+            map.related_symbols
+                .iter()
+                .map(|related| &related.source_path),
+        )
+    {
+        push_repo_map_range(
+            &mut ranges,
+            &mut seen,
+            ResultReadRange {
+                path: path.clone(),
+                start: 1,
+                lines: DEFAULT_RELATED_FILE_READ_LINES,
+            },
+        );
+    }
+
+    for symbol in map
+        .top_symbols
+        .iter()
+        .chain(map.related_symbols.iter().map(|related| &related.symbol))
+    {
+        push_repo_map_range(&mut ranges, &mut seen, symbol_read_range(symbol));
+    }
+
+    ranges
+}
+
+fn push_repo_map_range(
+    ranges: &mut Vec<ResultReadRange>,
+    seen: &mut HashSet<(String, usize, usize)>,
+    range: ResultReadRange,
+) {
+    if seen.insert((range.path.clone(), range.start, range.lines)) {
+        ranges.push(range);
     }
 }
 

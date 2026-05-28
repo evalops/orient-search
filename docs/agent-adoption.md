@@ -101,4 +101,5 @@ simple JSON-lines over stdio, TCP, or Unix sockets.
    `query_plan_request` when results are noisy or suspicious, then follow any
    returned `retry_requests`.
 6. Use `repo_map_request` when the agent needs entrypoints, tests, commands, or
-   top symbols for the chosen search surface.
+   top symbols for the chosen search surface. Repo-map responses include a
+   `read_batch_request` for the map's highest-value files and definitions.

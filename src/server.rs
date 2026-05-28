@@ -6,10 +6,11 @@ use crate::query::{merge_filters, normalize_symbol_kind, parse_query, query_text
 use crate::repo_index::{
     MAX_ATTACHED_CONTEXT_LINES, MAX_READ_RANGE_LINES, MAX_SEARCH_RESULTS, QueryPlan,
     QueryPlanFilter, RepoIndexer, ResultToolRequest, SearchFilters, SearchResult, SnippetMode,
-    Symbol, SymbolLookupResult, attach_result_context, attach_result_read_requests,
-    attach_result_related_requests, attach_result_related_symbol_requests, finalize_results,
-    normalize_token, read_file_range, related_file_lookup_results, related_symbol_lookup_results,
-    result_read_batch_request, search_repo_fast_filtered, symbol_lookup_results,
+    Symbol, SymbolLookupResult, attach_repo_map_read_batch_request, attach_result_context,
+    attach_result_read_requests, attach_result_related_requests,
+    attach_result_related_symbol_requests, finalize_results, normalize_token, read_file_range,
+    related_file_lookup_results, related_symbol_lookup_results, result_read_batch_request,
+    search_repo_fast_filtered, symbol_lookup_results,
 };
 use crate::shards::{
     ShardEntry, ShardManifest, ShardQueryPlan, ShardRepoMap, ShardSearchScope, build_shards,
@@ -1640,19 +1641,27 @@ impl ToolRuntime {
                 let repo = path_arg(&request.arguments, "repo")?;
                 let symbol_limit = positive_usize_arg(&request.arguments, "symbols", 50)?;
                 let test_limit = positive_usize_arg(&request.arguments, "tests", 50)?;
-                let index = RepoIndexer::new(repo).build()?;
-                Ok(serde_json::to_value(
-                    index.repo_map(symbol_limit, test_limit),
-                )?)
+                let index = RepoIndexer::new(&repo).build()?;
+                let mut map = index.repo_map(symbol_limit, test_limit);
+                attach_repo_map_read_batch_request(
+                    &mut map,
+                    "read_ranges",
+                    read_request_args("repo", &repo),
+                );
+                Ok(serde_json::to_value(map)?)
             }
             "indexed_repo_map" => {
                 let index_path = self.index_path_arg_or_single_cached(&request.arguments)?;
                 let symbol_limit = positive_usize_arg(&request.arguments, "symbols", 50)?;
                 let test_limit = positive_usize_arg(&request.arguments, "tests", 50)?;
-                let index = self.cached_index(index_path)?;
-                Ok(serde_json::to_value(
-                    index.repo_map(symbol_limit, test_limit),
-                )?)
+                let index = self.cached_index(index_path.clone())?;
+                let mut map = index.repo_map(symbol_limit, test_limit);
+                attach_repo_map_read_batch_request(
+                    &mut map,
+                    "read_index_ranges",
+                    read_request_args("index", &index_path),
+                );
+                Ok(serde_json::to_value(map)?)
             }
             "read_range" | "open_range" => {
                 let repo = path_arg(&request.arguments, "repo")?;
@@ -3120,6 +3129,11 @@ impl ToolRuntime {
                     map.top_symbols.truncate(symbol_limit);
                 }
                 prefix_repo_map_paths(&mut map, &scope);
+                attach_repo_map_read_batch_request(
+                    &mut map,
+                    "read_shard_ranges",
+                    read_request_args("index_dir", index_dir),
+                );
                 maps.push(ShardRepoMap {
                     aliases: shard
                         .aliases

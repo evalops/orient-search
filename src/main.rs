@@ -8,10 +8,11 @@ use orient::fast_index::{FastIndex, RefreshStats};
 use orient::query::normalize_symbol_kind;
 use orient::repo_index::{
     QueryPlan, RepoIndexer, ResultToolRequest, SearchFilters, SearchResult, SnippetMode,
-    SymbolLookupResult, attach_result_context, attach_result_read_requests,
-    attach_result_related_requests, attach_result_related_symbol_requests, read_file_range,
-    related_file_lookup_results, related_symbol_lookup_results, result_read_batch_request,
-    search_repo_fast_filtered, symbol_lookup_results,
+    SymbolLookupResult, attach_repo_map_read_batch_request, attach_result_context,
+    attach_result_read_requests, attach_result_related_requests,
+    attach_result_related_symbol_requests, read_file_range, related_file_lookup_results,
+    related_symbol_lookup_results, result_read_batch_request, search_repo_fast_filtered,
+    symbol_lookup_results,
 };
 use orient::server::{
     MAX_BATCH_QUERIES, MAX_BATCH_RANGES, ToolRuntime, agent_guide, agent_instructions,
@@ -1349,18 +1350,23 @@ fn run() -> Result<()> {
             tests,
             repo,
         } => {
-            println!(
-                "{}",
-                serde_json::to_string(&shard_repo_maps(
-                    index_dir,
-                    symbols,
-                    tests,
-                    &SearchFilters {
-                        repo,
-                        ..SearchFilters::default()
-                    },
-                )?)?
-            );
+            let mut maps = shard_repo_maps(
+                &index_dir,
+                symbols,
+                tests,
+                &SearchFilters {
+                    repo,
+                    ..SearchFilters::default()
+                },
+            )?;
+            for shard_map in &mut maps {
+                attach_repo_map_read_batch_request(
+                    &mut shard_map.map,
+                    "read_shard_ranges",
+                    read_request_args("index_dir", &index_dir),
+                );
+            }
+            println!("{}", serde_json::to_string(&maps)?);
         }
         Commands::Brief { repo } => {
             let index = RepoIndexer::new(repo).build()?;
@@ -1371,22 +1377,29 @@ fn run() -> Result<()> {
             symbols,
             tests,
         } => {
-            let index = RepoIndexer::new(repo).build()?;
-            println!(
-                "{}",
-                serde_json::to_string(&index.repo_map(symbols, tests))?
+            let index = RepoIndexer::new(&repo).build()?;
+            let mut map = index.repo_map(symbols, tests);
+            attach_repo_map_read_batch_request(
+                &mut map,
+                "read_ranges",
+                read_request_args("repo", &repo),
             );
+            println!("{}", serde_json::to_string(&map)?);
         }
         Commands::IndexMap {
             index,
             symbols,
             tests,
         } => {
-            let index = FastIndex::load(index)?;
-            println!(
-                "{}",
-                serde_json::to_string(&index.repo_map(symbols, tests))?
+            let index_path = index;
+            let index = FastIndex::load(&index_path)?;
+            let mut map = index.repo_map(symbols, tests);
+            attach_repo_map_read_batch_request(
+                &mut map,
+                "read_index_ranges",
+                read_request_args("index", &index_path),
             );
+            println!("{}", serde_json::to_string(&map)?);
         }
         Commands::IndexPlan {
             index,

@@ -86,7 +86,7 @@ Search results include:
 - `context`: optional attached file context when `context_lines` is set.
 - `explanation` and `query_plan` when `explain` is set.
 
-`search_auto` and each `search_auto_batch` item also include `query_plan_request`, a ready-to-send plan request for the chosen live, indexed, or shard surface. When an automatic search is empty, the response also includes `query_plan_result` with repair hints and retry requests immediately. They also include `repo_map_request` for the matching map tool when the agent needs entrypoints, tests, commands, or top symbols before editing, plus `read_batch_request` when there are results to read in one batch call. Batch search items from `search_batch`, `indexed_search_batch`, and `search_shards_batch` include the same `read_batch_request` shape.
+`search_auto` and each `search_auto_batch` item also include `query_plan_request`, a ready-to-send plan request for the chosen live, indexed, or shard surface. When an automatic search is empty, the response also includes `query_plan_result` with repair hints and retry requests immediately. They also include `repo_map_request` for the matching map tool when the agent needs entrypoints, tests, commands, or top symbols before editing, plus `read_batch_request` when there are results to read in one batch call. Batch search items from `search_batch`, `indexed_search_batch`, and `search_shards_batch` include the same `read_batch_request` shape. Repo-map responses include a top-level `read_batch_request` covering entrypoints, manifests, important files, tests, top symbol definitions, and related context.
 
 Explicit `symbol:` searches center snippets and read ranges on the matching definition line when the language extractor can identify it, even if earlier callers also match the same tokens.
 
@@ -125,7 +125,7 @@ Range reads follow manifest bounds: `start >= 1`, `1 <= lines <= lines.maximum`,
 
 ## Orientation And Repair
 
-Use `repo_map`, `indexed_repo_map`, or `shard_repo_map` before editing unfamiliar code. They return entrypoints, manifests, tests, important files, top symbols, related files/symbols, command hints, dependency hints, and import/module hints.
+Use `repo_map`, `indexed_repo_map`, or `shard_repo_map` before editing unfamiliar code. They return entrypoints, manifests, tests, important files, top symbols, related files/symbols, command hints, dependency hints, import/module hints, and a bounded `read_batch_request` for the map's most actionable files and definitions.
 
 Use `find_symbol`, `find_index_symbol`, or `find_shard_symbol` when the next step is a direct definition jump. Use their `_batch` variants when the agent has several candidate names from a search or repo map. Symbol hits include flat `name`, `kind`, `path`, and `line` fields plus a ready-to-send bounded `read_request`, so the agent can open definition context without constructing a second request by hand. These tools accept the same path, file, language, extension, test, dependency/import, symbol, and kind filters as search, so agents can keep a narrowed scope instead of broadening a symbol lookup across the whole repo set.
 

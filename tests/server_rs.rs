@@ -4247,6 +4247,8 @@ fn server_handles_indexed_search_request() {
     assert!(stdout.contains("\"manifest_files\""));
     assert!(stdout.contains("\"related_files\""));
     assert!(stdout.contains("\"related_symbols\""));
+    assert!(stdout.contains("\"read_batch_request\""));
+    assert!(stdout.contains("\"tool\":\"read_index_ranges\""));
     assert!(stdout.contains("tests/auth_test.rs"));
     assert!(stdout.contains("\"id\":\"related-index-files\""));
     assert!(stdout.contains("tests/auth_test.rs"));
@@ -4422,6 +4424,8 @@ fn server_handles_shard_index_search_and_read_requests() {
     assert!(stdout.contains("\"id\":\"shard-repo-map\""));
     assert!(stdout.contains("\"entrypoints\":[\"billing/Cargo.toml\"]"));
     assert!(stdout.contains("\"manifest_files\":[\"billing/Cargo.toml\"]"));
+    assert!(stdout.contains("\"read_batch_request\""));
+    assert!(stdout.contains("\"tool\":\"read_shard_ranges\""));
     assert!(stdout.contains("\"id\":\"read-shard-range\""));
     assert!(stdout.contains("\"path\":\"billing/src/billing.rs\""));
     assert!(stdout.contains("invoice_total"));

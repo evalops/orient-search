@@ -917,6 +917,8 @@ fn cli_outputs_repo_map_and_reads_ranges() {
         ))
         .stdout(predicate::str::contains("\"related_files\""))
         .stdout(predicate::str::contains("\"related_symbols\""))
+        .stdout(predicate::str::contains("\"read_batch_request\""))
+        .stdout(predicate::str::contains("\"tool\":\"read_ranges\""))
         .stdout(predicate::str::contains("src/auth.rs"))
         .stdout(predicate::str::contains("tests/auth_test.rs"))
         .stdout(predicate::str::contains("SessionManager"));
@@ -1845,7 +1847,9 @@ fn cli_builds_and_searches_persistent_index() {
         .stdout(predicate::str::contains("\"manifest_files\""))
         .stdout(predicate::str::contains("tests/auth_test.rs"))
         .stdout(predicate::str::contains("SessionManager"))
-        .stdout(predicate::str::contains("cargo test"));
+        .stdout(predicate::str::contains("cargo test"))
+        .stdout(predicate::str::contains("\"read_batch_request\""))
+        .stdout(predicate::str::contains("\"tool\":\"read_index_ranges\""));
 
     let mut related_index = Command::cargo_bin("orient").unwrap();
     related_index
@@ -2038,6 +2042,8 @@ fn cli_builds_and_searches_shard_directory() {
         .stdout(predicate::str::contains(&format!(
             "\"manifest_files\":[\"{billing_name}/Cargo.toml\"]"
         )))
+        .stdout(predicate::str::contains("\"read_batch_request\""))
+        .stdout(predicate::str::contains("\"tool\":\"read_shard_ranges\""))
         .stdout(predicate::str::contains("\"command_hints\""))
         .stdout(predicate::str::contains(&format!(
             "\"source\":\"{billing_name}/Cargo.toml\""

@@ -659,6 +659,7 @@ impl FastIndex {
             top_symbols,
             related_files,
             related_symbols,
+            read_batch_request: None,
         }
     }
 
