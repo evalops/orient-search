@@ -1597,6 +1597,43 @@ fn indexed_search_uses_symbol_postings_for_identifier_queries() {
         "symbol: filters should plan through exact symbol postings: {:?}",
         filtered_plan
     );
+
+    let kind_only = index
+        .search_filtered(
+            "kind:function",
+            5,
+            &SearchFilters {
+                explain: true,
+                ..SearchFilters::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(kind_only[0].path, "src/lib.rs");
+    let kind_plan = kind_only[0].query_plan.as_ref().unwrap();
+    assert_eq!(kind_plan.strategy, "symbol_kind_filter_postings");
+    assert!(
+        kind_plan
+            .planned_postings
+            .iter()
+            .any(|posting| posting.kind == "symbol_kind" && posting.value == "function"),
+        "{:?}",
+        kind_plan.planned_postings
+    );
+    assert_eq!(kind_plan.candidate_count, 1);
+
+    let direct_kind_plan = index
+        .query_plan("kind:function", &SearchFilters::default())
+        .unwrap();
+    assert_eq!(direct_kind_plan.strategy, "symbol_kind_filter_postings");
+    assert_eq!(direct_kind_plan.candidate_count, 1);
+    assert!(
+        direct_kind_plan
+            .planned_postings
+            .iter()
+            .any(|posting| posting.kind == "symbol_kind" && posting.value == "function"),
+        "{:?}",
+        direct_kind_plan.planned_postings
+    );
 }
 
 #[test]
