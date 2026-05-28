@@ -254,10 +254,16 @@ enum Commands {
     RepoMap {
         #[arg(long, default_value = ".")]
         repo: PathBuf,
+        #[arg(long, conflicts_with = "index_dir")]
+        index: Option<PathBuf>,
+        #[arg(long, conflicts_with = "index")]
+        index_dir: Option<PathBuf>,
         #[arg(long, default_value_t = 50)]
         symbols: usize,
         #[arg(long, default_value_t = 50)]
         tests: usize,
+        #[arg(long = "repo-filter")]
+        repo_filter: Option<String>,
         #[arg(long, default_value = "compact", value_parser = ["compact", "full"])]
         detail: String,
         #[arg(long = "read-limit", default_value_t = DEFAULT_REPO_MAP_READ_BATCH_RANGES)]
@@ -1519,22 +1525,57 @@ fn run() -> Result<()> {
         }
         Commands::RepoMap {
             repo,
+            index,
+            index_dir,
             symbols,
             tests,
+            repo_filter,
             detail,
             read_limit,
         } => {
             let detail = repo_map_detail_from_cli(&detail)?;
             let read_limit = repo_map_read_limit_from_cli(read_limit)?;
-            let index = RepoIndexer::new(&repo).build()?;
-            let mut map = index.repo_map_with_detail(symbols, tests, detail);
-            attach_repo_map_read_batch_request_with_limit(
-                &mut map,
-                "read_ranges",
-                read_request_args("repo", &repo),
-                read_limit,
-            );
-            println!("{}", serde_json::to_string(&map)?);
+            if let Some(index_dir) = index_dir {
+                let mut maps = shard_repo_maps(
+                    &index_dir,
+                    symbols,
+                    tests,
+                    detail,
+                    &SearchFilters {
+                        repo: repo_filter,
+                        ..SearchFilters::default()
+                    },
+                )?;
+                for shard_map in &mut maps {
+                    attach_repo_map_read_batch_request_with_limit(
+                        &mut shard_map.map,
+                        "read_ranges",
+                        read_request_args("index_dir", &index_dir),
+                        read_limit,
+                    );
+                }
+                println!("{}", serde_json::to_string(&maps)?);
+            } else if let Some(index_path) = index {
+                let index = FastIndex::load(&index_path)?;
+                let mut map = index.repo_map_with_detail(symbols, tests, detail);
+                attach_repo_map_read_batch_request_with_limit(
+                    &mut map,
+                    "read_ranges",
+                    read_request_args("index", &index_path),
+                    read_limit,
+                );
+                println!("{}", serde_json::to_string(&map)?);
+            } else {
+                let index = RepoIndexer::new(&repo).build()?;
+                let mut map = index.repo_map_with_detail(symbols, tests, detail);
+                attach_repo_map_read_batch_request_with_limit(
+                    &mut map,
+                    "read_ranges",
+                    read_request_args("repo", &repo),
+                    read_limit,
+                );
+                println!("{}", serde_json::to_string(&map)?);
+            }
         }
         Commands::IndexMap {
             index,

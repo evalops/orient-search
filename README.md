@@ -79,7 +79,8 @@ separate read tools for live repos, persisted indexes, and shard directories.
 tests, source counterparts, definitions, and types; the CLI mirrors this as
 `related --repo`, `related --index`, or `related --index-dir`.
 `repo_map` follows it too, returning live, indexed, or shard orientation from
-one JSON-lines tool.
+one JSON-lines tool; the CLI mirrors this as `repo-map --repo`,
+`repo-map --index`, or `repo-map --index-dir`.
 `find_symbol` and `find_symbol_batch` also accept `repo`, `index`, or
 `index_dir` for direct definition jumps; the CLI mirrors this as `symbol --repo`,
 `symbol --index`, or `symbol --index-dir`.

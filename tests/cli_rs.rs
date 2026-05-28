@@ -2172,6 +2172,31 @@ fn cli_builds_and_searches_persistent_index() {
         .stdout(predicate::str::contains("\"read_batch_request\""))
         .stdout(predicate::str::contains("\"tool\":\"read_index_ranges\""));
 
+    let mut generic_index_map = Command::cargo_bin("orient").unwrap();
+    generic_index_map
+        .args([
+            "repo-map",
+            "--index",
+            index_path.to_str().unwrap(),
+            "--symbols",
+            "5",
+            "--tests",
+            "5",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"entrypoints\""))
+        .stdout(predicate::str::contains("\"manifest_files\""))
+        .stdout(predicate::str::contains("tests/auth_test.rs"))
+        .stdout(predicate::str::contains("SessionManager"))
+        .stdout(predicate::str::contains("cargo test"))
+        .stdout(predicate::str::contains("\"read_batch_request\""))
+        .stdout(predicate::str::contains("\"tool\":\"read_ranges\""))
+        .stdout(predicate::str::contains(&format!(
+            "\"index\":\"{}\"",
+            index_path.display()
+        )));
+
     let mut related_index = Command::cargo_bin("orient").unwrap();
     related_index
         .args([
@@ -2442,6 +2467,35 @@ fn cli_builds_and_searches_shard_directory() {
         .stdout(predicate::str::contains(&format!(
             "\"source\":\"{billing_name}/Cargo.toml\""
         )))
+        .stdout(predicate::str::contains(&format!(
+            "\"path\":\"{billing_name}/src/billing.rs\""
+        )));
+
+    let mut generic_shard_map = Command::cargo_bin("orient").unwrap();
+    generic_shard_map
+        .args([
+            "repo-map",
+            "--index-dir",
+            shard_dir.path().to_str().unwrap(),
+            "--repo-filter",
+            &billing_name.to_ascii_uppercase(),
+            "--symbols",
+            "5",
+            "--tests",
+            "5",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(&format!(
+            "\"name\":\"{billing_name}\""
+        )))
+        .stdout(predicate::str::contains(&format!(
+            "\"entrypoints\":[\"{billing_name}/Cargo.toml\"]"
+        )))
+        .stdout(predicate::str::contains("\"read_batch_request\""))
+        .stdout(predicate::str::contains("\"tool\":\"read_ranges\""))
+        .stdout(predicate::str::contains("\"index_dir\""))
+        .stdout(predicate::str::contains("\"command_hints\""))
         .stdout(predicate::str::contains(&format!(
             "\"path\":\"{billing_name}/src/billing.rs\""
         )));
@@ -2838,6 +2892,24 @@ fn cli_filters_shard_search_by_nested_repo_alias() {
         .stdout(predicate::str::contains("billing"))
         .stdout(predicate::str::contains("cargo test"))
         .stdout(predicate::str::contains("billing/Cargo.toml"))
+        .stdout(predicate::str::contains("auth/src/auth.rs").not());
+
+    let mut generic_shard_map = Command::cargo_bin("orient").unwrap();
+    generic_shard_map
+        .args([
+            "repo-map",
+            "--index-dir",
+            shard_dir.path().to_str().unwrap(),
+            "--repo-filter",
+            "billing",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"aliases\""))
+        .stdout(predicate::str::contains("billing"))
+        .stdout(predicate::str::contains("cargo test"))
+        .stdout(predicate::str::contains("billing/Cargo.toml"))
+        .stdout(predicate::str::contains("\"tool\":\"read_ranges\""))
         .stdout(predicate::str::contains("auth/src/auth.rs").not());
 
     let mut read = Command::cargo_bin("orient").unwrap();
