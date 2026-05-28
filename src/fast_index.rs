@@ -2702,32 +2702,43 @@ fn cap_candidate_ids(
     trigram_lists: &[(&str, &[Posting])],
 ) -> (Vec<u32>, bool) {
     let cap_hit = candidate_ids.len() > candidate_cap;
-    let mut ids = candidate_ids;
-    if cap_hit {
-        ids.sort_by(|left, right| {
-            candidate_rank_score(
-                *right,
-                files,
-                query_tokens,
-                posting_lists,
-                path_lists,
-                trigram_lists,
-            )
-            .partial_cmp(&candidate_rank_score(
-                *left,
-                files,
-                query_tokens,
-                posting_lists,
-                path_lists,
-                trigram_lists,
-            ))
-            .unwrap_or(Ordering::Equal)
-            .then_with(|| candidate_path(files, *left).cmp(candidate_path(files, *right)))
-            .then_with(|| left.cmp(right))
-        });
-        ids.truncate(candidate_cap);
+    if !cap_hit {
+        return (candidate_ids, false);
     }
+
+    let mut ranked = candidate_ids
+        .into_iter()
+        .map(|file_id| CandidateCapRank {
+            file_id,
+            score: candidate_rank_score(
+                file_id,
+                files,
+                query_tokens,
+                posting_lists,
+                path_lists,
+                trigram_lists,
+            ),
+        })
+        .collect::<Vec<_>>();
+    ranked.sort_by(|left, right| {
+        right
+            .score
+            .partial_cmp(&left.score)
+            .unwrap_or(Ordering::Equal)
+            .then_with(|| {
+                candidate_path(files, left.file_id).cmp(candidate_path(files, right.file_id))
+            })
+            .then_with(|| left.file_id.cmp(&right.file_id))
+    });
+    ranked.truncate(candidate_cap);
+    let ids = ranked.into_iter().map(|rank| rank.file_id).collect();
     (ids, cap_hit)
+}
+
+#[derive(Debug, Clone, Copy)]
+struct CandidateCapRank {
+    file_id: u32,
+    score: f64,
 }
 
 fn candidate_rank_score(
