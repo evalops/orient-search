@@ -1031,6 +1031,8 @@ fn refresh_result_snippets_from_files(
         if !snippet.is_empty() {
             result.snippet = snippet;
             result.line_range = None;
+            result.match_lines =
+                ranked_match_lines_from_text(&result.path, &text, query_tokens, query_phrases, 16);
         }
     }
 }
@@ -2928,7 +2930,7 @@ fn score_text_file(
             snippet_mode,
         ),
         line_range: None,
-        match_lines: match_lines_from_text(text, query_tokens, query_phrases, 16),
+        match_lines: ranked_match_lines_from_text(path, text, query_tokens, query_phrases, 16),
         explanation: explain.then_some(signals),
         query_plan: None,
         duplicate_group: None,
@@ -3218,7 +3220,10 @@ pub(crate) fn best_snippet_for_path_with_phrases(
     mode: SnippetMode,
 ) -> String {
     let lines = text.lines().collect::<Vec<_>>();
-    if let Some((line, _)) = best_snippet_line(path, text, &lines, query_tokens, query_phrases) {
+    if let Some((line, _)) = line_scores_for_path(path, text, &lines, query_tokens, query_phrases)
+        .into_iter()
+        .max_by_key(|(line, score)| (*score, std::cmp::Reverse(*line)))
+    {
         return format_snippet_window(&lines, line.saturating_sub(1), mode);
     }
     let (_, after) = mode.window();
@@ -3228,13 +3233,13 @@ pub(crate) fn best_snippet_for_path_with_phrases(
         .collect()
 }
 
-fn best_snippet_line(
+fn line_scores_for_path(
     path: &str,
     text: &str,
     lines: &[&str],
     query_tokens: &[String],
     query_phrases: &[String],
-) -> Option<(usize, usize)> {
+) -> HashMap<usize, usize> {
     let mut scores = HashMap::<usize, usize>::new();
     for (idx, line) in lines.iter().enumerate() {
         let line_lower = line.to_lowercase();
@@ -3271,8 +3276,6 @@ fn best_snippet_line(
     }
 
     scores
-        .into_iter()
-        .max_by_key(|(line, score)| (*score, std::cmp::Reverse(*line)))
 }
 
 pub(crate) fn symbol_exact_phrase_bonus(
@@ -3436,6 +3439,26 @@ pub(crate) fn match_lines_from_text(
             }
         }
     }
+    lines
+}
+
+pub(crate) fn ranked_match_lines_from_text(
+    path: &str,
+    text: &str,
+    query_tokens: &[String],
+    query_phrases: &[String],
+    limit: usize,
+) -> Vec<usize> {
+    if (query_tokens.is_empty() && query_phrases.is_empty()) || limit == 0 {
+        return Vec::new();
+    }
+    let lines = text.lines().collect::<Vec<_>>();
+    let mut lines = line_scores_for_path(path, text, &lines, query_tokens, query_phrases)
+        .into_iter()
+        .collect::<Vec<_>>();
+    lines.sort_by_key(|(line, score)| (std::cmp::Reverse(*score), *line));
+    let mut lines = lines.into_iter().map(|(line, _)| line).collect::<Vec<_>>();
+    lines.truncate(limit);
     lines
 }
 

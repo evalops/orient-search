@@ -1338,6 +1338,7 @@ fn snippets_prefer_symbol_lines_over_early_broad_token_lines() {
     assert!(fallback[0].snippet.contains("20: pub fn lower_path()"));
     assert!(!fallback[0].snippet.contains("1: // broad header"));
     assert_eq!(fallback[0].line_range.as_ref().unwrap().start_line, 20);
+    assert_eq!(fallback[0].match_lines[0], 20);
     assert_eq!(fallback[0].read_range.as_ref().unwrap().start, 1);
 
     let index = FastIndex::build(repo.path()).unwrap();
@@ -1348,6 +1349,7 @@ fn snippets_prefer_symbol_lines_over_early_broad_token_lines() {
     assert!(indexed[0].snippet.contains("20: pub fn lower_path()"));
     assert!(!indexed[0].snippet.contains("1: // broad header"));
     assert_eq!(indexed[0].line_range.as_ref().unwrap().start_line, 20);
+    assert_eq!(indexed[0].match_lines[0], 20);
     assert_eq!(indexed[0].read_range.as_ref().unwrap().start, 1);
 }
 
