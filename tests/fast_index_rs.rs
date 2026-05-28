@@ -1637,6 +1637,35 @@ fn indexed_search_uses_symbol_postings_for_identifier_queries() {
 }
 
 #[test]
+fn indexed_kind_filters_use_persisted_symbols_without_reparsing_source() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/lib.rs"),
+        "pub fn persisted_symbol_kind() -> &'static str { \"ok\" }\n",
+    );
+
+    let mut index = FastIndex::build(repo.path()).unwrap();
+    let file = index
+        .files
+        .iter_mut()
+        .find(|file| file.path == "src/lib.rs")
+        .unwrap();
+    file.content = "not rust anymore".to_string();
+
+    let results = index
+        .search_filtered("kind:function", 5, &SearchFilters::default())
+        .unwrap();
+    assert_eq!(results[0].path, "src/lib.rs");
+
+    let plan = index
+        .query_plan("kind:function", &SearchFilters::default())
+        .unwrap();
+    assert_eq!(plan.strategy, "symbol_kind_filter_postings");
+    assert_eq!(plan.candidate_count, 1);
+    assert_eq!(plan.final_match_count, 1);
+}
+
+#[test]
 fn indexed_search_caps_broad_candidates_after_rank_aware_prefilter() {
     let repo = tempfile::tempdir().unwrap();
     for index in 0..1100 {
