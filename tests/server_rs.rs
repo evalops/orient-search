@@ -116,6 +116,19 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         search["input_schema"]["properties"]["exclude_import"]["oneOf"][1]["items"]["type"],
         "string"
     );
+    assert_eq!(
+        search["arguments"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|argument| argument["name"] == "exclude_symbol_kind")
+            .unwrap()["type"],
+        "string|string[]"
+    );
+    assert_eq!(
+        search["input_schema"]["properties"]["exclude_symbol_kind"]["oneOf"][1]["items"]["type"],
+        "string"
+    );
     let indexed_search = tools
         .iter()
         .find(|tool| tool["name"] == "indexed_search_code")
@@ -290,6 +303,26 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
             .unwrap()["maximum"],
         serde_json::json!(MAX_ATTACHED_CONTEXT_LINES)
     );
+
+    let listed = ToolRuntime::default().dispatch(ToolRequest {
+        id: serde_json::json!("list"),
+        tool: "list_tools".to_string(),
+        arguments: serde_json::json!({}),
+    });
+    assert!(listed.error.is_none(), "{:?}", listed.error);
+    let listed_names = listed
+        .result
+        .unwrap()
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|value| value.as_str().unwrap().to_string())
+        .collect::<Vec<_>>();
+    let manifest_names = tools
+        .iter()
+        .map(|tool| tool["name"].as_str().unwrap().to_string())
+        .collect::<Vec<_>>();
+    assert_eq!(listed_names, manifest_names);
 }
 
 #[test]

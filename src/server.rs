@@ -632,6 +632,17 @@ fn tool_entry(name: &str, description: &str, required: &[&str], optional: &[&str
     Value::Object(entry)
 }
 
+fn tool_names() -> Value {
+    let names = match tool_manifest() {
+        Value::Array(tools) => tools
+            .into_iter()
+            .filter_map(|tool| tool.get("name")?.as_str().map(str::to_string))
+            .collect::<Vec<_>>(),
+        _ => Vec::new(),
+    };
+    json!(names)
+}
+
 fn argument_metadata(tool_name: &str, required: &[&str], optional: &[&str]) -> Vec<Value> {
     required
         .iter()
@@ -835,10 +846,15 @@ fn argument_type(name: &str) -> &'static str {
         | "lines" | "tests" | "context_lines" => "integer",
         "test" | "explain" | "require_all" | "refresh_if_stale" | "git_metadata"
         | "tracked_files" | "nested_manifests" => "boolean",
-        "exclude_file" | "exclude_path" | "exclude_language" | "exclude_extension"
-        | "exclude_symbol" | "exclude_repo" | "exclude_dependency" | "exclude_import" => {
-            "string|string[]"
-        }
+        "exclude_file"
+        | "exclude_path"
+        | "exclude_language"
+        | "exclude_extension"
+        | "exclude_symbol"
+        | "exclude_symbol_kind"
+        | "exclude_repo"
+        | "exclude_dependency"
+        | "exclude_import" => "string|string[]",
         "ranges" => "range[]",
         "repos" | "discover_roots" | "queries" => "string[]",
         _ => "string",
@@ -1404,61 +1420,7 @@ impl ToolRuntime {
             "daemon_status" => Ok(self.daemon_status()),
             "tool_manifest" => Ok(tool_manifest()),
             "mcp_manifest" => Ok(mcp_tool_manifest()),
-            "list_tools" => Ok(json!([
-                "list_tools",
-                "tool_manifest",
-                "mcp_manifest",
-                "daemon_status",
-                "warm_index",
-                "ensure_index",
-                "refresh_index",
-                "index_status",
-                "warm_shards",
-                "discover_repos",
-                "repo_brief",
-                "repo_map",
-                "indexed_repo_map",
-                "read_range",
-                "open_range",
-                "read_ranges",
-                "open_ranges",
-                "search_code",
-                "search",
-                "search_batch",
-                "indexed_search_code",
-                "indexed_search",
-                "indexed_search_batch",
-                "indexed_query_plan",
-                "index_plan",
-                "indexed_query_plan_batch",
-                "read_index_range",
-                "open_index_range",
-                "read_index_ranges",
-                "open_index_ranges",
-                "index_shards",
-                "ensure_shards",
-                "refresh_shards",
-                "shard_status",
-                "search_shards",
-                "search_shards_batch",
-                "shard_query_plan",
-                "shard_plan",
-                "shard_query_plan_batch",
-                "read_shard_range",
-                "open_shard_range",
-                "read_shard_ranges",
-                "open_shard_ranges",
-                "shard_repo_map",
-                "find_shard_symbol",
-                "find_symbol",
-                "find_index_symbol",
-                "related_files",
-                "related_index_files",
-                "related_shard_files",
-                "related_symbols",
-                "related_index_symbols",
-                "related_shard_symbols"
-            ])),
+            "list_tools" => Ok(tool_names()),
             other => Err(anyhow!("unknown tool: {other}")),
         }
     }
