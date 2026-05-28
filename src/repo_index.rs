@@ -29,6 +29,15 @@ const DEFAULT_SYMBOL_READ_CONTEXT_BEFORE: usize = 20;
 const DEFAULT_SYMBOL_READ_LINES: usize = 80;
 const RIPGREP_TIMEOUT: Duration = Duration::from_millis(250);
 const RIPGREP_POLL_INTERVAL: Duration = Duration::from_millis(5);
+const GENERATED_DIRECTORY_SEGMENTS: &[&str] = &[
+    "generated",
+    "__generated__",
+    "gen",
+    "gensrc",
+    "codegen",
+    "autogen",
+    "auto-generated",
+];
 static TOKEN_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[A-Za-z][A-Za-z0-9_]*").unwrap());
 static SYMBOL_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"\b(?:(?:pub|export|default|declare|async)\s+)*(fn|function|class|interface|struct|enum|trait|type|const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)").unwrap()
@@ -706,6 +715,7 @@ fn filter_only_candidates_from_fd_files(
         .arg("--exclude")
         .arg("target")
         .arg(pattern);
+    add_generated_filter_fd_excludes(&mut command, filters);
 
     collect_filter_only_candidates_from_path_command(
         command,
@@ -1015,6 +1025,32 @@ fn add_scope_filter_ripgrep_globs(command: &mut Command, filters: &SearchFilters
         }
     }
     add_test_filter_ripgrep_globs(command, filters.test);
+    add_generated_filter_ripgrep_globs(command, filters);
+}
+
+fn add_generated_filter_fd_excludes(command: &mut Command, filters: &SearchFilters) {
+    if filters.generated != Some(false) {
+        return;
+    }
+    for segment in GENERATED_DIRECTORY_SEGMENTS {
+        command.arg("--exclude").arg(segment);
+    }
+}
+
+fn add_generated_filter_ripgrep_globs(command: &mut Command, filters: &SearchFilters) {
+    for glob in generated_false_ripgrep_globs(filters) {
+        command.arg("--iglob").arg(glob);
+    }
+}
+
+fn generated_false_ripgrep_globs(filters: &SearchFilters) -> Vec<String> {
+    if filters.generated != Some(false) {
+        return Vec::new();
+    }
+    GENERATED_DIRECTORY_SEGMENTS
+        .iter()
+        .map(|segment| format!("!**/{segment}/**"))
+        .collect()
 }
 
 fn rg_negative_file_globs(filters: &SearchFilters) -> Vec<String> {
@@ -5378,6 +5414,27 @@ mod tests {
             Some(
                 "orient search --repo '/tmp/my repo' --limit 5 --language rust --explain 'mode:any issue token'"
             )
+        );
+    }
+
+    #[test]
+    fn generated_false_pushes_conservative_ripgrep_directory_excludes() {
+        let filters = SearchFilters {
+            generated: Some(false),
+            ..SearchFilters::default()
+        };
+        let globs = generated_false_ripgrep_globs(&filters);
+
+        assert!(globs.contains(&"!**/generated/**".to_string()));
+        assert!(globs.contains(&"!**/__generated__/**".to_string()));
+        assert!(globs.contains(&"!**/codegen/**".to_string()));
+        assert!(globs.iter().all(|glob| glob.starts_with("!**/")));
+        assert_eq!(
+            generated_false_ripgrep_globs(&SearchFilters {
+                generated: Some(true),
+                ..SearchFilters::default()
+            }),
+            Vec::<String>::new()
         );
     }
 }

@@ -136,6 +136,25 @@ fn is_test_path(path: &str) -> bool {
     .any(|suffix| stem.ends_with(suffix))
 }
 
+fn is_generated_path(path: &str) -> bool {
+    let path = path.replace('\\', "/").to_ascii_lowercase();
+    for part in path.split('/').filter(|part| !part.is_empty()) {
+        if matches!(
+            part,
+            "generated"
+                | "__generated__"
+                | "gen"
+                | "gensrc"
+                | "codegen"
+                | "autogen"
+                | "auto-generated"
+        ) {
+            return true;
+        }
+    }
+    false
+}
+
 fn file_name(path: &str) -> String {
     Path::new(path)
         .file_name()
@@ -163,6 +182,8 @@ fn fallback_scoped_search_matches_rg_content_set_for_agent_filters() {
         "src/notes.md",
         "src/auth.ts",
         "src/auth.test.ts",
+        "gen/schema.rs",
+        "codegen/client.ts",
         "tests/auth_test.rs",
         "spec/gateway_spec.rs",
         "docs/auth.md",
@@ -189,6 +210,10 @@ fn fallback_scoped_search_matches_rg_content_set_for_agent_filters() {
         (
             "test:false MAGICNEEDLE",
             Box::new(|path| !is_test_path(path)),
+        ),
+        (
+            "generated:false MAGICNEEDLE",
+            Box::new(|path| !is_generated_path(path)),
         ),
         (
             "path:src MAGICNEEDLE -path:generated",
