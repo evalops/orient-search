@@ -1666,6 +1666,36 @@ fn indexed_kind_filters_use_persisted_symbols_without_reparsing_source() {
 }
 
 #[test]
+fn indexed_kind_filter_snippets_anchor_on_matching_symbol_line() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/lib.rs"),
+        "// module overview\n// setup notes\n\npub struct AuthSession;\n\npub fn target_kind_function() -> &'static str { \"ok\" }\n",
+    );
+
+    let index = FastIndex::build(repo.path()).unwrap();
+    let results = index
+        .search_filtered(
+            "kind:function",
+            5,
+            &SearchFilters {
+                snippet: SnippetMode::Short,
+                ..SearchFilters::default()
+            },
+        )
+        .unwrap();
+
+    assert_eq!(results[0].path, "src/lib.rs");
+    assert_eq!(
+        results[0].snippet,
+        "6: pub fn target_kind_function() -> &'static str { \"ok\" }"
+    );
+    assert_eq!(results[0].match_lines, vec![6]);
+    assert_eq!(results[0].line_range.as_ref().unwrap().start_line, 6);
+    assert_eq!(results[0].line_range.as_ref().unwrap().end_line, 6);
+}
+
+#[test]
 fn indexed_search_caps_broad_candidates_after_rank_aware_prefilter() {
     let repo = tempfile::tempdir().unwrap();
     for index in 0..1100 {

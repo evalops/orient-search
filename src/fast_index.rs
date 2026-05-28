@@ -1558,12 +1558,12 @@ impl FastIndex {
             Some(candidate_ids) => candidate_ids
                 .iter()
                 .filter_map(|file_id| self.files.get(*file_id as usize))
-                .filter_map(|file| indexed_filter_only_result(file, filters))
+                .filter_map(|file| indexed_filter_only_result(&self.root, file, filters))
                 .collect::<Vec<_>>(),
             None => self
                 .files
                 .iter()
-                .filter_map(|file| indexed_filter_only_result(file, filters))
+                .filter_map(|file| indexed_filter_only_result(&self.root, file, filters))
                 .collect::<Vec<_>>(),
         };
         let final_match_count = results.len();
@@ -2189,18 +2189,33 @@ fn indexed_file_matches_filters(file: &IndexedPath, filters: &SearchFilters) -> 
         && source_import_filters_match(&file.path, &file.content, filters)
 }
 
-fn indexed_filter_only_result(file: &IndexedPath, filters: &SearchFilters) -> Option<SearchResult> {
+fn indexed_filter_only_result(
+    root: &Path,
+    file: &IndexedPath,
+    filters: &SearchFilters,
+) -> Option<SearchResult> {
     if !indexed_file_matches_filters(file, filters) {
         return None;
     }
     let matched = score_filter_only_path(&file.path, filters, filters.explain)?;
-    Some(filter_only_search_result(
+    let mut result = filter_only_search_result(
         &file.path,
         &file.content,
         matched,
         filters.snippet,
         filters.explain,
-    ))
+    );
+    if let Some(line) = filters
+        .symbol_kind
+        .as_deref()
+        .and_then(|kind| indexed_symbol_kind_filter_line(file, kind))
+    {
+        if let Some(snippet) = indexed_symbol_filter_snippet(root, file, line, filters.snippet) {
+            result.snippet = snippet;
+            result.match_lines = vec![line];
+        }
+    }
+    Some(result)
 }
 
 fn indexed_path_matches_symbol_filter(file: &IndexedPath, wanted: &str) -> bool {
@@ -2873,6 +2888,13 @@ fn indexed_symbol_filter_line(file: &IndexedPath, wanted: &str) -> Option<usize>
     file.symbols
         .iter()
         .find(|symbol| symbol.normalized == wanted)
+        .map(|symbol| symbol.line)
+}
+
+fn indexed_symbol_kind_filter_line(file: &IndexedPath, wanted: &str) -> Option<usize> {
+    file.symbols
+        .iter()
+        .find(|symbol| symbol.kind.eq_ignore_ascii_case(wanted))
         .map(|symbol| symbol.line)
 }
 
