@@ -4174,6 +4174,34 @@ fn runtime_reuses_cached_shard_index_after_initial_load() {
     assert!(plan_result.contains("\"missing_terms\""), "{plan_result}");
     assert!(plan_result.contains("missingterm"), "{plan_result}");
     assert!(plan_result.contains("drop_missing_terms"), "{plan_result}");
+
+    let selection_miss = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("selection-miss"),
+        tool: "shard_query_plan".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": shard_dir.path(),
+            "query": "branch:missing-branch invoice total",
+            "require_all": true
+        }),
+    });
+    assert!(selection_miss.error.is_none(), "{:?}", selection_miss.error);
+    let selection = selection_miss.result.as_ref().unwrap();
+    assert_eq!(selection[0]["name"], "__shard_selection__");
+    assert_eq!(selection[0]["plan"]["strategy"], "shard_filter_mismatch");
+    assert_eq!(selection[0]["plan"]["candidate_count"], 1);
+    assert_eq!(selection[0]["plan"]["active_filters"][0]["field"], "branch");
+    assert_eq!(
+        selection[0]["plan"]["repair_hints"][0]["kind"],
+        "relax_filters"
+    );
+    assert_eq!(
+        selection[0]["plan"]["retry_requests"][0]["tool"],
+        "search_shards"
+    );
+    assert_eq!(
+        selection[0]["plan"]["retry_requests"][0]["arguments"]["query"],
+        "invoice total"
+    );
 }
 
 #[test]

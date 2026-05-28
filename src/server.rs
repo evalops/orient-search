@@ -17,7 +17,8 @@ use crate::repo_index::{
 use crate::shards::{
     ShardEntry, ShardManifest, ShardQueryPlan, ShardRepoMap, ShardSearchScope, build_shards,
     ensure_shards, filter_repo_map_by_prefix, filters_for_shard_scope, load_manifest,
-    refresh_shards, resolve_shard_path_from_manifest, shard_search_scopes, shard_status,
+    refresh_shards, resolve_shard_path_from_manifest, shard_search_scopes,
+    shard_selection_miss_plan, shard_status,
 };
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use anyhow::{Context, Result, anyhow};
@@ -3724,6 +3725,12 @@ impl ToolRuntime {
         let parsed = parse_query(query);
         let filters = merge_filters(filters.clone(), parsed.filters);
         let shard_query = query_text(&parsed.terms, &filters);
+        let shard_count = manifest.shards.len();
+        let shard_names = manifest
+            .shards
+            .iter()
+            .map(|shard| shard.name.clone())
+            .collect::<Vec<_>>();
         let jobs = manifest
             .shards
             .iter()
@@ -3733,6 +3740,15 @@ impl ToolRuntime {
                 (!scopes.is_empty()).then_some(ShardJob { shard, scopes })
             })
             .collect::<Vec<_>>();
+        if jobs.is_empty() {
+            return Ok(vec![shard_selection_miss_plan(
+                index_dir,
+                &shard_query,
+                &filters,
+                shard_count,
+                shard_names,
+            )]);
+        }
         let mut plans =
             self.shard_query_plan_jobs_cached(index_dir, &shard_query, &filters, jobs)?;
         plans.sort_by(|left, right| left.name.cmp(&right.name));

@@ -3062,6 +3062,28 @@ fn cli_filters_shard_search_by_nested_repo_alias() {
         .stdout(predicate::str::contains("\"query\":\"invoice\""))
         .stdout(predicate::str::contains("\"name\":\"auth\"").not());
 
+    let mut shard_selection_plan = Command::cargo_bin("orient").unwrap();
+    shard_selection_plan
+        .args([
+            "shard-plan",
+            "--index-dir",
+            shard_dir.path().to_str().unwrap(),
+            "repo:billing branch:missing-branch invoice total",
+            "--require-all",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"name\":\"__shard_selection__\""))
+        .stdout(predicate::str::contains(
+            "\"strategy\":\"shard_filter_mismatch\"",
+        ))
+        .stdout(predicate::str::contains("\"candidate_count\":1"))
+        .stdout(predicate::str::contains("\"field\":\"repo\""))
+        .stdout(predicate::str::contains("\"field\":\"branch\""))
+        .stdout(predicate::str::contains("\"kind\":\"relax_filters\""))
+        .stdout(predicate::str::contains("\"tool\":\"search_shards\""))
+        .stdout(predicate::str::contains("\"query\":\"invoice total\""));
+
     let mut shard_symbol = Command::cargo_bin("orient").unwrap();
     shard_symbol
         .args([

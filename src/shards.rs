@@ -4,9 +4,9 @@ use crate::discover::{RepoGitMetadata, git_metadata_for_repo};
 use crate::fast_index::{FastIndex, IndexFreshness, IndexStats};
 use crate::query::{merge_filters, parse_query, query_text};
 use crate::repo_index::{
-    CommandHint, FileRange, QueryPlan, RelatedFile, RelatedSymbol, RepoMap, RepoMapDetail,
-    SearchFilters, SearchResult, Symbol, finalize_results, is_manifest_file, language_for,
-    normalize_token,
+    CommandHint, FileRange, QueryPlan, QueryPlanFilter, QueryPlanRepairHint, RelatedFile,
+    RelatedSymbol, RepoMap, RepoMapDetail, SearchFilters, SearchResult, Symbol, finalize_results,
+    is_manifest_file, language_for, normalize_token,
 };
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use anyhow::{Context, Result};
@@ -625,6 +625,12 @@ pub fn shard_query_plans(
     let parsed = parse_query(query);
     let filters = merge_filters(filters.clone(), parsed.filters);
     let shard_query = query_text(&parsed.terms, &filters);
+    let shard_count = manifest.shards.len();
+    let shard_names = manifest
+        .shards
+        .iter()
+        .map(|shard| shard.name.clone())
+        .collect::<Vec<_>>();
     let jobs = manifest
         .shards
         .into_iter()
@@ -633,9 +639,94 @@ pub fn shard_query_plans(
             (!scopes.is_empty()).then_some(ShardJob { shard, scopes })
         })
         .collect::<Vec<_>>();
+    if jobs.is_empty() {
+        return Ok(vec![shard_selection_miss_plan(
+            index_dir,
+            &shard_query,
+            &filters,
+            shard_count,
+            shard_names,
+        )]);
+    }
     let mut plans = shard_query_plan_jobs(index_dir, &shard_query, &filters, jobs)?;
     plans.sort_by(|left, right| left.name.cmp(&right.name));
     Ok(plans)
+}
+
+pub(crate) fn shard_selection_miss_plan(
+    index_dir: &Path,
+    query: &str,
+    filters: &SearchFilters,
+    shard_count: usize,
+    shard_names: Vec<String>,
+) -> ShardQueryPlan {
+    let message = if shard_count == 0 {
+        "The shard manifest has no searchable shards. Build or refresh the shard directory before searching."
+    } else {
+        "No shard matched the repo/branch/origin filters. Relax shard filters or inspect shard_repo_map for available names, branches, and origins."
+    };
+    ShardQueryPlan {
+        name: "__shard_selection__".to_string(),
+        root: index_dir.to_path_buf(),
+        aliases: shard_names,
+        git: None,
+        plan: QueryPlan {
+            strategy: "shard_filter_mismatch".to_string(),
+            require_all: filters.require_all,
+            query_tokens: Vec::new(),
+            query_phrases: Vec::new(),
+            query_trigrams: Vec::new(),
+            active_filters: shard_scope_plan_filters(filters),
+            planned_postings: Vec::new(),
+            missing_terms: Vec::new(),
+            missing_trigrams: Vec::new(),
+            candidate_count: shard_count,
+            candidate_cap: shard_count,
+            candidate_cap_hit: false,
+            filtered_candidate_count: 0,
+            scored_candidate_count: 0,
+            final_match_count: 0,
+            repair_hints: vec![QueryPlanRepairHint {
+                kind: "relax_filters".to_string(),
+                message: message.to_string(),
+                suggested_query: (!query.trim().is_empty()).then(|| query.to_string()),
+            }],
+            retry_requests: Vec::new(),
+        },
+    }
+}
+
+fn shard_scope_plan_filters(filters: &SearchFilters) -> Vec<QueryPlanFilter> {
+    let mut active = Vec::new();
+    if let Some(value) = &filters.repo {
+        active.push(shard_scope_plan_filter("repo", value, false));
+    }
+    if let Some(value) = &filters.branch {
+        active.push(shard_scope_plan_filter("branch", value, false));
+    }
+    if let Some(value) = &filters.origin {
+        active.push(shard_scope_plan_filter("origin", value, false));
+    }
+    for value in &filters.exclude_repo {
+        active.push(shard_scope_plan_filter("repo", value, true));
+    }
+    for value in &filters.exclude_branch {
+        active.push(shard_scope_plan_filter("branch", value, true));
+    }
+    for value in &filters.exclude_origin {
+        active.push(shard_scope_plan_filter("origin", value, true));
+    }
+    active
+}
+
+fn shard_scope_plan_filter(field: &str, value: &str, negated: bool) -> QueryPlanFilter {
+    QueryPlanFilter {
+        field: field.to_string(),
+        value: value.to_string(),
+        negated,
+        candidate_matches: None,
+        candidate_rejections: None,
+    }
 }
 
 fn shard_query_plan_jobs(
