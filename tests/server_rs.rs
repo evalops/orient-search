@@ -5029,6 +5029,13 @@ fn tcp_daemon_serves_json_lines_requests() {
     startup_reader.read_line(&mut startup).unwrap();
     let startup_json: serde_json::Value = serde_json::from_str(&startup).unwrap();
     let addr = startup_json["addr"].as_str().unwrap();
+    assert!(
+        startup_json["daemon_status"]["default_requests"]["search"]["client_cli"]
+            .as_str()
+            .unwrap()
+            .contains(&format!("orient client-jsonl --addr {addr}")),
+        "{startup_json}"
+    );
 
     let mut stream = TcpStream::connect(addr).unwrap();
     let mut reader = BufReader::new(stream.try_clone().unwrap());
@@ -5120,7 +5127,7 @@ fn tcp_daemon_status_cli_reports_runtime_cache() {
         status["default_requests"]["search"]["client_cli"]
             .as_str()
             .unwrap()
-            .contains("| orient client-jsonl")
+            .contains(&format!("| orient client-jsonl --addr {addr}"))
     );
     assert!(status.get("id").is_none(), "{status}");
 }
@@ -5273,6 +5280,16 @@ fn unix_daemon_status_cli_reports_runtime_cache() {
     let status: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(status["cached_indexes"], serde_json::json!(0));
     assert_eq!(status["cached_shard_manifests"], serde_json::json!(0));
+    assert!(
+        status["default_requests"]["search"]["client_cli"]
+            .as_str()
+            .unwrap()
+            .contains(&format!(
+                "| orient client-jsonl --socket {}",
+                socket.to_str().unwrap()
+            )),
+        "{status}"
+    );
 }
 
 #[cfg(unix)]

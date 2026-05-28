@@ -3042,11 +3042,16 @@ fn run() -> Result<()> {
             );
         }
         Commands::DaemonStatus { socket, addr } => {
-            let status = if let Some(socket) = socket {
-                daemon_status_unix(&socket)?
+            let (mut status, client_command) = if let Some(socket) = socket {
+                (
+                    daemon_status_unix(&socket)?,
+                    unix_client_command(socket.as_path()),
+                )
             } else {
-                daemon_status_tcp(addr.as_deref().unwrap_or(DEFAULT_DAEMON_ADDR))?
+                let addr = addr.as_deref().unwrap_or(DEFAULT_DAEMON_ADDR);
+                (daemon_status_tcp(addr)?, tcp_client_command(addr))
             };
+            retarget_client_cli_commands(&mut status, &client_command);
             println!("{}", serde_json::to_string(&status)?);
         }
         Commands::ServeJsonl => {
@@ -3078,16 +3083,16 @@ fn run() -> Result<()> {
                 family_limit,
                 nested_manifests,
             )?;
-            println!(
-                "{}",
-                serde_json::to_string(&serde_json::json!({
-                    "addr": listener.local_addr()?.to_string(),
-                    "transport": "tcp",
-                    "cached_indexes": runtime.cached_index_count(),
-                    "ensured_shards": ensured_shards,
-                    "daemon_status": runtime.daemon_status()
-                }))?
-            );
+            let addr = listener.local_addr()?.to_string();
+            let mut startup = serde_json::json!({
+                "addr": addr.clone(),
+                "transport": "tcp",
+                "cached_indexes": runtime.cached_index_count(),
+                "ensured_shards": ensured_shards,
+                "daemon_status": runtime.daemon_status()
+            });
+            retarget_client_cli_commands(&mut startup, &tcp_client_command(&addr));
+            println!("{}", serde_json::to_string(&startup)?);
             io::stdout().flush()?;
             serve_tcp(listener, runtime)?;
         }
@@ -3120,16 +3125,15 @@ fn run() -> Result<()> {
                 family_limit,
                 nested_manifests,
             )?;
-            println!(
-                "{}",
-                serde_json::to_string(&serde_json::json!({
-                    "socket": socket,
-                    "transport": "unix",
-                    "cached_indexes": runtime.cached_index_count(),
-                    "ensured_shards": ensured_shards,
-                    "daemon_status": runtime.daemon_status()
-                }))?
-            );
+            let mut startup = serde_json::json!({
+                "socket": socket.clone(),
+                "transport": "unix",
+                "cached_indexes": runtime.cached_index_count(),
+                "ensured_shards": ensured_shards,
+                "daemon_status": runtime.daemon_status()
+            });
+            retarget_client_cli_commands(&mut startup, &unix_client_command(&socket));
+            println!("{}", serde_json::to_string(&startup)?);
             io::stdout().flush()?;
             serve_unix(listener, runtime)?;
         }
@@ -3227,6 +3231,62 @@ fn daemon_status_stream(stream: impl Read + Write) -> Result<Value> {
         .get("result")
         .cloned()
         .ok_or_else(|| anyhow::anyhow!("daemon response did not include result"))
+}
+
+fn retarget_client_cli_commands(value: &mut Value, client_command: &str) {
+    match value {
+        Value::Object(object) => {
+            let jsonl = object
+                .get("jsonl")
+                .and_then(Value::as_str)
+                .map(str::to_string);
+            if let Some(jsonl) = jsonl {
+                object.insert(
+                    "client_cli".to_string(),
+                    Value::String(jsonl_client_cli(&jsonl, client_command)),
+                );
+            }
+            for value in object.values_mut() {
+                retarget_client_cli_commands(value, client_command);
+            }
+        }
+        Value::Array(values) => {
+            for value in values {
+                retarget_client_cli_commands(value, client_command);
+            }
+        }
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
+    }
+}
+
+fn jsonl_client_cli(jsonl: &str, client_command: &str) -> String {
+    format!("printf '%s\\n' {} | {client_command}", shell_quote(jsonl))
+}
+
+fn tcp_client_command(addr: &str) -> String {
+    if addr == DEFAULT_DAEMON_ADDR {
+        "orient client-jsonl".to_string()
+    } else {
+        format!("orient client-jsonl --addr {}", shell_quote(addr))
+    }
+}
+
+fn unix_client_command(socket: &Path) -> String {
+    format!(
+        "orient client-jsonl --socket {}",
+        shell_quote(&socket.to_string_lossy())
+    )
+}
+
+fn shell_quote(value: &str) -> String {
+    if !value.is_empty()
+        && value
+            .bytes()
+            .all(|byte| matches!(byte, b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'_' | b'-' | b'.' | b'/' | b':' | b'@' | b'%' | b'+' | b'=' | b','))
+    {
+        return value.to_string();
+    }
+    format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 fn client_jsonl_stream(stream: impl Read + Write) -> Result<()> {

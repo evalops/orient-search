@@ -51,7 +51,9 @@ needs to confirm the shared daemon has the expected warmed index or shard set.
 Check `search_auto_default` and `default_requests` in that response to see the
 exact target no-argument `search_auto` will use and copy the right first
 repo-map/search/query-plan requests. Each default request also includes `jsonl`
-and `client_cli` fields for direct terminal use.
+and `client_cli` fields for direct terminal use. When you call
+`daemon-status --addr` or `daemon-status --socket`, those `client_cli` commands
+target that same daemon transport.
 
 Start with `agent_guide` or `tool_manifest` once, then use `search_auto`.
 Follow returned `read_batch_request`, `read_request`, `related_request`,
