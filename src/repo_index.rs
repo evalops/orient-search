@@ -922,6 +922,8 @@ fn search_repo_ripgrep(
         .arg("--glob")
         .arg("!target/**");
 
+    add_test_filter_ripgrep_globs(&mut command, filters.test);
+
     for pattern in ripgrep_patterns(raw_terms, query_tokens, query_phrases, filters) {
         command.arg("-e").arg(pattern);
     }
@@ -1063,6 +1065,54 @@ fn search_repo_ripgrep(
         );
     }
     Ok(Some(finalize_results(results, limit)))
+}
+
+const TEST_RIPGREP_GLOBS: &[&str] = &[
+    "test/**",
+    "tests/**",
+    "spec/**",
+    "specs/**",
+    "**/test/**",
+    "**/tests/**",
+    "**/__tests__/**",
+    "**/spec/**",
+    "**/specs/**",
+    "**/test_*",
+    "**/tests_*",
+    "**/test-*",
+    "**/tests-*",
+    "**/spec_*",
+    "**/specs_*",
+    "**/spec-*",
+    "**/specs-*",
+    "**/*_test.*",
+    "**/*_tests.*",
+    "**/*_spec.*",
+    "**/*_specs.*",
+    "**/*.test.*",
+    "**/*.tests.*",
+    "**/*.spec.*",
+    "**/*.specs.*",
+    "**/*-test.*",
+    "**/*-tests.*",
+    "**/*-spec.*",
+    "**/*-specs.*",
+];
+
+fn add_test_filter_ripgrep_globs(command: &mut Command, test: Option<bool>) {
+    match test {
+        Some(true) => {
+            for glob in TEST_RIPGREP_GLOBS {
+                command.arg("--glob").arg(glob);
+            }
+        }
+        Some(false) => {
+            for glob in TEST_RIPGREP_GLOBS {
+                command.arg("--glob").arg(format!("!{glob}"));
+            }
+        }
+        None => {}
+    }
 }
 
 fn refresh_result_snippets_from_files(
@@ -3519,11 +3569,47 @@ fn format_snippet_window(lines: &[&str], center: usize, mode: SnippetMode) -> St
 }
 
 pub(crate) fn is_test_path(path: &str) -> bool {
-    path.starts_with("test")
-        || path.contains("/test")
-        || path.ends_with("_test.py")
-        || path.ends_with(".test.ts")
-        || path.ends_with(".test.tsx")
+    let normalized_path;
+    let path = if path
+        .bytes()
+        .any(|byte| byte == b'\\' || byte.is_ascii_uppercase())
+    {
+        normalized_path = path.replace('\\', "/").to_ascii_lowercase();
+        normalized_path.as_str()
+    } else {
+        path
+    };
+
+    let mut file_name = path;
+    for part in path.split('/').filter(|part| !part.is_empty()) {
+        if matches!(part, "test" | "tests" | "__tests__" | "spec" | "specs") {
+            return true;
+        }
+        file_name = part;
+    }
+
+    if file_name.starts_with("test_")
+        || file_name.starts_with("tests_")
+        || file_name.starts_with("test-")
+        || file_name.starts_with("tests-")
+        || file_name.starts_with("spec_")
+        || file_name.starts_with("specs_")
+        || file_name.starts_with("spec-")
+        || file_name.starts_with("specs-")
+    {
+        return true;
+    }
+
+    let stem = file_name
+        .rsplit_once('.')
+        .map(|(stem, _)| stem)
+        .unwrap_or(file_name);
+    [
+        "_test", "_tests", "_spec", "_specs", ".test", ".tests", ".spec", ".specs", "-test",
+        "-tests", "-spec", "-specs",
+    ]
+    .iter()
+    .any(|suffix| stem.ends_with(suffix))
 }
 
 pub(crate) fn is_entrypoint_path(path: &str) -> bool {

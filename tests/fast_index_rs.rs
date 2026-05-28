@@ -5,14 +5,23 @@ use std::time::{Duration, Instant};
 
 use orient::fast_index::FastIndex;
 use orient::repo_index::{
-    MAX_READ_RANGE_LINES, MAX_SEARCH_RESULTS, SearchFilters, SnippetMode, attach_result_context,
-    search_repo_fast_filtered, search_repo_fast_filtered_with_timeout,
+    MAX_READ_RANGE_LINES, MAX_SEARCH_RESULTS, SearchFilters, SearchResult, SnippetMode,
+    attach_result_context, search_repo_fast_filtered, search_repo_fast_filtered_with_timeout,
 };
 use orient::shards::{build_shards, search_shards};
 
 fn write(path: &Path, text: &str) {
     fs::create_dir_all(path.parent().unwrap()).unwrap();
     fs::write(path, text).unwrap();
+}
+
+fn result_paths(results: &[SearchResult]) -> Vec<String> {
+    let mut paths = results
+        .iter()
+        .map(|result| result.path.clone())
+        .collect::<Vec<_>>();
+    paths.sort();
+    paths
 }
 
 #[test]
@@ -2325,6 +2334,96 @@ fn dependency_filters_scope_fallback_indexed_and_shard_search() {
     )
     .unwrap();
     assert_eq!(react_results[0].path, "react-ui/src/lib.ts");
+}
+
+#[test]
+fn test_filter_recognizes_common_multilanguage_test_paths() {
+    let repo = tempfile::tempdir().unwrap();
+    let test_paths = [
+        "src/lib_test.rs",
+        "pkg/client_test.go",
+        "src/auth.spec.ts",
+        "src/__tests__/widget.tsx",
+        "spec/models/user_spec.rb",
+        "src/test/java/AuthFlow.java",
+    ];
+    for path in test_paths {
+        write(
+            &repo.path().join(path),
+            "// agent common token\npub fn agent_common_token() {}\n",
+        );
+    }
+    for path in ["src/lib.rs", "src/testament.rs", "src/contest.ts"] {
+        write(
+            &repo.path().join(path),
+            "// agent common token\npub fn agent_common_token() {}\n",
+        );
+    }
+
+    let fallback = search_repo_fast_filtered(
+        repo.path(),
+        "test:true agent common token",
+        20,
+        &Default::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        result_paths(&fallback),
+        vec![
+            "pkg/client_test.go",
+            "spec/models/user_spec.rb",
+            "src/__tests__/widget.tsx",
+            "src/auth.spec.ts",
+            "src/lib_test.rs",
+            "src/test/java/AuthFlow.java",
+        ]
+    );
+
+    let fallback_source = search_repo_fast_filtered(
+        repo.path(),
+        "test:false agent common token",
+        20,
+        &Default::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        result_paths(&fallback_source),
+        vec!["src/contest.ts", "src/lib.rs", "src/testament.rs"]
+    );
+
+    let index = FastIndex::build(repo.path()).unwrap();
+    let indexed = index
+        .search_filtered("is:test agent common token", 20, &Default::default())
+        .unwrap();
+    assert_eq!(result_paths(&indexed), result_paths(&fallback));
+
+    let plan = index
+        .query_plan("is:source agent common token", &SearchFilters::default())
+        .unwrap();
+    assert!(plan.active_filters.iter().any(|filter| {
+        filter.field == "test"
+            && filter.value == "false"
+            && filter.candidate_matches == Some(3)
+            && filter.candidate_rejections == Some(6)
+    }));
+
+    let shard_dir = tempfile::tempdir().unwrap();
+    build_shards(&[repo.path().to_path_buf()], shard_dir.path()).unwrap();
+    let shard_name = repo.path().file_name().unwrap().to_string_lossy();
+    let shard_results = search_shards(
+        shard_dir.path(),
+        "test:true agent common token",
+        20,
+        &SearchFilters::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        result_paths(&shard_results),
+        result_paths(&fallback)
+            .into_iter()
+            .map(|path| format!("{shard_name}/{path}"))
+            .collect::<Vec<_>>()
+    );
 }
 
 #[test]

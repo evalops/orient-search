@@ -72,7 +72,9 @@ Filters: `repo:`, `path:`/`dir:`, `file:`, `lang:`, `ext:`, `symbol:`,
 `kind:`/`type:`, `dep:`, `import:`, `test:`, `is:test`, `is:source`,
 `content:`, `text:`, `-path:docs`, quoted phrases, and `mode:any`.
 `file:` and `path:` accept `*` and `?` wildcards; `path:` accepts `/` or `\`
-separators.
+separators. `test:true` recognizes common test/spec directories and filenames
+such as `tests/`, `__tests__/`, `spec/`, `_test.go`, `_test.rs`,
+`.test.tsx`, and `.spec.ts`.
 
 The adoption eval: run the same 20 repo-editing tasks with and without Orient.
 Measure time to first relevant file, local-search command count, wrong file
