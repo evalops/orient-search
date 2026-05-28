@@ -493,6 +493,62 @@ fn prose_files_do_not_pollute_symbol_indexes_or_repo_maps() {
 }
 
 #[test]
+fn repo_maps_diversify_top_symbols_across_files() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/alpha.rs"),
+        "pub struct AlphaOne;\npub struct AlphaTwo;\npub struct AlphaThree;\npub struct AlphaFour;\n",
+    );
+    write(
+        &repo.path().join("src/beta.rs"),
+        "pub struct BetaOne;\npub struct BetaTwo;\n",
+    );
+    write(&repo.path().join("src/gamma.rs"), "pub struct GammaOne;\n");
+
+    let live = RepoIndexer::new(repo.path()).build().unwrap();
+    let live_symbols = live.repo_map(5, 5).top_symbols;
+    assert!(
+        live_symbols
+            .iter()
+            .any(|symbol| symbol.path == "src/beta.rs")
+    );
+    assert!(
+        live_symbols
+            .iter()
+            .any(|symbol| symbol.path == "src/gamma.rs")
+    );
+    assert_eq!(live_symbols[0].name, "AlphaOne");
+    assert!(
+        live_symbols
+            .iter()
+            .filter(|symbol| symbol.path == "src/alpha.rs")
+            .count()
+            <= 2
+    );
+
+    let indexed = FastIndex::build(repo.path()).unwrap();
+    let indexed_symbols = indexed.repo_map(5, 5).top_symbols;
+    assert!(
+        indexed_symbols
+            .iter()
+            .any(|symbol| symbol.path == "src/beta.rs")
+    );
+    assert!(
+        indexed_symbols
+            .iter()
+            .any(|symbol| symbol.path == "src/gamma.rs")
+    );
+    assert_eq!(indexed_symbols[0].name, "AlphaOne");
+    assert!(
+        indexed_symbols
+            .iter()
+            .filter(|symbol| symbol.path == "src/alpha.rs")
+            .count()
+            <= 2
+    );
+}
+
+#[test]
 fn fallback_line_range_tracks_displayed_contiguous_snippet_block() {
     let repo = tempfile::tempdir().unwrap();
     let mut source = String::from("alpha first hit\n");

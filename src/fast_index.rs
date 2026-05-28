@@ -13,7 +13,7 @@ use crate::repo_index::{
     matches_filters_with_path_metadata, normalize_token, regular_file_metadata,
     related_query_terms_symbol_and_filters, related_stem_terms, repo_map_seed_paths, repo_matches,
     result_matches_all_tokens, result_matches_symbol_filters, round4, score_filter_only_path,
-    source_import_filters_match, symbol_exact_phrase_bonus, symbol_kind_rank,
+    select_repo_map_top_symbols, source_import_filters_match, symbol_exact_phrase_bonus,
     symbol_matches_related_filters, symbol_query_match_score, token_counts, tokenize,
     unique_query_tokens,
 };
@@ -605,7 +605,7 @@ impl FastIndex {
         test_files.sort();
         test_files.truncate(test_limit);
 
-        let mut top_symbols = self
+        let top_symbols = self
             .files
             .iter()
             .flat_map(|file| {
@@ -617,14 +617,7 @@ impl FastIndex {
                 })
             })
             .collect::<Vec<_>>();
-        top_symbols.sort_by(|a, b| {
-            symbol_kind_rank(&a.kind)
-                .cmp(&symbol_kind_rank(&b.kind))
-                .then_with(|| a.path.cmp(&b.path))
-                .then_with(|| a.line.cmp(&b.line))
-                .then_with(|| a.name.cmp(&b.name))
-        });
-        top_symbols.truncate(symbol_limit);
+        let top_symbols = select_repo_map_top_symbols(top_symbols, symbol_limit);
 
         let mut related_file_seeds = important_files.clone();
         related_file_seeds.extend(top_symbols.iter().map(|symbol| symbol.path.clone()));

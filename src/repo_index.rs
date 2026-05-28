@@ -1827,15 +1827,7 @@ impl RepoIndex {
         test_files.sort();
         test_files.truncate(test_limit);
 
-        let mut top_symbols = self.symbols.clone();
-        top_symbols.sort_by(|a, b| {
-            symbol_kind_rank(&a.kind)
-                .cmp(&symbol_kind_rank(&b.kind))
-                .then_with(|| a.path.cmp(&b.path))
-                .then_with(|| a.line.cmp(&b.line))
-                .then_with(|| a.name.cmp(&b.name))
-        });
-        top_symbols.truncate(symbol_limit);
+        let top_symbols = select_repo_map_top_symbols(self.symbols.clone(), symbol_limit);
 
         let brief = self.repo_brief();
         let mut related_file_seeds = brief.important_files.clone();
@@ -3523,6 +3515,52 @@ pub(crate) fn symbol_kind_rank(kind: &str) -> usize {
         "function" => 1,
         _ => 2,
     }
+}
+
+pub(crate) fn select_repo_map_top_symbols(mut symbols: Vec<Symbol>, limit: usize) -> Vec<Symbol> {
+    if limit == 0 {
+        return Vec::new();
+    }
+    symbols.sort_by(|a, b| {
+        symbol_kind_rank(&a.kind)
+            .cmp(&symbol_kind_rank(&b.kind))
+            .then_with(|| a.path.cmp(&b.path))
+            .then_with(|| a.line.cmp(&b.line))
+            .then_with(|| a.name.cmp(&b.name))
+    });
+
+    let per_path_cap = if limit <= 4 {
+        limit
+    } else {
+        limit.saturating_add(3) / 4
+    };
+    let mut selected = Vec::with_capacity(limit.min(symbols.len()));
+    let mut path_counts = HashMap::<String, usize>::new();
+    for symbol in &symbols {
+        let count = path_counts.entry(symbol.path.clone()).or_default();
+        if *count < per_path_cap {
+            selected.push(symbol.clone());
+            *count += 1;
+        }
+        if selected.len() == limit {
+            return selected;
+        }
+    }
+
+    for symbol in symbols {
+        if selected.iter().any(|selected| {
+            selected.path == symbol.path
+                && selected.line == symbol.line
+                && selected.name == symbol.name
+        }) {
+            continue;
+        }
+        selected.push(symbol);
+        if selected.len() == limit {
+            break;
+        }
+    }
+    selected
 }
 
 pub(crate) fn round4(value: f64) -> f64 {
