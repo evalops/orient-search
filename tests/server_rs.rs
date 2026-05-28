@@ -428,6 +428,10 @@ fn mcp_manifest_exposes_input_schema_for_adapter_wrappers() {
         .iter()
         .find(|tool| tool["name"] == "mcp_manifest")
         .unwrap();
+    let ensure_index = tools
+        .iter()
+        .find(|tool| tool["name"] == "ensure_index")
+        .unwrap();
 
     assert_eq!(
         search["description"],
@@ -446,6 +450,14 @@ fn mcp_manifest_exposes_input_schema_for_adapter_wrappers() {
         mcp_manifest["inputSchema"]["properties"],
         serde_json::json!({})
     );
+    assert_eq!(search["annotations"]["readOnlyHint"], true);
+    assert_eq!(search["annotations"]["destructiveHint"], false);
+    assert_eq!(search["annotations"]["idempotentHint"], true);
+    assert_eq!(search["annotations"]["openWorldHint"], false);
+    assert_eq!(ensure_index["annotations"]["readOnlyHint"], false);
+    assert_eq!(ensure_index["annotations"]["destructiveHint"], false);
+    assert_eq!(ensure_index["annotations"]["idempotentHint"], false);
+    assert_eq!(ensure_index["annotations"]["openWorldHint"], false);
 }
 
 #[test]

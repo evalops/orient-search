@@ -22,7 +22,7 @@ Each request is one JSON object per line:
 ```
 
 Responses preserve `id` and return either `result` or `error`. Use `tool_manifest` for the complete tool list, argument metadata, daemon-default hints, defaults, enums, and JSON-schema-like input schemas.
-Adapters that want MCP-shaped definitions can call `mcp_manifest` or `orient mcp-manifest`; it returns `tools` entries with `name`, `description`, and `inputSchema`.
+Adapters that want MCP-shaped definitions can call `mcp_manifest` or `orient mcp-manifest`; it returns `tools` entries with `name`, `description`, `inputSchema`, and `annotations`. Search, read, map, status, and plan tools are marked read-only. Index/shard build, refresh, and warm-cache tools are marked non-destructive but not read-only.
 
 ## Bootstrap
 

@@ -601,7 +601,8 @@ pub fn mcp_tool_manifest() -> Value {
                 Some(json!({
                     "name": name,
                     "description": description,
-                    "inputSchema": input_schema
+                    "inputSchema": input_schema,
+                    "annotations": mcp_tool_annotations(tool.get("name")?.as_str()?)
                 }))
             })
             .collect::<Vec<_>>(),
@@ -609,6 +610,25 @@ pub fn mcp_tool_manifest() -> Value {
     };
     json!({
         "tools": tools
+    })
+}
+
+fn mcp_tool_annotations(name: &str) -> Value {
+    let mutating = matches!(
+        name,
+        "warm_index"
+            | "ensure_index"
+            | "refresh_index"
+            | "warm_shards"
+            | "index_shards"
+            | "ensure_shards"
+            | "refresh_shards"
+    );
+    json!({
+        "readOnlyHint": !mutating,
+        "destructiveHint": false,
+        "idempotentHint": !mutating,
+        "openWorldHint": false
     })
 }
 

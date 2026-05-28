@@ -110,6 +110,9 @@ fn cli_outputs_mcp_manifest() {
         .stdout(predicate::str::contains("\"tools\""))
         .stdout(predicate::str::contains("\"name\":\"search_code\""))
         .stdout(predicate::str::contains("\"inputSchema\""))
+        .stdout(predicate::str::contains("\"annotations\""))
+        .stdout(predicate::str::contains("\"readOnlyHint\":true"))
+        .stdout(predicate::str::contains("\"destructiveHint\":false"))
         .stdout(predicate::str::contains(
             "\"required\":[\"repo\",\"query\"]",
         ))
