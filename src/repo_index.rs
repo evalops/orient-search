@@ -91,6 +91,7 @@ pub struct QueryPlan {
     pub query_trigrams: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub active_filters: Vec<QueryPlanFilter>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub planned_postings: Vec<QueryPlanPosting>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub missing_terms: Vec<String>,

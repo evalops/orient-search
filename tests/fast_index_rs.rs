@@ -658,6 +658,8 @@ fn indexed_query_plan_reports_missing_terms_without_results() {
     assert_eq!(filter_plan.final_match_count, 1);
     assert!(filter_plan.repair_hints.is_empty());
     assert!(filter_plan.missing_terms.is_empty());
+    let serialized_filter_plan = serde_json::to_value(&filter_plan).unwrap();
+    assert!(serialized_filter_plan.get("planned_postings").is_none());
     assert!(
         filter_plan.active_filters.iter().any(|filter| {
             filter.field == "language" && filter.value == "rust" && !filter.negated
@@ -1197,6 +1199,7 @@ fn indexed_query_plan_dedupes_identifier_tokens() {
     assert!(plan.query_trigrams.is_empty());
     let serialized = serde_json::to_value(&plan).unwrap();
     assert!(serialized.get("query_trigrams").is_none());
+    assert!(serialized.get("planned_postings").is_some());
     assert_eq!(
         plan.planned_postings
             .iter()
