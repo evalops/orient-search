@@ -385,9 +385,9 @@ pub fn tool_manifest() -> Value {
         ),
         tool_entry(
             "repo_map",
-            "Return entrypoints, tests, top symbols, known commands, and important files for a local repository.",
-            &["repo"],
-            &["symbols", "tests", "detail", "read_limit"],
+            "Return entrypoints, tests, top symbols, known commands, and important files for a live repo, persistent index, or shard directory.",
+            &[],
+            REPO_MAP_TARGET_OPTIONAL_ARGS,
         ),
         tool_entry(
             "indexed_repo_map",
@@ -1479,7 +1479,7 @@ fn auto_repo_map_request<T: Serialize>(
         "read_limit".to_string(),
         json!(DEFAULT_REPO_MAP_READ_BATCH_RANGES),
     );
-    if tool == "shard_repo_map" {
+    if target_name == "index_dir" {
         if let Some(source) = source_arguments.as_object() {
             if let Some(repo) = source.get("repo").or_else(|| source.get("repo_filter")) {
                 arguments.insert("repo".to_string(), repo.clone());
@@ -1731,11 +1731,47 @@ impl ToolRuntime {
                 Ok(serde_json::to_value(index.repo_brief_with_detail(detail))?)
             }
             "repo_map" => {
-                let repo = path_arg(&request.arguments, "repo")?;
                 let symbol_limit = positive_usize_arg(&request.arguments, "symbols", 50)?;
                 let test_limit = positive_usize_arg(&request.arguments, "tests", 50)?;
                 let detail = repo_map_detail_arg(&request.arguments)?;
                 let read_limit = repo_map_read_limit_arg(&request.arguments)?;
+                if request.arguments.get("index").is_some()
+                    && request.arguments.get("index_dir").is_some()
+                {
+                    return Err(anyhow!("repo_map accepts only one of index or index_dir"));
+                }
+                if let Some(index_dir) =
+                    optional_string_arg(&request.arguments, "index_dir").map(PathBuf::from)
+                {
+                    return Ok(serde_json::to_value(self.shard_repo_maps_cached(
+                        &index_dir,
+                        symbol_limit,
+                        test_limit,
+                        detail,
+                        read_limit,
+                        &search_filters(&request.arguments, true)?,
+                        "read_ranges",
+                    )?)?);
+                }
+                if let Some(index_path) =
+                    optional_string_arg(&request.arguments, "index").map(PathBuf::from)
+                {
+                    let index = self.cached_index(index_path.clone())?;
+                    let mut map = index.repo_map_with_detail(symbol_limit, test_limit, detail);
+                    attach_repo_map_read_batch_request_with_limit(
+                        &mut map,
+                        "read_ranges",
+                        read_request_args("index", &index_path),
+                        read_limit,
+                    );
+                    return Ok(serde_json::to_value(map)?);
+                }
+                let repo = optional_string_arg(&request.arguments, "repo")
+                    .map(PathBuf::from)
+                    .map(Ok)
+                    .unwrap_or_else(|| {
+                        std::env::current_dir().context("resolve current directory for repo_map")
+                    })?;
                 let index = RepoIndexer::new(&repo).build()?;
                 let mut map = index.repo_map_with_detail(symbol_limit, test_limit, detail);
                 attach_repo_map_read_batch_request_with_limit(
@@ -2603,6 +2639,7 @@ impl ToolRuntime {
                     detail,
                     read_limit,
                     &search_filters(&request.arguments, true)?,
+                    "read_shard_ranges",
                 )?)?)
             }
             "find_shard_symbol" => {
@@ -3136,12 +3173,7 @@ impl ToolRuntime {
                 query,
             ),
             query_plan_result,
-            repo_map_request: auto_repo_map_request(
-                "shard_repo_map",
-                "index_dir",
-                &index_dir,
-                arguments,
-            ),
+            repo_map_request: auto_repo_map_request("repo_map", "index_dir", &index_dir, arguments),
             read_batch_request: result_read_batch_request(
                 &results,
                 "read_ranges",
@@ -3205,12 +3237,7 @@ impl ToolRuntime {
             } else {
                 None
             },
-            repo_map_request: auto_repo_map_request(
-                "indexed_repo_map",
-                "index",
-                &index_path,
-                arguments,
-            ),
+            repo_map_request: auto_repo_map_request("repo_map", "index", &index_path, arguments),
             read_batch_request: result_read_batch_request(
                 &results,
                 "read_ranges",
@@ -3743,6 +3770,7 @@ impl ToolRuntime {
         detail: RepoMapDetail,
         read_limit: usize,
         filters: &SearchFilters,
+        read_tool: &str,
     ) -> Result<Vec<ShardRepoMap>> {
         let manifest = self.cached_shard_manifest(index_dir)?;
         let mut maps = Vec::new();
@@ -3766,7 +3794,7 @@ impl ToolRuntime {
                 prefix_repo_map_paths(&mut map, &scope);
                 attach_repo_map_read_batch_request_with_limit(
                     &mut map,
-                    "read_shard_ranges",
+                    read_tool,
                     read_request_args("index_dir", index_dir),
                     read_limit,
                 );
@@ -4061,6 +4089,17 @@ const SEARCH_TARGET_OPTIONAL_ARGS: &[&str] = &[
 const READ_TARGET_OPTIONAL_ARGS: &[&str] = &["repo", "index", "index_dir", "start", "lines"];
 
 const READ_BATCH_TARGET_OPTIONAL_ARGS: &[&str] = &["repo", "index", "index_dir"];
+
+const REPO_MAP_TARGET_OPTIONAL_ARGS: &[&str] = &[
+    "repo",
+    "index",
+    "index_dir",
+    "symbols",
+    "tests",
+    "detail",
+    "read_limit",
+    "repo_filter",
+];
 
 const RELATED_TARGET_OPTIONAL_ARGS: &[&str] = &["repo", "index", "index_dir", "limit"];
 

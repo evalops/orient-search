@@ -562,6 +562,15 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         agent_instructions_tool["input_schema"]["properties"]["addr"]["default"],
         "127.0.0.1:8796"
     );
+    assert_eq!(repo_map["required"], serde_json::json!([]));
+    assert_eq!(
+        repo_map["input_schema"]["properties"]["index"]["type"],
+        "string"
+    );
+    assert_eq!(
+        repo_map["input_schema"]["properties"]["index_dir"]["type"],
+        "string"
+    );
     assert_eq!(
         repo_map["input_schema"]["properties"]["detail"]["default"],
         "compact"
@@ -1059,6 +1068,69 @@ fn runtime_repo_map_detail_defaults_to_compact_and_allows_full_imports() {
             .unwrap()
             .contains("argument read_limit must be a positive integer")
     );
+
+    let index_path = repo.path().join("orient.index");
+    FastIndex::build(repo.path())
+        .unwrap()
+        .save(&index_path)
+        .unwrap();
+    let indexed = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("indexed-map"),
+        tool: "repo_map".to_string(),
+        arguments: serde_json::json!({
+            "index": index_path,
+            "symbols": 5,
+            "tests": 5
+        }),
+    });
+    assert!(indexed.error.is_none(), "{:?}", indexed.error);
+    let indexed = indexed.result.unwrap();
+    assert!(indexed["brief"]["manifest_files"].is_array());
+    assert_eq!(indexed["read_batch_request"]["tool"], "read_ranges");
+    assert_eq!(
+        indexed["read_batch_request"]["arguments"]["index"],
+        serde_json::json!(index_path)
+    );
+
+    let shard_dir = repo.path().join(".orient-shards");
+    build_shards(&[repo.path().to_path_buf()], &shard_dir).unwrap();
+    let sharded = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("sharded-map"),
+        tool: "repo_map".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": shard_dir,
+            "symbols": 5,
+            "tests": 5
+        }),
+    });
+    assert!(sharded.error.is_none(), "{:?}", sharded.error);
+    let sharded = sharded.result.unwrap();
+    assert_eq!(
+        sharded[0]["map"]["read_batch_request"]["tool"],
+        "read_ranges"
+    );
+    assert_eq!(
+        sharded[0]["map"]["read_batch_request"]["arguments"]["index_dir"],
+        serde_json::json!(shard_dir)
+    );
+
+    let conflicted = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("conflicted-map"),
+        tool: "repo_map".to_string(),
+        arguments: serde_json::json!({
+            "index": repo.path().join("orient.index"),
+            "index_dir": repo.path().join(".orient-shards")
+        }),
+    });
+    assert!(
+        conflicted
+            .error
+            .as_ref()
+            .unwrap()
+            .contains("only one of index or index_dir"),
+        "{:?}",
+        conflicted.error
+    );
 }
 
 #[test]
@@ -1222,7 +1294,11 @@ fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
     let indexed = indexed.result.unwrap();
     assert_eq!(indexed["surface"], "indexed");
     assert_eq!(indexed["query_plan_request"]["tool"], "indexed_query_plan");
-    assert_eq!(indexed["repo_map_request"]["tool"], "indexed_repo_map");
+    assert_eq!(indexed["repo_map_request"]["tool"], "repo_map");
+    assert_eq!(
+        indexed["repo_map_request"]["arguments"]["index"],
+        serde_json::json!(index_path.canonicalize().unwrap())
+    );
     assert_eq!(
         indexed["repo_map_request"]["arguments"]["detail"],
         "compact"
@@ -1914,7 +1990,7 @@ fn runtime_search_auto_batch_uses_single_warmed_index() {
     assert_eq!(batch[0]["query"], "issue_token");
     assert_eq!(batch[0]["surface"], "indexed");
     assert_eq!(batch[0]["query_plan_request"]["tool"], "indexed_query_plan");
-    assert_eq!(batch[0]["repo_map_request"]["tool"], "indexed_repo_map");
+    assert_eq!(batch[0]["repo_map_request"]["tool"], "repo_map");
     assert_eq!(
         batch[0]["repo_map_request"]["arguments"]["detail"],
         "compact"
