@@ -114,7 +114,7 @@ Engineering definition:
 - Multi-repo shard directories store a validated, atomically replaced manifest plus one versioned index per repo, and can refresh those indexes incrementally.
 - Persistent indexed files include line-offset tables, token-to-line tables, and bounded source snapshots for snippet and range retrieval.
 - Incremental refresh covers add/edit/delete and same-content rename detection.
-- Tests cover fallback search, indexed search, shard search/read tools, cross-surface golden retrieval, incremental refresh, filters, query parser stress cases, ranking explanations, duplicate suppression, JSON-lines server calls, corrupt index errors, path safety including symlink escapes, snippet modes, and a guarded `rg` differential check.
+- Tests cover fallback search, indexed search, shard search/read tools, cross-surface golden retrieval, incremental refresh, filters, query parser stress cases, ranking explanations, duplicate suppression, JSON-lines server calls, corrupt index errors, path safety including symlink escapes, snippet modes, and a dedicated `rg` differential suite for scoped live fallback search.
 - Every release claim is backed by `cargo fmt --check`, `cargo test`, `cargo build --release`, and `orient bench-search` or equivalent timed searches, with saved baselines available for local or CI regression checks.
 
 ## Architecture Direction
