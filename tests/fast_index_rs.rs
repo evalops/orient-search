@@ -1316,6 +1316,42 @@ fn indexed_snippets_anchor_on_strongest_matching_line() {
 }
 
 #[test]
+fn snippets_prefer_symbol_lines_over_early_broad_token_lines() {
+    let repo = tempfile::tempdir().unwrap();
+    let mut text = String::new();
+    for line in 1..20 {
+        text.push_str(&format!(
+            "// broad header {line}: lower path score file metadata\n"
+        ));
+    }
+    text.push_str("pub fn lower_path() {}\n");
+    text.push_str("pub fn score_file() {}\n");
+    write(&repo.path().join("src/noisy.rs"), &text);
+
+    let filters = SearchFilters {
+        snippet: SnippetMode::Short,
+        ..SearchFilters::default()
+    };
+    let fallback =
+        search_repo_fast_filtered(repo.path(), "lower_path score_file", 10, &filters).unwrap();
+    assert_eq!(fallback[0].path, "src/noisy.rs");
+    assert!(fallback[0].snippet.contains("20: pub fn lower_path()"));
+    assert!(!fallback[0].snippet.contains("1: // broad header"));
+    assert_eq!(fallback[0].line_range.as_ref().unwrap().start_line, 20);
+    assert_eq!(fallback[0].read_range.as_ref().unwrap().start, 1);
+
+    let index = FastIndex::build(repo.path()).unwrap();
+    let indexed = index
+        .search_filtered("lower_path score_file", 10, &filters)
+        .unwrap();
+    assert_eq!(indexed[0].path, "src/noisy.rs");
+    assert!(indexed[0].snippet.contains("20: pub fn lower_path()"));
+    assert!(!indexed[0].snippet.contains("1: // broad header"));
+    assert_eq!(indexed[0].line_range.as_ref().unwrap().start_line, 20);
+    assert_eq!(indexed[0].read_range.as_ref().unwrap().start, 1);
+}
+
+#[test]
 fn symbol_filter_snippets_anchor_on_definition_line() {
     let repo = tempfile::tempdir().unwrap();
     write(
@@ -1569,7 +1605,7 @@ fn search_explain_mode_returns_structured_rank_signals() {
             .any(|signal| signal.kind == "symbol_exact" && signal.value == "SessionManager")
     );
     assert_eq!(fallback[0].line_range.as_ref().unwrap().start_line, 1);
-    assert_eq!(fallback[0].line_range.as_ref().unwrap().end_line, 1);
+    assert_eq!(fallback[0].line_range.as_ref().unwrap().end_line, 2);
     assert_eq!(fallback[0].match_lines, vec![1]);
 
     let index = FastIndex::build(repo.path()).unwrap();

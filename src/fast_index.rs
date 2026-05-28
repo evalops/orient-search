@@ -4,7 +4,7 @@ use crate::query::{merge_filters, normalize_phrase_text, parse_query, query_phra
 use crate::repo_index::{
     FileRange, MAX_READ_RANGE_LINES, QueryPlan, QueryPlanFilter, QueryPlanPosting,
     QueryPlanRepairHint, RankSignal, RelatedFile, RelatedSymbol, RepoBrief, RepoMap, SearchFilters,
-    SearchResult, SnippetMode, Symbol, apply_phrase_matches, best_snippet_for_path,
+    SearchResult, SnippetMode, Symbol, apply_phrase_matches, best_snippet_for_path_with_phrases,
     capped_search_limit, command_hints_from_manifest_texts, dependency_filters_match,
     dependency_hints_from_manifest_texts, extract_symbols, filter_only_query,
     filter_only_search_result, filter_value_matches, finalize_results,
@@ -13,7 +13,8 @@ use crate::repo_index::{
     matches_filters_with_path_metadata, normalize_token, regular_file_metadata, related_stem_terms,
     repo_map_seed_paths, repo_matches, result_matches_all_tokens, result_matches_symbol_filters,
     round4, score_filter_only_path, source_content_filters_match, source_import_filters_match,
-    symbol_kind_rank, symbol_query_match_score, token_counts, tokenize, unique_query_tokens,
+    symbol_exact_phrase_bonus, symbol_kind_rank, symbol_query_match_score, token_counts, tokenize,
+    unique_query_tokens,
 };
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use anyhow::{Context, Result};
@@ -2637,7 +2638,7 @@ fn indexed_snippet(
     }
 
     let text = String::from_utf8_lossy(&bytes);
-    best_snippet_for_path(&file.path, &text, query_tokens, mode)
+    best_snippet_for_path_with_phrases(&file.path, &text, query_tokens, query_phrases, mode)
 }
 
 fn indexed_symbol_filter_line(file: &IndexedPath, wanted: &str) -> Option<usize> {
@@ -2713,6 +2714,20 @@ fn indexed_line_scores(
             if phrase_text.contains(phrase) {
                 *scores.entry(index + 1).or_insert(0) += 100;
             }
+        }
+    }
+    let query_name = query_tokens.join("");
+    for symbol in &file.symbols {
+        if let Some((kind, amount)) = symbol_query_match_score(
+            &symbol.normalized,
+            &symbol.tokens,
+            query_tokens,
+            &query_name,
+        ) {
+            let bonus = if kind == "symbol_exact" { 250 } else { 150 };
+            let exact_phrase_bonus =
+                symbol_exact_phrase_bonus(&symbol.name, query_phrases).unwrap_or(0);
+            *scores.entry(symbol.line).or_insert(0) += bonus + exact_phrase_bonus + amount as usize;
         }
     }
     scores

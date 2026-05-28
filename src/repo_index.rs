@@ -473,7 +473,9 @@ fn strict_fallback_rescue_needed(
     query_phrases: &[String],
     filters: &SearchFilters,
 ) -> bool {
-    filters.require_all || query_tokens.len() > 1 || !query_phrases.is_empty()
+    filters.require_all
+        || (!filters.match_any && query_tokens.len() > 1)
+        || !query_phrases.is_empty()
 }
 
 fn search_repo_filter_only(
@@ -995,7 +997,42 @@ fn search_repo_ripgrep(
     if !query_phrases.is_empty() {
         results.retain(|result| result_or_file_matches_phrases(root, result, query_phrases));
     }
+    if strict_fallback_rescue_needed(query_tokens, query_phrases, filters) {
+        refresh_result_snippets_from_files(
+            root,
+            &mut results,
+            query_tokens,
+            query_phrases,
+            filters.snippet,
+        );
+    }
     Ok(Some(finalize_results(results, limit)))
+}
+
+fn refresh_result_snippets_from_files(
+    root: &Path,
+    results: &mut [SearchResult],
+    query_tokens: &[String],
+    query_phrases: &[String],
+    snippet_mode: SnippetMode,
+) {
+    for result in results {
+        let text = fs::read_to_string(root.join(&result.path)).unwrap_or_default();
+        if text.contains('\0') {
+            continue;
+        }
+        let snippet = best_snippet_for_path_with_phrases(
+            &result.path,
+            &text,
+            query_tokens,
+            query_phrases,
+            snippet_mode,
+        );
+        if !snippet.is_empty() {
+            result.snippet = snippet;
+            result.line_range = None;
+        }
+    }
 }
 
 fn search_repo_streaming_until(
@@ -1212,7 +1249,15 @@ fn merge_match_result(
     let snippet = if matches!(snippet_mode, SnippetMode::Block | SnippetMode::Symbol) {
         fs::read_to_string(root.join(path))
             .ok()
-            .map(|text| best_snippet_for_path(path, &text, query_tokens, snippet_mode))
+            .map(|text| {
+                best_snippet_for_path_with_phrases(
+                    path,
+                    &text,
+                    query_tokens,
+                    query_phrases,
+                    snippet_mode,
+                )
+            })
             .filter(|snippet| !snippet.is_empty())
             .unwrap_or_else(|| {
                 if line_number > 0 {
@@ -2875,7 +2920,13 @@ fn score_text_file(
         path: path.to_string(),
         score: round4(score),
         reason: format!("matched {}", reasons.join(", ")),
-        snippet: best_snippet_for_path(path, text, query_tokens, snippet_mode),
+        snippet: best_snippet_for_path_with_phrases(
+            path,
+            text,
+            query_tokens,
+            query_phrases,
+            snippet_mode,
+        ),
         line_range: None,
         match_lines: match_lines_from_text(text, query_tokens, query_phrases, 16),
         explanation: explain.then_some(signals),
@@ -3156,34 +3207,83 @@ pub(crate) fn best_snippet_for_path(
     query_tokens: &[String],
     mode: SnippetMode,
 ) -> String {
+    best_snippet_for_path_with_phrases(path, text, query_tokens, &[], mode)
+}
+
+pub(crate) fn best_snippet_for_path_with_phrases(
+    path: &str,
+    text: &str,
+    query_tokens: &[String],
+    query_phrases: &[String],
+    mode: SnippetMode,
+) -> String {
     let lines = text.lines().collect::<Vec<_>>();
-    if matches!(mode, SnippetMode::Symbol) {
-        let language = language_for(Path::new(path)).unwrap_or_else(|| "text".to_string());
-        if let Some(symbol_line) = extract_symbols(path, text, &language)
-            .into_iter()
-            .find(|symbol| {
-                let normalized = normalize_token(&symbol.name);
-                normalized == query_tokens.join("")
-                    || tokenize(&symbol.name)
-                        .into_iter()
-                        .any(|token| query_tokens.contains(&token))
-            })
-            .map(|symbol| symbol.line)
-        {
-            return format_snippet_window(&lines, symbol_line.saturating_sub(1), mode);
-        }
-    }
-    for (idx, line) in lines.iter().enumerate() {
-        let lowered = line.to_lowercase();
-        if query_tokens.iter().any(|token| lowered.contains(token)) {
-            return format_snippet_window(&lines, idx, mode);
-        }
+    if let Some((line, _)) = best_snippet_line(path, text, &lines, query_tokens, query_phrases) {
+        return format_snippet_window(&lines, line.saturating_sub(1), mode);
     }
     let (_, after) = mode.window();
     format_numbered_lines(&lines, 0, lines.len().min(after + 1))
         .chars()
         .take(mode.max_chars())
         .collect()
+}
+
+fn best_snippet_line(
+    path: &str,
+    text: &str,
+    lines: &[&str],
+    query_tokens: &[String],
+    query_phrases: &[String],
+) -> Option<(usize, usize)> {
+    let mut scores = HashMap::<usize, usize>::new();
+    for (idx, line) in lines.iter().enumerate() {
+        let line_lower = line.to_lowercase();
+        let phrase_line = normalize_phrase_text(line);
+        let mut score = 0usize;
+        for token in query_tokens {
+            if line_lower.contains(token) {
+                score += 1;
+            }
+        }
+        for phrase in query_phrases {
+            if phrase_line.contains(phrase) {
+                score += 100;
+            }
+        }
+        if score > 0 {
+            scores.insert(idx + 1, score);
+        }
+    }
+
+    let language = language_for(Path::new(path)).unwrap_or_else(|| "text".to_string());
+    let query_name = query_tokens.join("");
+    for symbol in extract_symbols(path, text, &language) {
+        let normalized = normalize_token(&symbol.name);
+        let tokens = tokenize(&symbol.name);
+        if let Some((kind, amount)) =
+            symbol_query_match_score(&normalized, &tokens, query_tokens, &query_name)
+        {
+            let bonus = if kind == "symbol_exact" { 250 } else { 150 };
+            let exact_phrase_bonus =
+                symbol_exact_phrase_bonus(&symbol.name, query_phrases).unwrap_or(0);
+            *scores.entry(symbol.line).or_insert(0) += bonus + exact_phrase_bonus + amount as usize;
+        }
+    }
+
+    scores
+        .into_iter()
+        .max_by_key(|(line, score)| (*score, std::cmp::Reverse(*line)))
+}
+
+pub(crate) fn symbol_exact_phrase_bonus(
+    symbol_name: &str,
+    query_phrases: &[String],
+) -> Option<usize> {
+    let symbol_phrase = normalize_phrase_text(symbol_name);
+    query_phrases
+        .iter()
+        .any(|phrase| phrase == &symbol_phrase)
+        .then_some(200)
 }
 
 fn format_snippet_window(lines: &[&str], center: usize, mode: SnippetMode) -> String {
