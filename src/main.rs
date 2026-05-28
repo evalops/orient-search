@@ -553,6 +553,8 @@ struct CommonSearchArgs {
     test: Option<bool>,
     #[arg(long)]
     require_all: bool,
+    #[arg(long, conflicts_with = "require_all")]
+    any_terms: bool,
     #[arg(long, default_value = "medium")]
     snippet: String,
     #[arg(long)]
@@ -613,7 +615,8 @@ fn search_filters_from_args(
             .map(|value| normalize_filter(value)),
         import: args.import.as_ref().map(|value| normalize_filter(value)),
         test: args.test,
-        require_all: args.require_all,
+        require_all: args.require_all && !args.any_terms,
+        match_any: args.any_terms,
         snippet: snippet_mode_arg(&args.snippet)?,
         explain: args.explain,
         exclude_file: args.exclude_file.clone(),

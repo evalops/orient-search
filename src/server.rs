@@ -739,7 +739,7 @@ fn argument_schema(tool_name: &str, name: &str) -> Value {
             schema.insert("type".to_string(), json!("array"));
             schema.insert("items".to_string(), json!({"type": "string"}));
         }
-        "test" | "explain" | "require_all" | "refresh_if_stale" | "git_metadata"
+        "test" | "explain" | "require_all" | "any_terms" | "refresh_if_stale" | "git_metadata"
         | "tracked_files" | "nested_manifests" => {
             schema.insert("type".to_string(), json!("boolean"));
         }
@@ -844,7 +844,7 @@ fn argument_type(name: &str) -> &'static str {
     match name {
         "limit" | "max_depth" | "discover_limit" | "family_limit" | "symbols" | "start"
         | "lines" | "tests" | "context_lines" => "integer",
-        "test" | "explain" | "require_all" | "refresh_if_stale" | "git_metadata"
+        "test" | "explain" | "require_all" | "any_terms" | "refresh_if_stale" | "git_metadata"
         | "tracked_files" | "nested_manifests" => "boolean",
         "exclude_file"
         | "exclude_path"
@@ -877,8 +877,8 @@ fn argument_default(tool_name: &str, name: &str) -> Option<Value> {
         (_, "context_lines") => Some(json!(0)),
         (
             _,
-            "explain" | "require_all" | "refresh_if_stale" | "git_metadata" | "tracked_files"
-            | "nested_manifests",
+            "explain" | "require_all" | "any_terms" | "refresh_if_stale" | "git_metadata"
+            | "tracked_files" | "nested_manifests",
         ) => Some(json!(false)),
         _ => None,
     }
@@ -952,6 +952,9 @@ fn argument_description(name: &str) -> &'static str {
         "snippet" => "Snippet mode: short, medium, block, or symbol.",
         "explain" => "Include structured rank signals and indexed query plans.",
         "require_all" => "Require all normalized query tokens to appear in each result.",
+        "any_terms" => {
+            "Match any normalized query token for exploratory orientation; query text can also use mode:any."
+        }
         "context_lines" => "Attach this many bounded line-numbered context lines per result.",
         "refresh_if_stale" => {
             "When true, refresh a stale persistent index or shard directory before searching."
@@ -2194,6 +2197,7 @@ const SEARCH_OPTIONAL_ARGS: &[&str] = &[
     "snippet",
     "explain",
     "require_all",
+    "any_terms",
     "context_lines",
     "exclude_file",
     "exclude_path",
@@ -2223,6 +2227,7 @@ const SEARCH_INDEX_OPTIONAL_ARGS: &[&str] = &[
     "snippet",
     "explain",
     "require_all",
+    "any_terms",
     "context_lines",
     "refresh_if_stale",
     "exclude_file",
@@ -2250,6 +2255,7 @@ const PLAN_INDEX_OPTIONAL_ARGS: &[&str] = &[
     "repo_filter",
     "test",
     "require_all",
+    "any_terms",
     "refresh_if_stale",
     "exclude_file",
     "exclude_path",
@@ -2632,10 +2638,8 @@ fn search_filters(arguments: &Value, allow_repo_alias: bool) -> Result<SearchFil
             .get("explain")
             .and_then(Value::as_bool)
             .unwrap_or(false),
-        require_all: arguments
-            .get("require_all")
-            .and_then(Value::as_bool)
-            .unwrap_or(false),
+        require_all: bool_arg(arguments, "require_all") && !bool_arg(arguments, "any_terms"),
+        match_any: bool_arg(arguments, "any_terms"),
         exclude_file: optional_string_list_arg(arguments, "exclude_file")?,
         exclude_path: optional_string_list_arg(arguments, "exclude_path")?,
         exclude_language: normalized_string_list_arg(arguments, "exclude_language")?,

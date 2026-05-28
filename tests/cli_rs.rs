@@ -749,6 +749,21 @@ fn cli_searches_symbols_and_related_files() {
         .stdout(predicate::str::contains("\"context\""))
         .stdout(predicate::str::contains("\"total_lines\""));
 
+    let mut any_terms = Command::cargo_bin("orient").unwrap();
+    any_terms
+        .args([
+            "search",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "SessionManager nonexistent",
+            "--any-terms",
+            "--limit",
+            "1",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("src/auth.rs"));
+
     let mut symbol = Command::cargo_bin("orient").unwrap();
     symbol
         .args([

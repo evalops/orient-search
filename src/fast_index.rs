@@ -978,7 +978,7 @@ impl FastIndex {
                 Ok(Vec::new())
             };
         }
-        if query_tokens.len() > 1 {
+        if query_tokens.len() > 1 && !filters.match_any {
             filters.require_all = true;
         }
 
@@ -1027,7 +1027,7 @@ impl FastIndex {
             .collect::<HashSet<_>>();
         let path_plan_postings = path_postings
             .iter()
-            .filter(|(token, _)| !content_tokens.contains(token.as_str()))
+            .filter(|(token, _)| filters.match_any || !content_tokens.contains(token.as_str()))
             .collect::<Vec<_>>();
 
         let mut planned_postings = token_postings
@@ -1213,7 +1213,7 @@ impl FastIndex {
         let query = query_text(&parsed.terms, &filters);
         let query_tokens = unique_query_tokens(&query);
         let query_trigrams = query_trigrams(&query);
-        if query_tokens.len() > 1 {
+        if query_tokens.len() > 1 && !filters.match_any {
             filters.require_all = true;
         }
         if query_tokens.is_empty() && query_trigrams.is_empty() {
@@ -1311,7 +1311,7 @@ impl FastIndex {
             .collect::<HashSet<_>>();
         let path_plan_postings = path_postings
             .iter()
-            .filter(|(token, _)| !content_tokens.contains(token.as_str()))
+            .filter(|(token, _)| filters.match_any || !content_tokens.contains(token.as_str()))
             .collect::<Vec<_>>();
         let mut planned_postings = token_postings
             .iter()
@@ -2849,15 +2849,19 @@ fn intersect_planned_postings(planned: &[&Vec<Posting>], require_all: bool) -> V
     let Some(first) = planned.first() else {
         return Vec::new();
     };
+    if !require_all {
+        let mut candidate_ids = Vec::new();
+        for postings in planned {
+            candidate_ids = union_candidates(candidate_ids, posting_file_ids(postings));
+        }
+        return candidate_ids;
+    }
     let mut candidate_ids = posting_file_ids(first);
     for postings in planned.iter().skip(1) {
         candidate_ids = intersect_sorted_ids_with_postings(&candidate_ids, postings);
         if candidate_ids.is_empty() {
             break;
         }
-    }
-    if candidate_ids.is_empty() && !require_all {
-        return posting_file_ids(first);
     }
     candidate_ids
 }

@@ -494,6 +494,72 @@ fn indexed_search_supports_filters_require_all_and_symbol_boosting() {
 }
 
 #[test]
+fn explicit_any_terms_relaxes_default_and_for_orientation() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/alpha.rs"),
+        "pub fn alpha_only() {}\n",
+    );
+    write(&repo.path().join("src/beta.rs"), "pub fn beta_only() {}\n");
+    write(
+        &repo.path().join("src/both.rs"),
+        "pub fn alpha_beta() { let beta = 1; }\n",
+    );
+
+    let strict =
+        search_repo_fast_filtered(repo.path(), "alpha beta", 10, &SearchFilters::default())
+            .unwrap();
+    assert_eq!(
+        strict
+            .iter()
+            .map(|result| result.path.as_str())
+            .collect::<Vec<_>>(),
+        vec!["src/both.rs"]
+    );
+
+    let relaxed = search_repo_fast_filtered(
+        repo.path(),
+        "mode:any alpha beta",
+        10,
+        &SearchFilters::default(),
+    )
+    .unwrap();
+    let relaxed_paths = relaxed
+        .iter()
+        .map(|result| result.path.as_str())
+        .collect::<Vec<_>>();
+    assert!(relaxed_paths.contains(&"src/alpha.rs"));
+    assert!(relaxed_paths.contains(&"src/beta.rs"));
+    assert!(relaxed_paths.contains(&"src/both.rs"));
+
+    let index = FastIndex::build(repo.path()).unwrap();
+    let indexed = index
+        .search_filtered(
+            "alpha beta",
+            10,
+            &SearchFilters {
+                match_any: true,
+                ..SearchFilters::default()
+            },
+        )
+        .unwrap();
+    let indexed_paths = indexed
+        .iter()
+        .map(|result| result.path.as_str())
+        .collect::<Vec<_>>();
+    assert!(indexed_paths.contains(&"src/alpha.rs"));
+    assert!(indexed_paths.contains(&"src/beta.rs"));
+    assert!(indexed_paths.contains(&"src/both.rs"));
+
+    let plan = index
+        .query_plan("mode:any alpha beta", &SearchFilters::default())
+        .unwrap();
+    assert!(!plan.require_all);
+    assert!(plan.candidate_count >= 3);
+    assert!(plan.final_match_count >= 3);
+}
+
+#[test]
 fn indexed_symbol_lookup_returns_definition_paths() {
     let repo = tempfile::tempdir().unwrap();
     write(

@@ -15,7 +15,9 @@ pub fn parse_query(input: &str) -> ParsedQuery {
             .strip_prefix('-')
             .map(|value| (true, value.to_string()))
             .unwrap_or((false, token));
-        if apply_filter(&mut filters, &token, negated) {
+        if apply_match_mode(&mut filters, &token, negated)
+            || apply_filter(&mut filters, &token, negated)
+        {
             continue;
         }
         if !negated && !token.trim().is_empty() {
@@ -23,11 +25,35 @@ pub fn parse_query(input: &str) -> ParsedQuery {
         }
     }
 
-    if terms.len() > 1 {
+    if terms.len() > 1 && !filters.match_any {
         filters.require_all = true;
     }
 
     ParsedQuery { terms, filters }
+}
+
+fn apply_match_mode(filters: &mut SearchFilters, token: &str, negated: bool) -> bool {
+    if negated {
+        return false;
+    }
+    let Some((key, value)) = token.split_once(':') else {
+        return false;
+    };
+    let key = key.to_ascii_lowercase();
+    let value = value.trim().to_ascii_lowercase();
+    match (key.as_str(), value.as_str()) {
+        ("mode" | "match" | "terms", "any" | "or" | "some") | ("all", "false" | "0" | "no") => {
+            filters.match_any = true;
+            filters.require_all = false;
+            true
+        }
+        ("mode" | "match" | "terms", "all" | "and") | ("all", "true" | "1" | "yes") => {
+            filters.match_any = false;
+            filters.require_all = true;
+            true
+        }
+        _ => false,
+    }
 }
 
 fn apply_filter(filters: &mut SearchFilters, token: &str, negated: bool) -> bool {
@@ -205,7 +231,12 @@ pub fn merge_filters(mut base: SearchFilters, parsed: SearchFilters) -> SearchFi
     if parsed.test.is_some() {
         base.test = parsed.test;
     }
-    base.require_all |= parsed.require_all;
+    if base.match_any || parsed.match_any {
+        base.match_any |= parsed.match_any;
+        base.require_all = false;
+    } else {
+        base.require_all |= parsed.require_all;
+    }
     base.exclude_file.extend(parsed.exclude_file);
     base.exclude_path.extend(parsed.exclude_path);
     base.exclude_language.extend(parsed.exclude_language);
@@ -267,6 +298,18 @@ mod tests {
     }
 
     #[test]
+    fn parses_explicit_term_match_modes() {
+        let relaxed = parse_query("mode:any roadmap mmap compression");
+        assert_eq!(relaxed.terms, vec!["roadmap", "mmap", "compression"]);
+        assert!(relaxed.filters.match_any);
+        assert!(!relaxed.filters.require_all);
+
+        let strict = parse_query("match:all roadmap mmap");
+        assert!(!strict.filters.match_any);
+        assert!(strict.filters.require_all);
+    }
+
+    #[test]
     fn normalizes_quoted_phrases_across_identifier_boundaries() {
         assert_eq!(normalize_phrase_text("issue_token"), "issue token");
         assert_eq!(normalize_phrase_text("issue-token"), "issue token");
@@ -317,5 +360,18 @@ mod tests {
         assert_eq!(merged.language.as_deref(), Some("rust"));
         assert_eq!(merged.exclude_path, vec!["target", "fixtures"]);
         assert!(merged.require_all);
+    }
+
+    #[test]
+    fn merge_filters_lets_any_terms_override_default_and() {
+        let base = SearchFilters {
+            match_any: true,
+            ..SearchFilters::default()
+        };
+        let parsed = parse_query("token auth");
+        let merged = merge_filters(base, parsed.filters);
+
+        assert!(merged.match_any);
+        assert!(!merged.require_all);
     }
 }

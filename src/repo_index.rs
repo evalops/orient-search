@@ -195,6 +195,7 @@ pub struct SearchFilters {
     pub import: Option<String>,
     pub test: Option<bool>,
     pub require_all: bool,
+    pub match_any: bool,
     pub snippet: SnippetMode,
     pub explain: bool,
     pub exclude_file: Vec<String>,
@@ -229,6 +230,7 @@ impl Default for SearchFilters {
             import: None,
             test: None,
             require_all: false,
+            match_any: false,
             snippet: SnippetMode::Medium,
             explain: false,
             exclude_file: Vec::new(),
@@ -400,7 +402,7 @@ pub fn search_repo_fast_filtered_with_timeout(
             Ok(Vec::new())
         };
     }
-    if query_tokens.len() > 1 {
+    if query_tokens.len() > 1 && !filters.match_any {
         filters.require_all = true;
     }
 

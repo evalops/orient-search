@@ -129,6 +129,14 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         search["input_schema"]["properties"]["exclude_symbol_kind"]["oneOf"][1]["items"]["type"],
         "string"
     );
+    assert_eq!(
+        search["input_schema"]["properties"]["any_terms"]["type"],
+        "boolean"
+    );
+    assert_eq!(
+        search["input_schema"]["properties"]["any_terms"]["default"],
+        false
+    );
     let indexed_search = tools
         .iter()
         .find(|tool| tool["name"] == "indexed_search_code")
