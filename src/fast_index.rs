@@ -2464,12 +2464,16 @@ fn indexed_match_lines(
         .flat_map(|lines| lines.iter().copied())
         .map(|line| line as usize)
         .collect::<Vec<_>>();
-    if !query_phrases.is_empty() {
+    let multi_word_phrases = query_phrases
+        .iter()
+        .filter(|phrase| phrase.split_whitespace().nth(1).is_some())
+        .collect::<Vec<_>>();
+    if !multi_word_phrases.is_empty() {
         for (index, line) in file.content.lines().enumerate() {
             let line_lower = normalize_phrase_text(line);
-            if query_phrases
+            if multi_word_phrases
                 .iter()
-                .any(|phrase| line_lower.contains(phrase))
+                .any(|phrase| line_lower.contains(phrase.as_str()))
             {
                 lines.push(index + 1);
             }
@@ -2573,8 +2577,13 @@ fn indexed_snippet(
         }
     }
 
-    if let Some(line) = first_matching_line(&bytes, &file.line_offsets, query_tokens, query_phrases)
-    {
+    if let Some(line) = best_matching_line(
+        file,
+        &bytes,
+        &file.line_offsets,
+        query_tokens,
+        query_phrases,
+    ) {
         return render_indexed_window(&bytes, &file.line_offsets, line, mode);
     }
 
@@ -2582,24 +2591,44 @@ fn indexed_snippet(
     best_snippet_for_path(&file.path, &text, query_tokens, mode)
 }
 
-fn first_matching_line(
+fn best_matching_line(
+    file: &IndexedPath,
     bytes: &[u8],
     offsets: &[u32],
     query_tokens: &[String],
     query_phrases: &[String],
 ) -> Option<usize> {
-    offsets.iter().enumerate().find_map(|(index, offset)| {
-        let start = *offset as usize;
-        let end = line_end(bytes, offsets, index);
-        let line = String::from_utf8_lossy(&bytes[start..end]);
-        let lowered = line.to_lowercase();
-        let phrase_text = normalize_phrase_text(&line);
-        (query_phrases
-            .iter()
-            .any(|phrase| phrase_text.contains(phrase))
-            || query_tokens.iter().any(|token| lowered.contains(token)))
-        .then_some(index + 1)
-    })
+    let mut scores = HashMap::<usize, usize>::new();
+    for token in query_tokens {
+        if let Ok(index) = file
+            .term_lines
+            .binary_search_by(|entry| entry.term.as_str().cmp(token.as_str()))
+        {
+            for line in &file.term_lines[index].lines {
+                *scores.entry(*line as usize).or_insert(0) += 1;
+            }
+        }
+    }
+
+    for phrase in query_phrases
+        .iter()
+        .filter(|phrase| phrase.split_whitespace().nth(1).is_some())
+    {
+        for (index, offset) in offsets.iter().enumerate() {
+            let start = *offset as usize;
+            let end = line_end(bytes, offsets, index);
+            let line = String::from_utf8_lossy(&bytes[start..end]);
+            let phrase_text = normalize_phrase_text(&line);
+            if phrase_text.contains(phrase) {
+                *scores.entry(index + 1).or_insert(0) += 100;
+            }
+        }
+    }
+
+    scores
+        .into_iter()
+        .max_by_key(|(line, score)| (*score, std::cmp::Reverse(*line)))
+        .map(|(line, _)| line)
 }
 
 fn render_indexed_window(

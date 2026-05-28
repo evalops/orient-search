@@ -2306,11 +2306,16 @@ fn attached_context_line_count(line_count: usize) -> Option<usize> {
 }
 
 fn context_start_line(result: &SearchResult, line_count: usize) -> usize {
+    let line_range = result.line_range.as_ref();
     let anchor = result
         .match_lines
-        .first()
+        .iter()
         .copied()
-        .or_else(|| result.line_range.as_ref().map(|range| range.start_line))
+        .find(|line| {
+            line_range.is_none_or(|range| *line >= range.start_line && *line <= range.end_line)
+        })
+        .or_else(|| line_range.map(|range| range.start_line))
+        .or_else(|| result.match_lines.first().copied())
         .unwrap_or(1);
     anchor.saturating_sub(line_count / 3).max(1)
 }

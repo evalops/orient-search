@@ -1145,6 +1145,35 @@ fn indexed_search_supports_line_offsets_and_snippet_modes() {
 }
 
 #[test]
+fn indexed_snippets_anchor_on_strongest_matching_line() {
+    let repo = tempfile::tempdir().unwrap();
+    let mut text = "//! Multi-repo shard manifests for local indexed search.\n".to_string();
+    for line in 2..90 {
+        text.push_str(&format!("pub fn unrelated_shard_helper_{line}() {{}}\n"));
+    }
+    text.push_str("pub fn shard_status_jobs() { ordered_status_items(); }\n");
+    text.push_str("fn ordered_status_items() {}\n");
+    write(&repo.path().join("src/shards.rs"), &text);
+
+    let index = FastIndex::build(repo.path()).unwrap();
+    let results = index
+        .search_filtered(
+            "shard_status_jobs ordered_status_items",
+            10,
+            &SearchFilters {
+                snippet: SnippetMode::Short,
+                ..SearchFilters::default()
+            },
+        )
+        .unwrap();
+
+    assert_eq!(results[0].path, "src/shards.rs");
+    assert!(results[0].snippet.contains("90: pub fn shard_status_jobs"));
+    assert!(!results[0].snippet.contains("1: //! Multi-repo shard"));
+    assert_eq!(results[0].read_range.as_ref().unwrap().start, 64);
+}
+
+#[test]
 fn indexed_search_uses_trigram_postings_for_substring_queries() {
     let repo = tempfile::tempdir().unwrap();
     write(
