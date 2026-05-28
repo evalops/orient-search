@@ -914,11 +914,18 @@ fn push_filter_only_candidate(
 }
 
 fn fd_positive_file_pattern(filters: &SearchFilters) -> Option<String> {
+    if prefer_rg_files_for_positive_structural_scope(filters) {
+        return None;
+    }
     let file = filters.file.as_deref()?.trim().replace('\\', "/");
     if file.is_empty() || file.contains('/') || file.contains('*') || file.contains('?') {
         return None;
     }
     Some(regex::escape(&file))
+}
+
+fn prefer_rg_files_for_positive_structural_scope(filters: &SearchFilters) -> bool {
+    filters.test == Some(true) || filters.generated == Some(true)
 }
 
 fn rg_positive_file_glob(filters: &SearchFilters) -> Option<String> {
@@ -5467,6 +5474,43 @@ mod tests {
         assert_eq!(
             generated_ripgrep_globs(&SearchFilters::default()),
             Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn fd_file_prefilter_defers_positive_structural_scopes_to_rg() {
+        assert_eq!(
+            fd_positive_file_pattern(&SearchFilters {
+                file: Some("auth.rs".to_string()),
+                ..SearchFilters::default()
+            })
+            .as_deref(),
+            Some("auth\\.rs")
+        );
+        assert_eq!(
+            fd_positive_file_pattern(&SearchFilters {
+                file: Some("auth.rs".to_string()),
+                generated: Some(false),
+                ..SearchFilters::default()
+            })
+            .as_deref(),
+            Some("auth\\.rs")
+        );
+        assert!(
+            fd_positive_file_pattern(&SearchFilters {
+                file: Some("auth.rs".to_string()),
+                generated: Some(true),
+                ..SearchFilters::default()
+            })
+            .is_none()
+        );
+        assert!(
+            fd_positive_file_pattern(&SearchFilters {
+                file: Some("auth.rs".to_string()),
+                test: Some(true),
+                ..SearchFilters::default()
+            })
+            .is_none()
         );
     }
 }
