@@ -239,6 +239,89 @@ func (s *Server) ServeHTTP() {}
 }
 
 #[test]
+fn common_language_symbols_work_across_live_and_persistent_indexes() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("app.rb"),
+        r#"
+class BillingJob
+  def perform!
+  end
+end
+"#,
+    );
+    write(
+        &repo.path().join("App.kt"),
+        r#"
+package sample
+
+data class InvoiceState(val id: String)
+
+fun String.slugify(): String = lowercase()
+"#,
+    );
+    write(
+        &repo.path().join("Client.swift"),
+        r#"
+protocol PaymentClient {
+  func chargeCard()
+}
+"#,
+    );
+    write(
+        &repo.path().join("Gateway.java"),
+        r#"
+public class Gateway {
+  public String routePayment() {
+    return "ok";
+  }
+}
+"#,
+    );
+
+    let live = RepoIndexer::new(repo.path()).build().unwrap();
+    assert_symbol(&live.find_symbol("BillingJob", 10)[0], "app.rb", "class");
+    assert_symbol(&live.find_symbol("perform", 10)[0], "app.rb", "function");
+    assert_symbol(&live.find_symbol("InvoiceState", 10)[0], "App.kt", "class");
+    assert_symbol(&live.find_symbol("slugify", 10)[0], "App.kt", "function");
+    assert_symbol(
+        &live.find_symbol("PaymentClient", 10)[0],
+        "Client.swift",
+        "interface",
+    );
+    assert_symbol(
+        &live.find_symbol("chargeCard", 10)[0],
+        "Client.swift",
+        "function",
+    );
+    assert_symbol(&live.find_symbol("Gateway", 10)[0], "Gateway.java", "class");
+    assert_symbol(
+        &live.find_symbol("routePayment", 10)[0],
+        "Gateway.java",
+        "function",
+    );
+
+    let fallback =
+        search_repo_fast_filtered(repo.path(), "symbol:routePayment", 5, &Default::default())
+            .unwrap();
+    assert_eq!(fallback[0].path, "Gateway.java");
+    assert!(fallback[0].snippet.contains("routePayment"));
+
+    let indexed = FastIndex::build(repo.path()).unwrap();
+    assert_symbol(&indexed.find_symbol("slugify", 10)[0], "App.kt", "function");
+    let indexed_results = indexed
+        .search_filtered("symbol:chargeCard", 5, &Default::default())
+        .unwrap();
+    assert_eq!(indexed_results[0].path, "Client.swift");
+    assert!(indexed_results[0].reason.contains("symbol:chargeCard"));
+}
+
+fn assert_symbol(symbol: &orient::repo_index::Symbol, path: &str, kind: &str) {
+    assert_eq!(symbol.path, path);
+    assert_eq!(symbol.kind, kind);
+}
+
+#[test]
 fn read_file_range_rejects_paths_outside_repo() {
     let repo = tempfile::tempdir().unwrap();
     let outside = tempfile::tempdir().unwrap();

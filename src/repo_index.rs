@@ -35,6 +35,23 @@ static GO_FUNC_SYMBOL_RE: LazyLock<Regex> = LazyLock::new(|| {
 static GO_TYPE_SYMBOL_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^\s*type\s+([A-Za-z_][A-Za-z0-9_]*)\s+(struct|interface)\b").unwrap()
 });
+static RUBY_SYMBOL_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^\s*(class|module|def)\s+([A-Za-z_][A-Za-z0-9_!?=]*)").unwrap());
+static KOTLIN_FUNC_SYMBOL_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\bfun\s+(?:[A-Za-z_][A-Za-z0-9_<>?.]*\.)?([A-Za-z_][A-Za-z0-9_]*)\s*\(").unwrap()
+});
+static KOTLIN_TYPE_SYMBOL_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\b(?:(data|sealed|enum)\s+)?(class|interface|object)\s+([A-Za-z_][A-Za-z0-9_]*)")
+        .unwrap()
+});
+static SWIFT_FUNC_SYMBOL_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\bfunc\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(").unwrap());
+static SWIFT_TYPE_SYMBOL_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\b(class|struct|enum|protocol)\s+([A-Za-z_][A-Za-z0-9_]*)").unwrap()
+});
+static JAVA_METHOD_SYMBOL_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^\s*(?:public|private|protected|static|final|abstract|synchronized|native|default|\s)+[A-Za-z_][A-Za-z0-9_<>\[\], ?]*\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(").unwrap()
+});
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Symbol {
@@ -2278,6 +2295,18 @@ pub(crate) fn extract_symbols(path: &str, text: &str, language: &str) -> Vec<Sym
     if language == "go" {
         return extract_go_symbols(path, text);
     }
+    if language == "ruby" {
+        return extract_ruby_symbols(path, text);
+    }
+    if language == "kotlin" {
+        return extract_kotlin_symbols(path, text);
+    }
+    if language == "swift" {
+        return extract_swift_symbols(path, text);
+    }
+    if language == "java" {
+        return extract_java_symbols(path, text);
+    }
     text.lines()
         .enumerate()
         .filter_map(|(index, line)| {
@@ -2299,6 +2328,138 @@ pub(crate) fn extract_symbols(path: &str, text: &str, language: &str) -> Vec<Sym
             })
         })
         .collect()
+}
+
+fn extract_ruby_symbols(path: &str, text: &str) -> Vec<Symbol> {
+    text.lines()
+        .enumerate()
+        .filter_map(|(index, line)| {
+            let capture = RUBY_SYMBOL_RE.captures(line)?;
+            let raw_kind = capture.get(1)?.as_str();
+            Some(Symbol {
+                name: capture.get(2)?.as_str().to_string(),
+                kind: if raw_kind == "def" {
+                    "function"
+                } else {
+                    "class"
+                }
+                .to_string(),
+                path: path.to_string(),
+                line: index + 1,
+            })
+        })
+        .collect()
+}
+
+fn extract_kotlin_symbols(path: &str, text: &str) -> Vec<Symbol> {
+    text.lines()
+        .enumerate()
+        .filter_map(|(index, line)| {
+            if let Some(capture) = KOTLIN_FUNC_SYMBOL_RE.captures(line) {
+                return Some(Symbol {
+                    name: capture.get(1)?.as_str().to_string(),
+                    kind: "function".to_string(),
+                    path: path.to_string(),
+                    line: index + 1,
+                });
+            }
+            let capture = KOTLIN_TYPE_SYMBOL_RE.captures(line)?;
+            Some(Symbol {
+                name: capture.get(3)?.as_str().to_string(),
+                kind: kotlin_type_kind(
+                    capture.get(1).map(|value| value.as_str()),
+                    capture.get(2)?.as_str(),
+                )
+                .to_string(),
+                path: path.to_string(),
+                line: index + 1,
+            })
+        })
+        .collect()
+}
+
+fn kotlin_type_kind(prefix: Option<&str>, kind: &str) -> &'static str {
+    match (prefix, kind) {
+        (Some("enum"), "class") => "enum",
+        (_, "interface") => "interface",
+        (_, "object") => "class",
+        _ => "class",
+    }
+}
+
+fn extract_swift_symbols(path: &str, text: &str) -> Vec<Symbol> {
+    text.lines()
+        .enumerate()
+        .filter_map(|(index, line)| {
+            if let Some(capture) = SWIFT_FUNC_SYMBOL_RE.captures(line) {
+                return Some(Symbol {
+                    name: capture.get(1)?.as_str().to_string(),
+                    kind: "function".to_string(),
+                    path: path.to_string(),
+                    line: index + 1,
+                });
+            }
+            let capture = SWIFT_TYPE_SYMBOL_RE.captures(line)?;
+            Some(Symbol {
+                name: capture.get(2)?.as_str().to_string(),
+                kind: swift_type_kind(capture.get(1)?.as_str()).to_string(),
+                path: path.to_string(),
+                line: index + 1,
+            })
+        })
+        .collect()
+}
+
+fn swift_type_kind(kind: &str) -> &'static str {
+    match kind {
+        "protocol" => "interface",
+        "class" => "class",
+        "struct" => "struct",
+        "enum" => "enum",
+        _ => "class",
+    }
+}
+
+fn extract_java_symbols(path: &str, text: &str) -> Vec<Symbol> {
+    let mut symbols = Vec::new();
+    for (index, line) in text.lines().enumerate() {
+        if let Some(capture) = SYMBOL_RE.captures(line) {
+            let kind = if line.contains("interface ") {
+                "interface"
+            } else if line.contains("enum ") {
+                "enum"
+            } else if line.contains("class ") {
+                "class"
+            } else {
+                "function"
+            };
+            symbols.push(Symbol {
+                name: capture
+                    .get(1)
+                    .map(|value| value.as_str())
+                    .unwrap_or_default()
+                    .to_string(),
+                kind: kind.to_string(),
+                path: path.to_string(),
+                line: index + 1,
+            });
+            continue;
+        }
+        if let Some(capture) = JAVA_METHOD_SYMBOL_RE.captures(line) {
+            let Some(name) = capture.get(1).map(|value| value.as_str()) else {
+                continue;
+            };
+            if !matches!(name, "if" | "for" | "while" | "switch" | "catch") {
+                symbols.push(Symbol {
+                    name: name.to_string(),
+                    kind: "function".to_string(),
+                    path: path.to_string(),
+                    line: index + 1,
+                });
+            }
+        }
+    }
+    symbols
 }
 
 fn extract_go_symbols(path: &str, text: &str) -> Vec<Symbol> {
