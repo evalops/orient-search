@@ -510,6 +510,11 @@ fn indexed_query_plan_counts_filter_and_phrase_rejections() {
     assert_eq!(filter_rejected.active_filters[0].field, "path");
     assert_eq!(filter_rejected.active_filters[0].value, "tests");
     assert!(!filter_rejected.active_filters[0].negated);
+    assert_eq!(filter_rejected.active_filters[0].candidate_matches, Some(0));
+    assert_eq!(
+        filter_rejected.active_filters[0].candidate_rejections,
+        Some(filter_rejected.candidate_count)
+    );
     assert!(filter_rejected.repair_hints.iter().any(|hint| {
         hint.kind == "relax_filters" && hint.suggested_query.as_deref() == Some("session manager")
     }));

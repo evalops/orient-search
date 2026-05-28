@@ -1023,6 +1023,8 @@ impl FastIndex {
             &path_maps,
             &trigram_maps,
         );
+        let active_filters =
+            query_plan_filters_for_candidates(&filters, &self.files, &candidate_ids);
         let filtered_candidate_ids = candidate_ids
             .into_iter()
             .filter(|file_id| {
@@ -1067,7 +1069,7 @@ impl FastIndex {
                 &missing_terms,
                 &missing_trigrams,
                 use_trigrams,
-                &filters,
+                active_filters,
                 filters.require_all,
                 candidate_count,
                 candidate_cap,
@@ -1292,6 +1294,8 @@ impl FastIndex {
             &path_maps,
             &trigram_maps,
         );
+        let active_filters =
+            query_plan_filters_for_candidates(&filters, &self.files, &candidate_ids);
         let filtered_candidate_ids = candidate_ids
             .into_iter()
             .filter(|file_id| {
@@ -1334,7 +1338,7 @@ impl FastIndex {
             &missing_terms,
             &missing_trigrams,
             use_trigrams,
-            &filters,
+            active_filters,
             filters.require_all,
             candidate_count,
             candidate_cap,
@@ -1642,7 +1646,81 @@ fn plan_filter(field: &str, value: &str, negated: bool) -> QueryPlanFilter {
         field: field.to_string(),
         value: value.to_string(),
         negated,
+        candidate_matches: None,
+        candidate_rejections: None,
     }
+}
+
+fn query_plan_filters_for_candidates(
+    filters: &SearchFilters,
+    files: &[IndexedPath],
+    candidate_ids: &[u32],
+) -> Vec<QueryPlanFilter> {
+    let total = candidate_ids.len();
+    query_plan_filters(filters)
+        .into_iter()
+        .map(|mut filter| {
+            if filter.field != "repo" {
+                let matched = candidate_ids
+                    .iter()
+                    .filter_map(|file_id| files.get(*file_id as usize))
+                    .filter(|file| indexed_path_matches_plan_filter(file, &filter))
+                    .count();
+                filter.candidate_matches = Some(matched);
+                filter.candidate_rejections = Some(total.saturating_sub(matched));
+            }
+            filter
+        })
+        .collect()
+}
+
+fn indexed_path_matches_plan_filter(file: &IndexedPath, filter: &QueryPlanFilter) -> bool {
+    let matches = match filter.field.as_str() {
+        "file" => std::path::Path::new(&file.path)
+            .file_name()
+            .map(|value| {
+                value
+                    .to_string_lossy()
+                    .to_ascii_lowercase()
+                    .contains(&filter.value.to_ascii_lowercase())
+            })
+            .unwrap_or(false),
+        "path" => file
+            .path
+            .to_ascii_lowercase()
+            .contains(&filter.value.to_ascii_lowercase()),
+        "language" => file.language == filter.value.trim().to_ascii_lowercase(),
+        "extension" => std::path::Path::new(&file.path)
+            .extension()
+            .map(|value| value.to_string_lossy().to_ascii_lowercase())
+            .is_some_and(|extension| {
+                extension
+                    == filter
+                        .value
+                        .trim()
+                        .trim_start_matches('.')
+                        .to_ascii_lowercase()
+            }),
+        "symbol" => indexed_path_matches_symbol_filter(file, &filter.value),
+        "test" => {
+            let wanted = matches!(
+                filter.value.to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "y"
+            );
+            is_test_path(&file.path.to_ascii_lowercase()) == wanted
+        }
+        _ => true,
+    };
+    matches != filter.negated
+}
+
+fn indexed_path_matches_symbol_filter(file: &IndexedPath, wanted: &str) -> bool {
+    let wanted = normalize_token(wanted);
+    !wanted.is_empty()
+        && file
+            .symbols
+            .iter()
+            .any(|symbol| symbol.normalized == wanted || normalize_token(&symbol.name) == wanted)
 }
 
 fn indexed_query_plan(
@@ -1655,7 +1733,7 @@ fn indexed_query_plan(
     missing_terms: &[String],
     missing_trigrams: &[String],
     use_trigrams: bool,
-    filters: &SearchFilters,
+    active_filters: Vec<QueryPlanFilter>,
     require_all: bool,
     candidate_count: usize,
     candidate_cap: usize,
@@ -1699,7 +1777,7 @@ fn indexed_query_plan(
         query_tokens: query_tokens.to_vec(),
         query_phrases: query_phrases.to_vec(),
         query_trigrams: query_trigrams.to_vec(),
-        active_filters: query_plan_filters(filters),
+        active_filters,
         planned_postings,
         missing_terms: missing_terms.to_vec(),
         missing_trigrams: missing_trigrams.to_vec(),

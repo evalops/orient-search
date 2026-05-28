@@ -2899,6 +2899,7 @@ fn server_handles_indexed_search_request() {
     assert!(stdout.contains("\"id\":\"indexed-query-plan\""));
     assert!(stdout.contains("\"active_filters\""));
     assert!(stdout.contains("\"field\":\"path\""));
+    assert!(stdout.contains("\"candidate_rejections\""));
     assert!(stdout.contains("\"missing_terms\""));
     assert!(stdout.contains("definitely"));
     assert!(stdout.contains("missing"));

@@ -121,6 +121,10 @@ pub struct QueryPlanFilter {
     pub field: String,
     pub value: String,
     pub negated: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub candidate_matches: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub candidate_rejections: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

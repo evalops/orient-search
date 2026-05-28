@@ -50,7 +50,7 @@ Implemented now:
 - Filter-only discovery queries like `file:Cargo.toml` or `lang:rust test:true` work across fallback, indexed, shard, CLI, and JSON-lines search surfaces; indexed explain output reports them as `filter_scan`.
 - JSON-lines search tools accept structured `exclude_*` filters as strings or arrays, so wrappers can express negative filters without query-string rewriting.
 - Optional structured ranking explanations with path/content/term-frequency/symbol signals.
-- Indexed explain mode includes query-plan metadata: planner strategy, active filters, normalized tokens, exact phrases, trigrams, rarest planned posting lists, broad-query candidate caps, missing postings, candidate counts through planning, file-filtering, phrase/scoring, and final-match stages, plus structured zero-hit repair hints; `index-plan` / `indexed_query_plan`, `index-plan-batch` / `indexed_query_plan_batch`, and parallel shard forms expose the same diagnostics for zero-result searches.
+- Indexed explain mode includes query-plan metadata: planner strategy, active filters with candidate match/rejection counts, normalized tokens, exact phrases, trigrams, rarest planned posting lists, broad-query candidate caps, missing postings, candidate counts through planning, file-filtering, phrase/scoring, and final-match stages, plus structured zero-hit repair hints; `index-plan` / `indexed_query_plan`, `index-plan-batch` / `indexed_query_plan_batch`, and parallel shard forms expose the same diagnostics for zero-result searches.
 - Indexed search plans candidates from the rarest content/path token postings, falling back to rare trigram postings for substring queries, and caps broad candidate scoring after a cheap rank-aware prefilter.
 - Indexed files persist line-offset and token-to-line tables for bounded snippet rendering and exact match-line metadata.
 - Result de-duping and grouping for repeated worktree copies using normalized path suffixes and snippet signatures, with compact duplicate metadata on the kept result.
@@ -97,7 +97,7 @@ Search quality definition:
 
 - Query support covers literals, separator-normalized exact quoted phrases, multi-token AND semantics, path filters, extension/language filters, and exact-symbol boosts.
 - Snippets include line numbers, exact match-line metadata, and enough context for an agent to decide whether to read/edit.
-- Query-plan diagnostics explain zero-hit searches by showing active filters and separating missing postings from filter rejections, exact-phrase/scoring rejections, and final AND/symbol rejections, with structured repair hints an agent can retry.
+- Query-plan diagnostics explain zero-hit searches by showing active filter impact and separating missing postings from filter rejections, exact-phrase/scoring rejections, and final AND/symbol rejections, with structured repair hints an agent can retry.
 - Search surfaces can optionally attach bounded read-range context to each hit when an agent wants fewer follow-up calls.
 - Explain mode returns structured ranking signals when an agent needs to compare close results.
 - CLI and JSON-lines server expose the same search capabilities, including multi-repo shard search.
