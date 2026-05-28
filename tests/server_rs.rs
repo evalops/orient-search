@@ -53,6 +53,10 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         .iter()
         .find(|tool| tool["name"] == "search_auto")
         .unwrap();
+    let search_auto_batch = tools
+        .iter()
+        .find(|tool| tool["name"] == "search_auto_batch")
+        .unwrap();
     let discover = tools
         .iter()
         .find(|tool| tool["name"] == "discover_repos")
@@ -117,8 +121,16 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
     assert_eq!(search["required"], serde_json::json!(["repo", "query"]));
     assert_eq!(search_auto["required"], serde_json::json!(["query"]));
     assert_eq!(
+        search_auto_batch["required"],
+        serde_json::json!(["queries"])
+    );
+    assert_eq!(
         search_auto["input_schema"]["properties"]["limit"]["default"],
         10
+    );
+    assert_eq!(
+        search_auto_batch["input_schema"]["properties"]["queries"]["maxItems"],
+        serde_json::json!(MAX_BATCH_QUERIES)
     );
     assert_eq!(
         search_auto["input_schema"]["properties"]["limit"]["maximum"],
@@ -452,6 +464,7 @@ fn server_reports_tool_manifest_for_agent_wrappers() {
     assert!(stdout.contains("\"name\":\"search_code\""));
     assert!(stdout.contains("\"name\":\"search\""));
     assert!(stdout.contains("\"name\":\"search_auto\""));
+    assert!(stdout.contains("\"name\":\"search_auto_batch\""));
     assert!(stdout.contains("\"name\":\"indexed_search\""));
     assert!(stdout.contains("\"name\":\"index_plan\""));
     assert!(stdout.contains("\"name\":\"shard_plan\""));
@@ -588,6 +601,10 @@ fn agent_guide_returns_local_agent_request_templates() {
         "search_auto"
     );
     assert_eq!(
+        guide["request_templates"]["auto_search_batch"]["tool"],
+        "search_auto_batch"
+    );
+    assert_eq!(
         guide["request_templates"]["shard_search"]["tool"],
         "search_shards"
     );
@@ -701,6 +718,46 @@ fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
         indexed["results"][0]["read_request"]["tool"],
         "read_index_range"
     );
+}
+
+#[test]
+fn runtime_search_auto_batch_uses_single_warmed_index() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/auth.rs"),
+        "pub struct SessionManager;\npub fn issue_token() {}\n",
+    );
+    let runtime = ToolRuntime::default();
+    let index_path = repo.path().join("orient.index");
+    let ensure = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("ensure"),
+        tool: "ensure_index".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "index": index_path
+        }),
+    });
+    assert!(ensure.error.is_none(), "{:?}", ensure.error);
+
+    let batch = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("batch"),
+        tool: "search_auto_batch".to_string(),
+        arguments: serde_json::json!({
+            "queries": ["issue_token", "SessionManager"],
+            "limit": 5
+        }),
+    });
+    assert!(batch.error.is_none(), "{:?}", batch.error);
+    let batch = batch.result.unwrap();
+    assert_eq!(batch.as_array().unwrap().len(), 2);
+    assert_eq!(batch[0]["query"], "issue_token");
+    assert_eq!(batch[0]["surface"], "indexed");
+    assert_eq!(
+        batch[0]["results"][0]["read_request"]["tool"],
+        "read_index_range"
+    );
+    assert_eq!(batch[1]["query"], "SessionManager");
+    assert_eq!(batch[1]["surface"], "indexed");
 }
 
 #[test]

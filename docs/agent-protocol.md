@@ -54,7 +54,7 @@ Use the fastest surface that matches your setup:
 - `search_code` for a live repo without a prebuilt index.
 - `indexed_search_code` for one persistent repo index.
 - `search_shards` for a multi-repo shard directory.
-- `search_batch`, `indexed_search_batch`, or `search_shards_batch` when an agent wants to try several query formulations in one round trip. CLI equivalents are `search-batch`, `indexed-search-batch`, and `search-shards-batch`.
+- `search_auto_batch`, `search_batch`, `indexed_search_batch`, or `search_shards_batch` when an agent wants to try several query formulations in one round trip. CLI equivalents are `search-auto-batch`, `search-batch`, `indexed-search-batch`, and `search-shards-batch`.
 - `search_query_plan`, `indexed_query_plan`, or `shard_query_plan` when a search returns empty or suspicious results and the agent needs missing terms plus retry hints. CLI equivalents are `search-plan`, `index-plan`, and `shard-plan`.
 
 CLI-style JSON-lines aliases are accepted for the most guessable names: `search` for `search_code`, `search_plan` for `search_query_plan`, `indexed_search` for `indexed_search_code`, `index_plan` for `indexed_query_plan`, and `shard_plan` for `shard_query_plan`.

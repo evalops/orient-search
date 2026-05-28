@@ -53,6 +53,7 @@ struct SearchBatchResult {
 
 #[derive(Debug, Serialize)]
 struct SearchAutoResult {
+    query: String,
     surface: String,
     target: String,
     results: Vec<SearchResult>,
@@ -411,6 +412,12 @@ pub fn tool_manifest() -> Value {
             SEARCH_AUTO_OPTIONAL_ARGS,
         ),
         tool_entry(
+            "search_auto_batch",
+            "Run several automatic searches against the best available local surface in one request.",
+            &["queries"],
+            SEARCH_AUTO_OPTIONAL_ARGS,
+        ),
+        tool_entry(
             "search_batch",
             "Run several fast fallback searches against one local repository in a single request.",
             &["repo", "queries"],
@@ -736,6 +743,11 @@ pub fn agent_guide(
                 "id": "search",
                 "tool": "search_auto",
                 "arguments": {"query": "symbol:SessionManager token", "limit": 10, "explain": true}
+            },
+            "auto_search_batch": {
+                "id": "searches",
+                "tool": "search_auto_batch",
+                "arguments": {"queries": ["symbol:SessionManager token", "path:src token"], "limit": 10, "explain": true}
             },
             "indexed_repo_map": {
                 "id": "map",
@@ -1124,6 +1136,7 @@ fn tool_has_result_limit(tool_name: &str) -> bool {
         "search_code"
             | "search"
             | "search_auto"
+            | "search_auto_batch"
             | "indexed_search"
             | "search_batch"
             | "indexed_search_code"
@@ -1398,6 +1411,23 @@ impl ToolRuntime {
                     refresh_if_stale,
                 )?;
                 Ok(serde_json::to_value(result)?)
+            }
+            "search_auto_batch" => {
+                let queries = string_array_arg(&request.arguments, "queries")?;
+                let limit = search_limit_arg(&request.arguments)?;
+                let context_lines = context_lines_arg(&request.arguments)?;
+                let refresh_if_stale = bool_arg(&request.arguments, "refresh_if_stale");
+                let mut batch = Vec::new();
+                for query in queries {
+                    batch.push(self.search_auto(
+                        &request.arguments,
+                        &query,
+                        limit,
+                        context_lines,
+                        refresh_if_stale,
+                    )?);
+                }
+                Ok(serde_json::to_value(batch)?)
             }
             "search_batch" => {
                 let repo = path_arg(&request.arguments, "repo")?;
@@ -1935,6 +1965,7 @@ impl ToolRuntime {
                 read_request_args("repo", &repo),
             );
             return Ok(SearchAutoResult {
+                query: query.to_string(),
                 surface: "fallback".to_string(),
                 target: repo.to_string_lossy().to_string(),
                 results,
@@ -1965,6 +1996,7 @@ impl ToolRuntime {
             context_lines,
         )?;
         Ok(SearchAutoResult {
+            query: query.to_string(),
             surface: "shards".to_string(),
             target: index_dir.to_string_lossy().to_string(),
             results,
@@ -2001,6 +2033,7 @@ impl ToolRuntime {
             read_request_args("index", &index_path),
         );
         Ok(SearchAutoResult {
+            query: query.to_string(),
             surface: "indexed".to_string(),
             target: index_path.to_string_lossy().to_string(),
             results,

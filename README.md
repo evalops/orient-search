@@ -30,6 +30,7 @@ orient client-jsonl --addr 127.0.0.1:8796
 {"id":"guide","tool":"agent_guide","arguments":{"index_dir":"/tmp/orient-shards"}}
 {"id":"map","tool":"shard_repo_map","arguments":{"symbols":25,"tests":25}}
 {"id":"auto","tool":"search_auto","arguments":{"query":"repo:api symbol:AuthSession token","limit":10,"explain":true}}
+{"id":"autos","tool":"search_auto_batch","arguments":{"queries":["repo:api symbol:AuthSession token","repo:api path:auth token"],"limit":10}}
 {"id":"search","tool":"search_shards","arguments":{"query":"repo:api symbol:AuthSession token","limit":10,"explain":true}}
 {"id":"read","tool":"read_shard_ranges","arguments":{"ranges":[{"path":"api/src/auth.rs","start":40,"lines":80}]}}
 ```
@@ -39,6 +40,8 @@ search the shard set, read the returned `read_range` objects, and inspect the
 query plan when results are empty or noisy.
 Once a daemon has exactly one shard directory or index warmed, `search_auto`
 lets wrappers search that target with just a query.
+Use `search_auto_batch` when an agent wants to try several query formulations in
+one daemon round trip.
 
 For a repo without a saved index, use `orient search-plan --repo . "query"` or
 the JSON-lines `search_query_plan` tool to get the same missing-term and retry

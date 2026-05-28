@@ -66,6 +66,7 @@ fn cli_outputs_tool_manifest() {
         .stdout(predicate::str::contains("\"name\":\"search_code\""))
         .stdout(predicate::str::contains("\"name\":\"search\""))
         .stdout(predicate::str::contains("\"name\":\"search_auto\""))
+        .stdout(predicate::str::contains("\"name\":\"search_auto_batch\""))
         .stdout(predicate::str::contains("\"name\":\"search_query_plan\""))
         .stdout(predicate::str::contains("\"name\":\"search_plan\""))
         .stdout(predicate::str::contains("\"name\":\"indexed_search\""))
@@ -168,6 +169,7 @@ fn cli_outputs_agent_guide() {
     .stdout(predicate::str::contains("no session analytics"))
     .stdout(predicate::str::contains("\"tool\":\"search_shards\""))
     .stdout(predicate::str::contains("\"tool\":\"search_auto\""))
+    .stdout(predicate::str::contains("\"tool\":\"search_auto_batch\""))
     .stdout(predicate::str::contains("\"tool\":\"indexed_search_code\""))
     .stdout(predicate::str::contains("\"tool\":\"search_code\""))
     .stdout(predicate::str::contains("read_request"))
@@ -243,6 +245,40 @@ fn cli_search_auto_selects_live_indexed_and_shard_surfaces() {
         .success()
         .stdout(predicate::str::contains("\"surface\":\"shards\""))
         .stdout(predicate::str::contains("\"tool\":\"read_shard_range\""));
+}
+
+#[test]
+fn cli_search_auto_batch_returns_query_surfaces() {
+    let repo = sample_repo();
+    let index_path = repo.path().join("orient.index");
+
+    let mut index = Command::cargo_bin("orient").unwrap();
+    index
+        .args([
+            "index",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--output",
+            index_path.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let mut batch = Command::cargo_bin("orient").unwrap();
+    batch
+        .args([
+            "search-auto-batch",
+            "--index",
+            index_path.to_str().unwrap(),
+            "issue_token",
+            "SessionManager",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"query\":\"issue_token\""))
+        .stdout(predicate::str::contains("\"query\":\"SessionManager\""))
+        .stdout(predicate::str::contains("\"surface\":\"indexed\""))
+        .stdout(predicate::str::contains("\"tool\":\"read_index_range\""));
 }
 
 #[test]
