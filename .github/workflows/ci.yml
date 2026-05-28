@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  rust:
+    name: Rust checks and search gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Run tests
+        run: cargo test
+
+      - name: Build release binary
+        run: cargo build --release
+
+      - name: Smoke JSON-lines protocol
+        run: |
+          printf '%s\n' '{"id":"tools","tool":"list_tools","arguments":{}}' \
+            | target/release/orient serve-jsonl \
+            | grep -q '"search_code"'
+
+      - name: Gate fallback search latency
+        run: |
+          target/release/orient bench-search \
+            --repo . \
+            --runs 5 \
+            --warmup 1 \
+            --limit 10 \
+            --fail-p95-ms 1000 \
+            "indexed search symbol filters" \
+            "read range tool manifest" \
+            "file:Cargo.toml"
+
+      - name: Gate indexed search latency
+        run: |
+          target/release/orient index --repo . --output /tmp/orient.index
+          target/release/orient bench-search \
+            --repo . \
+            --index /tmp/orient.index \
+            --runs 5 \
+            --warmup 1 \
+            --limit 10 \
+            --fail-p95-ms 500 \
+            "indexed search symbol filters" \
+            "read range tool manifest"
+
+      - name: Gate shard search latency
+        run: |
+          target/release/orient ensure-shards \
+            --repo . \
+            --output-dir /tmp/orient-shards
+          target/release/orient bench-shards \
+            --index-dir /tmp/orient-shards \
+            --cached \
+            --runs 5 \
+            --warmup 1 \
+            --limit 10 \
+            --fail-p95-ms 1000 \
+            "indexed search symbol filters" \
+            "file:Cargo.toml"
