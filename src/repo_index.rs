@@ -3022,22 +3022,35 @@ fn apply_symbol_match(
     signals: &mut Vec<RankSignal>,
 ) {
     let normalized = normalize_token(symbol_name);
-    if normalized == query_name || query_tokens.contains(&normalized) {
-        *score += 25.0;
-        reasons.push(format!("symbol:{symbol_name}"));
-        signals.push(rank_signal("symbol_exact", symbol_name, 25.0));
+    let symbol_tokens = tokenize(symbol_name);
+    let Some((kind, amount)) =
+        symbol_query_match_score(&normalized, &symbol_tokens, query_tokens, query_name)
+    else {
         return;
+    };
+    *score += amount;
+    reasons.push(format!("symbol:{symbol_name}"));
+    signals.push(rank_signal(kind, symbol_name, amount));
+}
+
+pub(crate) fn symbol_query_match_score(
+    symbol_normalized: &str,
+    symbol_tokens: &[String],
+    query_tokens: &[String],
+    query_name: &str,
+) -> Option<(&'static str, f64)> {
+    if symbol_normalized == query_name
+        || (query_tokens.len() == 1 && query_tokens[0] == symbol_normalized)
+        || (symbol_tokens.len() > 1 && query_tokens.iter().any(|token| token == symbol_normalized))
+    {
+        return Some(("symbol_exact", 25.0));
     }
-    let overlap = tokenize(symbol_name)
-        .into_iter()
+    let overlap = symbol_tokens
+        .iter()
         .filter(|token| query_tokens.contains(token))
         .count();
-    if overlap > 0 {
-        let amount = 4.0 * overlap as f64;
-        *score += amount;
-        reasons.push(format!("symbol:{symbol_name}"));
-        signals.push(rank_signal("symbol_overlap", symbol_name, amount));
-    }
+    let min_overlap = if query_tokens.len() > 1 { 2 } else { 1 };
+    (overlap >= min_overlap).then_some(("symbol_overlap", 4.0 * overlap as f64))
 }
 
 fn rank_signal(kind: &str, value: &str, score: f64) -> RankSignal {

@@ -13,7 +13,7 @@ use crate::repo_index::{
     matches_filters_with_path_metadata, normalize_token, regular_file_metadata, related_stem_terms,
     repo_map_seed_paths, repo_matches, result_matches_all_tokens, result_matches_symbol_filters,
     round4, score_filter_only_path, source_content_filters_match, source_import_filters_match,
-    symbol_kind_rank, token_counts, tokenize, unique_query_tokens,
+    symbol_kind_rank, symbol_query_match_score, token_counts, tokenize, unique_query_tokens,
 };
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use anyhow::{Context, Result};
@@ -1091,14 +1091,13 @@ impl FastIndex {
             .map(|(trigram, postings)| (trigram.as_str(), postings.as_slice()))
             .collect::<Vec<_>>();
         let query_name = query_tokens.join("");
-        let query_token_set = query_token_set(&query_tokens);
         let candidate_cap = indexed_candidate_cap(limit);
         let (candidate_ids, candidate_cap_hit) = cap_candidate_ids(
             candidate_ids,
             candidate_cap,
             &self.files,
             &query_name,
-            &query_token_set,
+            &query_tokens,
             &posting_lists,
             &path_lists,
             &trigram_lists,
@@ -1121,7 +1120,6 @@ impl FastIndex {
                     file_id,
                     &query_tokens,
                     &query_name,
-                    &query_token_set,
                     &query_phrases,
                     &posting_lists,
                     &path_lists,
@@ -1375,14 +1373,13 @@ impl FastIndex {
             .map(|(trigram, postings)| (trigram.as_str(), postings.as_slice()))
             .collect::<Vec<_>>();
         let query_name = query_tokens.join("");
-        let query_token_set = query_token_set(&query_tokens);
         let candidate_cap = MAX_INDEX_CANDIDATES_TO_SCORE;
         let (candidate_ids, candidate_cap_hit) = cap_candidate_ids(
             candidate_ids,
             candidate_cap,
             &self.files,
             &query_name,
-            &query_token_set,
+            &query_tokens,
             &posting_lists,
             &path_lists,
             &trigram_lists,
@@ -1405,7 +1402,6 @@ impl FastIndex {
                     file_id,
                     &query_tokens,
                     &query_name,
-                    &query_token_set,
                     &query_phrases,
                     &posting_lists,
                     &path_lists,
@@ -1495,7 +1491,6 @@ impl FastIndex {
         file_id: u32,
         query_tokens: &[String],
         query_name: &str,
-        query_token_set: &HashSet<&str>,
         query_phrases: &[String],
         posting_lists: &[(&str, &[Posting])],
         path_lists: &[(&str, &[Posting])],
@@ -1568,24 +1563,15 @@ impl FastIndex {
             reasons.push(format!("trigrams:{trigram_hits}"));
         }
         for symbol in &file.symbols {
-            if symbol.normalized == query_name
-                || query_token_set.contains(symbol.normalized.as_str())
-            {
-                score += 25.0;
+            if let Some((kind, amount)) = symbol_query_match_score(
+                &symbol.normalized,
+                &symbol.tokens,
+                query_tokens,
+                &query_name,
+            ) {
+                score += amount;
                 reasons.push(format!("symbol:{}", symbol.name));
-                signals.push(rank_signal("symbol_exact", &symbol.name, 25.0));
-            } else {
-                let overlap = symbol
-                    .tokens
-                    .iter()
-                    .filter(|token| query_token_set.contains(token.as_str()))
-                    .count();
-                if overlap > 0 {
-                    let amount = 4.0 * overlap as f64;
-                    score += amount;
-                    reasons.push(format!("symbol:{}", symbol.name));
-                    signals.push(rank_signal("symbol_overlap", &symbol.name, amount));
-                }
+                signals.push(rank_signal(kind, &symbol.name, amount));
             }
         }
         if score == 0.0 {
@@ -2829,7 +2815,7 @@ fn cap_candidate_ids(
     candidate_cap: usize,
     files: &[IndexedPath],
     query_name: &str,
-    query_token_set: &HashSet<&str>,
+    query_tokens: &[String],
     posting_lists: &[(&str, &[Posting])],
     path_lists: &[(&str, &[Posting])],
     trigram_lists: &[(&str, &[Posting])],
@@ -2847,7 +2833,7 @@ fn cap_candidate_ids(
                 file_id,
                 files,
                 query_name,
-                query_token_set,
+                query_tokens,
                 posting_lists,
                 path_lists,
                 trigram_lists,
@@ -2879,7 +2865,7 @@ fn candidate_rank_score(
     file_id: u32,
     files: &[IndexedPath],
     query_name: &str,
-    query_token_set: &HashSet<&str>,
+    query_tokens: &[String],
     posting_lists: &[(&str, &[Posting])],
     path_lists: &[(&str, &[Posting])],
     trigram_lists: &[(&str, &[Posting])],
@@ -2911,22 +2897,13 @@ fn candidate_rank_score(
         }
     }
     for symbol in &file.symbols {
-        if symbol.normalized == query_name || query_token_set.contains(symbol.normalized.as_str()) {
-            score += 25.0;
-        } else {
-            score += 4.0
-                * symbol
-                    .tokens
-                    .iter()
-                    .filter(|token| query_token_set.contains(token.as_str()))
-                    .count() as f64;
+        if let Some((_, amount)) =
+            symbol_query_match_score(&symbol.normalized, &symbol.tokens, query_tokens, query_name)
+        {
+            score += amount;
         }
     }
     score
-}
-
-fn query_token_set(query_tokens: &[String]) -> HashSet<&str> {
-    query_tokens.iter().map(String::as_str).collect()
 }
 
 fn posting_count(postings: &[Posting], file_id: u32) -> u16 {

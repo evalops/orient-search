@@ -1610,6 +1610,75 @@ fn search_explain_mode_returns_structured_rank_signals() {
 }
 
 #[test]
+fn multi_token_symbol_scoring_does_not_overboost_single_token_symbols() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/noisy.rs"),
+        "pub fn path() {}\npub fn file() {}\npub fn lower_path() {}\npub fn score_file() {}\n",
+    );
+
+    let filters = SearchFilters {
+        explain: true,
+        ..SearchFilters::default()
+    };
+    let fallback =
+        search_repo_fast_filtered(repo.path(), "lower_path score_file", 10, &filters).unwrap();
+    assert_eq!(fallback[0].path, "src/noisy.rs");
+    assert!(!fallback[0].reason.contains("symbol:path"));
+    assert!(!fallback[0].reason.contains("symbol:file"));
+    let fallback_signals = fallback[0].explanation.as_ref().unwrap();
+    assert!(
+        !fallback_signals
+            .iter()
+            .any(|signal| signal.kind == "symbol_exact" && signal.value == "path")
+    );
+    assert!(
+        !fallback_signals
+            .iter()
+            .any(|signal| signal.kind == "symbol_exact" && signal.value == "file")
+    );
+    assert!(
+        fallback_signals
+            .iter()
+            .any(|signal| signal.kind == "symbol_overlap" && signal.value == "lower_path")
+    );
+    assert!(
+        fallback_signals
+            .iter()
+            .any(|signal| signal.kind == "symbol_overlap" && signal.value == "score_file")
+    );
+
+    let index = FastIndex::build(repo.path()).unwrap();
+    let indexed = index
+        .search_filtered("lower_path score_file", 10, &filters)
+        .unwrap();
+    assert_eq!(indexed[0].path, "src/noisy.rs");
+    assert!(!indexed[0].reason.contains("symbol:path"));
+    assert!(!indexed[0].reason.contains("symbol:file"));
+    let indexed_signals = indexed[0].explanation.as_ref().unwrap();
+    assert!(
+        !indexed_signals
+            .iter()
+            .any(|signal| signal.kind == "symbol_exact" && signal.value == "path")
+    );
+    assert!(
+        !indexed_signals
+            .iter()
+            .any(|signal| signal.kind == "symbol_exact" && signal.value == "file")
+    );
+    assert!(
+        indexed_signals
+            .iter()
+            .any(|signal| signal.kind == "symbol_overlap" && signal.value == "lower_path")
+    );
+    assert!(
+        indexed_signals
+            .iter()
+            .any(|signal| signal.kind == "symbol_overlap" && signal.value == "score_file")
+    );
+}
+
+#[test]
 fn loading_corrupt_index_returns_error() {
     let repo = tempfile::tempdir().unwrap();
     let path = repo.path().join("corrupt.index");
