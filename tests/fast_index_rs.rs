@@ -1571,6 +1571,32 @@ fn indexed_search_uses_symbol_postings_for_identifier_queries() {
         "symbol postings should keep exact identifier candidates tight: {:?}",
         plan
     );
+
+    let filtered = index
+        .search_filtered(
+            "symbol:agent_instructions",
+            5,
+            &SearchFilters {
+                explain: true,
+                ..SearchFilters::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(filtered[0].path, "src/lib.rs");
+    let filtered_plan = filtered[0].query_plan.as_ref().unwrap();
+    assert!(
+        filtered_plan
+            .planned_postings
+            .iter()
+            .any(|posting| posting.kind == "symbol" && posting.value == "agentinstructions"),
+        "{:?}",
+        filtered_plan.planned_postings
+    );
+    assert!(
+        filtered_plan.candidate_count < 10,
+        "symbol: filters should plan through exact symbol postings: {:?}",
+        filtered_plan
+    );
 }
 
 #[test]

@@ -1047,13 +1047,22 @@ impl FastIndex {
         } else {
             Vec::new()
         };
-        let missing_terms = missing_query_terms(&query_tokens, &token_postings, &path_postings);
+        let missing_terms = missing_query_terms(
+            &query_tokens,
+            &token_postings,
+            &symbol_postings,
+            &path_postings,
+        );
         let missing_trigrams = if use_trigrams {
             missing_query_trigrams(&query_trigrams, &trigram_postings)
         } else {
             Vec::new()
         };
-        if token_postings.is_empty() && path_postings.is_empty() && trigram_postings.is_empty() {
+        if token_postings.is_empty()
+            && symbol_postings.is_empty()
+            && path_postings.is_empty()
+            && trigram_postings.is_empty()
+        {
             return Ok(Vec::new());
         }
         token_postings.sort_by_key(|(_, postings)| postings.len());
@@ -1349,7 +1358,12 @@ impl FastIndex {
         } else {
             Vec::new()
         };
-        let missing_terms = missing_query_terms(&query_tokens, &token_postings, &path_postings);
+        let missing_terms = missing_query_terms(
+            &query_tokens,
+            &token_postings,
+            &symbol_postings,
+            &path_postings,
+        );
         let missing_trigrams = if use_trigrams {
             missing_query_trigrams(&query_trigrams, &trigram_postings)
         } else {
@@ -2393,6 +2407,7 @@ fn suggested_query_from_tokens(query_tokens: &[String]) -> Option<String> {
 fn missing_query_terms(
     query_tokens: &[String],
     token_postings: &[(&String, &Vec<Posting>)],
+    symbol_postings: &[(&String, &Vec<Posting>)],
     path_postings: &[(&String, &Vec<Posting>)],
 ) -> Vec<String> {
     query_tokens
@@ -2401,6 +2416,9 @@ fn missing_query_terms(
             !token_postings
                 .iter()
                 .any(|(posted, _)| posted.as_str() == token.as_str())
+                && !symbol_postings
+                    .iter()
+                    .any(|(posted, _)| posted.as_str() == normalize_token(token).as_str())
                 && !path_postings
                     .iter()
                     .any(|(posted, _)| posted.as_str() == token.as_str())
@@ -2428,7 +2446,11 @@ fn exact_symbol_query_name(
     terms: &[String],
     explicit_symbol_filter: Option<&str>,
 ) -> Option<String> {
-    if explicit_symbol_filter.is_some() || terms.len() != 1 {
+    if let Some(symbol) = explicit_symbol_filter {
+        let normalized = normalize_token(symbol);
+        return (!normalized.is_empty()).then_some(normalized);
+    }
+    if terms.len() != 1 {
         return None;
     }
     let term = terms.first()?.trim();
