@@ -63,7 +63,7 @@ Search results include:
 - `context`: optional attached file context when `context_lines` is set.
 - `explanation` and `query_plan` when `explain` is set.
 
-Search result counts are capped by the manifest `limit.maximum`, and non-empty batch query arrays by `queries.maxItems`, so broad requests stay bounded even when callers ask for more.
+Search `limit` values must be positive and stay under `limit.maximum`; `context_lines`, read ranges, and non-empty batch arrays are bounded by the manifest too, so broad requests fail fast instead of expanding silently.
 
 ## Read Next
 

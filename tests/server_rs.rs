@@ -430,6 +430,57 @@ fn runtime_rejects_oversized_batches() {
     assert!(error.contains("positive integer"), "{error}");
 
     let response = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("zero-limit"),
+        tool: "search_code".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "query": "SessionManager",
+            "limit": 0
+        }),
+    });
+    let error = response.error.unwrap();
+    assert!(error.contains("positive integer"), "{error}");
+
+    let response = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("negative-limit"),
+        tool: "search_code".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "query": "SessionManager",
+            "limit": -1
+        }),
+    });
+    let error = response.error.unwrap();
+    assert!(error.contains("non-negative integer"), "{error}");
+
+    let response = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("too-many-results"),
+        tool: "search_code".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "query": "SessionManager",
+            "limit": MAX_SEARCH_RESULTS + 1
+        }),
+    });
+    let error = response.error.unwrap();
+    assert!(error.contains("max 100"), "{error}");
+
+    let response = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("too-much-context"),
+        tool: "search_code".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "query": "SessionManager",
+            "context_lines": MAX_ATTACHED_CONTEXT_LINES + 1
+        }),
+    });
+    let error = response.error.unwrap();
+    assert!(
+        error.contains(&format!("max {MAX_ATTACHED_CONTEXT_LINES}")),
+        "{error}"
+    );
+
+    let response = runtime.dispatch(ToolRequest {
         id: serde_json::json!("too-many-lines"),
         tool: "open_range".to_string(),
         arguments: serde_json::json!({

@@ -931,10 +931,9 @@ impl ToolRuntime {
         match request.tool.as_str() {
             "discover_repos" => {
                 let root = path_arg(&request.arguments, "root")?;
-                let max_depth = usize_arg(&request.arguments, "max_depth").unwrap_or(4);
-                let limit = usize_arg(&request.arguments, "limit").unwrap_or(500);
-                let family_limit =
-                    usize_arg(&request.arguments, "family_limit").filter(|limit| *limit > 0);
+                let max_depth = positive_usize_arg(&request.arguments, "max_depth", 4)?;
+                let limit = positive_usize_arg(&request.arguments, "limit", 500)?;
+                let family_limit = optional_family_limit_arg(&request.arguments)?;
                 let git_metadata = request
                     .arguments
                     .get("git_metadata")
@@ -969,8 +968,8 @@ impl ToolRuntime {
             }
             "repo_map" => {
                 let repo = path_arg(&request.arguments, "repo")?;
-                let symbol_limit = usize_arg(&request.arguments, "symbols").unwrap_or(50);
-                let test_limit = usize_arg(&request.arguments, "tests").unwrap_or(50);
+                let symbol_limit = positive_usize_arg(&request.arguments, "symbols", 50)?;
+                let test_limit = positive_usize_arg(&request.arguments, "tests", 50)?;
                 let index = RepoIndexer::new(repo).build()?;
                 Ok(serde_json::to_value(
                     index.repo_map(symbol_limit, test_limit),
@@ -978,8 +977,8 @@ impl ToolRuntime {
             }
             "indexed_repo_map" => {
                 let index_path = self.index_path_arg_or_single_cached(&request.arguments)?;
-                let symbol_limit = usize_arg(&request.arguments, "symbols").unwrap_or(50);
-                let test_limit = usize_arg(&request.arguments, "tests").unwrap_or(50);
+                let symbol_limit = positive_usize_arg(&request.arguments, "symbols", 50)?;
+                let test_limit = positive_usize_arg(&request.arguments, "tests", 50)?;
                 let index = self.cached_index(index_path)?;
                 Ok(serde_json::to_value(
                     index.repo_map(symbol_limit, test_limit),
@@ -1010,8 +1009,8 @@ impl ToolRuntime {
             "search_code" => {
                 let repo = path_arg(&request.arguments, "repo")?;
                 let query = string_arg(&request.arguments, "query")?;
-                let limit = usize_arg(&request.arguments, "limit").unwrap_or(10);
-                let context_lines = usize_arg(&request.arguments, "context_lines").unwrap_or(0);
+                let limit = search_limit_arg(&request.arguments)?;
+                let context_lines = context_lines_arg(&request.arguments)?;
                 let mut results = search_repo_fast_filtered(
                     &repo,
                     &query,
@@ -1026,8 +1025,8 @@ impl ToolRuntime {
             "search_batch" => {
                 let repo = path_arg(&request.arguments, "repo")?;
                 let queries = string_array_arg(&request.arguments, "queries")?;
-                let limit = usize_arg(&request.arguments, "limit").unwrap_or(10);
-                let context_lines = usize_arg(&request.arguments, "context_lines").unwrap_or(0);
+                let limit = search_limit_arg(&request.arguments)?;
+                let context_lines = context_lines_arg(&request.arguments)?;
                 let filters = search_filters(&request.arguments, false)?;
                 let mut batch = Vec::new();
                 for query in queries {
@@ -1042,8 +1041,8 @@ impl ToolRuntime {
             "indexed_search_code" => {
                 let index_path = self.index_path_arg_or_single_cached(&request.arguments)?;
                 let query = string_arg(&request.arguments, "query")?;
-                let limit = usize_arg(&request.arguments, "limit").unwrap_or(10);
-                let context_lines = usize_arg(&request.arguments, "context_lines").unwrap_or(0);
+                let limit = search_limit_arg(&request.arguments)?;
+                let context_lines = context_lines_arg(&request.arguments)?;
                 let refresh_if_stale = bool_arg(&request.arguments, "refresh_if_stale");
                 let index = self.cached_index_maybe_refresh(index_path, refresh_if_stale)?;
                 let mut results = index.search_filtered(
@@ -1059,8 +1058,8 @@ impl ToolRuntime {
             "indexed_search_batch" => {
                 let index_path = self.index_path_arg_or_single_cached(&request.arguments)?;
                 let queries = string_array_arg(&request.arguments, "queries")?;
-                let limit = usize_arg(&request.arguments, "limit").unwrap_or(10);
-                let context_lines = usize_arg(&request.arguments, "context_lines").unwrap_or(0);
+                let limit = search_limit_arg(&request.arguments)?;
+                let context_lines = context_lines_arg(&request.arguments)?;
                 let refresh_if_stale = bool_arg(&request.arguments, "refresh_if_stale");
                 let index = self.cached_index_maybe_refresh(index_path, refresh_if_stale)?;
                 let filters = search_filters(&request.arguments, true)?;
@@ -1158,8 +1157,8 @@ impl ToolRuntime {
             "search_shards" => {
                 let index_dir = self.shard_dir_arg_or_single_cached(&request.arguments)?;
                 let query = string_arg(&request.arguments, "query")?;
-                let limit = usize_arg(&request.arguments, "limit").unwrap_or(10);
-                let context_lines = usize_arg(&request.arguments, "context_lines").unwrap_or(0);
+                let limit = search_limit_arg(&request.arguments)?;
+                let context_lines = context_lines_arg(&request.arguments)?;
                 if bool_arg(&request.arguments, "refresh_if_stale") {
                     self.refresh_shards_if_stale(&index_dir)?;
                 }
@@ -1174,8 +1173,8 @@ impl ToolRuntime {
             "search_shards_batch" => {
                 let index_dir = self.shard_dir_arg_or_single_cached(&request.arguments)?;
                 let queries = string_array_arg(&request.arguments, "queries")?;
-                let limit = usize_arg(&request.arguments, "limit").unwrap_or(10);
-                let context_lines = usize_arg(&request.arguments, "context_lines").unwrap_or(0);
+                let limit = search_limit_arg(&request.arguments)?;
+                let context_lines = context_lines_arg(&request.arguments)?;
                 if bool_arg(&request.arguments, "refresh_if_stale") {
                     self.refresh_shards_if_stale(&index_dir)?;
                 }
@@ -1243,8 +1242,8 @@ impl ToolRuntime {
             }
             "shard_repo_map" => {
                 let index_dir = self.shard_dir_arg_or_single_cached(&request.arguments)?;
-                let symbol_limit = usize_arg(&request.arguments, "symbols").unwrap_or(50);
-                let test_limit = usize_arg(&request.arguments, "tests").unwrap_or(50);
+                let symbol_limit = positive_usize_arg(&request.arguments, "symbols", 50)?;
+                let test_limit = positive_usize_arg(&request.arguments, "tests", 50)?;
                 Ok(serde_json::to_value(self.shard_repo_maps_cached(
                     &index_dir,
                     symbol_limit,
@@ -1255,7 +1254,7 @@ impl ToolRuntime {
             "find_shard_symbol" => {
                 let index_dir = self.shard_dir_arg_or_single_cached(&request.arguments)?;
                 let name = string_arg(&request.arguments, "name")?;
-                let limit = usize_arg(&request.arguments, "limit").unwrap_or(10);
+                let limit = positive_usize_arg(&request.arguments, "limit", 10)?;
                 Ok(serde_json::to_value(self.find_shard_symbol_cached(
                     &index_dir,
                     &name,
@@ -1266,35 +1265,35 @@ impl ToolRuntime {
             "find_symbol" => {
                 let repo = path_arg(&request.arguments, "repo")?;
                 let name = string_arg(&request.arguments, "name")?;
-                let limit = usize_arg(&request.arguments, "limit").unwrap_or(10);
+                let limit = positive_usize_arg(&request.arguments, "limit", 10)?;
                 let index = RepoIndexer::new(repo).build()?;
                 Ok(serde_json::to_value(index.find_symbol(&name, limit))?)
             }
             "find_index_symbol" => {
                 let index_path = self.index_path_arg_or_single_cached(&request.arguments)?;
                 let name = string_arg(&request.arguments, "name")?;
-                let limit = usize_arg(&request.arguments, "limit").unwrap_or(10);
+                let limit = positive_usize_arg(&request.arguments, "limit", 10)?;
                 let index = self.cached_index(index_path)?;
                 Ok(serde_json::to_value(index.find_symbol(&name, limit))?)
             }
             "related_files" => {
                 let repo = path_arg(&request.arguments, "repo")?;
                 let path = string_arg(&request.arguments, "path")?;
-                let limit = usize_arg(&request.arguments, "limit").unwrap_or(10);
+                let limit = positive_usize_arg(&request.arguments, "limit", 10)?;
                 let index = RepoIndexer::new(repo).build()?;
                 Ok(serde_json::to_value(index.related_files(&path, limit))?)
             }
             "related_index_files" => {
                 let index_path = self.index_path_arg_or_single_cached(&request.arguments)?;
                 let path = string_arg(&request.arguments, "path")?;
-                let limit = usize_arg(&request.arguments, "limit").unwrap_or(10);
+                let limit = positive_usize_arg(&request.arguments, "limit", 10)?;
                 let index = self.cached_index(index_path)?;
                 Ok(serde_json::to_value(index.related_files(&path, limit))?)
             }
             "related_shard_files" => {
                 let index_dir = self.shard_dir_arg_or_single_cached(&request.arguments)?;
                 let path = string_arg(&request.arguments, "path")?;
-                let limit = usize_arg(&request.arguments, "limit").unwrap_or(10);
+                let limit = positive_usize_arg(&request.arguments, "limit", 10)?;
                 Ok(serde_json::to_value(
                     self.related_shard_files_cached(&index_dir, &path, limit)?,
                 )?)
@@ -1303,7 +1302,7 @@ impl ToolRuntime {
                 let repo = path_arg(&request.arguments, "repo")?;
                 let path = optional_string_arg(&request.arguments, "path");
                 let query = optional_string_arg(&request.arguments, "query");
-                let limit = usize_arg(&request.arguments, "limit").unwrap_or(10);
+                let limit = positive_usize_arg(&request.arguments, "limit", 10)?;
                 let index = RepoIndexer::new(repo).build()?;
                 Ok(serde_json::to_value(index.related_symbols(
                     path.as_deref(),
@@ -1315,7 +1314,7 @@ impl ToolRuntime {
                 let index_dir = self.shard_dir_arg_or_single_cached(&request.arguments)?;
                 let path = string_arg(&request.arguments, "path")?;
                 let query = optional_string_arg(&request.arguments, "query");
-                let limit = usize_arg(&request.arguments, "limit").unwrap_or(10);
+                let limit = positive_usize_arg(&request.arguments, "limit", 10)?;
                 Ok(serde_json::to_value(self.related_shard_symbols_cached(
                     &index_dir,
                     &path,
@@ -1327,7 +1326,7 @@ impl ToolRuntime {
                 let index_path = self.index_path_arg_or_single_cached(&request.arguments)?;
                 let path = optional_string_arg(&request.arguments, "path");
                 let query = optional_string_arg(&request.arguments, "query");
-                let limit = usize_arg(&request.arguments, "limit").unwrap_or(10);
+                let limit = positive_usize_arg(&request.arguments, "limit", 10)?;
                 let index = self.cached_index(index_path)?;
                 Ok(serde_json::to_value(index.related_symbols(
                     path.as_deref(),
@@ -2258,8 +2257,8 @@ fn bool_arg(arguments: &Value, name: &str) -> bool {
 }
 
 fn read_window_args(arguments: &Value) -> Result<(usize, usize)> {
-    let start = usize_arg(arguments, "start").unwrap_or(1);
-    let lines = usize_arg(arguments, "lines").unwrap_or(80);
+    let start = positive_usize_arg(arguments, "start", 1)?;
+    let lines = bounded_usize_arg(arguments, "lines", 80, 1, Some(MAX_READ_RANGE_LINES))?;
     validate_read_window(start, lines)?;
     Ok((start, lines))
 }
@@ -2353,8 +2352,8 @@ fn range_args(arguments: &Value) -> Result<Vec<RangeArg>> {
             .and_then(Value::as_str)
             .map(String::from)
             .ok_or_else(|| anyhow!("range entry must include string path"))?;
-        let start = value.get("start").and_then(Value::as_u64).unwrap_or(1) as usize;
-        let lines = value.get("lines").and_then(Value::as_u64).unwrap_or(80) as usize;
+        let start = bounded_usize_field(value, "start", 1, 1, None)?;
+        let lines = bounded_usize_field(value, "lines", 80, 1, Some(MAX_READ_RANGE_LINES))?;
         validate_read_window(start, lines)?;
         ranges.push(RangeArg { path, start, lines });
     }
@@ -2373,11 +2372,11 @@ fn shard_repos_from_arguments(arguments: &Value) -> Result<ShardRepoSelection> {
         discover_roots.push(PathBuf::from(root));
     }
     if !discover_roots.is_empty() {
-        let max_depth = usize_arg(arguments, "max_depth").unwrap_or(4);
-        let limit = usize_arg(arguments, "discover_limit")
-            .or_else(|| usize_arg(arguments, "limit"))
+        let max_depth = positive_usize_arg(arguments, "max_depth", 4)?;
+        let limit = optional_positive_usize_arg(arguments, "discover_limit")?
+            .or(optional_positive_usize_arg(arguments, "limit")?)
             .unwrap_or(500);
-        let family_limit = usize_arg(arguments, "family_limit").filter(|limit| *limit > 0);
+        let family_limit = optional_family_limit_arg(arguments)?;
         let nested_manifests = arguments
             .get("nested_manifests")
             .and_then(Value::as_bool)
@@ -2431,11 +2430,94 @@ fn shard_bootstrap_output<T: Serialize>(
     Ok(value)
 }
 
-fn usize_arg(arguments: &Value, name: &str) -> Option<usize> {
-    arguments
-        .get(name)
-        .and_then(Value::as_u64)
-        .map(|value| value as usize)
+fn search_limit_arg(arguments: &Value) -> Result<usize> {
+    bounded_usize_arg(arguments, "limit", 10, 1, Some(MAX_SEARCH_RESULTS))
+}
+
+fn context_lines_arg(arguments: &Value) -> Result<usize> {
+    bounded_usize_arg(
+        arguments,
+        "context_lines",
+        0,
+        0,
+        Some(MAX_ATTACHED_CONTEXT_LINES),
+    )
+}
+
+fn positive_usize_arg(arguments: &Value, name: &str, default: usize) -> Result<usize> {
+    bounded_usize_arg(arguments, name, default, 1, None)
+}
+
+fn optional_positive_usize_arg(arguments: &Value, name: &str) -> Result<Option<usize>> {
+    optional_bounded_usize_arg(arguments, name, 1, None)
+}
+
+fn optional_family_limit_arg(arguments: &Value) -> Result<Option<usize>> {
+    Ok(optional_bounded_usize_arg(arguments, "family_limit", 0, None)?.filter(|limit| *limit > 0))
+}
+
+fn bounded_usize_arg(
+    arguments: &Value,
+    name: &str,
+    default: usize,
+    minimum: usize,
+    maximum: Option<usize>,
+) -> Result<usize> {
+    Ok(optional_bounded_usize_arg(arguments, name, minimum, maximum)?.unwrap_or(default))
+}
+
+fn optional_bounded_usize_arg(
+    arguments: &Value,
+    name: &str,
+    minimum: usize,
+    maximum: Option<usize>,
+) -> Result<Option<usize>> {
+    bounded_usize_value(
+        arguments.get(name),
+        &format!("argument {name}"),
+        minimum,
+        maximum,
+    )
+}
+
+fn bounded_usize_field(
+    object: &Value,
+    name: &str,
+    default: usize,
+    minimum: usize,
+    maximum: Option<usize>,
+) -> Result<usize> {
+    Ok(
+        bounded_usize_value(object.get(name), &format!("range {name}"), minimum, maximum)?
+            .unwrap_or(default),
+    )
+}
+
+fn bounded_usize_value(
+    value: Option<&Value>,
+    label: &str,
+    minimum: usize,
+    maximum: Option<usize>,
+) -> Result<Option<usize>> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let value = value
+        .as_u64()
+        .ok_or_else(|| anyhow!("{label} must be a non-negative integer"))?;
+    let value = usize::try_from(value).map_err(|_| anyhow!("{label} is too large"))?;
+    if value < minimum {
+        if minimum == 1 {
+            return Err(anyhow!("{label} must be a positive integer"));
+        }
+        return Err(anyhow!("{label} must be at least {minimum}"));
+    }
+    if let Some(maximum) = maximum {
+        if value > maximum {
+            return Err(anyhow!("{label} has {value}, max {maximum}"));
+        }
+    }
+    Ok(Some(value))
 }
 
 fn optional_string_arg(arguments: &Value, name: &str) -> Option<String> {
