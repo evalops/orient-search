@@ -102,6 +102,21 @@ fn golden_cases() -> Vec<GoldenCase> {
             filters: SearchFilters::default(),
         },
         GoldenCase {
+            query: "file:*.rs gateway",
+            expected_path: "src/http_gateway.rs",
+            filters: SearchFilters::default(),
+        },
+        GoldenCase {
+            query: "path:src/*gateway.rs",
+            expected_path: "src/http_gateway.rs",
+            filters: SearchFilters::default(),
+        },
+        GoldenCase {
+            query: "path:src/http_???????.rs gateway",
+            expected_path: "src/http_gateway.rs",
+            filters: SearchFilters::default(),
+        },
+        GoldenCase {
             query: "lang:rust test:true issue token",
             expected_path: "tests/auth_test.rs",
             filters: SearchFilters::default(),
@@ -123,6 +138,14 @@ fn golden_cases() -> Vec<GoldenCase> {
         },
         GoldenCase {
             query: "issue token -path:docs -path:tests",
+            expected_path: "src/auth.rs",
+            filters: SearchFilters {
+                require_all: true,
+                ..SearchFilters::default()
+            },
+        },
+        GoldenCase {
+            query: "issue token -file:*test.rs -path:docs",
             expected_path: "src/auth.rs",
             filters: SearchFilters {
                 require_all: true,

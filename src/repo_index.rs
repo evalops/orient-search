@@ -3152,12 +3152,12 @@ pub(crate) fn matches_filters_with_path_metadata(
     filters: &SearchFilters,
 ) -> bool {
     if let Some(file_filter) = &filters.file {
-        if !file_name_lower.contains(&file_filter.to_ascii_lowercase()) {
+        if !filter_value_matches(file_name_lower, file_filter) {
             return false;
         }
     }
     if let Some(path_filter) = &filters.path {
-        if !path_lower.contains(&path_filter.to_ascii_lowercase()) {
+        if !filter_value_matches(path_lower, path_filter) {
             return false;
         }
     }
@@ -3189,14 +3189,14 @@ pub(crate) fn matches_filters_with_path_metadata(
     if filters
         .exclude_file
         .iter()
-        .any(|filter| file_name_lower.contains(&filter.to_ascii_lowercase()))
+        .any(|filter| filter_value_matches(file_name_lower, filter))
     {
         return false;
     }
     if filters
         .exclude_path
         .iter()
-        .any(|filter| path_lower.contains(&filter.to_ascii_lowercase()))
+        .any(|filter| filter_value_matches(path_lower, filter))
     {
         return false;
     }
@@ -3219,6 +3219,49 @@ pub(crate) fn matches_filters_with_path_metadata(
         }
     }
     true
+}
+
+pub(crate) fn filter_value_matches(haystack_lower: &str, filter: &str) -> bool {
+    let filter_lower = filter.trim().to_ascii_lowercase();
+    if filter_lower.contains('*') || filter_lower.contains('?') {
+        wildcard_matches(&filter_lower, haystack_lower)
+    } else {
+        haystack_lower.contains(&filter_lower)
+    }
+}
+
+fn wildcard_matches(pattern: &str, haystack: &str) -> bool {
+    let pattern = pattern.as_bytes();
+    let haystack = haystack.as_bytes();
+    let (mut pattern_index, mut haystack_index) = (0, 0);
+    let mut star_index = None;
+    let mut star_match_index = 0;
+
+    while haystack_index < haystack.len() {
+        if pattern_index < pattern.len()
+            && (pattern[pattern_index] == b'?'
+                || pattern[pattern_index] == haystack[haystack_index])
+        {
+            pattern_index += 1;
+            haystack_index += 1;
+        } else if pattern_index < pattern.len() && pattern[pattern_index] == b'*' {
+            star_index = Some(pattern_index);
+            pattern_index += 1;
+            star_match_index = haystack_index;
+        } else if let Some(star) = star_index {
+            pattern_index = star + 1;
+            star_match_index += 1;
+            haystack_index = star_match_index;
+        } else {
+            return false;
+        }
+    }
+
+    while pattern_index < pattern.len() && pattern[pattern_index] == b'*' {
+        pattern_index += 1;
+    }
+
+    pattern_index == pattern.len()
 }
 
 pub(crate) fn filter_only_query(filters: &SearchFilters) -> bool {
