@@ -241,6 +241,34 @@ fn indexed_posting_lists_are_sorted_for_direct_lookup() {
 }
 
 #[test]
+fn indexed_planner_intersects_sorted_posting_lists() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/alpha_beta.rs"),
+        "pub fn alpha_beta() { let alpha = true; let beta = true; }\n",
+    );
+    write(
+        &repo.path().join("src/alpha_gamma.rs"),
+        "pub fn alpha_gamma() { let alpha = true; let gamma = true; }\n",
+    );
+    write(
+        &repo.path().join("src/beta_gamma.rs"),
+        "pub fn beta_gamma() { let beta = true; let gamma = true; }\n",
+    );
+
+    let index = FastIndex::build(repo.path()).unwrap();
+    let results = index.search("alpha beta", 10).unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].path, "src/alpha_beta.rs");
+
+    let plan = index
+        .query_plan("alpha beta", &SearchFilters::default())
+        .unwrap();
+    assert_eq!(plan.candidate_count, 1);
+    assert_eq!(plan.final_match_count, 1);
+}
+
+#[test]
 fn saving_index_replaces_existing_file_without_leaving_temp_files() {
     let repo = tempfile::tempdir().unwrap();
     write(

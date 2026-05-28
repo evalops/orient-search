@@ -981,7 +981,7 @@ impl FastIndex {
         planned_postings.sort_by_key(|postings| postings.len());
         let candidate_ids =
             if filters.require_all && has_unsatisfied_missing_terms(&missing_terms, &filters) {
-                HashSet::new()
+                Vec::new()
             } else if use_trigrams
                 && (!token_postings.is_empty() || !path_postings.is_empty())
                 && query_tokens.len() == 1
@@ -1255,7 +1255,7 @@ impl FastIndex {
         planned_postings.sort_by_key(|postings| postings.len());
         let candidate_ids =
             if filters.require_all && has_unsatisfied_missing_terms(&missing_terms, &filters) {
-                HashSet::new()
+                Vec::new()
             } else if use_trigrams
                 && (!token_postings.is_empty() || !path_postings.is_empty())
                 && query_tokens.len() == 1
@@ -2377,7 +2377,7 @@ fn indexed_candidate_cap(limit: usize) -> usize {
 }
 
 fn cap_candidate_ids(
-    candidate_ids: HashSet<u32>,
+    candidate_ids: Vec<u32>,
     candidate_cap: usize,
     files: &[IndexedPath],
     query_tokens: &[String],
@@ -2386,7 +2386,7 @@ fn cap_candidate_ids(
     trigram_lists: &[(&str, &[Posting])],
 ) -> (Vec<u32>, bool) {
     let cap_hit = candidate_ids.len() > candidate_cap;
-    let mut ids = candidate_ids.into_iter().collect::<Vec<_>>();
+    let mut ids = candidate_ids;
     if cap_hit {
         ids.sort_by(|left, right| {
             candidate_rank_score(
@@ -2478,32 +2478,70 @@ fn candidate_path(files: &[IndexedPath], file_id: u32) -> &str {
         .unwrap_or("")
 }
 
-fn intersect_planned_postings(planned: &[&Vec<Posting>], require_all: bool) -> HashSet<u32> {
+fn intersect_planned_postings(planned: &[&Vec<Posting>], require_all: bool) -> Vec<u32> {
     let Some(first) = planned.first() else {
-        return HashSet::new();
+        return Vec::new();
     };
-    let mut candidate_ids = first
-        .iter()
-        .map(|posting| posting.file_id)
-        .collect::<HashSet<_>>();
+    let mut candidate_ids = posting_file_ids(first);
     for postings in planned.iter().skip(1) {
-        let ids = postings
-            .iter()
-            .map(|posting| posting.file_id)
-            .collect::<HashSet<_>>();
-        candidate_ids.retain(|id| ids.contains(id));
+        candidate_ids = intersect_sorted_ids_with_postings(&candidate_ids, postings);
         if candidate_ids.is_empty() {
             break;
         }
     }
     if candidate_ids.is_empty() && !require_all {
-        return first.iter().map(|posting| posting.file_id).collect();
+        return posting_file_ids(first);
     }
     candidate_ids
 }
 
-fn union_candidates(left: HashSet<u32>, right: HashSet<u32>) -> HashSet<u32> {
-    left.into_iter().chain(right).collect()
+fn posting_file_ids(postings: &[Posting]) -> Vec<u32> {
+    postings.iter().map(|posting| posting.file_id).collect()
+}
+
+fn intersect_sorted_ids_with_postings(left: &[u32], right: &[Posting]) -> Vec<u32> {
+    let mut intersection = Vec::with_capacity(left.len().min(right.len()));
+    let mut left_index = 0usize;
+    let mut right_index = 0usize;
+    while let (Some(left_id), Some(right_posting)) = (left.get(left_index), right.get(right_index))
+    {
+        match left_id.cmp(&right_posting.file_id) {
+            Ordering::Less => left_index += 1,
+            Ordering::Greater => right_index += 1,
+            Ordering::Equal => {
+                intersection.push(*left_id);
+                left_index += 1;
+                right_index += 1;
+            }
+        }
+    }
+    intersection
+}
+
+fn union_candidates(left: Vec<u32>, right: Vec<u32>) -> Vec<u32> {
+    let mut merged = Vec::with_capacity(left.len() + right.len());
+    let mut left_index = 0usize;
+    let mut right_index = 0usize;
+    while left_index < left.len() && right_index < right.len() {
+        match left[left_index].cmp(&right[right_index]) {
+            Ordering::Less => {
+                merged.push(left[left_index]);
+                left_index += 1;
+            }
+            Ordering::Greater => {
+                merged.push(right[right_index]);
+                right_index += 1;
+            }
+            Ordering::Equal => {
+                merged.push(left[left_index]);
+                left_index += 1;
+                right_index += 1;
+            }
+        }
+    }
+    merged.extend_from_slice(&left[left_index..]);
+    merged.extend_from_slice(&right[right_index..]);
+    merged
 }
 
 fn query_trigrams(query: &str) -> Vec<String> {
