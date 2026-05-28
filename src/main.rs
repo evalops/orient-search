@@ -404,21 +404,30 @@ enum Commands {
     Related {
         #[arg(long, default_value = ".")]
         repo: PathBuf,
-        path: String,
+        #[arg(value_name = "PATH", required_unless_present = "path_arg")]
+        path: Option<String>,
+        #[arg(long = "path", value_name = "PATH", conflicts_with = "path")]
+        path_arg: Option<String>,
         #[arg(long, default_value_t = 10)]
         limit: usize,
     },
     RelatedIndex {
         #[arg(long)]
         index: PathBuf,
-        path: String,
+        #[arg(value_name = "PATH", required_unless_present = "path_arg")]
+        path: Option<String>,
+        #[arg(long = "path", value_name = "PATH", conflicts_with = "path")]
+        path_arg: Option<String>,
         #[arg(long, default_value_t = 10)]
         limit: usize,
     },
     RelatedShard {
         #[arg(long)]
         index_dir: PathBuf,
-        path: String,
+        #[arg(value_name = "PATH", required_unless_present = "path_arg")]
+        path: Option<String>,
+        #[arg(long = "path", value_name = "PATH", conflicts_with = "path")]
+        path_arg: Option<String>,
         #[arg(long, default_value_t = 10)]
         limit: usize,
     },
@@ -435,7 +444,10 @@ enum Commands {
     RelatedShardSymbols {
         #[arg(long)]
         index_dir: PathBuf,
-        path: String,
+        #[arg(value_name = "PATH", required_unless_present = "path_arg")]
+        path: Option<String>,
+        #[arg(long = "path", value_name = "PATH", conflicts_with = "path")]
+        path_arg: Option<String>,
         #[arg(long)]
         query: Option<String>,
         #[arg(long, default_value_t = 10)]
@@ -1202,14 +1214,26 @@ fn main() -> Result<()> {
                 serde_json::to_string(&index.find_symbol(&name, limit))?
             );
         }
-        Commands::Related { repo, path, limit } => {
+        Commands::Related {
+            repo,
+            path,
+            path_arg,
+            limit,
+        } => {
+            let path = cli_single_path(path, path_arg)?;
             let index = RepoIndexer::new(repo).build()?;
             println!(
                 "{}",
                 serde_json::to_string(&index.related_files(&path, limit))?
             );
         }
-        Commands::RelatedIndex { index, path, limit } => {
+        Commands::RelatedIndex {
+            index,
+            path,
+            path_arg,
+            limit,
+        } => {
+            let path = cli_single_path(path, path_arg)?;
             let index = FastIndex::load(index)?;
             println!(
                 "{}",
@@ -1219,8 +1243,10 @@ fn main() -> Result<()> {
         Commands::RelatedShard {
             index_dir,
             path,
+            path_arg,
             limit,
         } => {
+            let path = cli_single_path(path, path_arg)?;
             println!(
                 "{}",
                 serde_json::to_string(&related_shard_files(index_dir, &path, limit)?)?
@@ -1261,9 +1287,11 @@ fn main() -> Result<()> {
         Commands::RelatedShardSymbols {
             index_dir,
             path,
+            path_arg,
             query,
             limit,
         } => {
+            let path = cli_single_path(path, path_arg)?;
             println!(
                 "{}",
                 serde_json::to_string(&related_shard_symbols(

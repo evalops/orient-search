@@ -666,6 +666,19 @@ fn cli_outputs_repo_map_and_reads_ranges() {
         .stdout(predicate::str::contains("tests/auth_test.rs"))
         .stdout(predicate::str::contains("SessionManager"));
 
+    let mut related = Command::cargo_bin("orient").unwrap();
+    related
+        .args([
+            "related",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--path",
+            "src/auth.rs",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("tests/auth_test.rs"));
+
     let mut read_range = Command::cargo_bin("orient").unwrap();
     read_range
         .args([
@@ -1532,6 +1545,7 @@ fn cli_builds_and_searches_persistent_index() {
             "related-index",
             "--index",
             index_path.to_str().unwrap(),
+            "--path",
             "src/auth.rs",
         ])
         .assert()
@@ -2042,6 +2056,7 @@ fn cli_filters_shard_search_by_nested_repo_alias() {
             "related-shard",
             "--index-dir",
             shard_dir.path().to_str().unwrap(),
+            "--path",
             "billing/src/billing.rs",
         ])
         .assert()
@@ -2055,6 +2070,7 @@ fn cli_filters_shard_search_by_nested_repo_alias() {
             "related-shard-symbols",
             "--index-dir",
             shard_dir.path().to_str().unwrap(),
+            "--path",
             "billing/src/billing.rs",
             "--query",
             "invoice total",
