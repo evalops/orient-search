@@ -1903,3 +1903,27 @@ fn fast_search_timeout_is_bounded() {
     assert!(started.elapsed() < Duration::from_millis(500));
     assert!(results.len() <= 10);
 }
+
+#[test]
+fn filter_only_fast_search_timeout_is_bounded() {
+    let repo = tempfile::tempdir().unwrap();
+    for index in 0..500 {
+        write(
+            &repo.path().join(format!("src/file_{index}.rs")),
+            "pub fn unrelated_symbol() {}\n",
+        );
+    }
+
+    let started = Instant::now();
+    let results = search_repo_fast_filtered_with_timeout(
+        repo.path(),
+        "file:*.rs",
+        10,
+        &SearchFilters::default(),
+        Duration::from_nanos(1),
+    )
+    .unwrap();
+
+    assert!(started.elapsed() < Duration::from_millis(500));
+    assert!(results.len() <= 10);
+}

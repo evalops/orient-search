@@ -420,7 +420,7 @@ pub fn search_repo_fast_filtered_with_timeout(
     }
     if query_tokens.is_empty() && query_phrases.is_empty() {
         return if filter_only_query(&filters) {
-            search_repo_filter_only(&root, limit, &filters)
+            search_repo_filter_only(&root, limit, &filters, timeout)
         } else {
             Ok(Vec::new())
         };
@@ -448,44 +448,23 @@ fn search_repo_filter_only(
     root: &Path,
     limit: usize,
     filters: &SearchFilters,
+    timeout: Duration,
 ) -> Result<Vec<SearchResult>> {
-    let mut candidates = Vec::new();
-    let candidate_cap = (limit.max(1) * 100).clamp(100, 5_000);
-
-    for entry in WalkBuilder::new(&root)
-        .hidden(false)
-        .filter_entry(|entry| !is_ignored(entry.path()))
-        .build()
-    {
-        let entry = entry?;
-        let path = entry.path();
-        let Some(metadata) = regular_file_metadata(path) else {
-            continue;
-        };
-        if metadata.len() > MAX_FILE_BYTES || language_for(path).is_none() {
-            continue;
-        }
-        let rel = path
-            .strip_prefix(root)?
-            .to_string_lossy()
-            .replace('\\', "/");
-        if !matches_filters(&rel, filters) {
-            continue;
-        }
-        if content_filters_active(filters) {
-            let text = fs::read_to_string(path).unwrap_or_default();
-            if text.contains('\0') || !source_content_filters_match(&rel, &text, filters) {
-                continue;
+    let candidate_cap = filter_only_candidate_cap(limit, filters);
+    let deadline = Instant::now() + timeout;
+    let mut candidates =
+        match filter_only_candidates_from_fd_files(root, filters, candidate_cap, deadline)? {
+            Some(candidates) => candidates,
+            None => {
+                match filter_only_candidates_from_rg_files(root, filters, candidate_cap, deadline)?
+                {
+                    Some(candidates) => candidates,
+                    None => {
+                        filter_only_candidates_from_walk(root, filters, candidate_cap, deadline)?
+                    }
+                }
             }
-        }
-        let Some(matched) = score_filter_only_path(&rel, filters, filters.explain) else {
-            continue;
         };
-        candidates.push((rel, matched));
-        if candidates.len() >= candidate_cap {
-            break;
-        }
-    }
 
     candidates.sort_by(|(left_path, left), (right_path, right)| {
         right
@@ -498,6 +477,9 @@ fn search_repo_filter_only(
 
     let mut results = Vec::new();
     for (path, matched) in candidates {
+        if Instant::now() >= deadline {
+            break;
+        }
         let text = fs::read_to_string(root.join(&path)).unwrap_or_default();
         if text.contains('\0') {
             continue;
@@ -515,6 +497,267 @@ fn search_repo_filter_only(
     }
 
     Ok(finalize_results(results, limit))
+}
+
+fn filter_only_candidates_from_fd_files(
+    root: &Path,
+    filters: &SearchFilters,
+    candidate_cap: usize,
+    deadline: Instant,
+) -> Result<Option<Vec<(String, FilterOnlyMatch)>>> {
+    let Some(pattern) = fd_positive_file_pattern(filters) else {
+        return Ok(None);
+    };
+    let mut command = Command::new("fd");
+    command
+        .current_dir(root)
+        .arg("-H")
+        .arg("-I")
+        .arg("-i")
+        .arg("-t")
+        .arg("f")
+        .arg("--color")
+        .arg("never")
+        .arg("--exclude")
+        .arg(".git")
+        .arg("--exclude")
+        .arg(".venv")
+        .arg("--exclude")
+        .arg("__pycache__")
+        .arg("--exclude")
+        .arg(".pytest_cache")
+        .arg("--exclude")
+        .arg(".orient")
+        .arg("--exclude")
+        .arg("node_modules")
+        .arg("--exclude")
+        .arg("dist")
+        .arg("--exclude")
+        .arg("build")
+        .arg("--exclude")
+        .arg(".next")
+        .arg("--exclude")
+        .arg("coverage")
+        .arg("--exclude")
+        .arg("target")
+        .arg(pattern);
+
+    collect_filter_only_candidates_from_path_command(
+        command,
+        root,
+        filters,
+        candidate_cap,
+        deadline,
+    )
+}
+
+fn filter_only_candidates_from_rg_files(
+    root: &Path,
+    filters: &SearchFilters,
+    candidate_cap: usize,
+    deadline: Instant,
+) -> Result<Option<Vec<(String, FilterOnlyMatch)>>> {
+    let mut command = Command::new("rg");
+    command
+        .current_dir(root)
+        .arg("--files")
+        .arg("--hidden")
+        .arg("--max-filesize")
+        .arg(format!("{MAX_FILE_BYTES}"))
+        .arg("--glob")
+        .arg("!.git/**")
+        .arg("--glob")
+        .arg("!.venv/**")
+        .arg("--glob")
+        .arg("!__pycache__/**")
+        .arg("--glob")
+        .arg("!.pytest_cache/**")
+        .arg("--glob")
+        .arg("!.orient/**")
+        .arg("--glob")
+        .arg("!node_modules/**")
+        .arg("--glob")
+        .arg("!dist/**")
+        .arg("--glob")
+        .arg("!build/**")
+        .arg("--glob")
+        .arg("!.next/**")
+        .arg("--glob")
+        .arg("!coverage/**")
+        .arg("--glob")
+        .arg("!target/**");
+    if let Some(glob) = rg_positive_file_glob(filters) {
+        command.arg("--iglob").arg(glob);
+    }
+    command.arg(".");
+
+    collect_filter_only_candidates_from_path_command(
+        command,
+        root,
+        filters,
+        candidate_cap,
+        deadline,
+    )
+}
+
+fn collect_filter_only_candidates_from_path_command(
+    mut command: Command,
+    root: &Path,
+    filters: &SearchFilters,
+    candidate_cap: usize,
+    deadline: Instant,
+) -> Result<Option<Vec<(String, FilterOnlyMatch)>>> {
+    let Ok(mut child) = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+    else {
+        return Ok(None);
+    };
+    let Some(stdout) = child.stdout.take() else {
+        return Ok(None);
+    };
+    let (lines_tx, lines_rx) = mpsc::channel();
+    thread::spawn(move || {
+        for line in BufReader::new(stdout).lines() {
+            if lines_tx.send(line).is_err() {
+                break;
+            }
+        }
+    });
+
+    let mut candidates = Vec::new();
+    loop {
+        let now = Instant::now();
+        if now >= deadline {
+            let _ = child.kill();
+            break;
+        }
+        let wait_for = (deadline - now).min(RIPGREP_POLL_INTERVAL);
+        let line = match lines_rx.recv_timeout(wait_for) {
+            Ok(line) => line?,
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                if child.try_wait()?.is_some() {
+                    break;
+                }
+                continue;
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        };
+        let rel = line
+            .trim_start_matches("./")
+            .trim_start_matches('/')
+            .replace('\\', "/");
+        if push_filter_only_candidate(root, filters, &rel, &mut candidates)? {
+            if candidates.len() >= candidate_cap {
+                let _ = child.kill();
+                break;
+            }
+        }
+    }
+
+    let _ = child.wait();
+    Ok(Some(candidates))
+}
+
+fn filter_only_candidates_from_walk(
+    root: &Path,
+    filters: &SearchFilters,
+    candidate_cap: usize,
+    deadline: Instant,
+) -> Result<Vec<(String, FilterOnlyMatch)>> {
+    let mut candidates = Vec::new();
+    for entry in WalkBuilder::new(&root)
+        .hidden(false)
+        .filter_entry(|entry| !is_ignored(entry.path()))
+        .build()
+    {
+        if Instant::now() >= deadline {
+            break;
+        }
+        let entry = entry?;
+        let path = entry.path();
+        let Some(metadata) = regular_file_metadata(path) else {
+            continue;
+        };
+        if metadata.len() > MAX_FILE_BYTES || language_for(path).is_none() {
+            continue;
+        }
+        let rel = path
+            .strip_prefix(root)?
+            .to_string_lossy()
+            .replace('\\', "/");
+        if push_filter_only_candidate(root, filters, &rel, &mut candidates)? {
+            if candidates.len() >= candidate_cap {
+                break;
+            }
+        }
+    }
+    Ok(candidates)
+}
+
+fn push_filter_only_candidate(
+    root: &Path,
+    filters: &SearchFilters,
+    rel: &str,
+    candidates: &mut Vec<(String, FilterOnlyMatch)>,
+) -> Result<bool> {
+    let path = root.join(rel);
+    let Some(metadata) = regular_file_metadata(&path) else {
+        return Ok(false);
+    };
+    if metadata.len() > MAX_FILE_BYTES || language_for(Path::new(rel)).is_none() {
+        return Ok(false);
+    }
+    if content_filters_active(filters) {
+        let text = fs::read_to_string(&path).unwrap_or_default();
+        if text.contains('\0') || !source_content_filters_match(rel, &text, filters) {
+            return Ok(false);
+        }
+    }
+    let rel_lower = rel.to_ascii_lowercase();
+    let Some(matched) =
+        score_filter_only_path_with_lower(rel, &rel_lower, filters, filters.explain)
+    else {
+        return Ok(false);
+    };
+    candidates.push((rel.to_string(), matched));
+    Ok(true)
+}
+
+fn fd_positive_file_pattern(filters: &SearchFilters) -> Option<String> {
+    let file = filters.file.as_deref()?.trim().replace('\\', "/");
+    if file.is_empty() || file.contains('/') || file.contains('*') || file.contains('?') {
+        return None;
+    }
+    Some(regex::escape(&file))
+}
+
+fn rg_positive_file_glob(filters: &SearchFilters) -> Option<String> {
+    let file = filters.file.as_deref()?.trim().replace('\\', "/");
+    if file.is_empty() {
+        return None;
+    }
+    if file.contains('*') || file.contains('?') {
+        if file.contains('/') {
+            Some(file)
+        } else {
+            Some(format!("**/{file}"))
+        }
+    } else if file.contains('/') {
+        Some(format!("*{file}*"))
+    } else {
+        Some(format!("**/*{file}*"))
+    }
+}
+
+fn filter_only_candidate_cap(limit: usize, filters: &SearchFilters) -> usize {
+    if rg_positive_file_glob(filters).is_some() {
+        limit.max(1)
+    } else {
+        (limit.max(1) * 100).clamp(100, 5_000)
+    }
 }
 
 fn ripgrep_patterns(
@@ -615,6 +858,7 @@ fn search_repo_ripgrep(
     });
 
     let mut scored: HashMap<String, SearchResult> = HashMap::new();
+    let mut path_filter_cache = HashMap::<String, Option<String>>::new();
     let max_matches = (limit.max(1) * 300).clamp(1_000, 8_000);
     let mut match_count = 0usize;
     let deadline = Instant::now() + timeout;
@@ -656,12 +900,23 @@ fn search_repo_ripgrep(
             .trim_start_matches("./")
             .trim_start_matches('/')
             .to_string();
-        if language_for(Path::new(&path)).is_none()
-            || is_ignored(Path::new(&path))
-            || !matches_filters(&path, filters)
-        {
+        let path_lower = path_filter_cache
+            .entry(path.clone())
+            .or_insert_with(|| {
+                let path_lower = path.to_ascii_lowercase();
+                if language_for(Path::new(&path)).is_none()
+                    || is_ignored(Path::new(&path))
+                    || !matches_filters_with_path_lower(&path, &path_lower, filters)
+                {
+                    None
+                } else {
+                    Some(path_lower)
+                }
+            })
+            .as_deref();
+        let Some(path_lower) = path_lower else {
             continue;
-        }
+        };
         if content_filters_active(filters) {
             let text = fs::read_to_string(root.join(&path)).unwrap_or_default();
             if text.contains('\0') || !source_content_filters_match(&path, &text, filters) {
@@ -683,6 +938,7 @@ fn search_repo_ripgrep(
             &mut scored,
             &root,
             &path,
+            path_lower,
             text,
             line_number,
             query_tokens,
@@ -849,6 +1105,7 @@ fn merge_match_result(
     scored: &mut HashMap<String, SearchResult>,
     root: &Path,
     path: &str,
+    path_lower: &str,
     line: &str,
     line_number: u64,
     query_tokens: &[String],
@@ -857,7 +1114,6 @@ fn merge_match_result(
     snippet_mode: SnippetMode,
     explain: bool,
 ) {
-    let path_lower = path.to_lowercase();
     let line_lower = line.to_lowercase();
     let query_name = query_tokens.join("");
     let mut score = 0.0;
@@ -3272,7 +3528,17 @@ pub(crate) fn score_filter_only_path(
     filters: &SearchFilters,
     explain: bool,
 ) -> Option<FilterOnlyMatch> {
-    if !filter_only_query(filters) || !matches_filters(path, filters) {
+    let path_lower = path.to_ascii_lowercase();
+    score_filter_only_path_with_lower(path, &path_lower, filters, explain)
+}
+
+fn score_filter_only_path_with_lower(
+    path: &str,
+    path_lower: &str,
+    filters: &SearchFilters,
+    explain: bool,
+) -> Option<FilterOnlyMatch> {
+    if !filter_only_query(filters) || !matches_filters_with_path_lower(path, path_lower, filters) {
         return None;
     }
 
