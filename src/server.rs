@@ -1176,6 +1176,11 @@ fn string_list_argument(name: &str) -> bool {
             | "exclude_kind"
             | "exclude_type"
             | "exclude_repo"
+            | "exclude_branch"
+            | "exclude_git_branch"
+            | "exclude_origin"
+            | "exclude_remote"
+            | "exclude_remote_origin"
             | "exclude_dependency"
             | "exclude_dep"
             | "exclude_deps"
@@ -1266,6 +1271,10 @@ fn argument_description(tool_name: &str, name: &str) -> &'static str {
     match name {
         "repo" => "Local repository root or shard repo filter, depending on the tool.",
         "repo_filter" => "Repository name filter when repo is already used as a root path.",
+        "branch" | "git_branch" => "Git branch substring filter for shard-aware agent searches.",
+        "origin" | "remote" | "remote_origin" => {
+            "Git remote origin substring filter for shard-aware agent searches."
+        }
         "index" => {
             "Path to a persistent single-repo Orient index. Daemon tools may omit this when exactly one index is warmed."
         }
@@ -1348,6 +1357,12 @@ fn argument_description(tool_name: &str, name: &str) -> &'static str {
         "exclude_kind" => "Alias for exclude_symbol_kind.",
         "exclude_type" => "Alias for exclude_symbol_kind using type-style names.",
         "exclude_repo" => "Repository name substring or list of substrings to exclude.",
+        "exclude_branch" | "exclude_git_branch" => {
+            "Git branch substring or list of substrings to exclude."
+        }
+        "exclude_origin" | "exclude_remote" | "exclude_remote_origin" => {
+            "Git remote origin substring or list of substrings to exclude."
+        }
         "exclude_dependency" => "Dependency name or list of dependency substrings to exclude.",
         "exclude_dep" | "exclude_deps" => "Alias for exclude_dependency.",
         "exclude_import" => "Imported module or list of module substrings to exclude.",
@@ -4118,6 +4133,8 @@ const SEARCH_OPTIONAL_ARGS: &[&str] = &[
     "uses",
     "file",
     "repo_filter",
+    "branch",
+    "origin",
     "test",
     "snippet",
     "explain",
@@ -4135,6 +4152,8 @@ const SEARCH_OPTIONAL_ARGS: &[&str] = &[
     "exclude_kind",
     "exclude_type",
     "exclude_repo",
+    "exclude_branch",
+    "exclude_origin",
     "exclude_dependency",
     "exclude_dep",
     "exclude_deps",
@@ -4172,6 +4191,8 @@ const SEARCH_TARGET_OPTIONAL_ARGS: &[&str] = &[
     "uses",
     "file",
     "repo_filter",
+    "branch",
+    "origin",
     "test",
     "snippet",
     "explain",
@@ -4190,6 +4211,8 @@ const SEARCH_TARGET_OPTIONAL_ARGS: &[&str] = &[
     "exclude_kind",
     "exclude_type",
     "exclude_repo",
+    "exclude_branch",
+    "exclude_origin",
     "exclude_dependency",
     "exclude_dep",
     "exclude_deps",
@@ -4214,6 +4237,8 @@ const REPO_MAP_TARGET_OPTIONAL_ARGS: &[&str] = &[
     "detail",
     "read_limit",
     "repo_filter",
+    "branch",
+    "origin",
 ];
 
 const RELATED_TARGET_OPTIONAL_ARGS: &[&str] = &["repo", "index", "index_dir", "limit"];
@@ -4247,6 +4272,8 @@ const SYMBOL_TARGET_OPTIONAL_ARGS: &[&str] = &[
     "uses",
     "file",
     "repo_filter",
+    "branch",
+    "origin",
     "test",
     "exclude_file",
     "exclude_path",
@@ -4259,6 +4286,8 @@ const SYMBOL_TARGET_OPTIONAL_ARGS: &[&str] = &[
     "exclude_kind",
     "exclude_type",
     "exclude_repo",
+    "exclude_branch",
+    "exclude_origin",
     "exclude_dependency",
     "exclude_dep",
     "exclude_deps",
@@ -4294,6 +4323,8 @@ const SYMBOL_INDEX_OPTIONAL_ARGS: &[&str] = &[
     "file",
     "repo",
     "repo_filter",
+    "branch",
+    "origin",
     "test",
     "exclude_file",
     "exclude_path",
@@ -4306,6 +4337,8 @@ const SYMBOL_INDEX_OPTIONAL_ARGS: &[&str] = &[
     "exclude_kind",
     "exclude_type",
     "exclude_repo",
+    "exclude_branch",
+    "exclude_origin",
     "exclude_dependency",
     "exclude_dep",
     "exclude_deps",
@@ -4343,6 +4376,8 @@ const SEARCH_AUTO_OPTIONAL_ARGS: &[&str] = &[
     "uses",
     "file",
     "repo_filter",
+    "branch",
+    "origin",
     "test",
     "snippet",
     "explain",
@@ -4362,6 +4397,8 @@ const SEARCH_AUTO_OPTIONAL_ARGS: &[&str] = &[
     "exclude_kind",
     "exclude_type",
     "exclude_repo",
+    "exclude_branch",
+    "exclude_origin",
     "exclude_dependency",
     "exclude_dep",
     "exclude_deps",
@@ -4397,6 +4434,8 @@ const SEARCH_INDEX_OPTIONAL_ARGS: &[&str] = &[
     "file",
     "repo",
     "repo_filter",
+    "branch",
+    "origin",
     "test",
     "snippet",
     "explain",
@@ -4415,6 +4454,8 @@ const SEARCH_INDEX_OPTIONAL_ARGS: &[&str] = &[
     "exclude_kind",
     "exclude_type",
     "exclude_repo",
+    "exclude_branch",
+    "exclude_origin",
     "exclude_dependency",
     "exclude_dep",
     "exclude_deps",
@@ -4448,6 +4489,8 @@ const PLAN_OPTIONAL_ARGS: &[&str] = &[
     "uses",
     "file",
     "repo_filter",
+    "branch",
+    "origin",
     "test",
     "require_all",
     "any_terms",
@@ -4462,6 +4505,8 @@ const PLAN_OPTIONAL_ARGS: &[&str] = &[
     "exclude_kind",
     "exclude_type",
     "exclude_repo",
+    "exclude_branch",
+    "exclude_origin",
     "exclude_dependency",
     "exclude_dep",
     "exclude_deps",
@@ -4498,6 +4543,8 @@ const PLAN_TARGET_OPTIONAL_ARGS: &[&str] = &[
     "uses",
     "file",
     "repo_filter",
+    "branch",
+    "origin",
     "test",
     "require_all",
     "any_terms",
@@ -4513,6 +4560,8 @@ const PLAN_TARGET_OPTIONAL_ARGS: &[&str] = &[
     "exclude_kind",
     "exclude_type",
     "exclude_repo",
+    "exclude_branch",
+    "exclude_origin",
     "exclude_dependency",
     "exclude_dep",
     "exclude_deps",
@@ -4547,6 +4596,8 @@ const PLAN_INDEX_OPTIONAL_ARGS: &[&str] = &[
     "file",
     "repo",
     "repo_filter",
+    "branch",
+    "origin",
     "test",
     "require_all",
     "any_terms",
@@ -4562,6 +4613,8 @@ const PLAN_INDEX_OPTIONAL_ARGS: &[&str] = &[
     "exclude_kind",
     "exclude_type",
     "exclude_repo",
+    "exclude_branch",
+    "exclude_origin",
     "exclude_dependency",
     "exclude_dep",
     "exclude_deps",
@@ -4983,6 +5036,8 @@ fn search_filters(arguments: &Value, allow_repo_alias: bool) -> Result<SearchFil
         extension: optional_string_arg_any(arguments, &["extension", "ext"]),
         symbol: optional_string_arg(arguments, "symbol"),
         symbol_kind: symbol_kind_arg_any(arguments, &["symbol_kind", "kind", "type"]),
+        branch: optional_string_arg_any(arguments, &["branch", "git_branch"]),
+        origin: optional_string_arg_any(arguments, &["origin", "remote", "remote_origin"]),
         dependency: optional_string_arg_any(arguments, &["dependency", "dep", "deps"])
             .map(|value| value.to_ascii_lowercase()),
         import: optional_string_arg_any(
@@ -5031,6 +5086,14 @@ fn search_filters(arguments: &Value, allow_repo_alias: bool) -> Result<SearchFil
             &["exclude_symbol_kind", "exclude_kind", "exclude_type"],
         )?,
         exclude_repo: optional_string_list_arg(arguments, "exclude_repo")?,
+        exclude_branch: optional_string_list_arg_any(
+            arguments,
+            &["exclude_branch", "exclude_git_branch"],
+        )?,
+        exclude_origin: optional_string_list_arg_any(
+            arguments,
+            &["exclude_origin", "exclude_remote", "exclude_remote_origin"],
+        )?,
         exclude_dependency: normalized_string_list_arg_any(
             arguments,
             &["exclude_dependency", "exclude_dep", "exclude_deps"],

@@ -1,5 +1,6 @@
 //! Repo orientation index.
 
+use crate::discover::git_metadata_for_repo;
 use crate::query::{merge_filters, normalize_phrase_text, parse_query, query_phrases, query_text};
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use anyhow::Result;
@@ -276,6 +277,8 @@ pub struct SearchFilters {
     pub symbol: Option<String>,
     pub symbol_kind: Option<String>,
     pub repo: Option<String>,
+    pub branch: Option<String>,
+    pub origin: Option<String>,
     pub dependency: Option<String>,
     pub import: Option<String>,
     pub test: Option<bool>,
@@ -290,6 +293,8 @@ pub struct SearchFilters {
     pub exclude_symbol: Vec<String>,
     pub exclude_symbol_kind: Vec<String>,
     pub exclude_repo: Vec<String>,
+    pub exclude_branch: Vec<String>,
+    pub exclude_origin: Vec<String>,
     pub exclude_dependency: Vec<String>,
     pub exclude_import: Vec<String>,
 }
@@ -311,6 +316,8 @@ impl Default for SearchFilters {
             symbol: None,
             symbol_kind: None,
             repo: None,
+            branch: None,
+            origin: None,
             dependency: None,
             import: None,
             test: None,
@@ -325,6 +332,8 @@ impl Default for SearchFilters {
             exclude_symbol: Vec::new(),
             exclude_symbol_kind: Vec::new(),
             exclude_repo: Vec::new(),
+            exclude_branch: Vec::new(),
+            exclude_origin: Vec::new(),
             exclude_dependency: Vec::new(),
             exclude_import: Vec::new(),
         }
@@ -4217,6 +4226,8 @@ fn append_search_filter_cli_args(
     append_repeated_string_cli_arg(parts, args, "file", "--file");
     append_repeated_string_cli_arg(parts, args, "symbol", "--symbol");
     append_repeated_string_cli_arg(parts, args, "symbol_kind", "--kind");
+    append_repeated_string_cli_arg(parts, args, "branch", "--branch");
+    append_repeated_string_cli_arg(parts, args, "origin", "--origin");
     append_repeated_string_cli_arg(parts, args, "dependency", "--dependency");
     append_repeated_string_cli_arg(parts, args, "import", "--import");
     append_bool_value_cli_arg(parts, args, "test", "--test");
@@ -4231,6 +4242,8 @@ fn append_search_filter_cli_args(
     append_repeated_string_cli_arg(parts, args, "exclude_symbol", "--exclude-symbol");
     append_repeated_string_cli_arg(parts, args, "exclude_symbol_kind", "--exclude-kind");
     append_repeated_string_cli_arg(parts, args, "exclude_repo", "--exclude-repo");
+    append_repeated_string_cli_arg(parts, args, "exclude_branch", "--exclude-branch");
+    append_repeated_string_cli_arg(parts, args, "exclude_origin", "--exclude-origin");
     append_repeated_string_cli_arg(parts, args, "exclude_dependency", "--exclude-dependency");
     append_repeated_string_cli_arg(parts, args, "exclude_import", "--exclude-import");
     append_bool_cli_arg(parts, args, "refresh_if_stale", "--refresh-if-stale");
@@ -4761,6 +4774,8 @@ pub(crate) fn filter_only_query(filters: &SearchFilters) -> bool {
         || filters.extension.is_some()
         || filters.symbol_kind.is_some()
         || filters.repo.is_some()
+        || filters.branch.is_some()
+        || filters.origin.is_some()
         || filters.dependency.is_some()
         || filters.import.is_some()
         || filters.test.is_some()
@@ -4847,6 +4862,28 @@ pub(crate) fn score_filter_only_path_match(
         add_filter_signal(
             "repo_filter",
             repo,
+            2.0,
+            explain,
+            &mut score,
+            &mut reasons,
+            &mut signals,
+        );
+    }
+    if let Some(branch) = &filters.branch {
+        add_filter_signal(
+            "branch_filter",
+            branch,
+            2.0,
+            explain,
+            &mut score,
+            &mut reasons,
+            &mut signals,
+        );
+    }
+    if let Some(origin) = &filters.origin {
+        add_filter_signal(
+            "origin_filter",
+            origin,
             2.0,
             explain,
             &mut score,
@@ -4960,10 +4997,51 @@ pub(crate) fn repo_matches(root: &Path, filters: &SearchFilters) -> bool {
             return false;
         }
     }
-    !filters
+    if filters
         .exclude_repo
         .iter()
         .any(|filter| repo.contains(&filter.to_ascii_lowercase()))
+    {
+        return false;
+    }
+
+    if filters.branch.is_none()
+        && filters.origin.is_none()
+        && filters.exclude_branch.is_empty()
+        && filters.exclude_origin.is_empty()
+    {
+        return true;
+    }
+
+    let git = git_metadata_for_repo(root, false);
+    if let Some(filter) = &filters.branch {
+        if !metadata_value_matches(git.branch.as_deref(), filter) {
+            return false;
+        }
+    }
+    if let Some(filter) = &filters.origin {
+        if !metadata_value_matches(git.origin.as_deref(), filter) {
+            return false;
+        }
+    }
+    if filters
+        .exclude_branch
+        .iter()
+        .any(|filter| metadata_value_matches(git.branch.as_deref(), filter))
+        || filters
+            .exclude_origin
+            .iter()
+            .any(|filter| metadata_value_matches(git.origin.as_deref(), filter))
+    {
+        return false;
+    }
+    true
+}
+
+fn metadata_value_matches(value: Option<&str>, filter: &str) -> bool {
+    value
+        .map(|value| value.to_ascii_lowercase())
+        .is_some_and(|value| value.contains(&filter.to_ascii_lowercase()))
 }
 
 pub(crate) fn result_matches_all_tokens(result: &SearchResult, query_tokens: &[String]) -> bool {

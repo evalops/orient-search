@@ -240,6 +240,15 @@ enum Commands {
         tests: usize,
         #[arg(long = "repo")]
         repo: Option<String>,
+        #[arg(long, alias = "git-branch", alias = "git_branch")]
+        branch: Option<String>,
+        #[arg(
+            long,
+            alias = "remote",
+            alias = "remote-origin",
+            alias = "remote_origin"
+        )]
+        origin: Option<String>,
         #[arg(long, default_value = "compact", value_parser = ["compact", "full"])]
         detail: String,
         #[arg(long = "read-limit", default_value_t = DEFAULT_REPO_MAP_READ_BATCH_RANGES)]
@@ -266,6 +275,15 @@ enum Commands {
         tests: usize,
         #[arg(long = "repo-filter")]
         repo_filter: Option<String>,
+        #[arg(long, alias = "git-branch", alias = "git_branch")]
+        branch: Option<String>,
+        #[arg(
+            long,
+            alias = "remote",
+            alias = "remote-origin",
+            alias = "remote_origin"
+        )]
+        origin: Option<String>,
         #[arg(long, default_value = "compact", value_parser = ["compact", "full"])]
         detail: String,
         #[arg(long = "read-limit", default_value_t = DEFAULT_REPO_MAP_READ_BATCH_RANGES)]
@@ -796,6 +814,15 @@ struct CommonSearchArgs {
         alias = "symbol_kind"
     )]
     symbol_kind: Option<String>,
+    #[arg(long, alias = "git-branch", alias = "git_branch")]
+    branch: Option<String>,
+    #[arg(
+        long,
+        alias = "remote",
+        alias = "remote-origin",
+        alias = "remote_origin"
+    )]
+    origin: Option<String>,
     #[arg(long, alias = "dep", alias = "deps")]
     dependency: Option<String>,
     #[arg(
@@ -855,6 +882,21 @@ struct CommonSearchArgs {
     #[arg(long = "exclude-repo")]
     exclude_repo: Vec<String>,
     #[arg(
+        long = "exclude-branch",
+        alias = "exclude-git-branch",
+        alias = "exclude_branch",
+        alias = "exclude_git_branch"
+    )]
+    exclude_branch: Vec<String>,
+    #[arg(
+        long = "exclude-origin",
+        alias = "exclude-remote",
+        alias = "exclude-remote-origin",
+        alias = "exclude_origin",
+        alias = "exclude_remote_origin"
+    )]
+    exclude_origin: Vec<String>,
+    #[arg(
         long = "exclude-dependency",
         alias = "exclude-dep",
         alias = "exclude-deps"
@@ -892,6 +934,8 @@ fn search_filters_from_args(
             .as_ref()
             .map(|value| normalize_symbol_kind(value)),
         repo,
+        branch: args.branch.clone(),
+        origin: args.origin.clone(),
         dependency: args
             .dependency
             .as_ref()
@@ -921,6 +965,8 @@ fn search_filters_from_args(
             .map(|value| normalize_symbol_kind(value))
             .collect(),
         exclude_repo: args.exclude_repo.clone(),
+        exclude_branch: args.exclude_branch.clone(),
+        exclude_origin: args.exclude_origin.clone(),
         exclude_dependency: args
             .exclude_dependency
             .iter()
@@ -1530,6 +1576,8 @@ fn run() -> Result<()> {
             symbols,
             tests,
             repo,
+            branch,
+            origin,
             detail,
             read_limit,
             format: _format,
@@ -1543,6 +1591,8 @@ fn run() -> Result<()> {
                 detail,
                 &SearchFilters {
                     repo,
+                    branch,
+                    origin,
                     ..SearchFilters::default()
                 },
             )?;
@@ -1571,6 +1621,8 @@ fn run() -> Result<()> {
             symbols,
             tests,
             repo_filter,
+            branch,
+            origin,
             detail,
             read_limit,
             format: _format,
@@ -1585,6 +1637,8 @@ fn run() -> Result<()> {
                     detail,
                     &SearchFilters {
                         repo: repo_filter,
+                        branch,
+                        origin,
                         ..SearchFilters::default()
                     },
                 )?;

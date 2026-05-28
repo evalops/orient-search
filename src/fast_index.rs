@@ -2231,6 +2231,12 @@ fn query_plan_filters(filters: &SearchFilters) -> Vec<QueryPlanFilter> {
     if let Some(value) = &filters.repo {
         active.push(plan_filter("repo", value, false));
     }
+    if let Some(value) = &filters.branch {
+        active.push(plan_filter("branch", value, false));
+    }
+    if let Some(value) = &filters.origin {
+        active.push(plan_filter("origin", value, false));
+    }
     if let Some(value) = &filters.dependency {
         active.push(plan_filter("dependency", value, false));
     }
@@ -2261,6 +2267,12 @@ fn query_plan_filters(filters: &SearchFilters) -> Vec<QueryPlanFilter> {
     for value in &filters.exclude_repo {
         active.push(plan_filter("repo", value, true));
     }
+    for value in &filters.exclude_branch {
+        active.push(plan_filter("branch", value, true));
+    }
+    for value in &filters.exclude_origin {
+        active.push(plan_filter("origin", value, true));
+    }
     for value in &filters.exclude_dependency {
         active.push(plan_filter("dependency", value, true));
     }
@@ -2289,7 +2301,10 @@ fn query_plan_filters_for_candidates(
     query_plan_filters(filters)
         .into_iter()
         .map(|mut filter| {
-            if !matches!(filter.field.as_str(), "repo" | "dependency") {
+            if !matches!(
+                filter.field.as_str(),
+                "repo" | "branch" | "origin" | "dependency"
+            ) {
                 let matched = candidate_ids
                     .iter()
                     .filter_map(|file_id| files.get(*file_id as usize))

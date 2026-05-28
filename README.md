@@ -39,6 +39,7 @@ orient search-auto "symbol:AuthSession token"
 orient search --repo . "issue token"
 orient search --index /tmp/repo.index "issue token"
 orient search --index-dir /tmp/orient-shards "repo:api issue token"
+orient search --index-dir /tmp/orient-shards "branch:feature/auth origin:evalops/api issue token"
 orient read-range --index /tmp/repo.index src/lib.rs:40:80
 ```
 
@@ -48,8 +49,8 @@ JSON-lines requests look like this:
 {"id":"tools","tool":"tool_manifest","arguments":{}}
 {"id":"guide","tool":"agent_guide","arguments":{"index_dir":"/tmp/orient-shards"}}
 {"id":"map","tool":"shard_repo_map","arguments":{"symbols":25,"tests":25,"detail":"compact","read_limit":16}}
-{"id":"search","tool":"search_auto","arguments":{"query":"repo:api symbol:AuthSession token","limit":10,"explain":true}}
-{"id":"batch","tool":"search_auto_batch","arguments":{"queries":["repo:api symbol:AuthSession token","repo:api path:auth token"],"limit":10}}
+{"id":"search","tool":"search_auto","arguments":{"query":"repo:api branch:main symbol:AuthSession token","limit":10,"explain":true}}
+{"id":"batch","tool":"search_auto_batch","arguments":{"queries":["repo:api symbol:AuthSession token","origin:evalops/api path:auth token"],"limit":10}}
 {"id":"read","tool":"read_ranges","arguments":{"index_dir":"/tmp/orient-shards","ranges":[{"path":"api/src/auth.rs","start":40,"lines":80}]}}
 ```
 

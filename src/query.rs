@@ -119,6 +119,10 @@ fn apply_filter(filters: &mut SearchFilters, token: &str, negated: bool) -> bool
             }
         }
         (false, "repo") => filters.repo = Some(value),
+        (false, "branch" | "git_branch" | "git-branch") => filters.branch = Some(value),
+        (false, "origin" | "remote" | "remote_origin" | "remote-origin") => {
+            filters.origin = Some(value)
+        }
         (false, "dep" | "deps" | "dependency" | "dependencies") => {
             filters.dependency = Some(value.to_ascii_lowercase())
         }
@@ -148,6 +152,10 @@ fn apply_filter(filters: &mut SearchFilters, token: &str, negated: bool) -> bool
             None => return false,
         },
         (true, "repo") => filters.exclude_repo.push(value),
+        (true, "branch" | "git_branch" | "git-branch") => filters.exclude_branch.push(value),
+        (true, "origin" | "remote" | "remote_origin" | "remote-origin") => {
+            filters.exclude_origin.push(value)
+        }
         (true, "dep" | "deps" | "dependency" | "dependencies") => {
             filters.exclude_dependency.push(value.to_ascii_lowercase())
         }
@@ -315,6 +323,12 @@ pub fn merge_filters(mut base: SearchFilters, parsed: SearchFilters) -> SearchFi
     if parsed.repo.is_some() {
         base.repo = parsed.repo;
     }
+    if parsed.branch.is_some() {
+        base.branch = parsed.branch;
+    }
+    if parsed.origin.is_some() {
+        base.origin = parsed.origin;
+    }
     if parsed.dependency.is_some() {
         base.dependency = parsed.dependency;
     }
@@ -337,6 +351,8 @@ pub fn merge_filters(mut base: SearchFilters, parsed: SearchFilters) -> SearchFi
     base.exclude_symbol.extend(parsed.exclude_symbol);
     base.exclude_symbol_kind.extend(parsed.exclude_symbol_kind);
     base.exclude_repo.extend(parsed.exclude_repo);
+    base.exclude_branch.extend(parsed.exclude_branch);
+    base.exclude_origin.extend(parsed.exclude_origin);
     base.exclude_dependency.extend(parsed.exclude_dependency);
     base.exclude_import.extend(parsed.exclude_import);
     base
@@ -362,7 +378,7 @@ mod tests {
     #[test]
     fn parses_aliases_booleans_escapes_and_negatives() {
         let parsed = parse_query(
-            r#"file:'auth service.rs' language:Rust extension:.RS repo:orient tests -ext:md -repo:old "quoted \"token\"""#,
+            r#"file:'auth service.rs' language:Rust extension:.RS repo:orient branch:main origin:evalops tests -ext:md -repo:old -branch:wip -origin:legacy "quoted \"token\"""#,
         );
 
         assert_eq!(parsed.terms, vec![r#"quoted "token""#]);
@@ -370,9 +386,13 @@ mod tests {
         assert_eq!(parsed.filters.language.as_deref(), Some("rust"));
         assert_eq!(parsed.filters.extension.as_deref(), Some("rs"));
         assert_eq!(parsed.filters.repo.as_deref(), Some("orient"));
+        assert_eq!(parsed.filters.branch.as_deref(), Some("main"));
+        assert_eq!(parsed.filters.origin.as_deref(), Some("evalops"));
         assert_eq!(parsed.filters.test, Some(true));
         assert_eq!(parsed.filters.exclude_extension, vec!["md"]);
         assert_eq!(parsed.filters.exclude_repo, vec!["old"]);
+        assert_eq!(parsed.filters.exclude_branch, vec!["wip"]);
+        assert_eq!(parsed.filters.exclude_origin, vec!["legacy"]);
     }
 
     #[test]

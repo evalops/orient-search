@@ -1326,7 +1326,27 @@ pub(crate) fn shard_search_scopes(
                 .aliases
                 .iter()
                 .any(|alias| alias_matches(alias, filter))
-    }) {
+    }) || filters
+        .exclude_branch
+        .iter()
+        .any(|filter| shard_git_branch_matches(shard, filter))
+        || filters
+            .exclude_origin
+            .iter()
+            .any(|filter| shard_git_origin_matches(shard, filter))
+    {
+        return Vec::new();
+    }
+
+    if filters
+        .branch
+        .as_deref()
+        .is_some_and(|filter| !shard_git_branch_matches(shard, filter))
+        || filters
+            .origin
+            .as_deref()
+            .is_some_and(|filter| !shard_git_origin_matches(shard, filter))
+    {
         return Vec::new();
     }
 
@@ -1363,7 +1383,11 @@ pub(crate) fn filters_for_shard_scope(
 ) -> SearchFilters {
     let mut filters = filters.clone();
     filters.repo = None;
+    filters.branch = None;
+    filters.origin = None;
     filters.exclude_repo.clear();
+    filters.exclude_branch.clear();
+    filters.exclude_origin.clear();
     if let Some(prefix) = path_prefix {
         if filters.path.is_none() {
             filters.path = Some(prefix.trim_end_matches('/').to_string());
@@ -1540,6 +1564,28 @@ fn git_metadata_matches(git: &RepoGitMetadata, filter: &str) -> bool {
                 .to_ascii_lowercase()
                 .contains(filter)
         })
+}
+
+fn shard_git_branch_matches(shard: &ShardEntry, filter: &str) -> bool {
+    shard.git.as_ref().is_some_and(|git| {
+        git.branch
+            .as_deref()
+            .is_some_and(|value| metadata_filter_matches(value, filter))
+    })
+}
+
+fn shard_git_origin_matches(shard: &ShardEntry, filter: &str) -> bool {
+    shard.git.as_ref().is_some_and(|git| {
+        git.origin
+            .as_deref()
+            .is_some_and(|value| metadata_filter_matches(value, filter))
+    })
+}
+
+fn metadata_filter_matches(value: &str, filter: &str) -> bool {
+    value
+        .to_ascii_lowercase()
+        .contains(&filter.to_ascii_lowercase())
 }
 
 fn add_stats(total: &mut ShardBuildStats, stats: &IndexStats) {

@@ -79,13 +79,13 @@ printf '%s\n' \
 
 ```bash
 printf '%s\n' \
-  '{"id":"search","tool":"search_auto","arguments":{"query":"repo:api symbol:AuthSession token","limit":10,"explain":true,"refresh_if_stale":true}}' \
+  '{"id":"search","tool":"search_auto","arguments":{"query":"repo:api branch:main symbol:AuthSession token","limit":10,"explain":true,"refresh_if_stale":true}}' \
   | orient client-jsonl --addr 127.0.0.1:8796
 ```
 
 ```bash
 printf '%s\n' \
-  '{"id":"searches","tool":"search_auto_batch","arguments":{"queries":["repo:api symbol:AuthSession token","repo:api path:auth token","repo:api mode:any AuthSession token"],"limit":10,"explain":true,"refresh_if_stale":true}}' \
+  '{"id":"searches","tool":"search_auto_batch","arguments":{"queries":["repo:api symbol:AuthSession token","origin:evalops/api path:auth token","repo:api mode:any AuthSession token"],"limit":10,"explain":true,"refresh_if_stale":true}}' \
   | orient client-jsonl --addr 127.0.0.1:8796
 ```
 

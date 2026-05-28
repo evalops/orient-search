@@ -3316,12 +3316,65 @@ fn runtime_shard_repo_map_reports_git_metadata() {
     let search_result = serde_json::to_string(&search.result).unwrap();
     assert!(search_result.contains("src/lib.rs"), "{search_result}");
 
+    let search_by_branch = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("search-branch"),
+        tool: "search_shards".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": shard_dir.path(),
+            "query": "unique branch token",
+            "branch": "shard-feature-branch",
+            "require_all": true
+        }),
+    });
+    assert!(
+        search_by_branch.error.is_none(),
+        "{:?}",
+        search_by_branch.error
+    );
+    let branch_result = serde_json::to_string(&search_by_branch.result).unwrap();
+    assert!(branch_result.contains("src/lib.rs"), "{branch_result}");
+
+    let search_by_origin = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("search-origin"),
+        tool: "search_shards".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": shard_dir.path(),
+            "query": "unique branch token",
+            "origin": "evalops/shard-project",
+            "require_all": true
+        }),
+    });
+    assert!(
+        search_by_origin.error.is_none(),
+        "{:?}",
+        search_by_origin.error
+    );
+    let origin_result = serde_json::to_string(&search_by_origin.result).unwrap();
+    assert!(origin_result.contains("src/lib.rs"), "{origin_result}");
+
+    let excluded_branch = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("exclude-branch"),
+        tool: "search_shards".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": shard_dir.path(),
+            "query": "unique branch token",
+            "exclude_branch": "shard-feature-branch",
+            "require_all": true
+        }),
+    });
+    assert!(
+        excluded_branch.error.is_none(),
+        "{:?}",
+        excluded_branch.error
+    );
+    assert_eq!(excluded_branch.result, Some(serde_json::json!([])));
+
     let map = runtime.dispatch(ToolRequest {
         id: serde_json::json!("map"),
         tool: "shard_repo_map".to_string(),
         arguments: serde_json::json!({
             "index_dir": shard_dir.path(),
-            "repo": "shard-project",
+            "origin": "evalops/shard-project",
             "symbols": 5,
             "tests": 5
         }),

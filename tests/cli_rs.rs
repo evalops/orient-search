@@ -2888,14 +2888,59 @@ fn cli_shard_manifest_records_git_metadata() {
         .success()
         .stdout(predicate::str::contains("src/lib.rs"));
 
+    let mut search_by_explicit_branch = Command::cargo_bin("orient").unwrap();
+    search_by_explicit_branch
+        .args([
+            "search-shards",
+            "--index-dir",
+            shard_dir.path().to_str().unwrap(),
+            "unique branch token",
+            "--branch",
+            "shard-feature-branch",
+            "--require-all",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("src/lib.rs"));
+
+    let mut search_by_explicit_origin = Command::cargo_bin("orient").unwrap();
+    search_by_explicit_origin
+        .args([
+            "search-shards",
+            "--index-dir",
+            shard_dir.path().to_str().unwrap(),
+            "unique branch token",
+            "--origin",
+            "evalops/shard-project",
+            "--require-all",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("src/lib.rs"));
+
+    let mut exclude_branch = Command::cargo_bin("orient").unwrap();
+    exclude_branch
+        .args([
+            "search-shards",
+            "--index-dir",
+            shard_dir.path().to_str().unwrap(),
+            "unique branch token",
+            "--exclude-branch",
+            "shard-feature-branch",
+            "--require-all",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::eq("[]\n"));
+
     let mut map_by_origin = Command::cargo_bin("orient").unwrap();
     map_by_origin
         .args([
             "shard-map",
             "--index-dir",
             shard_dir.path().to_str().unwrap(),
-            "--repo",
-            "shard-project",
+            "--origin",
+            "evalops/shard-project",
             "--symbols",
             "5",
             "--tests",
