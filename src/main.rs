@@ -917,6 +917,12 @@ struct CommonSearchArgs {
         alias = "exclude-uses"
     )]
     exclude_import: Vec<String>,
+    #[arg(
+        long = "exclude-content",
+        alias = "exclude-text",
+        alias = "exclude-term"
+    )]
+    exclude_content: Vec<String>,
 }
 
 fn search_filters_from_args(
@@ -984,6 +990,7 @@ fn search_filters_from_args(
             .iter()
             .map(|value| normalize_filter(value))
             .collect(),
+        exclude_content: args.exclude_content.clone(),
     })
 }
 
@@ -1231,6 +1238,7 @@ fn add_filter_retry_args(
     }
     insert_string_array_arg(arguments, "exclude_dependency", &filters.exclude_dependency);
     insert_string_array_arg(arguments, "exclude_import", &filters.exclude_import);
+    insert_string_array_arg(arguments, "exclude_content", &filters.exclude_content);
 }
 
 fn insert_string_arg(arguments: &mut Map<String, Value>, name: &str, value: Option<&String>) {

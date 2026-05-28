@@ -19,9 +19,13 @@ pub fn parse_query(input: &str) -> ParsedQuery {
             .strip_prefix('-')
             .map(|value| (true, value.to_string()))
             .unwrap_or((false, token));
-        if let Some(term) = content_term(&token, negated) {
-            terms.push(term);
-            explicit_content_terms = true;
+        if let Some(term) = content_term(&token) {
+            if negated {
+                filters.exclude_content.push(term);
+            } else {
+                terms.push(term);
+                explicit_content_terms = true;
+            }
             continue;
         }
         if apply_match_mode(&mut filters, &token, negated)
@@ -45,10 +49,7 @@ pub fn parse_query(input: &str) -> ParsedQuery {
     }
 }
 
-fn content_term(token: &str, negated: bool) -> Option<String> {
-    if negated {
-        return None;
-    }
+fn content_term(token: &str) -> Option<String> {
     let (key, value) = token.split_once(':')?;
     if !matches!(
         key.to_ascii_lowercase().as_str(),
@@ -340,6 +341,9 @@ pub fn query_with_filters_text(terms: &[String], filters: &SearchFilters) -> Str
     for value in &filters.exclude_import {
         push_query_filter(&mut pieces, "import", Some(value), true);
     }
+    for value in &filters.exclude_content {
+        push_query_filter(&mut pieces, "content", Some(value), true);
+    }
     pieces.join(" ")
 }
 
@@ -454,6 +458,7 @@ pub fn merge_filters(mut base: SearchFilters, parsed: SearchFilters) -> SearchFi
     base.exclude_origin.extend(parsed.exclude_origin);
     base.exclude_dependency.extend(parsed.exclude_dependency);
     base.exclude_import.extend(parsed.exclude_import);
+    base.exclude_content.extend(parsed.exclude_content);
     base
 }
 
@@ -610,6 +615,7 @@ mod tests {
         let negated = parse_query("-content:generated issue token");
         assert!(!negated.explicit_content_terms);
         assert_eq!(negated.terms, vec!["issue", "token"]);
+        assert_eq!(negated.filters.exclude_content, vec!["generated"]);
     }
 
     #[test]

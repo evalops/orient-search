@@ -242,6 +242,10 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         "string"
     );
     assert_eq!(
+        search["input_schema"]["properties"]["exclude_content"]["oneOf"][1]["items"]["type"],
+        "string"
+    );
+    assert_eq!(
         search["arguments"]
             .as_array()
             .unwrap()
@@ -2983,6 +2987,26 @@ fn runtime_accepts_structured_negative_search_filters() {
     assert!(!result.contains("generated/auth.rs"), "{result}");
     assert!(!result.contains("src/generated_symbol.rs"), "{result}");
 
+    let fallback_exclude_content = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("fallback-exclude-content"),
+        tool: "search".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "query": "issue token",
+            "limit": 10,
+            "exclude_content": "GeneratedSessionManager"
+        }),
+    });
+    assert!(
+        fallback_exclude_content.error.is_none(),
+        "{:?}",
+        fallback_exclude_content.error
+    );
+    let result = serde_json::to_string(&fallback_exclude_content.result).unwrap();
+    assert!(result.contains("src/auth.rs"), "{result}");
+    assert!(!result.contains("generated/auth.rs"), "{result}");
+    assert!(!result.contains("src/generated_symbol.rs"), "{result}");
+
     let alias_filters = runtime.dispatch(ToolRequest {
         id: serde_json::json!("alias-filters"),
         tool: "search".to_string(),
@@ -3019,7 +3043,8 @@ fn runtime_accepts_structured_negative_search_filters() {
             "require_all": true,
             "exclude_path": ["generated"],
             "exclude_symbol": "GeneratedSessionManager",
-            "exclude_symbol_kind": "enum"
+            "exclude_symbol_kind": "enum",
+            "exclude_text": "GeneratedSessionManager"
         }),
     });
     assert!(indexed.error.is_none(), "{:?}", indexed.error);

@@ -384,6 +384,7 @@ pub struct SearchFilters {
     pub exclude_origin: Vec<String>,
     pub exclude_dependency: Vec<String>,
     pub exclude_import: Vec<String>,
+    pub exclude_content: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -424,6 +425,7 @@ impl Default for SearchFilters {
             exclude_origin: Vec::new(),
             exclude_dependency: Vec::new(),
             exclude_import: Vec::new(),
+            exclude_content: Vec::new(),
         }
     }
 }
@@ -2573,7 +2575,9 @@ pub(crate) fn symbol_kind_filters_active(filters: &SearchFilters) -> bool {
 }
 
 pub(crate) fn content_filters_active(filters: &SearchFilters) -> bool {
-    import_filters_active(filters) || symbol_kind_filters_active(filters)
+    import_filters_active(filters)
+        || symbol_kind_filters_active(filters)
+        || !filters.exclude_content.is_empty()
 }
 
 pub(crate) fn source_content_filters_match(
@@ -2583,6 +2587,7 @@ pub(crate) fn source_content_filters_match(
 ) -> bool {
     source_import_filters_match(path, text, filters)
         && source_symbol_kind_filters_match(path, text, filters)
+        && source_excluded_content_filters_match(text, filters)
 }
 
 fn source_content_filters_match_cached(
@@ -2606,6 +2611,31 @@ pub(crate) fn source_import_filters_match(path: &str, text: &str, filters: &Sear
     }
     let hints = import_hints_from_source_texts([(path, text)]);
     import_filters_match(&hints, filters)
+}
+
+pub(crate) fn source_excluded_content_filters_match(text: &str, filters: &SearchFilters) -> bool {
+    if filters.exclude_content.is_empty() {
+        return true;
+    }
+    let text_lower = text.to_ascii_lowercase();
+    let mut normalized_text = None;
+    for excluded in filters.exclude_content.iter().map(|value| value.trim()) {
+        if excluded.is_empty() {
+            continue;
+        }
+        if text_lower.contains(&excluded.to_ascii_lowercase()) {
+            return false;
+        }
+        let normalized = normalize_phrase_text(excluded);
+        if normalized.is_empty() {
+            continue;
+        }
+        let normalized_text = normalized_text.get_or_insert_with(|| normalize_phrase_text(text));
+        if normalized_text.contains(&normalized) {
+            return false;
+        }
+    }
+    true
 }
 
 pub(crate) fn source_symbol_kind_filters_match(
@@ -4435,6 +4465,7 @@ fn append_search_filter_cli_args(
     append_repeated_string_cli_arg(parts, args, "exclude_origin", "--exclude-origin");
     append_repeated_string_cli_arg(parts, args, "exclude_dependency", "--exclude-dependency");
     append_repeated_string_cli_arg(parts, args, "exclude_import", "--exclude-import");
+    append_repeated_string_cli_arg(parts, args, "exclude_content", "--exclude-content");
     append_bool_cli_arg(parts, args, "refresh_if_stale", "--refresh-if-stale");
 }
 

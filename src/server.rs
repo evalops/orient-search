@@ -1283,6 +1283,9 @@ fn string_list_argument(name: &str) -> bool {
             | "exclude_modules"
             | "exclude_use"
             | "exclude_uses"
+            | "exclude_content"
+            | "exclude_text"
+            | "exclude_term"
     )
 }
 
@@ -1464,6 +1467,10 @@ fn argument_description(tool_name: &str, name: &str) -> &'static str {
         "exclude_import" => "Imported module or list of module substrings to exclude.",
         "exclude_module" | "exclude_modules" | "exclude_imports" | "exclude_use"
         | "exclude_uses" => "Alias for exclude_import.",
+        "exclude_content" => {
+            "Content substring, quoted phrase, or list of content terms to exclude."
+        }
+        "exclude_text" | "exclude_term" => "Alias for exclude_content.",
         "root" | "discover_root" => "Workspace root to scan for repositories.",
         "discover_roots" => "Workspace roots to scan for repositories.",
         "repos" => "Explicit repository roots to add to a shard directory.",
@@ -4355,6 +4362,9 @@ const SEARCH_OPTIONAL_ARGS: &[&str] = &[
     "exclude_modules",
     "exclude_use",
     "exclude_uses",
+    "exclude_content",
+    "exclude_text",
+    "exclude_term",
 ];
 
 const SEARCH_TARGET_OPTIONAL_ARGS: &[&str] = &[
@@ -4415,6 +4425,9 @@ const SEARCH_TARGET_OPTIONAL_ARGS: &[&str] = &[
     "exclude_modules",
     "exclude_use",
     "exclude_uses",
+    "exclude_content",
+    "exclude_text",
+    "exclude_term",
 ];
 
 const READ_TARGET_OPTIONAL_ARGS: &[&str] = &["repo", "index", "index_dir", "start", "lines"];
@@ -4491,6 +4504,9 @@ const SYMBOL_TARGET_OPTIONAL_ARGS: &[&str] = &[
     "exclude_modules",
     "exclude_use",
     "exclude_uses",
+    "exclude_content",
+    "exclude_text",
+    "exclude_term",
 ];
 
 const SYMBOL_INDEX_OPTIONAL_ARGS: &[&str] = &[
@@ -4543,6 +4559,9 @@ const SYMBOL_INDEX_OPTIONAL_ARGS: &[&str] = &[
     "exclude_modules",
     "exclude_use",
     "exclude_uses",
+    "exclude_content",
+    "exclude_text",
+    "exclude_term",
 ];
 
 const SEARCH_AUTO_OPTIONAL_ARGS: &[&str] = &[
@@ -4604,6 +4623,9 @@ const SEARCH_AUTO_OPTIONAL_ARGS: &[&str] = &[
     "exclude_modules",
     "exclude_use",
     "exclude_uses",
+    "exclude_content",
+    "exclude_text",
+    "exclude_term",
 ];
 
 const SEARCH_INDEX_OPTIONAL_ARGS: &[&str] = &[
@@ -4662,6 +4684,9 @@ const SEARCH_INDEX_OPTIONAL_ARGS: &[&str] = &[
     "exclude_modules",
     "exclude_use",
     "exclude_uses",
+    "exclude_content",
+    "exclude_text",
+    "exclude_term",
 ];
 
 const PLAN_OPTIONAL_ARGS: &[&str] = &[
@@ -4714,6 +4739,9 @@ const PLAN_OPTIONAL_ARGS: &[&str] = &[
     "exclude_modules",
     "exclude_use",
     "exclude_uses",
+    "exclude_content",
+    "exclude_text",
+    "exclude_term",
 ];
 
 const PLAN_TARGET_OPTIONAL_ARGS: &[&str] = &[
@@ -4770,6 +4798,9 @@ const PLAN_TARGET_OPTIONAL_ARGS: &[&str] = &[
     "exclude_modules",
     "exclude_use",
     "exclude_uses",
+    "exclude_content",
+    "exclude_text",
+    "exclude_term",
 ];
 
 const PLAN_INDEX_OPTIONAL_ARGS: &[&str] = &[
@@ -4824,6 +4855,9 @@ const PLAN_INDEX_OPTIONAL_ARGS: &[&str] = &[
     "exclude_modules",
     "exclude_use",
     "exclude_uses",
+    "exclude_content",
+    "exclude_text",
+    "exclude_term",
 ];
 
 const SHARD_BUILD_OPTIONAL_ARGS: &[&str] = &[
@@ -5414,6 +5448,10 @@ fn search_filters(arguments: &Value, allow_repo_alias: bool) -> Result<SearchFil
                 "exclude_use",
                 "exclude_uses",
             ],
+        )?,
+        exclude_content: optional_string_list_arg_any(
+            arguments,
+            &["exclude_content", "exclude_text", "exclude_term"],
         )?,
         ..SearchFilters::default()
     })

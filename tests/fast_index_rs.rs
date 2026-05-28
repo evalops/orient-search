@@ -1308,6 +1308,34 @@ fn query_language_filters_fallback_and_indexed_search() {
         filter.field == "generated" && filter.value == "true" && filter.candidate_matches == Some(1)
     }));
 
+    let fallback_without_generated_content = search_repo_fast_filtered(
+        repo.path(),
+        "issue token -content:generated",
+        10,
+        &Default::default(),
+    )
+    .unwrap();
+    assert!(
+        !result_paths(&fallback_without_generated_content)
+            .contains(&"src/generated/session.generated.rs".to_string())
+    );
+    let indexed_without_generated_content = indexed
+        .search_filtered("issue token -content:generated", 10, &Default::default())
+        .unwrap();
+    assert!(
+        !result_paths(&indexed_without_generated_content)
+            .contains(&"src/generated/session.generated.rs".to_string())
+    );
+    let content_exclusion_plan = indexed
+        .query_plan("issue token -content:generated", &Default::default())
+        .unwrap();
+    assert!(content_exclusion_plan.active_filters.iter().any(|filter| {
+        filter.field == "content"
+            && filter.value == "generated"
+            && filter.negated
+            && filter.candidate_rejections == Some(1)
+    }));
+
     let fallback_without_markdown = search_repo_fast_filtered(
         repo.path(),
         "-lang:md SessionManager",

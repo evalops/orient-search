@@ -13,9 +13,9 @@ use crate::repo_index::{
     regular_file_metadata, related_query_terms_symbol_and_filters, related_stem_terms,
     repo_map_seed_paths, repo_matches, result_matches_all_tokens, result_matches_symbol_filters,
     round4, score_filter_only_path_match, select_repo_brief_import_hints,
-    select_repo_map_top_symbols, source_import_filters_match, symbol_exact_phrase_bonus,
-    symbol_matches_related_filters, symbol_query_match_score, token_counts, tokenize,
-    unique_query_tokens,
+    select_repo_map_top_symbols, source_excluded_content_filters_match,
+    source_import_filters_match, symbol_exact_phrase_bonus, symbol_matches_related_filters,
+    symbol_query_match_score, token_counts, tokenize, unique_query_tokens,
 };
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use anyhow::{Context, Result};
@@ -2279,6 +2279,9 @@ fn query_plan_filters(filters: &SearchFilters) -> Vec<QueryPlanFilter> {
     for value in &filters.exclude_import {
         active.push(plan_filter("import", value, true));
     }
+    for value in &filters.exclude_content {
+        active.push(plan_filter("content", value, true));
+    }
     active
 }
 
@@ -2334,6 +2337,16 @@ fn indexed_path_matches_plan_filter(file: &IndexedPath, filter: &QueryPlanFilter
         "symbol" => indexed_path_matches_symbol_filter(file, &filter.value),
         "symbol_kind" => indexed_path_matches_symbol_kind_filter(file, &filter.value),
         "import" => indexed_path_matches_import_filter(file, &filter.value),
+        "content" => {
+            !filter.value.trim().is_empty()
+                && !source_excluded_content_filters_match(
+                    &file.content,
+                    &SearchFilters {
+                        exclude_content: vec![filter.value.clone()],
+                        ..SearchFilters::default()
+                    },
+                )
+        }
         "test" => {
             let wanted = matches!(
                 filter.value.to_ascii_lowercase().as_str(),
@@ -2439,6 +2452,7 @@ fn indexed_file_matches_filters(file: &IndexedPath, filters: &SearchFilters) -> 
         filters,
     ) && indexed_path_matches_symbol_kind_filters(file, filters)
         && source_import_filters_match(&file.path, &file.content, filters)
+        && source_excluded_content_filters_match(&file.content, filters)
 }
 
 fn indexed_filter_only_result(file: &IndexedPath, filters: &SearchFilters) -> Option<SearchResult> {
@@ -2545,6 +2559,7 @@ fn indexed_file_matches_related_symbol_filters(
         Some(&file.language),
         filters,
     ) && source_import_filters_match(&file.path, &file.content, filters)
+        && source_excluded_content_filters_match(&file.content, filters)
 }
 
 fn indexed_symbol_matches_related_filters(symbol: &IndexedSymbol, filters: &SearchFilters) -> bool {
@@ -3097,6 +3112,7 @@ fn scope_allows_required_implicit_symbol_posting(filters: &SearchFilters) -> boo
         || !filters.exclude_repo.is_empty()
         || !filters.exclude_dependency.is_empty()
         || !filters.exclude_import.is_empty()
+        || !filters.exclude_content.is_empty()
     {
         return false;
     }

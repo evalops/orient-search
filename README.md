@@ -67,7 +67,7 @@ JSON-lines requests look like this:
 Useful filters: `repo:`, `path:`/`dir:`, `file:`, `lang:`, `ext:`, `symbol:`,
 `kind:`/`type:`, `dep:`, `import:`, `test:`, `generated:`, `is:test`,
 `is:source`, `is:generated`, `content:`, quoted phrases, negative filters like
-`-path:vendor`, and `mode:any` for broad orientation.
+`-path:vendor` and `-content:generated`, and `mode:any` for broad orientation.
 
 ## Eval
 

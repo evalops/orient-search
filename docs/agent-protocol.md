@@ -84,11 +84,16 @@ CLI query positionals accept leading negative filters directly, so `orient searc
 `generated:true` / `is:generated` matches common generated-code paths and suffixes such as `generated/`, `__generated__/`, `codegen/`, `.generated.*`, `.gen.*`, `.pb.go`, and `.g.dart`; `generated:false` / `-is:generated` excludes them when the agent wants hand-authored source.
 Live fallback search pushes safe `file:`, `path:`, `ext:`, `lang:`, `test:`, `-file:`, and `-path:` scopes into `rg` globs first, then rechecks every candidate with Orient's query matcher. This keeps scoped searches fast on large workspaces without making the glob layer authoritative.
 
+Use `content:` / `text:` / `term:` when a word or quoted phrase must match file
+contents rather than path-like filters. Use `-content:` / `-text:` / `-term:`
+to drop files containing noisy boilerplate such as generated markers while
+keeping the rest of the query intact.
+
 Structured JSON arguments accept the same common aliases for wrapper authors:
 `lang`/`language`, `ext`/`extension`, `kind`/`type`/`symbol_kind`,
 `dep`/`deps`/`dependency`, and `module`/`import`/`use`, plus matching
 `filename` / `file_name`, `directory` / `folder`, normalized language shorthands such as `rs`, `ts`, `py`, `js`, and `md`, and `exclude_*` aliases such as `exclude_folder`, `exclude_lang`, `exclude_ext`, `exclude_kind`,
-`exclude_dep`, and `exclude_module`. Symbol-kind values normalize common
+`exclude_dep`, `exclude_module`, and `exclude_content`. Symbol-kind values normalize common
 singular/plural forms such as `function`/`functions`, `class`/`classes`, and
 `interface`/`interfaces`.
 CLI flags accept the same common aliases, including `--lang`, `--ext`,
