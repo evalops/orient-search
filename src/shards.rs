@@ -1006,7 +1006,84 @@ pub(crate) fn load_manifest(index_dir: &Path) -> Result<ShardManifest> {
         "unsupported shard manifest version {}",
         manifest.version
     );
+    validate_manifest(&manifest)?;
     Ok(manifest)
+}
+
+fn validate_manifest(manifest: &ShardManifest) -> Result<()> {
+    let mut shard_names = HashSet::new();
+    let mut shard_indexes = HashSet::new();
+    for shard in &manifest.shards {
+        anyhow::ensure!(!shard.name.trim().is_empty(), "shard name cannot be empty");
+        anyhow::ensure!(
+            !shard.root.as_os_str().is_empty(),
+            "shard root cannot be empty for {}",
+            shard.name
+        );
+        anyhow::ensure!(
+            shard_names.insert(shard.name.clone()),
+            "duplicate shard name {}",
+            shard.name
+        );
+        anyhow::ensure!(
+            valid_manifest_file_name(&shard.index),
+            "invalid shard manifest index path {}",
+            shard.index
+        );
+        anyhow::ensure!(
+            shard_indexes.insert(shard.index.clone()),
+            "duplicate shard index {}",
+            shard.index
+        );
+
+        let mut alias_names = HashSet::new();
+        for alias in &shard.aliases {
+            anyhow::ensure!(
+                !alias.name.trim().is_empty(),
+                "alias name cannot be empty for shard {}",
+                shard.name
+            );
+            anyhow::ensure!(
+                alias_names.insert(alias.name.clone()),
+                "duplicate alias {} in shard {}",
+                alias.name,
+                shard.name
+            );
+            if let Some(prefix) = &alias.path_prefix {
+                anyhow::ensure!(
+                    valid_manifest_relative_prefix(prefix),
+                    "invalid alias path prefix {} in shard {}",
+                    prefix,
+                    shard.name
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+fn valid_manifest_file_name(value: &str) -> bool {
+    let path = Path::new(value);
+    !value.trim().is_empty()
+        && path.is_relative()
+        && path
+            .components()
+            .all(|component| matches!(component, std::path::Component::Normal(_)))
+}
+
+fn valid_manifest_relative_prefix(value: &str) -> bool {
+    let trimmed = value.trim_end_matches('/');
+    if trimmed.is_empty() {
+        return true;
+    }
+    let path = Path::new(trimmed);
+    path.is_relative()
+        && path.components().all(|component| {
+            matches!(
+                component,
+                std::path::Component::Normal(_) | std::path::Component::CurDir
+            )
+        })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]

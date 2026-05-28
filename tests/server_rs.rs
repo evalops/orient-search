@@ -1859,6 +1859,72 @@ fn shard_manifest_save_replaces_existing_file_without_leaving_temp_files() {
 }
 
 #[test]
+fn shard_manifest_rejects_unsafe_or_ambiguous_entries() {
+    let shard_dir = tempfile::tempdir().unwrap();
+    let runtime = ToolRuntime::default();
+    let manifest_path = shard_dir.path().join("manifest.json");
+
+    fs::write(
+        &manifest_path,
+        serde_json::to_vec(&serde_json::json!({
+            "version": 1,
+            "shards": [{
+                "name": "bad",
+                "root": shard_dir.path(),
+                "index": "../escape.orient",
+                "aliases": []
+            }]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let response = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("status"),
+        tool: "shard_status".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": shard_dir.path()
+        }),
+    });
+    let error = response.error.unwrap();
+    assert!(
+        error.contains("invalid shard manifest index path"),
+        "{error}"
+    );
+
+    fs::write(
+        &manifest_path,
+        serde_json::to_vec(&serde_json::json!({
+            "version": 1,
+            "shards": [
+                {
+                    "name": "duplicate",
+                    "root": shard_dir.path(),
+                    "index": "one.orient",
+                    "aliases": []
+                },
+                {
+                    "name": "duplicate",
+                    "root": shard_dir.path(),
+                    "index": "two.orient",
+                    "aliases": []
+                }
+            ]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let response = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("status"),
+        tool: "shard_status".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": shard_dir.path()
+        }),
+    });
+    let error = response.error.unwrap();
+    assert!(error.contains("duplicate shard name"), "{error}");
+}
+
+#[test]
 fn runtime_serves_parallel_warm_shard_searches() {
     let root = tempfile::tempdir().unwrap();
     let mut repos = Vec::new();
