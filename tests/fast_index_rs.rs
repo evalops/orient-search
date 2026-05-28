@@ -636,6 +636,16 @@ fn indexed_symbol_lookup_returns_definition_paths() {
     assert_eq!(symbols[0].kind, "struct");
     assert_eq!(symbols[0].path, "src/auth.rs");
     assert_eq!(symbols[0].line, 1);
+    assert!(
+        symbols
+            .iter()
+            .any(|symbol| symbol.name == "session_manager_helper"),
+        "{symbols:?}"
+    );
+
+    let exact_limited = index.find_symbol("SessionManager", 1);
+    assert_eq!(exact_limited.len(), 1);
+    assert_eq!(exact_limited[0].name, "SessionManager");
 
     let normalized = index.find_symbol("issue token", 10);
     assert_eq!(normalized[0].name, "issue_token");

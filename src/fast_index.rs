@@ -729,43 +729,42 @@ impl FastIndex {
         }
 
         let mut scored = Vec::new();
+        let mut seen = HashSet::new();
 
-        for file in &self.files {
-            for symbol in &file.symbols {
-                let score = if symbol.name == name {
-                    100
-                } else if symbol.normalized == needle {
-                    90
-                } else if symbol.normalized.contains(&needle) {
-                    60
-                } else {
-                    0
+        if let Some(postings) = self.symbol_postings.get(&needle) {
+            for posting in postings {
+                let Some(file) = self.files.get(posting.file_id as usize) else {
+                    continue;
                 };
-                if score > 0 {
-                    scored.push((
-                        score,
-                        Symbol {
-                            name: symbol.name.clone(),
-                            kind: symbol.kind.clone(),
-                            path: file.path.clone(),
-                            line: symbol.line,
-                        },
-                    ));
+                for symbol in &file.symbols {
+                    if symbol.normalized != needle {
+                        continue;
+                    }
+                    push_symbol_match(name, file, symbol, 90, &mut scored, &mut seen);
                 }
             }
         }
 
-        scored.sort_by(|a, b| {
-            b.0.cmp(&a.0)
-                .then_with(|| a.1.path.cmp(&b.1.path))
-                .then_with(|| a.1.line.cmp(&b.1.line))
-                .then_with(|| a.1.name.cmp(&b.1.name))
-        });
-        scored
-            .into_iter()
-            .take(limit)
-            .map(|(_, symbol)| symbol)
-            .collect()
+        if scored.len() < limit {
+            for file in &self.files {
+                for symbol in &file.symbols {
+                    let score = if symbol.name == name {
+                        100
+                    } else if symbol.normalized == needle {
+                        90
+                    } else if symbol.normalized.contains(&needle) {
+                        60
+                    } else {
+                        0
+                    };
+                    if score > 0 {
+                        push_symbol_match(name, file, symbol, score, &mut scored, &mut seen);
+                    }
+                }
+            }
+        }
+
+        scored_symbols(scored, limit)
     }
 
     pub fn read_range(
@@ -2069,6 +2068,42 @@ fn rank_signal(kind: &str, value: &str, score: f64) -> RankSignal {
         value: value.to_string(),
         score: round4(score),
     }
+}
+
+fn push_symbol_match(
+    query: &str,
+    file: &IndexedPath,
+    symbol: &IndexedSymbol,
+    score: i32,
+    scored: &mut Vec<(i32, Symbol)>,
+    seen: &mut HashSet<(String, usize, String)>,
+) {
+    if score <= 0 || !seen.insert((file.path.clone(), symbol.line, symbol.name.clone())) {
+        return;
+    }
+    scored.push((
+        if symbol.name == query { 100 } else { score },
+        Symbol {
+            name: symbol.name.clone(),
+            kind: symbol.kind.clone(),
+            path: file.path.clone(),
+            line: symbol.line,
+        },
+    ));
+}
+
+fn scored_symbols(mut scored: Vec<(i32, Symbol)>, limit: usize) -> Vec<Symbol> {
+    scored.sort_by(|a, b| {
+        b.0.cmp(&a.0)
+            .then_with(|| a.1.path.cmp(&b.1.path))
+            .then_with(|| a.1.line.cmp(&b.1.line))
+            .then_with(|| a.1.name.cmp(&b.1.name))
+    });
+    scored
+        .into_iter()
+        .take(limit)
+        .map(|(_, symbol)| symbol)
+        .collect()
 }
 
 fn query_plan_filters(filters: &SearchFilters) -> Vec<QueryPlanFilter> {
