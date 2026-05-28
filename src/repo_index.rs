@@ -2742,6 +2742,9 @@ pub(crate) fn extract_symbols(path: &str, text: &str, language: &str) -> Vec<Sym
     if language == "java" {
         return extract_java_symbols(path, text);
     }
+    if !language_supports_generic_symbols(language) {
+        return Vec::new();
+    }
     text.lines()
         .enumerate()
         .filter_map(|(index, line)| {
@@ -2754,6 +2757,10 @@ pub(crate) fn extract_symbols(path: &str, text: &str, language: &str) -> Vec<Sym
             })
         })
         .collect()
+}
+
+fn language_supports_generic_symbols(language: &str) -> bool {
+    matches!(language, "rust" | "javascript" | "typescript")
 }
 
 fn generic_symbol_kind(keyword: &str) -> &'static str {

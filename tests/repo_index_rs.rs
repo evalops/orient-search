@@ -442,6 +442,57 @@ export const useSearch = () => null;
 }
 
 #[test]
+fn prose_files_do_not_pollute_symbol_indexes_or_repo_maps() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/lib.rs"),
+        "pub struct RealSessionManager;\npub fn issue_token() {}\n",
+    );
+    write(
+        &repo.path().join("README.md"),
+        "# Benchmark\n\nThis paragraph mentions class FakeMarkdownSymbol and export type FakeType.\n",
+    );
+    write(
+        &repo.path().join("docs/guide.md"),
+        "## Usage\n\nUse class FakeGuideSymbol when explaining examples, not as code.\n",
+    );
+    write(&repo.path().join("config.yaml"), "class: FakeYamlSymbol\n");
+
+    let live = RepoIndexer::new(repo.path()).build().unwrap();
+    assert_symbol(
+        &live.find_symbol("RealSessionManager", 10)[0],
+        "src/lib.rs",
+        "struct",
+    );
+    assert!(live.find_symbol("FakeMarkdownSymbol", 10).is_empty());
+    assert!(live.find_symbol("FakeGuideSymbol", 10).is_empty());
+    assert!(live.find_symbol("FakeYamlSymbol", 10).is_empty());
+    assert!(
+        live.repo_map(10, 10)
+            .top_symbols
+            .iter()
+            .all(|symbol| !symbol.path.ends_with(".md") && !symbol.path.ends_with(".yaml"))
+    );
+
+    let indexed = FastIndex::build(repo.path()).unwrap();
+    assert_symbol(
+        &indexed.find_symbol("RealSessionManager", 10)[0],
+        "src/lib.rs",
+        "struct",
+    );
+    assert!(indexed.find_symbol("FakeMarkdownSymbol", 10).is_empty());
+    assert!(indexed.find_symbol("FakeGuideSymbol", 10).is_empty());
+    assert!(indexed.find_symbol("FakeYamlSymbol", 10).is_empty());
+    assert!(
+        indexed
+            .repo_map(10, 10)
+            .top_symbols
+            .iter()
+            .all(|symbol| !symbol.path.ends_with(".md") && !symbol.path.ends_with(".yaml"))
+    );
+}
+
+#[test]
 fn fallback_line_range_tracks_displayed_contiguous_snippet_block() {
     let repo = tempfile::tempdir().unwrap();
     let mut source = String::from("alpha first hit\n");
