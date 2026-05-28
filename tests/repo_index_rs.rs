@@ -316,6 +316,63 @@ public class Gateway {
     assert!(indexed_results[0].reason.contains("symbol:chargeCard"));
 }
 
+#[test]
+fn generic_extractor_indexes_traits_types_and_exported_symbols() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/lib.rs"),
+        r#"
+pub trait SearchBackend {
+    fn search(&self);
+}
+"#,
+    );
+    write(
+        &repo.path().join("types.ts"),
+        r#"
+export type SearchResult = { path: string };
+export interface SearchClient {}
+export const useSearch = () => null;
+"#,
+    );
+
+    let live = RepoIndexer::new(repo.path()).build().unwrap();
+    assert_symbol(
+        &live.find_symbol("SearchBackend", 10)[0],
+        "src/lib.rs",
+        "trait",
+    );
+    assert_symbol(&live.find_symbol("SearchResult", 10)[0], "types.ts", "type");
+    assert_symbol(
+        &live.find_symbol("SearchClient", 10)[0],
+        "types.ts",
+        "interface",
+    );
+    assert_symbol(
+        &live.find_symbol("useSearch", 10)[0],
+        "types.ts",
+        "function",
+    );
+
+    let fallback =
+        search_repo_fast_filtered(repo.path(), "symbol:SearchBackend", 5, &Default::default())
+            .unwrap();
+    assert_eq!(fallback[0].path, "src/lib.rs");
+    assert!(fallback[0].reason.contains("symbol:SearchBackend"));
+
+    let indexed = FastIndex::build(repo.path()).unwrap();
+    assert_symbol(
+        &indexed.find_symbol("SearchResult", 10)[0],
+        "types.ts",
+        "type",
+    );
+    let indexed_results = indexed
+        .search_filtered("symbol:useSearch", 5, &Default::default())
+        .unwrap();
+    assert_eq!(indexed_results[0].path, "types.ts");
+    assert!(indexed_results[0].reason.contains("symbol:useSearch"));
+}
+
 fn assert_symbol(symbol: &orient::repo_index::Symbol, path: &str, kind: &str) {
     assert_eq!(symbol.path, path);
     assert_eq!(symbol.kind, kind);

@@ -24,7 +24,7 @@ const RIPGREP_TIMEOUT: Duration = Duration::from_millis(250);
 const RIPGREP_POLL_INTERVAL: Duration = Duration::from_millis(5);
 static TOKEN_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[A-Za-z][A-Za-z0-9_]*").unwrap());
 static SYMBOL_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\b(?:pub\s+)?(?:async\s+)?(?:fn|function|class|interface|struct|enum|const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)").unwrap()
+    Regex::new(r"\b(?:(?:pub|export|default|declare|async)\s+)*(fn|function|class|interface|struct|enum|trait|type|const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)").unwrap()
 });
 static PYTHON_SYMBOL_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^\s*(class|def|async\s+def)\s+([A-Za-z_][A-Za-z0-9_]*)").unwrap()
@@ -2311,23 +2311,26 @@ pub(crate) fn extract_symbols(path: &str, text: &str, language: &str) -> Vec<Sym
         .enumerate()
         .filter_map(|(index, line)| {
             let capture = SYMBOL_RE.captures(line)?;
-            let kind = if line.contains("class ") {
-                "class"
-            } else if line.contains("struct ") {
-                "struct"
-            } else if line.contains("enum ") {
-                "enum"
-            } else {
-                "function"
-            };
             Some(Symbol {
-                name: capture.get(1)?.as_str().to_string(),
-                kind: kind.to_string(),
+                name: capture.get(2)?.as_str().to_string(),
+                kind: generic_symbol_kind(capture.get(1)?.as_str()).to_string(),
                 path: path.to_string(),
                 line: index + 1,
             })
         })
         .collect()
+}
+
+fn generic_symbol_kind(keyword: &str) -> &'static str {
+    match keyword {
+        "class" => "class",
+        "interface" => "interface",
+        "struct" => "struct",
+        "enum" => "enum",
+        "trait" => "trait",
+        "type" => "type",
+        _ => "function",
+    }
 }
 
 fn extract_ruby_symbols(path: &str, text: &str) -> Vec<Symbol> {
@@ -2424,22 +2427,19 @@ fn extract_java_symbols(path: &str, text: &str) -> Vec<Symbol> {
     let mut symbols = Vec::new();
     for (index, line) in text.lines().enumerate() {
         if let Some(capture) = SYMBOL_RE.captures(line) {
-            let kind = if line.contains("interface ") {
-                "interface"
-            } else if line.contains("enum ") {
-                "enum"
-            } else if line.contains("class ") {
-                "class"
-            } else {
-                "function"
-            };
             symbols.push(Symbol {
                 name: capture
-                    .get(1)
+                    .get(2)
                     .map(|value| value.as_str())
                     .unwrap_or_default()
                     .to_string(),
-                kind: kind.to_string(),
+                kind: generic_symbol_kind(
+                    capture
+                        .get(1)
+                        .map(|value| value.as_str())
+                        .unwrap_or_default(),
+                )
+                .to_string(),
                 path: path.to_string(),
                 line: index + 1,
             });
@@ -2960,7 +2960,7 @@ pub(crate) fn is_important_file(path: &str) -> bool {
 
 pub(crate) fn symbol_kind_rank(kind: &str) -> usize {
     match kind {
-        "class" | "struct" | "enum" | "interface" => 0,
+        "class" | "struct" | "enum" | "interface" | "trait" | "type" => 0,
         "function" => 1,
         _ => 2,
     }
