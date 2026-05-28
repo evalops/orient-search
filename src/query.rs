@@ -131,9 +131,13 @@ fn apply_filter(filters: &mut SearchFilters, token: &str, negated: bool) -> bool
         }
         (false, "test" | "tests") => filters.test = Some(parse_boolish(&value).unwrap_or(true)),
         (false, "is") => match test_filter_from_is_value(&value) {
-            Some(value) => filters.test = Some(value),
+            Some(IsFilter::Test(value)) => filters.test = Some(value),
+            Some(IsFilter::Generated(value)) => filters.generated = Some(value),
             None => return false,
         },
+        (false, "generated" | "generated_code" | "generated-code") => {
+            filters.generated = Some(parse_boolish(&value).unwrap_or(true))
+        }
         (true, "file" | "filename" | "file_name" | "basename") => filters.exclude_file.push(value),
         (true, "path" | "dir" | "directory" | "folder") => filters.exclude_path.push(value),
         (true, "lang" | "language") => filters
@@ -164,18 +168,29 @@ fn apply_filter(filters: &mut SearchFilters, token: &str, negated: bool) -> bool
         }
         (true, "test" | "tests") => filters.test = Some(false),
         (true, "is") => match test_filter_from_is_value(&value) {
-            Some(value) => filters.test = Some(!value),
+            Some(IsFilter::Test(value)) => filters.test = Some(!value),
+            Some(IsFilter::Generated(value)) => filters.generated = Some(!value),
             None => return false,
         },
+        (true, "generated" | "generated_code" | "generated-code") => {
+            filters.generated = Some(false)
+        }
         _ => return false,
     }
     true
 }
 
-fn test_filter_from_is_value(value: &str) -> Option<bool> {
+enum IsFilter {
+    Test(bool),
+    Generated(bool),
+}
+
+fn test_filter_from_is_value(value: &str) -> Option<IsFilter> {
     match value.to_ascii_lowercase().as_str() {
-        "test" | "tests" | "spec" | "specs" => Some(true),
-        "source" | "src" | "code" | "prod" | "production" => Some(false),
+        "test" | "tests" | "spec" | "specs" => Some(IsFilter::Test(true)),
+        "source" | "src" | "code" | "prod" | "production" => Some(IsFilter::Test(false)),
+        "generated" | "gen" | "codegen" | "autogen" => Some(IsFilter::Generated(true)),
+        "authored" | "manual" | "handwritten" => Some(IsFilter::Generated(false)),
         _ => None,
     }
 }
@@ -288,6 +303,9 @@ pub fn query_with_filters_text(terms: &[String], filters: &SearchFilters) -> Str
     push_query_filter(&mut pieces, "import", filters.import.as_deref(), false);
     if let Some(test) = filters.test {
         pieces.push(format!("test:{test}"));
+    }
+    if let Some(generated) = filters.generated {
+        pieces.push(format!("generated:{generated}"));
     }
     for value in &filters.exclude_file {
         push_query_filter(&mut pieces, "file", Some(value), true);
@@ -415,6 +433,9 @@ pub fn merge_filters(mut base: SearchFilters, parsed: SearchFilters) -> SearchFi
     }
     if parsed.test.is_some() {
         base.test = parsed.test;
+    }
+    if parsed.generated.is_some() {
+        base.generated = parsed.generated;
     }
     if base.match_any || parsed.match_any {
         base.match_any |= parsed.match_any;
@@ -552,9 +573,21 @@ mod tests {
         let negated = parse_query("-is:test issue token");
         assert_eq!(negated.filters.test, Some(false));
 
-        let unknown = parse_query("is:generated issue token");
-        assert_eq!(unknown.terms, vec!["is:generated", "issue", "token"]);
+        let generated = parse_query("is:generated issue token");
+        assert_eq!(generated.terms, vec!["issue", "token"]);
+        assert_eq!(generated.filters.generated, Some(true));
+
+        let authored = parse_query("-is:generated issue token");
+        assert_eq!(authored.terms, vec!["issue", "token"]);
+        assert_eq!(authored.filters.generated, Some(false));
+
+        let generated_bool = parse_query("generated:false issue token");
+        assert_eq!(generated_bool.filters.generated, Some(false));
+
+        let unknown = parse_query("is:vendored issue token");
+        assert_eq!(unknown.terms, vec!["is:vendored", "issue", "token"]);
         assert_eq!(unknown.filters.test, None);
+        assert_eq!(unknown.filters.generated, None);
     }
 
     #[test]

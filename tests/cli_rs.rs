@@ -1445,6 +1445,8 @@ fn cli_search_surfaces_accept_structured_filters() {
             "functions",
             "--test",
             "false",
+            "--generated",
+            "false",
             "--exclude-file",
             "generated",
             "--exclude-path",
@@ -1504,6 +1506,8 @@ fn cli_search_surfaces_accept_structured_filters() {
             "--type",
             "functions",
             "--test",
+            "false",
+            "--generated",
             "false",
             "--exclude-file",
             "generated",
@@ -1717,6 +1721,8 @@ fn cli_search_surfaces_accept_structured_filters() {
             "SessionManager",
             "--test",
             "false",
+            "--generated",
+            "false",
             "--exclude-file",
             "generated",
             "--exclude-path",
@@ -1772,6 +1778,8 @@ fn cli_search_surfaces_accept_structured_filters() {
             "SessionManager",
             "--test",
             "false",
+            "--generated",
+            "false",
             "--exclude-file",
             "generated",
             "issue token",
@@ -1779,6 +1787,20 @@ fn cli_search_surfaces_accept_structured_filters() {
         .assert()
         .success()
         .stdout(predicate::str::contains("\"result_count\":1"));
+
+    let mut generated_filter_only = Command::cargo_bin("orient").unwrap();
+    generated_filter_only
+        .args([
+            "indexed-search",
+            "--index",
+            index_path.to_str().unwrap(),
+            "is:generated",
+            "--explain",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("src/generated.rs"))
+        .stdout(predicate::str::contains("generated_filter"));
 }
 
 #[test]

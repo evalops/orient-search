@@ -841,6 +841,8 @@ struct CommonSearchArgs {
     #[arg(long)]
     test: Option<bool>,
     #[arg(long)]
+    generated: Option<bool>,
+    #[arg(long)]
     require_all: bool,
     #[arg(long, conflicts_with = "require_all")]
     any_terms: bool,
@@ -946,6 +948,7 @@ fn search_filters_from_args(
             .map(|value| normalize_filter(value)),
         import: args.import.as_ref().map(|value| normalize_filter(value)),
         test: args.test,
+        generated: args.generated,
         require_all: args.require_all && !args.any_terms,
         match_any: args.any_terms,
         snippet: snippet_mode_arg(&args.snippet)?,
@@ -1149,6 +1152,7 @@ fn cli_relaxed_filter_field(kind: &str) -> Option<&'static str> {
         "relax_language_filter" => Some("language"),
         "relax_extension_filter" => Some("extension"),
         "relax_test_filter" => Some("test"),
+        "relax_generated_filter" => Some("generated"),
         "relax_symbol_kind_filter" => Some("symbol_kind"),
         "relax_repo_filter" => Some("repo"),
         "relax_branch_filter" => Some("branch"),
@@ -1200,6 +1204,11 @@ fn add_filter_retry_args(
         && let Some(test) = filters.test
     {
         arguments.insert("test".to_string(), serde_json::json!(test));
+    }
+    if skip_field != Some("generated")
+        && let Some(generated) = filters.generated
+    {
+        arguments.insert("generated".to_string(), serde_json::json!(generated));
     }
     insert_string_array_arg(arguments, "exclude_file", &filters.exclude_file);
     insert_string_array_arg(arguments, "exclude_path", &filters.exclude_path);

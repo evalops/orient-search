@@ -335,6 +335,7 @@ pub struct SearchFilters {
     pub dependency: Option<String>,
     pub import: Option<String>,
     pub test: Option<bool>,
+    pub generated: Option<bool>,
     pub require_all: bool,
     pub match_any: bool,
     pub snippet: SnippetMode,
@@ -374,6 +375,7 @@ impl Default for SearchFilters {
             dependency: None,
             import: None,
             test: None,
+            generated: None,
             require_all: false,
             match_any: false,
             snippet: SnippetMode::Medium,
@@ -3811,6 +3813,53 @@ pub(crate) fn is_test_path(path: &str) -> bool {
     .any(|suffix| stem.ends_with(suffix))
 }
 
+pub(crate) fn is_generated_path(path: &str) -> bool {
+    let normalized_path;
+    let path = if path
+        .bytes()
+        .any(|byte| byte == b'\\' || byte.is_ascii_uppercase())
+    {
+        normalized_path = path.replace('\\', "/").to_ascii_lowercase();
+        normalized_path.as_str()
+    } else {
+        path
+    };
+
+    let mut file_name = path;
+    for part in path.split('/').filter(|part| !part.is_empty()) {
+        if matches!(
+            part,
+            "generated"
+                | "__generated__"
+                | "gen"
+                | "gensrc"
+                | "codegen"
+                | "autogen"
+                | "auto-generated"
+        ) {
+            return true;
+        }
+        file_name = part;
+    }
+
+    let stem = file_name
+        .rsplit_once('.')
+        .map(|(stem, _)| stem)
+        .unwrap_or(file_name);
+    stem == "generated"
+        || stem.starts_with("generated_")
+        || stem.starts_with("generated-")
+        || stem.ends_with("_generated")
+        || stem.ends_with("-generated")
+        || stem.ends_with(".generated")
+        || stem.ends_with(".gen")
+        || stem.ends_with("_gen")
+        || stem.ends_with("-gen")
+        || file_name.ends_with(".pb.go")
+        || file_name.ends_with(".pb.rs")
+        || file_name.ends_with(".g.dart")
+}
+
 pub(crate) fn is_entrypoint_path(path: &str) -> bool {
     matches!(
         path,
@@ -4284,6 +4333,7 @@ fn append_search_filter_cli_args(
     append_repeated_string_cli_arg(parts, args, "dependency", "--dependency");
     append_repeated_string_cli_arg(parts, args, "import", "--import");
     append_bool_value_cli_arg(parts, args, "test", "--test");
+    append_bool_value_cli_arg(parts, args, "generated", "--generated");
     append_bool_cli_arg(parts, args, "require_all", "--require-all");
     append_bool_cli_arg(parts, args, "any_terms", "--any-terms");
     append_string_cli_arg(parts, args, "snippet", "--snippet");
@@ -4743,6 +4793,11 @@ pub(crate) fn matches_filters_with_path_metadata(
             return false;
         }
     }
+    if let Some(generated) = filters.generated {
+        if is_generated_path(path_lower) != generated {
+            return false;
+        }
+    }
     if filters
         .exclude_file
         .iter()
@@ -4832,6 +4887,7 @@ pub(crate) fn filter_only_query(filters: &SearchFilters) -> bool {
         || filters.dependency.is_some()
         || filters.import.is_some()
         || filters.test.is_some()
+        || filters.generated.is_some()
 }
 
 fn score_filter_only_path_with_lower(
@@ -4905,6 +4961,17 @@ pub(crate) fn score_filter_only_path_match(
             "test_filter",
             if test { "true" } else { "false" },
             5.0,
+            explain,
+            &mut score,
+            &mut reasons,
+            &mut signals,
+        );
+    }
+    if let Some(generated) = filters.generated {
+        add_filter_signal(
+            "generated_filter",
+            if generated { "true" } else { "false" },
+            4.0,
             explain,
             &mut score,
             &mut reasons,

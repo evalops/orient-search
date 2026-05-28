@@ -29,8 +29,8 @@ orient client-jsonl
 The intended loop is simple: get the tool manifest or agent guide, ask for a
 repo map, search the warmed shard set, follow the returned `read_*` and
 `related_*` requests, and inspect the query plan when results are empty or
-noisy. Follow-up requests include replayable `cli` hints for terminal-native
-agents.
+noisy. Follow-up requests include replayable `cli`, `jsonl`, and `client_cli`
+hints for terminal-native agents.
 
 For one-shot CLI use inside a repo:
 
@@ -55,9 +55,9 @@ JSON-lines requests look like this:
 ```
 
 Useful filters: `repo:`, `path:`/`dir:`, `file:`, `lang:`, `ext:`, `symbol:`,
-`kind:`/`type:`, `dep:`, `import:`, `test:`, `is:test`, `is:source`,
-`content:`, quoted phrases, negative filters like `-path:vendor`, and
-`mode:any` for broad orientation.
+`kind:`/`type:`, `dep:`, `import:`, `test:`, `generated:`, `is:test`,
+`is:source`, `is:generated`, `content:`, quoted phrases, negative filters like
+`-path:vendor`, and `mode:any` for broad orientation.
 
 The adoption eval is the money chart: run the same repo-editing tasks with and
 without Orient, then compare time to first relevant file, local-search command

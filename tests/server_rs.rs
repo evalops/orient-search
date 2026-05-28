@@ -3028,6 +3028,26 @@ fn runtime_accepts_structured_negative_search_filters() {
     assert!(!result.contains("generated/auth.rs"), "{result}");
     assert!(!result.contains("src/generated_symbol.rs"), "{result}");
 
+    let generated_false = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("generated-false"),
+        tool: "search".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "query": "issue token",
+            "limit": 10,
+            "generated": false
+        }),
+    });
+    assert!(
+        generated_false.error.is_none(),
+        "{:?}",
+        generated_false.error
+    );
+    let result = serde_json::to_string(&generated_false.result).unwrap();
+    assert!(result.contains("src/auth.rs"), "{result}");
+    assert!(!result.contains("generated/auth.rs"), "{result}");
+    assert!(!result.contains("src/generated_symbol.rs"), "{result}");
+
     let filter_only = runtime.dispatch(ToolRequest {
         id: serde_json::json!("filter-only"),
         tool: "indexed_search".to_string(),
@@ -3043,6 +3063,22 @@ fn runtime_accepts_structured_negative_search_filters() {
     assert!(result.contains("src/auth.rs"), "{result}");
     assert!(result.contains("filter_scan"), "{result}");
     assert!(result.contains("file_filter"), "{result}");
+
+    let generated_true = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("generated-true"),
+        tool: "indexed_search".to_string(),
+        arguments: serde_json::json!({
+            "index": index_path,
+            "query": "issue token",
+            "limit": 10,
+            "generated": true
+        }),
+    });
+    assert!(generated_true.error.is_none(), "{:?}", generated_true.error);
+    let result = serde_json::to_string(&generated_true.result).unwrap();
+    assert!(result.contains("generated/auth.rs"), "{result}");
+    assert!(result.contains("src/generated_symbol.rs"), "{result}");
+    assert!(!result.contains("src/auth.rs"), "{result}");
 }
 
 #[test]

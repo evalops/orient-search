@@ -1151,6 +1151,10 @@ fn query_language_filters_fallback_and_indexed_search() {
         "SessionManager issue token docs.\n",
     );
     write(
+        &repo.path().join("src/generated/session.generated.rs"),
+        "pub struct SessionManagerGenerated;\npub fn issue_token_generated() {}\n",
+    );
+    write(
         &repo.path().join("README.md"),
         "SessionManager daemon status docs.\n",
     );
@@ -1271,6 +1275,38 @@ fn query_language_filters_fallback_and_indexed_search() {
     let indexed_source_scope_paths = result_paths(&indexed_source_scope);
     assert!(indexed_source_scope_paths.contains(&"docs/auth.md".to_string()));
     assert!(!indexed_source_scope_paths.contains(&"tests/auth_test.rs".to_string()));
+
+    let fallback_generated = search_repo_fast_filtered(
+        repo.path(),
+        "is:generated issue token",
+        10,
+        &Default::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        result_paths(&fallback_generated),
+        vec!["src/generated/session.generated.rs"]
+    );
+    let indexed_generated = indexed
+        .search_filtered("is:generated issue token", 10, &Default::default())
+        .unwrap();
+    assert_eq!(
+        result_paths(&indexed_generated),
+        vec!["src/generated/session.generated.rs"]
+    );
+    let indexed_hand_authored = indexed
+        .search_filtered("-is:generated issue token", 10, &Default::default())
+        .unwrap();
+    assert!(
+        !result_paths(&indexed_hand_authored)
+            .contains(&"src/generated/session.generated.rs".to_string())
+    );
+    let generated_plan = indexed
+        .query_plan("is:generated issue token", &Default::default())
+        .unwrap();
+    assert!(generated_plan.active_filters.iter().any(|filter| {
+        filter.field == "generated" && filter.value == "true" && filter.candidate_matches == Some(1)
+    }));
 
     let fallback_without_markdown = search_repo_fast_filtered(
         repo.path(),

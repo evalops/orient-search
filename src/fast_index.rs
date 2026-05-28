@@ -7,9 +7,9 @@ use crate::repo_index::{
     SearchFilters, SearchResult, SnippetMode, Symbol, best_snippet_for_path_with_phrases,
     capped_search_limit, command_hints_from_manifest_texts, dependency_filters_match,
     dependency_hints_from_manifest_texts, extract_symbols, filter_only_query, filter_value_matches,
-    finalize_results, import_hints_from_source_texts, is_entrypoint_path, is_ignored,
-    is_important_file, is_manifest_file, is_test_path, known_commands_from_hints, language_for,
-    matches_filters_with_path_metadata, normalize_language_filter, normalize_token,
+    finalize_results, import_hints_from_source_texts, is_entrypoint_path, is_generated_path,
+    is_ignored, is_important_file, is_manifest_file, is_test_path, known_commands_from_hints,
+    language_for, matches_filters_with_path_metadata, normalize_language_filter, normalize_token,
     regular_file_metadata, related_query_terms_symbol_and_filters, related_stem_terms,
     repo_map_seed_paths, repo_matches, result_matches_all_tokens, result_matches_symbol_filters,
     round4, score_filter_only_path_match, select_repo_brief_import_hints,
@@ -2243,6 +2243,9 @@ fn query_plan_filters(filters: &SearchFilters) -> Vec<QueryPlanFilter> {
     if let Some(value) = filters.test {
         active.push(plan_filter("test", &value.to_string(), false));
     }
+    if let Some(value) = filters.generated {
+        active.push(plan_filter("generated", &value.to_string(), false));
+    }
     for value in &filters.exclude_file {
         active.push(plan_filter("file", value, true));
     }
@@ -2337,6 +2340,13 @@ fn indexed_path_matches_plan_filter(file: &IndexedPath, filter: &QueryPlanFilter
                 "1" | "true" | "yes" | "y"
             );
             is_test_path(&file.path_lower) == wanted
+        }
+        "generated" => {
+            let wanted = matches!(
+                filter.value.to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "y"
+            );
+            is_generated_path(&file.path_lower) == wanted
         }
         _ => true,
     };
@@ -2660,7 +2670,7 @@ fn query_plan_repair_hints(
         hints.push(repair_hint(
             "narrow_query",
             format!(
-                "The indexed planner found {candidate_count} candidates and capped scoring at {candidate_cap}. Add a rarer term or file/path/lang/ext/symbol filter for more complete results."
+                "The indexed planner found {candidate_count} candidates and capped scoring at {candidate_cap}. Add a rarer term or file/path/lang/ext/symbol/generated filter for more complete results."
             ),
             suggested_token_query(query_tokens),
         ));
@@ -2697,7 +2707,7 @@ fn query_plan_repair_hints(
         hints.extend(filter_specific_repair_hints(active_filters, query_tokens));
         hints.push(repair_hint(
             "relax_filters",
-            "Posting candidates exist, but file/path/language/extension/test filters rejected all of them.",
+            "Posting candidates exist, but file/path/language/extension/test/generated filters rejected all of them.",
             suggested_token_query(query_tokens),
         ));
     }
@@ -2740,7 +2750,14 @@ fn filter_specific_repair_hints(
                 && filter.candidate_matches == Some(0)
                 && matches!(
                     filter.field.as_str(),
-                    "file" | "path" | "language" | "extension" | "test" | "symbol_kind" | "import"
+                    "file"
+                        | "path"
+                        | "language"
+                        | "extension"
+                        | "test"
+                        | "generated"
+                        | "symbol_kind"
+                        | "import"
                 )
         })
         .map(|filter| {
@@ -2829,7 +2846,7 @@ fn filter_scan_repair_hints(
     let mut hints = filter_scan_specific_repair_hints(filters);
     hints.push(repair_hint(
         "relax_filters",
-        "No files matched the filter-only query. Relax file/path/language/extension/test filters.",
+        "No files matched the filter-only query. Relax file/path/language/extension/test/generated filters.",
         None,
     ));
     hints
@@ -2881,6 +2898,9 @@ fn filter_scan_specific_repair_hints(filters: &SearchFilters) -> Vec<QueryPlanRe
     }
     if let Some(test) = filters.test {
         active.push(("test", "test", test.to_string()));
+    }
+    if let Some(generated) = filters.generated {
+        active.push(("generated", "generated", generated.to_string()));
     }
 
     active
