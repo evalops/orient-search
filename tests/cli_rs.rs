@@ -65,6 +65,7 @@ fn cli_outputs_tool_manifest() {
         .stdout(predicate::str::contains("\"name\":\"discover_repos\""))
         .stdout(predicate::str::contains("\"name\":\"search_code\""))
         .stdout(predicate::str::contains("\"name\":\"search\""))
+        .stdout(predicate::str::contains("\"name\":\"search_auto\""))
         .stdout(predicate::str::contains("\"name\":\"search_query_plan\""))
         .stdout(predicate::str::contains("\"name\":\"search_plan\""))
         .stdout(predicate::str::contains("\"name\":\"indexed_search\""))
@@ -166,12 +167,82 @@ fn cli_outputs_agent_guide() {
     .stdout(predicate::str::contains("\"purpose\""))
     .stdout(predicate::str::contains("no session analytics"))
     .stdout(predicate::str::contains("\"tool\":\"search_shards\""))
+    .stdout(predicate::str::contains("\"tool\":\"search_auto\""))
     .stdout(predicate::str::contains("\"tool\":\"indexed_search_code\""))
     .stdout(predicate::str::contains("\"tool\":\"search_code\""))
     .stdout(predicate::str::contains("read_request"))
     .stdout(predicate::str::contains("127.0.0.1:9999"))
     .stdout(predicate::str::contains("/work/repo"))
     .stdout(predicate::str::contains("/tmp/repo.index"));
+}
+
+#[test]
+fn cli_search_auto_selects_live_indexed_and_shard_surfaces() {
+    let repo = sample_repo();
+    let index_path = repo.path().join("orient.index");
+    let shard_dir = repo.path().join("shards");
+
+    let mut index = Command::cargo_bin("orient").unwrap();
+    index
+        .args([
+            "index",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--output",
+            index_path.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let mut shards = Command::cargo_bin("orient").unwrap();
+    shards
+        .args([
+            "ensure-shards",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--output-dir",
+            shard_dir.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let mut live = Command::cargo_bin("orient").unwrap();
+    live.args([
+        "search-auto",
+        "--repo",
+        repo.path().to_str().unwrap(),
+        "issue_token",
+    ])
+    .assert()
+    .success()
+    .stdout(predicate::str::contains("\"surface\":\"fallback\""))
+    .stdout(predicate::str::contains("\"tool\":\"read_range\""));
+
+    let mut indexed = Command::cargo_bin("orient").unwrap();
+    indexed
+        .args([
+            "search-auto",
+            "--index",
+            index_path.to_str().unwrap(),
+            "issue_token",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"surface\":\"indexed\""))
+        .stdout(predicate::str::contains("\"tool\":\"read_index_range\""));
+
+    let mut shard = Command::cargo_bin("orient").unwrap();
+    shard
+        .args([
+            "search-auto",
+            "--index-dir",
+            shard_dir.to_str().unwrap(),
+            "issue_token",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"surface\":\"shards\""))
+        .stdout(predicate::str::contains("\"tool\":\"read_shard_range\""));
 }
 
 #[test]

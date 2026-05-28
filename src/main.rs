@@ -319,6 +319,25 @@ enum Commands {
         #[arg(long, default_value_t = 0)]
         context_lines: usize,
     },
+    SearchAuto {
+        query: String,
+        #[arg(long)]
+        repo: Option<PathBuf>,
+        #[arg(long)]
+        index: Option<PathBuf>,
+        #[arg(long)]
+        index_dir: Option<PathBuf>,
+        #[arg(long, default_value_t = 10)]
+        limit: usize,
+        #[arg(long = "repo-filter")]
+        repo_filter: Option<String>,
+        #[command(flatten)]
+        filters: CommonSearchArgs,
+        #[arg(long, default_value_t = 0)]
+        context_lines: usize,
+        #[arg(long)]
+        refresh_if_stale: bool,
+    },
     SearchBatch {
         #[arg(long, default_value = ".")]
         repo: PathBuf,
@@ -1211,6 +1230,112 @@ fn run() -> Result<()> {
                 read_request_args("repo", &repo),
             );
             println!("{}", serde_json::to_string(&results)?);
+        }
+        Commands::SearchAuto {
+            query,
+            repo,
+            index,
+            index_dir,
+            limit,
+            repo_filter,
+            filters,
+            context_lines,
+            refresh_if_stale,
+        } => {
+            if let Some(index_dir) = index_dir {
+                if refresh_if_stale && shard_status(&index_dir)?.stale {
+                    refresh_shards(&index_dir)?;
+                }
+                let filters = search_filters_from_args(&filters, repo_filter)?;
+                let mut results = search_shards(&index_dir, &query, limit, &filters)?;
+                attach_result_context(&mut results, context_lines, |path, start, lines| {
+                    read_shard_range(&index_dir, path, start, lines)
+                })?;
+                attach_result_read_requests(
+                    &mut results,
+                    "read_shard_range",
+                    read_request_args("index_dir", &index_dir),
+                );
+                attach_result_related_requests(
+                    &mut results,
+                    "related_shard_files",
+                    read_request_args("index_dir", &index_dir),
+                );
+                attach_result_related_symbol_requests(
+                    &mut results,
+                    "related_shard_symbols",
+                    read_request_args("index_dir", &index_dir),
+                );
+                println!(
+                    "{}",
+                    serde_json::to_string(&serde_json::json!({
+                        "surface": "shards",
+                        "target": index_dir,
+                        "results": results
+                    }))?
+                );
+            } else if let Some(index_path) = index {
+                let index = load_index_for_search(index_path.clone(), refresh_if_stale)?;
+                let filters = search_filters_from_args(&filters, repo_filter)?;
+                let mut results = index.search_filtered(&query, limit, &filters)?;
+                attach_result_context(&mut results, context_lines, |path, start, lines| {
+                    index.read_range(path, start, lines)
+                })?;
+                attach_result_read_requests(
+                    &mut results,
+                    "read_index_range",
+                    read_request_args("index", &index_path),
+                );
+                attach_result_related_requests(
+                    &mut results,
+                    "related_index_files",
+                    read_request_args("index", &index_path),
+                );
+                attach_result_related_symbol_requests(
+                    &mut results,
+                    "related_index_symbols",
+                    read_request_args("index", &index_path),
+                );
+                println!(
+                    "{}",
+                    serde_json::to_string(&serde_json::json!({
+                        "surface": "indexed",
+                        "target": index_path,
+                        "results": results
+                    }))?
+                );
+            } else if let Some(repo) = repo {
+                let filters = search_filters_from_args(&filters, repo_filter)?;
+                let mut results = search_repo_fast_filtered(&repo, &query, limit, &filters)?;
+                attach_result_context(&mut results, context_lines, |path, start, lines| {
+                    read_file_range(&repo, path, start, lines)
+                })?;
+                attach_result_read_requests(
+                    &mut results,
+                    "read_range",
+                    read_request_args("repo", &repo),
+                );
+                attach_result_related_requests(
+                    &mut results,
+                    "related_files",
+                    read_request_args("repo", &repo),
+                );
+                attach_result_related_symbol_requests(
+                    &mut results,
+                    "related_symbols",
+                    read_request_args("repo", &repo),
+                );
+                println!(
+                    "{}",
+                    serde_json::to_string(&serde_json::json!({
+                        "surface": "fallback",
+                        "target": repo,
+                        "results": results
+                    }))?
+                );
+            } else {
+                bail!("search-auto needs --index-dir, --index, or --repo");
+            }
         }
         Commands::SearchBatch {
             repo,

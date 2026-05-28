@@ -50,6 +50,7 @@ Use `index_status` or `shard_status` when live files may have changed since inde
 
 Use the fastest surface that matches your setup:
 
+- `search_auto` when a daemon has exactly one warmed shard directory or index, or when the request supplies `index_dir`, `index`, or a live `repo`. It returns `{surface,target,results}` and keeps result follow-up requests aligned with the chosen surface.
 - `search_code` for a live repo without a prebuilt index.
 - `indexed_search_code` for one persistent repo index.
 - `search_shards` for a multi-repo shard directory.
@@ -57,6 +58,7 @@ Use the fastest surface that matches your setup:
 - `search_query_plan`, `indexed_query_plan`, or `shard_query_plan` when a search returns empty or suspicious results and the agent needs missing terms plus retry hints. CLI equivalents are `search-plan`, `index-plan`, and `shard-plan`.
 
 CLI-style JSON-lines aliases are accepted for the most guessable names: `search` for `search_code`, `search_plan` for `search_query_plan`, `indexed_search` for `indexed_search_code`, `index_plan` for `indexed_query_plan`, and `shard_plan` for `shard_query_plan`.
+The CLI equivalent for automatic target selection is `orient search-auto`; unlike a warmed daemon it needs `--index-dir`, `--index`, or `--repo`.
 
 Query strings support filters such as `repo:platform`, `path:src/auth` or `dir:src/auth`, `file:auth.rs`, `file:*.rs`, `path:src/*gateway.rs`, `path:src\auth.rs`, `lang:rust`, `ext:rs`, `symbol:SessionManager`, `kind:function`, `type:function`, `dep:react`, `import:crate::auth`, `test:false`, `is:test`, `is:source`, positive content aliases like `content:"issue token"` or `text:gateway`, negative filters like `-path:docs`, `-file:*test.rs`, `-kind:class`, `-dep:legacy`, or `-import:old_api`, and quoted phrases like `"issue token"`. Multi-token queries use AND behavior by default; use `mode:any` in the query or `any_terms:true` in JSON-lines calls for broad orientation searches.
 

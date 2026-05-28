@@ -52,6 +52,13 @@ struct SearchBatchResult {
 }
 
 #[derive(Debug, Serialize)]
+struct SearchAutoResult {
+    surface: String,
+    target: String,
+    results: Vec<SearchResult>,
+}
+
+#[derive(Debug, Serialize)]
 struct IndexedQueryPlanBatchResult {
     query: String,
     plan: QueryPlan,
@@ -398,6 +405,12 @@ pub fn tool_manifest() -> Value {
             SEARCH_OPTIONAL_ARGS,
         ),
         tool_entry(
+            "search_auto",
+            "Search the best available local surface: explicit shard/index, single warmed daemon target, or a supplied live repo.",
+            &["query"],
+            SEARCH_AUTO_OPTIONAL_ARGS,
+        ),
+        tool_entry(
             "search_batch",
             "Run several fast fallback searches against one local repository in a single request.",
             &["repo", "queries"],
@@ -673,7 +686,8 @@ pub fn agent_guide(
         "preferred_surfaces": {
             "one_live_repo": "search_code",
             "one_persistent_repo": "indexed_search_code",
-            "many_local_repos": "search_shards"
+            "many_local_repos": "search_shards",
+            "warmed_daemon_default": "search_auto"
         },
         "query_language": [
             "repo:platform",
@@ -717,6 +731,11 @@ pub fn agent_guide(
                 "id": "search",
                 "tool": "search_code",
                 "arguments": {"repo": repo, "query": "symbol:SessionManager token", "limit": 10, "explain": true}
+            },
+            "auto_search": {
+                "id": "search",
+                "tool": "search_auto",
+                "arguments": {"query": "symbol:SessionManager token", "limit": 10, "explain": true}
             },
             "indexed_repo_map": {
                 "id": "map",
@@ -1104,6 +1123,7 @@ fn tool_has_result_limit(tool_name: &str) -> bool {
         tool_name,
         "search_code"
             | "search"
+            | "search_auto"
             | "indexed_search"
             | "search_batch"
             | "indexed_search_code"
@@ -1364,6 +1384,20 @@ impl ToolRuntime {
                     read_request_args("repo", &repo),
                 );
                 Ok(serde_json::to_value(results)?)
+            }
+            "search_auto" => {
+                let query = string_arg(&request.arguments, "query")?;
+                let limit = search_limit_arg(&request.arguments)?;
+                let context_lines = context_lines_arg(&request.arguments)?;
+                let refresh_if_stale = bool_arg(&request.arguments, "refresh_if_stale");
+                let result = self.search_auto(
+                    &request.arguments,
+                    &query,
+                    limit,
+                    context_lines,
+                    refresh_if_stale,
+                )?;
+                Ok(serde_json::to_value(result)?)
             }
             "search_batch" => {
                 let repo = path_arg(&request.arguments, "repo")?;
@@ -1829,6 +1863,148 @@ impl ToolRuntime {
                 join_paths_for_error(&paths)
             )),
         }
+    }
+
+    fn search_auto(
+        &self,
+        arguments: &Value,
+        query: &str,
+        limit: usize,
+        context_lines: usize,
+        refresh_if_stale: bool,
+    ) -> Result<SearchAutoResult> {
+        if let Some(index_dir) = optional_string_arg(arguments, "index_dir").map(PathBuf::from) {
+            return self.search_auto_shards(
+                index_dir,
+                arguments,
+                query,
+                limit,
+                context_lines,
+                refresh_if_stale,
+            );
+        }
+        if let Some(index_path) = optional_string_arg(arguments, "index").map(PathBuf::from) {
+            return self.search_auto_index(
+                index_path,
+                arguments,
+                query,
+                limit,
+                context_lines,
+                refresh_if_stale,
+            );
+        }
+        if let Ok(index_dir) = self.single_cached_shard_manifest_path() {
+            return self.search_auto_shards(
+                index_dir,
+                arguments,
+                query,
+                limit,
+                context_lines,
+                refresh_if_stale,
+            );
+        }
+        if let Ok(index_path) = self.single_cached_index_path() {
+            return self.search_auto_index(
+                index_path,
+                arguments,
+                query,
+                limit,
+                context_lines,
+                refresh_if_stale,
+            );
+        }
+        if let Some(repo) = optional_string_arg(arguments, "repo").map(PathBuf::from) {
+            let mut results =
+                search_repo_fast_filtered(&repo, query, limit, &search_filters(arguments, false)?)?;
+            attach_result_context(&mut results, context_lines, |path, start, lines| {
+                read_file_range(&repo, path, start, lines)
+            })?;
+            attach_result_read_requests(
+                &mut results,
+                "read_range",
+                read_request_args("repo", &repo),
+            );
+            attach_result_related_requests(
+                &mut results,
+                "related_files",
+                read_request_args("repo", &repo),
+            );
+            attach_result_related_symbol_requests(
+                &mut results,
+                "related_symbols",
+                read_request_args("repo", &repo),
+            );
+            return Ok(SearchAutoResult {
+                surface: "fallback".to_string(),
+                target: repo.to_string_lossy().to_string(),
+                results,
+            });
+        }
+        Err(anyhow!(
+            "search_auto needs index_dir, index, repo, or exactly one warmed shard/index target"
+        ))
+    }
+
+    fn search_auto_shards(
+        &self,
+        index_dir: PathBuf,
+        arguments: &Value,
+        query: &str,
+        limit: usize,
+        context_lines: usize,
+        refresh_if_stale: bool,
+    ) -> Result<SearchAutoResult> {
+        if refresh_if_stale {
+            self.refresh_shards_if_stale(&index_dir)?;
+        }
+        let results = self.search_shards_cached(
+            &index_dir,
+            query,
+            limit,
+            &search_filters(arguments, true)?,
+            context_lines,
+        )?;
+        Ok(SearchAutoResult {
+            surface: "shards".to_string(),
+            target: index_dir.to_string_lossy().to_string(),
+            results,
+        })
+    }
+
+    fn search_auto_index(
+        &self,
+        index_path: PathBuf,
+        arguments: &Value,
+        query: &str,
+        limit: usize,
+        context_lines: usize,
+        refresh_if_stale: bool,
+    ) -> Result<SearchAutoResult> {
+        let index = self.cached_index_maybe_refresh(index_path.clone(), refresh_if_stale)?;
+        let mut results = index.search_filtered(query, limit, &search_filters(arguments, true)?)?;
+        attach_result_context(&mut results, context_lines, |path, start, lines| {
+            index.read_range(path, start, lines)
+        })?;
+        attach_result_read_requests(
+            &mut results,
+            "read_index_range",
+            read_request_args("index", &index_path),
+        );
+        attach_result_related_requests(
+            &mut results,
+            "related_index_files",
+            read_request_args("index", &index_path),
+        );
+        attach_result_related_symbol_requests(
+            &mut results,
+            "related_index_symbols",
+            read_request_args("index", &index_path),
+        );
+        Ok(SearchAutoResult {
+            surface: "indexed".to_string(),
+            target: index_path.to_string_lossy().to_string(),
+            results,
+        })
     }
 
     fn cached_index_maybe_refresh(
@@ -2570,6 +2746,39 @@ const SEARCH_OPTIONAL_ARGS: &[&str] = &[
     "require_all",
     "any_terms",
     "context_lines",
+    "exclude_file",
+    "exclude_path",
+    "exclude_language",
+    "exclude_extension",
+    "exclude_symbol",
+    "exclude_symbol_kind",
+    "exclude_repo",
+    "exclude_dependency",
+    "exclude_import",
+];
+
+const SEARCH_AUTO_OPTIONAL_ARGS: &[&str] = &[
+    "repo",
+    "index",
+    "index_dir",
+    "limit",
+    "path",
+    "dir",
+    "language",
+    "extension",
+    "symbol",
+    "symbol_kind",
+    "dependency",
+    "import",
+    "file",
+    "repo_filter",
+    "test",
+    "snippet",
+    "explain",
+    "require_all",
+    "any_terms",
+    "context_lines",
+    "refresh_if_stale",
     "exclude_file",
     "exclude_path",
     "exclude_language",
