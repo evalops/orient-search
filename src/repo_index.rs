@@ -4060,11 +4060,10 @@ pub fn attach_result_related_requests(
     for result in results {
         let mut arguments = base_arguments.clone();
         arguments.insert("path".to_string(), serde_json::json!(result.path.clone()));
-        result.related_request = Some(ResultToolRequest {
-            tool: tool.to_string(),
-            arguments: serde_json::Value::Object(arguments),
-            cli: None,
-        });
+        result.related_request = Some(ResultToolRequest::new(
+            tool.to_string(),
+            serde_json::Value::Object(arguments),
+        ));
     }
 }
 
@@ -4080,26 +4079,25 @@ pub fn attach_result_related_symbol_requests(
             arguments.insert("query".to_string(), serde_json::json!(query));
         }
         arguments.insert("path".to_string(), serde_json::json!(result.path.clone()));
-        result.related_symbols_request = Some(ResultToolRequest {
-            tool: tool.to_string(),
-            arguments: serde_json::Value::Object(arguments),
-            cli: None,
-        });
+        result.related_symbols_request = Some(ResultToolRequest::new(
+            tool.to_string(),
+            serde_json::Value::Object(arguments),
+        ));
     }
 }
 
 fn read_cli_command_for_request(tool: &str, arguments: &serde_json::Value) -> Option<String> {
     let args = arguments.as_object()?;
-    let subcommand = match tool {
+    let read_subcommand = match tool {
         "read_range" | "open_range" => "read-range",
         "read_ranges" | "open_ranges" => "read-ranges",
         "read_index_range" | "open_index_range" => "read-index-range",
         "read_index_ranges" | "open_index_ranges" => "read-index-ranges",
         "read_shard_range" | "open_shard_range" => "read-shard-range",
         "read_shard_ranges" | "open_shard_ranges" => "read-shard-ranges",
-        _ => return None,
+        _ => return related_cli_command_for_request(tool, args),
     };
-    let mut parts = vec!["orient".to_string(), subcommand.to_string()];
+    let mut parts = vec!["orient".to_string(), read_subcommand.to_string()];
     append_read_target_cli_args(&mut parts, args);
     if let Some(ranges) = args.get("ranges").and_then(|value| value.as_array()) {
         for range in ranges {
@@ -4108,6 +4106,36 @@ fn read_cli_command_for_request(tool: &str, arguments: &serde_json::Value) -> Op
         }
     } else {
         parts.push(compact_range_arg(args)?);
+    }
+    Some(parts.join(" "))
+}
+
+fn related_cli_command_for_request(
+    tool: &str,
+    args: &serde_json::Map<String, serde_json::Value>,
+) -> Option<String> {
+    let subcommand = match tool {
+        "related_files" => "related",
+        "related_index_files" => "related-index",
+        "related_shard_files" => "related-shard",
+        "related_symbols" => "related-symbols",
+        "related_index_symbols" => "related-index-symbols",
+        "related_shard_symbols" => "related-shard-symbols",
+        _ => return None,
+    };
+    let mut parts = vec!["orient".to_string(), subcommand.to_string()];
+    append_read_target_cli_args(&mut parts, args);
+    if let Some(path) = args.get("path").and_then(|value| value.as_str()) {
+        parts.push("--path".to_string());
+        parts.push(shell_quote(path));
+    }
+    if let Some(query) = args.get("query").and_then(|value| value.as_str()) {
+        parts.push("--query".to_string());
+        parts.push(shell_quote(query));
+    }
+    if let Some(limit) = args.get("limit").and_then(|value| value.as_u64()) {
+        parts.push("--limit".to_string());
+        parts.push(limit.to_string());
     }
     Some(parts.join(" "))
 }
@@ -4868,6 +4896,25 @@ mod tests {
             request.cli.as_deref(),
             Some(
                 "orient read-index-ranges --index /tmp/orient.index src/lib.rs:1:80 'tests/auth test.rs:3:4'"
+            )
+        );
+    }
+
+    #[test]
+    fn related_tool_requests_include_cli_hints() {
+        let request = ResultToolRequest::new(
+            "related_symbols",
+            serde_json::json!({
+                "repo": "/tmp/my repo",
+                "path": "src/auth.rs",
+                "query": "symbol:SessionManager issue token"
+            }),
+        );
+
+        assert_eq!(
+            request.cli.as_deref(),
+            Some(
+                "orient related-symbols --repo '/tmp/my repo' --path src/auth.rs --query 'symbol:SessionManager issue token'"
             )
         );
     }

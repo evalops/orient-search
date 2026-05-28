@@ -84,6 +84,9 @@ CLI range reads also accept compact `path:start:lines` positional ranges, e.g.
 `related_files` and `related_symbols` follow the same target style for nearby
 tests, source counterparts, definitions, and types; the CLI mirrors this as
 `related --repo`, `related --index`, or `related --index-dir`.
+Generated `related_request` and `related_symbols_request` objects also include
+`cli` hints so terminal agents can jump from a hit to nearby files or symbols
+without translating the JSON request shape.
 `repo_map` follows it too, returning live, indexed, or shard orientation from
 one JSON-lines tool; the CLI mirrors this as `repo-map --repo`,
 `repo-map --index`, or `repo-map --index-dir`, with `--format json` accepted
