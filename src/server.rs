@@ -669,6 +669,7 @@ fn argument_schema(tool_name: &str, name: &str) -> Value {
         }
         "ranges" => {
             schema.insert("type".to_string(), json!("array"));
+            schema.insert("minItems".to_string(), json!(1));
             schema.insert("maxItems".to_string(), json!(MAX_BATCH_RANGES));
             schema.insert(
                 "items".to_string(),
@@ -685,6 +686,7 @@ fn argument_schema(tool_name: &str, name: &str) -> Value {
         }
         "queries" => {
             schema.insert("type".to_string(), json!("array"));
+            schema.insert("minItems".to_string(), json!(1));
             schema.insert("maxItems".to_string(), json!(MAX_BATCH_QUERIES));
             schema.insert("items".to_string(), json!({"type": "string"}));
         }
@@ -2284,6 +2286,9 @@ fn string_array_arg(arguments: &Value, name: &str) -> Result<Vec<String>> {
     let values = value
         .as_array()
         .ok_or_else(|| anyhow!("argument {name} must be an array of strings"))?;
+    if values.is_empty() {
+        return Err(anyhow!("argument {name} must not be empty"));
+    }
     if values.len() > MAX_BATCH_QUERIES {
         return Err(anyhow!(
             "argument {name} has {} items, max {}",

@@ -143,6 +143,10 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         serde_json::json!(MAX_BATCH_QUERIES)
     );
     assert_eq!(
+        search_batch["input_schema"]["properties"]["queries"]["minItems"],
+        serde_json::json!(1)
+    );
+    assert_eq!(
         search_batch["arguments"][1]["max_items"],
         serde_json::json!(MAX_BATCH_QUERIES)
     );
@@ -216,6 +220,10 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
     assert_eq!(
         read_ranges["input_schema"]["properties"]["ranges"]["maxItems"],
         serde_json::json!(MAX_BATCH_RANGES)
+    );
+    assert_eq!(
+        read_ranges["input_schema"]["properties"]["ranges"]["minItems"],
+        serde_json::json!(1)
     );
     assert_eq!(read_ranges["arguments"][1]["type"], "range[]");
     assert_eq!(
@@ -365,6 +373,17 @@ fn runtime_rejects_oversized_batches() {
     });
     let error = response.error.unwrap();
     assert!(error.contains("max 32"), "{error}");
+
+    let response = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("empty-queries"),
+        tool: "search_batch".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "queries": []
+        }),
+    });
+    let error = response.error.unwrap();
+    assert!(error.contains("must not be empty"), "{error}");
 
     let too_many_ranges = (0..=MAX_BATCH_RANGES)
         .map(|_| {
