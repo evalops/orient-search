@@ -77,12 +77,15 @@ bounded batch read.
 target style as `search`, and the CLI mirrors that with `read-range --repo`,
 `read-range --index`, or `read-range --index-dir`. Simple adapters do not need
 separate read tools for live repos, persisted indexes, and shard directories.
+CLI range reads also accept compact `path:start:lines` positional ranges, e.g.
+`orient read-range --index /tmp/repo.index src/lib.rs:40:80`.
 `related_files` and `related_symbols` follow the same target style for nearby
 tests, source counterparts, definitions, and types; the CLI mirrors this as
 `related --repo`, `related --index`, or `related --index-dir`.
 `repo_map` follows it too, returning live, indexed, or shard orientation from
 one JSON-lines tool; the CLI mirrors this as `repo-map --repo`,
-`repo-map --index`, or `repo-map --index-dir`.
+`repo-map --index`, or `repo-map --index-dir`, with `--format json` accepted
+when wrappers want to make the JSON output contract explicit.
 `find_symbol` and `find_symbol_batch` also accept `repo`, `index`, or
 `index_dir` for direct definition jumps; the CLI mirrors this as `symbol --repo`,
 `symbol --index`, or `symbol --index-dir`.

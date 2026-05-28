@@ -7,10 +7,10 @@ use orient::discover::{
 use orient::fast_index::{FastIndex, RefreshStats};
 use orient::query::normalize_symbol_kind;
 use orient::repo_index::{
-    DEFAULT_REPO_MAP_READ_BATCH_RANGES, MAX_RESULT_READ_BATCH_RANGES, QueryPlan, RepoIndexer,
-    RepoMapDetail, ResultToolRequest, SearchFilters, SearchResult, SnippetMode, SymbolLookupResult,
-    attach_repo_map_read_batch_request_with_limit, attach_result_context,
-    attach_result_read_requests, attach_result_related_requests,
+    DEFAULT_REPO_MAP_READ_BATCH_RANGES, MAX_READ_RANGE_LINES, MAX_RESULT_READ_BATCH_RANGES,
+    QueryPlan, RepoIndexer, RepoMapDetail, ResultToolRequest, SearchFilters, SearchResult,
+    SnippetMode, SymbolLookupResult, attach_repo_map_read_batch_request_with_limit,
+    attach_result_context, attach_result_read_requests, attach_result_related_requests,
     attach_result_related_symbol_requests, normalize_language_filter, read_file_range,
     related_file_lookup_results, related_symbol_lookup_results, result_read_batch_request,
     search_repo_fast_filtered, symbol_lookup_read_batch_request, symbol_lookup_results,
@@ -244,6 +244,8 @@ enum Commands {
         detail: String,
         #[arg(long = "read-limit", default_value_t = DEFAULT_REPO_MAP_READ_BATCH_RANGES)]
         read_limit: usize,
+        #[arg(long, default_value = "json", value_parser = ["json"])]
+        format: String,
     },
     Brief {
         #[arg(long, default_value = ".")]
@@ -268,6 +270,8 @@ enum Commands {
         detail: String,
         #[arg(long = "read-limit", default_value_t = DEFAULT_REPO_MAP_READ_BATCH_RANGES)]
         read_limit: usize,
+        #[arg(long, default_value = "json", value_parser = ["json"])]
+        format: String,
     },
     IndexMap {
         #[arg(long)]
@@ -280,6 +284,8 @@ enum Commands {
         detail: String,
         #[arg(long = "read-limit", default_value_t = DEFAULT_REPO_MAP_READ_BATCH_RANGES)]
         read_limit: usize,
+        #[arg(long, default_value = "json", value_parser = ["json"])]
+        format: String,
     },
     IndexPlan {
         #[arg(long)]
@@ -1519,6 +1525,7 @@ fn run() -> Result<()> {
             repo,
             detail,
             read_limit,
+            format: _format,
         } => {
             let detail = repo_map_detail_from_cli(&detail)?;
             let read_limit = repo_map_read_limit_from_cli(read_limit)?;
@@ -1559,6 +1566,7 @@ fn run() -> Result<()> {
             repo_filter,
             detail,
             read_limit,
+            format: _format,
         } => {
             let detail = repo_map_detail_from_cli(&detail)?;
             let read_limit = repo_map_read_limit_from_cli(read_limit)?;
@@ -1610,6 +1618,7 @@ fn run() -> Result<()> {
             tests,
             detail,
             read_limit,
+            format: _format,
         } => {
             let detail = repo_map_detail_from_cli(&detail)?;
             let read_limit = repo_map_read_limit_from_cli(read_limit)?;
@@ -1771,13 +1780,22 @@ fn run() -> Result<()> {
             start,
             lines,
         } => {
-            let path = cli_single_path(path, path_arg)?;
+            let range_spec = cli_single_range(path, path_arg, start, lines)?;
             let range = if let Some(index_dir) = index_dir {
-                read_shard_range(&index_dir, &path, start, lines)?
+                read_shard_range(
+                    &index_dir,
+                    &range_spec.path,
+                    range_spec.start,
+                    range_spec.lines,
+                )?
             } else if let Some(index_path) = index {
-                FastIndex::load(index_path)?.read_range(&path, start, lines)?
+                FastIndex::load(index_path)?.read_range(
+                    &range_spec.path,
+                    range_spec.start,
+                    range_spec.lines,
+                )?
             } else {
-                read_file_range(repo, &path, start, lines)?
+                read_file_range(repo, &range_spec.path, range_spec.start, range_spec.lines)?
             };
             println!("{}", serde_json::to_string(&range)?);
         }
@@ -3281,13 +3299,17 @@ fn cli_ranges(
     start: usize,
     lines: usize,
 ) -> Result<Vec<CliRangeSpec>> {
+    validate_cli_range_bounds(start, lines)?;
     ranges.extend(
-        paths
-            .into_iter()
-            .map(|path| CliRangeSpec { path, start, lines }),
+        paths.into_iter().map(|path| {
+            CliRangeSpec::from_str(&path).unwrap_or(CliRangeSpec { path, start, lines })
+        }),
     );
     if ranges.is_empty() {
         bail!("provide at least one path or --range PATH:START:LINES");
+    }
+    for range in &ranges {
+        validate_cli_range_spec(range)?;
     }
     if ranges.len() > MAX_BATCH_RANGES {
         bail!(
@@ -3299,10 +3321,47 @@ fn cli_ranges(
     Ok(ranges)
 }
 
+fn cli_single_range(
+    path: Option<String>,
+    path_arg: Option<String>,
+    start: usize,
+    lines: usize,
+) -> Result<CliRangeSpec> {
+    validate_cli_range_bounds(start, lines)?;
+    if let Some(path) = path {
+        let range = CliRangeSpec::from_str(&path).unwrap_or(CliRangeSpec { path, start, lines });
+        validate_cli_range_spec(&range)?;
+        return Ok(range);
+    }
+    if let Some(path) = path_arg {
+        let range = CliRangeSpec { path, start, lines };
+        validate_cli_range_spec(&range)?;
+        return Ok(range);
+    }
+    bail!("provide a path, PATH:START:LINES, or --path PATH")
+}
+
 fn cli_single_path(path: Option<String>, path_arg: Option<String>) -> Result<String> {
     path.or(path_arg)
         .filter(|path| !path.is_empty())
         .ok_or_else(|| anyhow::anyhow!("provide a path or --path PATH"))
+}
+
+fn validate_cli_range_bounds(start: usize, lines: usize) -> Result<()> {
+    if start == 0 {
+        bail!("range start must be a positive integer");
+    }
+    if lines == 0 {
+        bail!("range lines must be a positive integer");
+    }
+    if lines > MAX_READ_RANGE_LINES {
+        bail!("range lines has {lines}, max {MAX_READ_RANGE_LINES}");
+    }
+    Ok(())
+}
+
+fn validate_cli_range_spec(range: &CliRangeSpec) -> Result<()> {
+    validate_cli_range_bounds(range.start, range.lines)
 }
 
 fn cli_batch_queries(queries: Vec<String>) -> Result<Vec<String>> {

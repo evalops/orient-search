@@ -1026,6 +1026,8 @@ fn cli_outputs_repo_map_and_reads_ranges() {
             "5",
             "--tests",
             "5",
+            "--format",
+            "json",
         ])
         .assert()
         .success()
@@ -1079,6 +1081,31 @@ fn cli_outputs_repo_map_and_reads_ranges() {
         .stdout(predicate::str::contains("\"start_line\":3"))
         .stdout(predicate::str::contains("issue_token"));
 
+    let mut compact_read_range = Command::cargo_bin("orient").unwrap();
+    compact_read_range
+        .args([
+            "read-range",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "src/auth.rs:3:3",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"start_line\":3"))
+        .stdout(predicate::str::contains("issue_token"));
+
+    let mut oversized_compact_read_range = Command::cargo_bin("orient").unwrap();
+    oversized_compact_read_range
+        .args([
+            "read-range",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "src/auth.rs:3:1001",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("range lines has 1001, max 1000"));
+
     let mut named_read_range = Command::cargo_bin("orient").unwrap();
     named_read_range
         .args([
@@ -1123,7 +1150,6 @@ fn cli_outputs_repo_map_and_reads_ranges() {
             repo.path().to_str().unwrap(),
             "--range",
             "src/auth.rs:5:1",
-            "--range",
             "tests/auth_test.rs:3:1",
         ])
         .assert()
