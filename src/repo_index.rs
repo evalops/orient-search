@@ -3212,7 +3212,7 @@ pub(crate) fn matches_filters_with_path_metadata(
 }
 
 pub(crate) fn filter_value_matches(haystack_lower: &str, filter: &str) -> bool {
-    let filter_lower = filter.trim().to_ascii_lowercase();
+    let filter_lower = filter.trim().replace('\\', "/").to_ascii_lowercase();
     if filter_lower.contains('*') || filter_lower.contains('?') {
         wildcard_matches(&filter_lower, haystack_lower)
     } else {
