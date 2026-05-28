@@ -378,6 +378,12 @@ pub fn tool_manifest() -> Value {
             SEARCH_OPTIONAL_ARGS,
         ),
         tool_entry(
+            "search",
+            "Alias for search_code for CLI-style JSON-lines clients.",
+            &["repo", "query"],
+            SEARCH_OPTIONAL_ARGS,
+        ),
+        tool_entry(
             "search_batch",
             "Run several fast fallback searches against one local repository in a single request.",
             &["repo", "queries"],
@@ -390,6 +396,12 @@ pub fn tool_manifest() -> Value {
             SEARCH_INDEX_OPTIONAL_ARGS,
         ),
         tool_entry(
+            "indexed_search",
+            "Alias for indexed_search_code for CLI-style JSON-lines clients.",
+            &["index", "query"],
+            SEARCH_INDEX_OPTIONAL_ARGS,
+        ),
+        tool_entry(
             "indexed_search_batch",
             "Run several searches against one persistent index in a single request.",
             &["index", "queries"],
@@ -398,6 +410,12 @@ pub fn tool_manifest() -> Value {
         tool_entry(
             "indexed_query_plan",
             "Return the indexed query plan, including missing postings, even when search has no hits.",
+            &["index", "query"],
+            PLAN_INDEX_OPTIONAL_ARGS,
+        ),
+        tool_entry(
+            "index_plan",
+            "Alias for indexed_query_plan for CLI-style JSON-lines clients.",
             &["index", "query"],
             PLAN_INDEX_OPTIONAL_ARGS,
         ),
@@ -470,6 +488,12 @@ pub fn tool_manifest() -> Value {
         tool_entry(
             "shard_query_plan",
             "Return indexed query plans for every matching shard repo or alias.",
+            &["index_dir", "query"],
+            PLAN_INDEX_OPTIONAL_ARGS,
+        ),
+        tool_entry(
+            "shard_plan",
+            "Alias for shard_query_plan for CLI-style JSON-lines clients.",
             &["index_dir", "query"],
             PLAN_INDEX_OPTIONAL_ARGS,
         ),
@@ -772,8 +796,10 @@ enum DaemonDefaultKind {
 fn daemon_default_kind(tool_name: &str) -> Option<DaemonDefaultKind> {
     match tool_name {
         "indexed_repo_map"
+        | "indexed_search"
         | "indexed_search_code"
         | "indexed_search_batch"
+        | "index_plan"
         | "indexed_query_plan"
         | "indexed_query_plan_batch"
         | "index_status"
@@ -788,6 +814,7 @@ fn daemon_default_kind(tool_name: &str) -> Option<DaemonDefaultKind> {
         | "shard_status"
         | "search_shards"
         | "search_shards_batch"
+        | "shard_plan"
         | "shard_query_plan"
         | "shard_query_plan_batch"
         | "read_shard_range"
@@ -869,6 +896,8 @@ fn tool_has_result_limit(tool_name: &str) -> bool {
     matches!(
         tool_name,
         "search_code"
+            | "search"
+            | "indexed_search"
             | "search_batch"
             | "indexed_search_code"
             | "indexed_search_batch"
@@ -1026,7 +1055,7 @@ impl ToolRuntime {
                 }
                 Ok(serde_json::to_value(results)?)
             }
-            "search_code" => {
+            "search_code" | "search" => {
                 let repo = path_arg(&request.arguments, "repo")?;
                 let query = string_arg(&request.arguments, "query")?;
                 let limit = search_limit_arg(&request.arguments)?;
@@ -1058,7 +1087,7 @@ impl ToolRuntime {
                 }
                 Ok(serde_json::to_value(batch)?)
             }
-            "indexed_search_code" => {
+            "indexed_search_code" | "indexed_search" => {
                 let index_path = self.index_path_arg_or_single_cached(&request.arguments)?;
                 let query = string_arg(&request.arguments, "query")?;
                 let limit = search_limit_arg(&request.arguments)?;
@@ -1093,7 +1122,7 @@ impl ToolRuntime {
                 }
                 Ok(serde_json::to_value(batch)?)
             }
-            "indexed_query_plan" => {
+            "indexed_query_plan" | "index_plan" => {
                 let index_path = self.index_path_arg_or_single_cached(&request.arguments)?;
                 let query = string_arg(&request.arguments, "query")?;
                 let refresh_if_stale = bool_arg(&request.arguments, "refresh_if_stale");
@@ -1212,7 +1241,7 @@ impl ToolRuntime {
                 }
                 Ok(serde_json::to_value(batch)?)
             }
-            "shard_query_plan" => {
+            "shard_query_plan" | "shard_plan" => {
                 let index_dir = self.shard_dir_arg_or_single_cached(&request.arguments)?;
                 let query = string_arg(&request.arguments, "query")?;
                 if bool_arg(&request.arguments, "refresh_if_stale") {
@@ -1394,10 +1423,13 @@ impl ToolRuntime {
                 "read_ranges",
                 "open_ranges",
                 "search_code",
+                "search",
                 "search_batch",
                 "indexed_search_code",
+                "indexed_search",
                 "indexed_search_batch",
                 "indexed_query_plan",
+                "index_plan",
                 "indexed_query_plan_batch",
                 "read_index_range",
                 "open_index_range",
@@ -1410,6 +1442,7 @@ impl ToolRuntime {
                 "search_shards",
                 "search_shards_batch",
                 "shard_query_plan",
+                "shard_plan",
                 "shard_query_plan_batch",
                 "read_shard_range",
                 "open_shard_range",

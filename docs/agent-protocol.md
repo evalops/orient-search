@@ -53,6 +53,8 @@ Use the fastest surface that matches your setup:
 - `search_shards` for a multi-repo shard directory.
 - `search_batch`, `indexed_search_batch`, or `search_shards_batch` when an agent wants to try several query formulations in one round trip. CLI equivalents are `search-batch`, `indexed-search-batch`, and `search-shards-batch`.
 
+CLI-style JSON-lines aliases are accepted for the most guessable names: `search` for `search_code`, `indexed_search` for `indexed_search_code`, `index_plan` for `indexed_query_plan`, and `shard_plan` for `shard_query_plan`.
+
 Query strings support filters such as `repo:platform`, `path:src/auth` or `dir:src/auth`, `file:auth.rs`, `lang:rust`, `ext:rs`, `symbol:SessionManager`, `kind:function`, `dep:react`, `import:crate::auth`, `test:false`, negative filters like `-path:docs`, `-kind:class`, `-dep:legacy`, or `-import:old_api`, and quoted phrases like `"issue token"`. Multi-token queries use AND behavior when appropriate.
 
 Search results include:
@@ -97,4 +99,4 @@ Range reads follow manifest bounds: `start >= 1`, `1 <= lines <= lines.maximum`,
 
 Use `repo_map`, `indexed_repo_map`, or `shard_repo_map` before editing unfamiliar code. They return entrypoints, manifests, tests, important files, top symbols, related files/symbols, command hints, dependency hints, and import/module hints.
 
-For empty or surprising indexed results, call `indexed_query_plan`, `shard_query_plan`, or their batch forms `indexed_query_plan_batch` / `shard_query_plan_batch`. Plans include active filters with candidate match/rejection counts and separate missing postings, filter rejections, phrase/scoring rejections, and final AND/symbol rejections, with repair hints agents can retry.
+For empty or surprising indexed results, call `indexed_query_plan`, `shard_query_plan`, their aliases `index_plan` / `shard_plan`, or their batch forms `indexed_query_plan_batch` / `shard_query_plan_batch`. Plans include active filters with candidate match/rejection counts and separate missing postings, filter rejections, phrase/scoring rejections, and final AND/symbol rejections, with repair hints agents can retry.

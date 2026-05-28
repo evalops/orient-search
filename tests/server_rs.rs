@@ -47,6 +47,7 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         .iter()
         .find(|tool| tool["name"] == "search_code")
         .unwrap();
+    let search_alias = tools.iter().find(|tool| tool["name"] == "search").unwrap();
     let discover = tools
         .iter()
         .find(|tool| tool["name"] == "discover_repos")
@@ -119,6 +120,26 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         .iter()
         .find(|tool| tool["name"] == "indexed_search_code")
         .unwrap();
+    let indexed_search_alias = tools
+        .iter()
+        .find(|tool| tool["name"] == "indexed_search")
+        .unwrap();
+    let index_plan_alias = tools
+        .iter()
+        .find(|tool| tool["name"] == "index_plan")
+        .unwrap();
+    let shard_plan_alias = tools
+        .iter()
+        .find(|tool| tool["name"] == "shard_plan")
+        .unwrap();
+    assert_eq!(
+        search_alias["required"],
+        serde_json::json!(["repo", "query"])
+    );
+    assert_eq!(
+        search_alias["input_schema"]["properties"]["limit"]["maximum"],
+        serde_json::json!(MAX_SEARCH_RESULTS)
+    );
     assert_eq!(
         indexed_search["input_schema"]["properties"]["refresh_if_stale"]["default"],
         false
@@ -138,6 +159,22 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
     assert_eq!(
         indexed_search["arguments"][0]["daemon_default"],
         serde_json::json!("single_warmed_index")
+    );
+    assert_eq!(
+        indexed_search_alias["daemon_default"]["source"],
+        serde_json::json!("single_warmed_index")
+    );
+    assert_eq!(
+        indexed_search_alias["input_schema"]["properties"]["limit"]["maximum"],
+        serde_json::json!(MAX_SEARCH_RESULTS)
+    );
+    assert_eq!(
+        index_plan_alias["daemon_default"]["source"],
+        serde_json::json!("single_warmed_index")
+    );
+    assert_eq!(
+        shard_plan_alias["daemon_default"]["source"],
+        serde_json::json!("single_warmed_shard_dir")
     );
     assert!(search.get("daemon_default").is_none());
     assert_eq!(
@@ -286,6 +323,10 @@ fn server_reports_tool_manifest_for_agent_wrappers() {
     assert!(stdout.contains("tool_manifest"));
     assert!(stdout.contains("\"id\":\"manifest\""));
     assert!(stdout.contains("\"name\":\"search_code\""));
+    assert!(stdout.contains("\"name\":\"search\""));
+    assert!(stdout.contains("\"name\":\"indexed_search\""));
+    assert!(stdout.contains("\"name\":\"index_plan\""));
+    assert!(stdout.contains("\"name\":\"shard_plan\""));
     assert!(stdout.contains("\"name\":\"mcp_manifest\""));
     assert!(stdout.contains("\"required\":[\"repo\",\"query\"]"));
     assert!(stdout.contains("\"optional\""));
@@ -578,6 +619,24 @@ fn runtime_batches_searches_and_query_plans_against_repo_index_and_shards() {
     assert!(result.contains("absentterm"), "{result}");
     assert!(result.contains("drop_missing_terms"), "{result}");
 
+    let indexed_plan_alias = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("index-plan-alias"),
+        tool: "index_plan".to_string(),
+        arguments: serde_json::json!({
+            "index": index_path,
+            "query": "SessionManager missingterm",
+            "require_all": true
+        }),
+    });
+    assert!(
+        indexed_plan_alias.error.is_none(),
+        "{:?}",
+        indexed_plan_alias.error
+    );
+    let result = serde_json::to_string(&indexed_plan_alias.result).unwrap();
+    assert!(result.contains("missingterm"), "{result}");
+    assert!(result.contains("drop_missing_terms"), "{result}");
+
     let shard_dir = tempfile::tempdir().unwrap();
     let build = runtime.dispatch(ToolRequest {
         id: serde_json::json!("build-shards"),
@@ -627,6 +686,23 @@ fn runtime_batches_searches_and_query_plans_against_repo_index_and_shards() {
     assert!(result.contains("missingterm"), "{result}");
     assert!(result.contains("absentterm"), "{result}");
     assert!(result.contains("drop_missing_terms"), "{result}");
+
+    let shard_plan_alias = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("shard-plan-alias"),
+        tool: "shard_plan".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": shard_dir.path(),
+            "query": "SessionManager missingterm",
+            "require_all": true
+        }),
+    });
+    assert!(
+        shard_plan_alias.error.is_none(),
+        "{:?}",
+        shard_plan_alias.error
+    );
+    let result = serde_json::to_string(&shard_plan_alias.result).unwrap();
+    assert!(result.contains("missingterm"), "{result}");
 }
 
 #[test]
@@ -653,7 +729,7 @@ fn runtime_accepts_structured_negative_search_filters() {
 
     let fallback = runtime.dispatch(ToolRequest {
         id: serde_json::json!("fallback"),
-        tool: "search_code".to_string(),
+        tool: "search".to_string(),
         arguments: serde_json::json!({
             "repo": repo.path(),
             "query": "issue token",
@@ -672,7 +748,7 @@ fn runtime_accepts_structured_negative_search_filters() {
 
     let indexed = runtime.dispatch(ToolRequest {
         id: serde_json::json!("indexed"),
-        tool: "indexed_search_code".to_string(),
+        tool: "indexed_search".to_string(),
         arguments: serde_json::json!({
             "index": index_path,
             "query": "issue token",
@@ -693,7 +769,7 @@ fn runtime_accepts_structured_negative_search_filters() {
 
     let filter_only = runtime.dispatch(ToolRequest {
         id: serde_json::json!("filter-only"),
-        tool: "indexed_search_code".to_string(),
+        tool: "indexed_search".to_string(),
         arguments: serde_json::json!({
             "index": index_path,
             "query": "file:auth.rs",
@@ -3071,7 +3147,7 @@ fn server_handles_indexed_search_request() {
 
     let request = serde_json::json!({
         "id": 2,
-        "tool": "indexed_search_code",
+        "tool": "indexed_search",
         "arguments": {
             "index": index_path,
             "query": "issue token",
@@ -3318,7 +3394,7 @@ fn server_handles_shard_index_search_and_read_requests() {
     });
     let plan_request = serde_json::json!({
         "id": "shard-query-plan",
-        "tool": "shard_query_plan",
+        "tool": "shard_plan",
         "arguments": {
             "index_dir": parent.path().join(".orient-shards"),
             "query": "repo:BILLING invoice missingterm",

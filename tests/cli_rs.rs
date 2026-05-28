@@ -63,6 +63,10 @@ fn cli_outputs_tool_manifest() {
         .success()
         .stdout(predicate::str::contains("\"name\":\"discover_repos\""))
         .stdout(predicate::str::contains("\"name\":\"search_code\""))
+        .stdout(predicate::str::contains("\"name\":\"search\""))
+        .stdout(predicate::str::contains("\"name\":\"indexed_search\""))
+        .stdout(predicate::str::contains("\"name\":\"index_plan\""))
+        .stdout(predicate::str::contains("\"name\":\"shard_plan\""))
         .stdout(predicate::str::contains("\"name\":\"mcp_manifest\""))
         .stdout(predicate::str::contains(
             "\"required\":[\"repo\",\"query\"]",
