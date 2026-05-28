@@ -9,8 +9,8 @@ use orient::repo_index::{
     read_file_range, search_repo_fast_filtered,
 };
 use orient::server::{
-    MAX_BATCH_QUERIES, MAX_BATCH_RANGES, ToolRuntime, mcp_tool_manifest, serve_jsonl, serve_tcp,
-    tool_manifest,
+    MAX_BATCH_QUERIES, MAX_BATCH_RANGES, ToolRuntime, mcp_tool_manifest, serve_jsonl,
+    serve_jsonl_stream, serve_tcp, tool_manifest,
 };
 use orient::shards::{
     ShardQueryPlan, build_shards, ensure_shards, find_shard_symbol, read_shard_range,
@@ -20,10 +20,15 @@ use orient::shards::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fs;
-use std::io::{self, BufRead, BufReader, Write};
+use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
+#[cfg(unix)]
+use std::os::unix::fs::FileTypeExt;
+#[cfg(unix)]
+use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::sync::Arc;
 use std::time::Instant;
 
 #[derive(Debug, Parser)]
@@ -495,9 +500,34 @@ enum Commands {
         #[arg(long)]
         nested_manifests: bool,
     },
+    #[cfg(unix)]
+    ServeUnix {
+        #[arg(long)]
+        socket: PathBuf,
+        #[arg(long = "index")]
+        indexes: Vec<PathBuf>,
+        #[arg(long = "index-dir")]
+        index_dirs: Vec<PathBuf>,
+        #[arg(long = "ensure-shards-dir")]
+        ensure_shard_dirs: Vec<PathBuf>,
+        #[arg(long = "repo")]
+        repos: Vec<PathBuf>,
+        #[arg(long = "discover-root")]
+        discover_roots: Vec<PathBuf>,
+        #[arg(long, default_value_t = 4)]
+        max_depth: usize,
+        #[arg(long, default_value_t = 500)]
+        discover_limit: usize,
+        #[arg(long)]
+        family_limit: Option<usize>,
+        #[arg(long)]
+        nested_manifests: bool,
+    },
     ClientJsonl {
-        #[arg(long, default_value = "127.0.0.1:8796")]
-        addr: String,
+        #[arg(long)]
+        socket: Option<PathBuf>,
+        #[arg(long)]
+        addr: Option<String>,
     },
 }
 
@@ -1217,34 +1247,22 @@ fn main() -> Result<()> {
             nested_manifests,
         } => {
             let listener = TcpListener::bind(&addr)?;
-            let runtime = ToolRuntime::default();
-            for index in indexes {
-                runtime.warm_index(index)?;
-            }
-            for index_dir in index_dirs {
-                runtime.warm_shards(index_dir)?;
-            }
-            let mut ensured_shards = Vec::new();
-            if !ensure_shard_dirs.is_empty() {
-                let selection = shard_repos_from_args(
-                    repos,
-                    discover_roots,
-                    max_depth,
-                    discover_limit,
-                    normalize_family_limit(family_limit),
-                    nested_manifests,
-                )?;
-                for index_dir in ensure_shard_dirs {
-                    let stats = ensure_shards(&selection.repos, &index_dir)?;
-                    runtime.warm_shards(index_dir)?;
-                    ensured_shards
-                        .push(shard_bootstrap_output(stats, selection.discovery.clone())?);
-                }
-            }
+            let (runtime, ensured_shards) = bootstrap_runtime(
+                indexes,
+                index_dirs,
+                ensure_shard_dirs,
+                repos,
+                discover_roots,
+                max_depth,
+                discover_limit,
+                family_limit,
+                nested_manifests,
+            )?;
             println!(
                 "{}",
                 serde_json::to_string(&serde_json::json!({
                     "addr": listener.local_addr()?.to_string(),
+                    "transport": "tcp",
                     "cached_indexes": runtime.cached_index_count(),
                     "ensured_shards": ensured_shards,
                     "daemon_status": runtime.daemon_status()
@@ -1253,16 +1271,112 @@ fn main() -> Result<()> {
             io::stdout().flush()?;
             serve_tcp(listener, runtime)?;
         }
-        Commands::ClientJsonl { addr } => {
-            client_jsonl(&addr)?;
+        #[cfg(unix)]
+        Commands::ServeUnix {
+            socket,
+            indexes,
+            index_dirs,
+            ensure_shard_dirs,
+            repos,
+            discover_roots,
+            max_depth,
+            discover_limit,
+            family_limit,
+            nested_manifests,
+        } => {
+            if socket.exists() {
+                if !fs::symlink_metadata(&socket)?.file_type().is_socket() {
+                    bail!("refusing to remove non-socket path: {}", socket.display());
+                }
+                fs::remove_file(&socket)?;
+            }
+            if let Some(parent) = socket.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            let listener = UnixListener::bind(&socket)?;
+            let (runtime, ensured_shards) = bootstrap_runtime(
+                indexes,
+                index_dirs,
+                ensure_shard_dirs,
+                repos,
+                discover_roots,
+                max_depth,
+                discover_limit,
+                family_limit,
+                nested_manifests,
+            )?;
+            println!(
+                "{}",
+                serde_json::to_string(&serde_json::json!({
+                    "socket": socket,
+                    "transport": "unix",
+                    "cached_indexes": runtime.cached_index_count(),
+                    "ensured_shards": ensured_shards,
+                    "daemon_status": runtime.daemon_status()
+                }))?
+            );
+            io::stdout().flush()?;
+            serve_unix(listener, runtime)?;
+        }
+        Commands::ClientJsonl { socket, addr } => {
+            if let Some(socket) = socket {
+                client_jsonl_unix(&socket)?;
+            } else {
+                client_jsonl_tcp(addr.as_deref().unwrap_or("127.0.0.1:8796"))?;
+            }
         }
     }
     Ok(())
 }
 
-fn client_jsonl(addr: &str) -> Result<()> {
-    let mut writer = TcpStream::connect(addr)?;
-    let mut reader = BufReader::new(writer.try_clone()?);
+fn bootstrap_runtime(
+    indexes: Vec<PathBuf>,
+    index_dirs: Vec<PathBuf>,
+    ensure_shard_dirs: Vec<PathBuf>,
+    repos: Vec<PathBuf>,
+    discover_roots: Vec<PathBuf>,
+    max_depth: usize,
+    discover_limit: usize,
+    family_limit: Option<usize>,
+    nested_manifests: bool,
+) -> Result<(ToolRuntime, Vec<Value>)> {
+    let runtime = ToolRuntime::default();
+    for index in indexes {
+        runtime.warm_index(index)?;
+    }
+    for index_dir in index_dirs {
+        runtime.warm_shards(index_dir)?;
+    }
+    let mut ensured_shards = Vec::new();
+    if !ensure_shard_dirs.is_empty() {
+        let selection = shard_repos_from_args(
+            repos,
+            discover_roots,
+            max_depth,
+            discover_limit,
+            normalize_family_limit(family_limit),
+            nested_manifests,
+        )?;
+        for index_dir in ensure_shard_dirs {
+            let stats = ensure_shards(&selection.repos, &index_dir)?;
+            runtime.warm_shards(index_dir)?;
+            ensured_shards.push(shard_bootstrap_output(stats, selection.discovery.clone())?);
+        }
+    }
+    Ok((runtime, ensured_shards))
+}
+
+fn client_jsonl_tcp(addr: &str) -> Result<()> {
+    client_jsonl_stream(TcpStream::connect(addr)?)
+}
+
+#[cfg(unix)]
+fn client_jsonl_unix(socket: &Path) -> Result<()> {
+    client_jsonl_stream(UnixStream::connect(socket)?)
+}
+
+fn client_jsonl_stream(stream: impl Read + Write) -> Result<()> {
+    let mut reader = BufReader::new(stream);
     let stdin = io::stdin();
     let mut stdout = io::stdout();
     let mut response = String::new();
@@ -1272,8 +1386,8 @@ fn client_jsonl(addr: &str) -> Result<()> {
         if line.trim().is_empty() {
             continue;
         }
-        writeln!(writer, "{line}")?;
-        writer.flush()?;
+        writeln!(reader.get_mut(), "{line}")?;
+        reader.get_mut().flush()?;
         response.clear();
         reader.read_line(&mut response)?;
         if response.is_empty() {
@@ -1283,6 +1397,19 @@ fn client_jsonl(addr: &str) -> Result<()> {
         stdout.flush()?;
     }
 
+    Ok(())
+}
+
+#[cfg(unix)]
+fn serve_unix(listener: UnixListener, runtime: ToolRuntime) -> Result<()> {
+    let runtime = Arc::new(runtime);
+    for stream in listener.incoming() {
+        let stream = stream?;
+        let runtime = Arc::clone(&runtime);
+        std::thread::spawn(move || {
+            let _ = serve_jsonl_stream(stream, runtime);
+        });
+    }
     Ok(())
 }
 

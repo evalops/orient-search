@@ -1,6 +1,8 @@
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpStream;
+#[cfg(unix)]
+use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::Arc;
@@ -2458,6 +2460,106 @@ fn tcp_daemon_serves_json_lines_requests() {
 
     assert!(response.contains("\"id\":\"status\""));
     assert!(response.contains("\"cached_indexes\":0"));
+}
+
+#[cfg(unix)]
+#[test]
+fn unix_daemon_serves_json_lines_requests() {
+    let socket_dir = tempfile::tempdir().unwrap();
+    let socket = socket_dir.path().join("orient.sock");
+    let binary = assert_cmd::cargo::cargo_bin("orient");
+    let mut child = Command::new(binary)
+        .args(["serve-unix", "--socket", socket.to_str().unwrap()])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let stdout = child.stdout.take().unwrap();
+    let mut startup_reader = BufReader::new(stdout);
+    let mut startup = String::new();
+    startup_reader.read_line(&mut startup).unwrap();
+    let startup_json: serde_json::Value = serde_json::from_str(&startup).unwrap();
+    assert_eq!(startup_json["transport"], serde_json::json!("unix"));
+    assert_eq!(startup_json["socket"], serde_json::json!(socket));
+
+    let mut stream = UnixStream::connect(&socket).unwrap();
+    let mut reader = BufReader::new(stream.try_clone().unwrap());
+    let request = serde_json::json!({
+        "id": "status",
+        "tool": "daemon_status",
+        "arguments": {}
+    });
+    writeln!(stream, "{request}").unwrap();
+    let mut response = String::new();
+    reader.read_line(&mut response).unwrap();
+
+    child.kill().unwrap();
+    let _ = child.wait();
+
+    assert!(response.contains("\"id\":\"status\""));
+    assert!(response.contains("\"cached_indexes\":0"));
+}
+
+#[cfg(unix)]
+#[test]
+fn unix_client_forwards_json_lines_requests() {
+    let socket_dir = tempfile::tempdir().unwrap();
+    let socket = socket_dir.path().join("orient.sock");
+    let binary = assert_cmd::cargo::cargo_bin("orient");
+    let mut child = Command::new(&binary)
+        .args(["serve-unix", "--socket", socket.to_str().unwrap()])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let stdout = child.stdout.take().unwrap();
+    let mut startup_reader = BufReader::new(stdout);
+    let mut startup = String::new();
+    startup_reader.read_line(&mut startup).unwrap();
+
+    let mut client = Command::new(binary)
+        .args(["client-jsonl", "--socket", socket.to_str().unwrap()])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let request = serde_json::json!({
+        "id": "status",
+        "tool": "daemon_status",
+        "arguments": {}
+    });
+    writeln!(client.stdin.as_mut().unwrap(), "{request}").unwrap();
+    drop(client.stdin.take());
+    let output = client.wait_with_output().unwrap();
+
+    child.kill().unwrap();
+    let _ = child.wait();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("\"id\":\"status\""), "{stdout}");
+    assert!(stdout.contains("\"cached_indexes\":0"), "{stdout}");
+}
+
+#[cfg(unix)]
+#[test]
+fn unix_daemon_refuses_to_replace_non_socket_path() {
+    let socket_dir = tempfile::tempdir().unwrap();
+    let socket = socket_dir.path().join("orient.sock");
+    fs::write(&socket, "not a socket").unwrap();
+    let binary = assert_cmd::cargo::cargo_bin("orient");
+    let output = Command::new(binary)
+        .args(["serve-unix", "--socket", socket.to_str().unwrap()])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        stderr.contains("refusing to remove non-socket path"),
+        "{stderr}"
+    );
+    assert_eq!(fs::read_to_string(&socket).unwrap(), "not a socket");
 }
 
 #[test]

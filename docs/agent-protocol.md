@@ -11,6 +11,8 @@ target/release/orient serve-jsonl
 target/release/orient serve-tcp --addr 127.0.0.1:8796 --index-dir /tmp/orient-shards
 target/release/orient serve-tcp --addr 127.0.0.1:8796 --ensure-shards-dir /tmp/orient-shards --repo /path/to/repo-a --repo /path/to/repo-b
 target/release/orient client-jsonl --addr 127.0.0.1:8796
+target/release/orient serve-unix --socket /tmp/orient.sock --index-dir /tmp/orient-shards
+target/release/orient client-jsonl --socket /tmp/orient.sock
 ```
 
 Each request is one JSON object per line:

@@ -17,8 +17,8 @@ use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use std::collections::HashMap;
-use std::io::{BufRead, Write};
-use std::net::{TcpListener, TcpStream};
+use std::io::{BufRead, BufReader, Read, Write};
+use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
@@ -89,23 +89,26 @@ pub fn serve_tcp(listener: TcpListener, runtime: ToolRuntime) -> Result<()> {
         let stream = stream?;
         let runtime = Arc::clone(&runtime);
         thread::spawn(move || {
-            let _ = serve_tcp_stream(stream, runtime);
+            let _ = serve_jsonl_stream(stream, runtime);
         });
     }
     Ok(())
 }
 
-fn serve_tcp_stream(stream: TcpStream, runtime: Arc<ToolRuntime>) -> Result<()> {
-    let reader = std::io::BufReader::new(stream.try_clone()?);
-    let mut writer = stream;
-    for line in reader.lines() {
-        let line = line?;
+pub fn serve_jsonl_stream(stream: impl Read + Write, runtime: Arc<ToolRuntime>) -> Result<()> {
+    let mut reader = BufReader::new(stream);
+    let mut line = String::new();
+    loop {
+        line.clear();
+        if reader.read_line(&mut line)? == 0 {
+            break;
+        }
         if line.trim().is_empty() {
             continue;
         }
         let response = runtime.dispatch_line(&line);
-        writeln!(writer, "{}", serde_json::to_string(&response)?)?;
-        writer.flush()?;
+        writeln!(reader.get_mut(), "{}", serde_json::to_string(&response)?)?;
+        reader.get_mut().flush()?;
     }
     Ok(())
 }
