@@ -30,7 +30,7 @@ Implemented now:
 
 - `orient search`: fast `rg`-backed candidate collection with Rust-side scoring/snippets.
 - Agent-oriented query language for `file:`, `path:`, `lang:`, `ext:`, `symbol:`, `repo:`, `test:`, filter-only discovery queries, separator-normalized exact quoted phrases, negative filters, and default multi-term AND behavior.
-- `orient index`: persistent Rust content-token, path-token, and trigram posting index with a versioned binary file header and legacy bincode load support.
+- `orient index`: persistent Rust content-token, path-token, and trigram posting index with a versioned binary file header, atomic same-directory saves, and legacy bincode load support.
 - `orient ensure-index` / `orient refresh-index`: single-repo index bootstrap and incremental refresh that reuse unchanged file metadata/terms, detect same-content renames, and refresh changed files.
 - `orient indexed-search`: indexed query path.
 - `orient discover-repos`: bounded local repo discovery for broad workspaces and repeated worktree layouts, with git checkout boundaries by default and an explicit nested-manifest opt-in.
@@ -104,7 +104,7 @@ Search quality definition:
 
 Engineering definition:
 
-- Persistent index has a versioned on-disk format with a cheap magic/version header before the encoded payload.
+- Persistent index has a versioned on-disk format with a cheap magic/version header before the encoded payload, and writes replace indexes atomically from same-directory temp files.
 - Persistent index stores separate content-token, path-token, and trigram postings.
 - Multi-repo shard directories store a manifest plus one versioned index per repo, and can refresh those indexes incrementally.
 - Persistent indexed files include line-offset tables, token-to-line tables, and bounded source snapshots for snippet and range retrieval.

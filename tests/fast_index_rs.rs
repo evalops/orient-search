@@ -208,6 +208,40 @@ fn saved_indexes_have_versioned_header_and_legacy_indexes_still_load() {
 }
 
 #[test]
+fn saving_index_replaces_existing_file_without_leaving_temp_files() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/auth.rs"),
+        "pub struct SessionManager;\npub fn issue_token() {}\n",
+    );
+    let index_path = repo.path().join(".orient/atomic.index");
+    let first = FastIndex::build(repo.path()).unwrap();
+    first.save(&index_path).unwrap();
+    let first_bytes = fs::read(&index_path).unwrap();
+
+    write(
+        &repo.path().join("src/billing.rs"),
+        "pub fn invoice_total() {}\n",
+    );
+    let second = FastIndex::build(repo.path()).unwrap();
+    second.save(&index_path).unwrap();
+    let second_bytes = fs::read(&index_path).unwrap();
+
+    assert_ne!(first_bytes, second_bytes);
+    let loaded = FastIndex::load(&index_path).unwrap();
+    assert_eq!(
+        loaded.search("invoice total", 10).unwrap()[0].path,
+        "src/billing.rs"
+    );
+    let temp_files = fs::read_dir(index_path.parent().unwrap())
+        .unwrap()
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.file_name().to_string_lossy().contains(".tmp-"))
+        .collect::<Vec<_>>();
+    assert!(temp_files.is_empty(), "{temp_files:?}");
+}
+
+#[test]
 fn loading_header_with_unsupported_version_returns_clear_error() {
     let repo = tempfile::tempdir().unwrap();
     let path = repo.path().join("future.index");

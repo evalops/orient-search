@@ -18,7 +18,9 @@ use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::fs;
+use std::io::Write;
 use std::path::{Component, Path, PathBuf};
+use std::process;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const INDEX_VERSION: u32 = 9;
@@ -308,7 +310,7 @@ impl FastIndex {
         bytes.extend_from_slice(INDEX_MAGIC);
         bytes.extend_from_slice(&INDEX_VERSION.to_le_bytes());
         bytes.extend_from_slice(&payload);
-        fs::write(path.as_ref(), bytes)
+        atomic_write(path.as_ref(), &bytes)
             .with_context(|| format!("write index {}", path.as_ref().display()))
     }
 
@@ -1530,6 +1532,46 @@ fn index_payload(bytes: &[u8]) -> Result<(&[u8], Option<u32>)> {
             .expect("header version length is fixed"),
     );
     Ok((&bytes[INDEX_HEADER_LEN..], Some(version)))
+}
+
+fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
+    let tmp_path = temporary_index_path(path);
+    let result = (|| -> Result<()> {
+        let mut file = fs::File::create(&tmp_path)
+            .with_context(|| format!("create temp index {}", tmp_path.display()))?;
+        file.write_all(bytes)
+            .with_context(|| format!("write temp index {}", tmp_path.display()))?;
+        file.sync_all()
+            .with_context(|| format!("sync temp index {}", tmp_path.display()))?;
+        drop(file);
+        fs::rename(&tmp_path, path).with_context(|| format!("replace index {}", path.display()))?;
+        Ok(())
+    })();
+
+    if result.is_err() {
+        let _ = fs::remove_file(&tmp_path);
+    }
+    result
+}
+
+fn temporary_index_path(path: &Path) -> PathBuf {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let file_name = path
+        .file_name()
+        .map(|value| value.to_string_lossy())
+        .unwrap_or_else(|| "index".into());
+    parent.join(format!(
+        ".{file_name}.tmp-{}-{}",
+        process::id(),
+        current_nanos()
+    ))
+}
+
+fn current_nanos() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default()
 }
 
 fn rank_signal(kind: &str, value: &str, score: f64) -> RankSignal {
