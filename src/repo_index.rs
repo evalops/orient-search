@@ -823,7 +823,11 @@ fn fd_positive_file_pattern(filters: &SearchFilters) -> Option<String> {
 }
 
 fn rg_positive_file_glob(filters: &SearchFilters) -> Option<String> {
-    let file = filters.file.as_deref()?.trim().replace('\\', "/");
+    rg_file_glob(filters.file.as_deref()?)
+}
+
+fn rg_file_glob(value: &str) -> Option<String> {
+    let file = value.trim().replace('\\', "/");
     if file.is_empty() {
         return None;
     }
@@ -841,10 +845,15 @@ fn rg_positive_file_glob(filters: &SearchFilters) -> Option<String> {
 }
 
 fn rg_positive_path_globs(filters: &SearchFilters) -> Vec<String> {
-    let Some(path) = filters.path.as_deref() else {
-        return Vec::new();
-    };
-    let path = path.trim().replace('\\', "/");
+    filters
+        .path
+        .as_deref()
+        .map(rg_path_globs)
+        .unwrap_or_default()
+}
+
+fn rg_path_globs(value: &str) -> Vec<String> {
+    let path = value.trim().replace('\\', "/");
     if path.is_empty() {
         return Vec::new();
     }
@@ -904,6 +913,12 @@ fn add_scope_filter_ripgrep_globs(command: &mut Command, filters: &SearchFilters
     for glob in rg_positive_path_globs(filters) {
         command.arg("--iglob").arg(glob);
     }
+    for glob in rg_negative_file_globs(filters) {
+        command.arg("--iglob").arg(format!("!{glob}"));
+    }
+    for glob in rg_negative_path_globs(filters) {
+        command.arg("--iglob").arg(format!("!{glob}"));
+    }
     if let Some(extension) = filters.extension.as_deref().and_then(rg_extension_glob) {
         command.arg("--iglob").arg(extension);
     }
@@ -925,6 +940,23 @@ fn add_scope_filter_ripgrep_globs(command: &mut Command, filters: &SearchFilters
         }
     }
     add_test_filter_ripgrep_globs(command, filters.test);
+}
+
+fn rg_negative_file_globs(filters: &SearchFilters) -> Vec<String> {
+    filters
+        .exclude_file
+        .iter()
+        .filter(|file| !file.contains('/') && !file.contains('\\'))
+        .filter_map(|file| rg_file_glob(file))
+        .collect()
+}
+
+fn rg_negative_path_globs(filters: &SearchFilters) -> Vec<String> {
+    filters
+        .exclude_path
+        .iter()
+        .flat_map(|path| rg_path_globs(path))
+        .collect()
 }
 
 fn filter_only_candidate_cap(limit: usize, filters: &SearchFilters) -> usize {

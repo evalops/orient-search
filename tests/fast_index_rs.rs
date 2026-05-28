@@ -1188,6 +1188,10 @@ fn scoped_fallback_prefilters_preserve_file_path_lang_and_ext_semantics() {
         "pub fn issue_token_test() { let token = \"session\"; }\n",
     );
     write(
+        &repo.path().join("generated/auth.rs"),
+        "pub fn issue_token_generated() { let token = \"session\"; }\n",
+    );
+    write(
         &repo.path().join("docs/auth.md"),
         "issue token documentation\n",
     );
@@ -1198,17 +1202,32 @@ fn scoped_fallback_prefilters_preserve_file_path_lang_and_ext_semantics() {
 
     let index = FastIndex::build(repo.path()).unwrap();
     for (query, expected) in [
-        ("file:AUTH.RS issue token", vec!["src/auth.rs"]),
+        (
+            "file:AUTH.RS issue token",
+            vec!["generated/auth.rs", "src/auth.rs"],
+        ),
         (
             "path:src/auth issue token",
             vec!["src/auth.rs", "src/auth.ts"],
         ),
         ("path:src/*auth.rs issue token", vec!["src/auth.rs"]),
         ("lang:typescript issue token", vec!["src/auth.ts"]),
-        ("ext:.rs issue token -path:tests", vec!["src/auth.rs"]),
+        (
+            "ext:.rs issue token -path:tests",
+            vec!["generated/auth.rs", "src/auth.rs"],
+        ),
+        (
+            "ext:rs issue token -path:generated",
+            vec!["src/auth.rs", "tests/auth_test.rs"],
+        ),
+        (
+            "ext:rs issue token -file:auth_test.rs",
+            vec!["generated/auth.rs", "src/auth.rs"],
+        ),
         (
             "-lang:markdown issue token",
             vec![
+                "generated/auth.rs",
                 "src/auth.rs",
                 "src/auth.ts",
                 "src/noise.py",
