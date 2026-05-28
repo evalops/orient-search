@@ -76,7 +76,8 @@ target style as `search`, and the CLI mirrors that with `read-range --repo`,
 `read-range --index`, or `read-range --index-dir`. Simple adapters do not need
 separate read tools for live repos, persisted indexes, and shard directories.
 `related_files` and `related_symbols` follow the same target style for nearby
-tests, source counterparts, definitions, and types.
+tests, source counterparts, definitions, and types; the CLI mirrors this as
+`related --repo`, `related --index`, or `related --index-dir`.
 `repo_map` follows it too, returning live, indexed, or shard orientation from
 one JSON-lines tool.
 `find_symbol` and `find_symbol_batch` also accept `repo`, `index`, or

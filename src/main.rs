@@ -544,6 +544,10 @@ enum Commands {
     Related {
         #[arg(long, default_value = ".")]
         repo: PathBuf,
+        #[arg(long, conflicts_with = "index_dir")]
+        index: Option<PathBuf>,
+        #[arg(long, conflicts_with = "index")]
+        index_dir: Option<PathBuf>,
         #[arg(value_name = "PATH", required_unless_present = "path_arg")]
         path: Option<String>,
         #[arg(long = "path", value_name = "PATH", conflicts_with = "path")]
@@ -574,6 +578,10 @@ enum Commands {
     RelatedSymbols {
         #[arg(long, default_value = ".")]
         repo: PathBuf,
+        #[arg(long, conflicts_with = "index_dir")]
+        index: Option<PathBuf>,
+        #[arg(long, conflicts_with = "index")]
+        index_dir: Option<PathBuf>,
         #[arg(long)]
         path: Option<String>,
         #[arg(long)]
@@ -2456,19 +2464,37 @@ fn run() -> Result<()> {
         }
         Commands::Related {
             repo,
+            index,
+            index_dir,
             path,
             path_arg,
             limit,
         } => {
             let path = cli_single_path(path, path_arg)?;
-            let index = RepoIndexer::new(&repo).build()?;
-            let related = index.related_files(&path, limit);
+            let (related, base_args) = if let Some(index_dir) = index_dir {
+                (
+                    related_shard_files(&index_dir, &path, limit)?,
+                    read_request_args("index_dir", &index_dir),
+                )
+            } else if let Some(index_path) = index {
+                let index = FastIndex::load(&index_path)?;
+                (
+                    index.related_files(&path, limit),
+                    read_request_args("index", &index_path),
+                )
+            } else {
+                let index = RepoIndexer::new(&repo).build()?;
+                (
+                    index.related_files(&path, limit),
+                    read_request_args("repo", &repo),
+                )
+            };
             println!(
                 "{}",
                 serde_json::to_string(&related_file_lookup_results(
                     related,
                     "read_range",
-                    read_request_args("repo", &repo)
+                    base_args
                 ))?
             );
         }
@@ -2510,18 +2536,42 @@ fn run() -> Result<()> {
         }
         Commands::RelatedSymbols {
             repo,
+            index,
+            index_dir,
             path,
             query,
             limit,
         } => {
-            let index = RepoIndexer::new(&repo).build()?;
-            let related = index.related_symbols(path.as_deref(), query.as_deref(), limit);
+            let (related, base_args) = if let Some(index_dir) = index_dir {
+                let path = path
+                    .as_deref()
+                    .filter(|path| !path.is_empty())
+                    .ok_or_else(|| {
+                        anyhow::anyhow!("provide --path PATH for shard related-symbols")
+                    })?;
+                (
+                    related_shard_symbols(&index_dir, path, query.as_deref(), limit)?,
+                    read_request_args("index_dir", &index_dir),
+                )
+            } else if let Some(index_path) = index {
+                let index = FastIndex::load(&index_path)?;
+                (
+                    index.related_symbols(path.as_deref(), query.as_deref(), limit),
+                    read_request_args("index", &index_path),
+                )
+            } else {
+                let index = RepoIndexer::new(&repo).build()?;
+                (
+                    index.related_symbols(path.as_deref(), query.as_deref(), limit),
+                    read_request_args("repo", &repo),
+                )
+            };
             println!(
                 "{}",
                 serde_json::to_string(&related_symbol_lookup_results(
                     related,
                     "read_range",
-                    read_request_args("repo", &repo)
+                    base_args
                 ))?
             );
         }

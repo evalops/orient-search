@@ -2187,6 +2187,25 @@ fn cli_builds_and_searches_persistent_index() {
         .stdout(predicate::str::contains("\"read_request\""))
         .stdout(predicate::str::contains("\"tool\":\"read_index_range\""));
 
+    let mut generic_related_index = Command::cargo_bin("orient").unwrap();
+    generic_related_index
+        .args([
+            "related",
+            "--index",
+            index_path.to_str().unwrap(),
+            "--path",
+            "src/auth.rs",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("tests/auth_test.rs"))
+        .stdout(predicate::str::contains("\"read_request\""))
+        .stdout(predicate::str::contains("\"tool\":\"read_range\""))
+        .stdout(predicate::str::contains(&format!(
+            "\"index\":\"{}\"",
+            index_path.display()
+        )));
+
     let mut related_index_symbols = Command::cargo_bin("orient").unwrap();
     related_index_symbols
         .args([
@@ -2202,6 +2221,23 @@ fn cli_builds_and_searches_persistent_index() {
         .success()
         .stdout(predicate::str::contains("SessionManager"))
         .stdout(predicate::str::contains("same file"));
+
+    let mut generic_related_index_symbols = Command::cargo_bin("orient").unwrap();
+    generic_related_index_symbols
+        .args([
+            "related-symbols",
+            "--index",
+            index_path.to_str().unwrap(),
+            "--path",
+            "src/auth.rs",
+            "--query",
+            "SessionManager",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("SessionManager"))
+        .stdout(predicate::str::contains("same file"))
+        .stdout(predicate::str::contains("\"tool\":\"read_range\""));
 
     write(
         &repo.path().join("src/auth.rs"),
@@ -2501,6 +2537,23 @@ fn cli_builds_and_searches_shard_directory() {
         )))
         .stdout(predicate::str::contains("\"read_request\""))
         .stdout(predicate::str::contains("\"tool\":\"read_shard_range\""));
+
+    let mut generic_related_unqualified = Command::cargo_bin("orient").unwrap();
+    generic_related_unqualified
+        .args([
+            "related",
+            "--index-dir",
+            shard_dir.path().to_str().unwrap(),
+            "--path",
+            "src/billing.rs",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(&format!(
+            "{billing_name}/src/legacy.rs"
+        )))
+        .stdout(predicate::str::contains("\"read_request\""))
+        .stdout(predicate::str::contains("\"tool\":\"read_range\""));
 
     let mut ambiguous_read = Command::cargo_bin("orient").unwrap();
     ambiguous_read
@@ -2843,6 +2896,22 @@ fn cli_filters_shard_search_by_nested_repo_alias() {
         .stdout(predicate::str::contains("\"read_request\""))
         .stdout(predicate::str::contains("\"tool\":\"read_shard_range\""));
 
+    let mut generic_related = Command::cargo_bin("orient").unwrap();
+    generic_related
+        .args([
+            "related",
+            "--index-dir",
+            shard_dir.path().to_str().unwrap(),
+            "--path",
+            "billing/src/billing.rs",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("billing/tests/billing_test.rs"))
+        .stdout(predicate::str::contains("auth/src/auth.rs").not())
+        .stdout(predicate::str::contains("\"read_request\""))
+        .stdout(predicate::str::contains("\"tool\":\"read_range\""));
+
     let mut related_symbols = Command::cargo_bin("orient").unwrap();
     related_symbols
         .args([
@@ -2862,6 +2931,26 @@ fn cli_filters_shard_search_by_nested_repo_alias() {
         .stdout(predicate::str::contains("invoice_total"))
         .stdout(predicate::str::contains("\"read_request\""))
         .stdout(predicate::str::contains("\"tool\":\"read_shard_range\""));
+
+    let mut generic_related_symbols = Command::cargo_bin("orient").unwrap();
+    generic_related_symbols
+        .args([
+            "related-symbols",
+            "--index-dir",
+            shard_dir.path().to_str().unwrap(),
+            "--path",
+            "billing/src/billing.rs",
+            "--query",
+            "invoice total",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "\"path\":\"billing/src/billing.rs\"",
+        ))
+        .stdout(predicate::str::contains("invoice_total"))
+        .stdout(predicate::str::contains("\"read_request\""))
+        .stdout(predicate::str::contains("\"tool\":\"read_range\""));
 }
 
 #[test]
