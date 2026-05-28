@@ -676,9 +676,7 @@ fn filter_only_candidates_from_rg_files(
         .arg("!coverage/**")
         .arg("--glob")
         .arg("!target/**");
-    if let Some(glob) = rg_positive_file_glob(filters) {
-        command.arg("--iglob").arg(glob);
-    }
+    add_scope_filter_ripgrep_globs(&mut command, filters);
     command.arg(".");
 
     collect_filter_only_candidates_from_path_command(
@@ -842,6 +840,93 @@ fn rg_positive_file_glob(filters: &SearchFilters) -> Option<String> {
     }
 }
 
+fn rg_positive_path_globs(filters: &SearchFilters) -> Vec<String> {
+    let Some(path) = filters.path.as_deref() else {
+        return Vec::new();
+    };
+    let path = path.trim().replace('\\', "/");
+    if path.is_empty() {
+        return Vec::new();
+    }
+    if path.contains('*') || path.contains('?') {
+        if path.contains('/') {
+            vec![path]
+        } else {
+            vec![format!("**/{path}"), format!("**/{path}/**")]
+        }
+    } else if safe_literal_glob_fragment(&path) {
+        vec![format!("**/*{path}*"), format!("**/*{path}*/**")]
+    } else {
+        Vec::new()
+    }
+}
+
+fn rg_extension_glob(extension: &str) -> Option<String> {
+    let extension = extension
+        .trim()
+        .trim_start_matches('.')
+        .to_ascii_lowercase();
+    if extension.is_empty() || !safe_literal_glob_fragment(&extension) {
+        return None;
+    }
+    Some(format!("**/*.{extension}"))
+}
+
+fn rg_language_globs(language: &str) -> &'static [&'static str] {
+    match language.trim().to_ascii_lowercase().as_str() {
+        "python" => &["**/*.py"],
+        "rust" => &["**/*.rs"],
+        "javascript" => &["**/*.js", "**/*.jsx"],
+        "typescript" => &["**/*.ts", "**/*.tsx"],
+        "go" => &["**/*.go"],
+        "ruby" => &["**/*.rb"],
+        "java" => &["**/*.java"],
+        "kotlin" => &["**/*.kt"],
+        "swift" => &["**/*.swift"],
+        "markdown" => &["**/*.md"],
+        "toml" => &["**/*.toml"],
+        "json" => &["**/*.json"],
+        "yaml" => &["**/*.yaml", "**/*.yml"],
+        _ => &[],
+    }
+}
+
+fn safe_literal_glob_fragment(value: &str) -> bool {
+    !value
+        .chars()
+        .any(|ch| matches!(ch, '[' | ']' | '{' | '}' | '\0'))
+}
+
+fn add_scope_filter_ripgrep_globs(command: &mut Command, filters: &SearchFilters) {
+    if let Some(glob) = rg_positive_file_glob(filters) {
+        command.arg("--iglob").arg(glob);
+    }
+    for glob in rg_positive_path_globs(filters) {
+        command.arg("--iglob").arg(glob);
+    }
+    if let Some(extension) = filters.extension.as_deref().and_then(rg_extension_glob) {
+        command.arg("--iglob").arg(extension);
+    }
+    if let Some(language) = filters.language.as_deref() {
+        for glob in rg_language_globs(language) {
+            command.arg("--iglob").arg(glob);
+        }
+    }
+    for extension in filters
+        .exclude_extension
+        .iter()
+        .filter_map(|extension| rg_extension_glob(extension).map(|glob| format!("!{glob}")))
+    {
+        command.arg("--iglob").arg(extension);
+    }
+    for language in &filters.exclude_language {
+        for glob in rg_language_globs(language) {
+            command.arg("--iglob").arg(format!("!{glob}"));
+        }
+    }
+    add_test_filter_ripgrep_globs(command, filters.test);
+}
+
 fn filter_only_candidate_cap(limit: usize, filters: &SearchFilters) -> usize {
     if rg_positive_file_glob(filters).is_some() {
         limit.max(1)
@@ -922,7 +1007,7 @@ fn search_repo_ripgrep(
         .arg("--glob")
         .arg("!target/**");
 
-    add_test_filter_ripgrep_globs(&mut command, filters.test);
+    add_scope_filter_ripgrep_globs(&mut command, filters);
 
     for pattern in ripgrep_patterns(raw_terms, query_tokens, query_phrases, filters) {
         command.arg("-e").arg(pattern);
@@ -1103,12 +1188,12 @@ fn add_test_filter_ripgrep_globs(command: &mut Command, test: Option<bool>) {
     match test {
         Some(true) => {
             for glob in TEST_RIPGREP_GLOBS {
-                command.arg("--glob").arg(glob);
+                command.arg("--iglob").arg(glob);
             }
         }
         Some(false) => {
             for glob in TEST_RIPGREP_GLOBS {
-                command.arg("--glob").arg(format!("!{glob}"));
+                command.arg("--iglob").arg(format!("!{glob}"));
             }
         }
         None => {}

@@ -1142,6 +1142,60 @@ fn query_language_filters_fallback_and_indexed_search() {
 }
 
 #[test]
+fn scoped_fallback_prefilters_preserve_file_path_lang_and_ext_semantics() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/auth.rs"),
+        "pub fn issue_token() { let token = \"session\"; }\n",
+    );
+    write(
+        &repo.path().join("src/auth.ts"),
+        "export function issueToken() { return 'session token' }\n",
+    );
+    write(
+        &repo.path().join("tests/auth_test.rs"),
+        "pub fn issue_token_test() { let token = \"session\"; }\n",
+    );
+    write(
+        &repo.path().join("docs/auth.md"),
+        "issue token documentation\n",
+    );
+    write(
+        &repo.path().join("src/noise.py"),
+        "def issue_token(): return 'session token'\n",
+    );
+
+    let index = FastIndex::build(repo.path()).unwrap();
+    for (query, expected) in [
+        ("file:AUTH.RS issue token", vec!["src/auth.rs"]),
+        (
+            "path:src/auth issue token",
+            vec!["src/auth.rs", "src/auth.ts"],
+        ),
+        ("path:src/*auth.rs issue token", vec!["src/auth.rs"]),
+        ("lang:typescript issue token", vec!["src/auth.ts"]),
+        ("ext:.rs issue token -path:tests", vec!["src/auth.rs"]),
+        (
+            "-lang:markdown issue token",
+            vec![
+                "src/auth.rs",
+                "src/auth.ts",
+                "src/noise.py",
+                "tests/auth_test.rs",
+            ],
+        ),
+    ] {
+        let fallback =
+            search_repo_fast_filtered(repo.path(), query, 10, &SearchFilters::default()).unwrap();
+        let indexed = index
+            .search_filtered(query, 10, &SearchFilters::default())
+            .unwrap();
+        assert_eq!(result_paths(&fallback), expected, "{query}");
+        assert_eq!(result_paths(&indexed), expected, "{query}");
+    }
+}
+
+#[test]
 fn filter_only_queries_discover_files_without_content_terms() {
     let repo = tempfile::tempdir().unwrap();
     write(
