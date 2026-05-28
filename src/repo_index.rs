@@ -19,7 +19,8 @@ const MAX_FILE_BYTES: u64 = 512_000;
 pub const MAX_ATTACHED_CONTEXT_LINES: usize = 500;
 pub const MAX_READ_RANGE_LINES: usize = 1_000;
 pub const MAX_SEARCH_RESULTS: usize = 100;
-const MAX_RESULT_READ_BATCH_RANGES: usize = 64;
+pub const MAX_RESULT_READ_BATCH_RANGES: usize = 64;
+pub const DEFAULT_REPO_MAP_READ_BATCH_RANGES: usize = 16;
 const MAX_REPO_BRIEF_IMPORT_HINTS: usize = 32;
 const DEFAULT_RESULT_READ_LINES: usize = 80;
 const DEFAULT_RELATED_FILE_READ_LINES: usize = 80;
@@ -3738,8 +3739,26 @@ pub fn attach_repo_map_read_batch_request(
     tool: &str,
     base_arguments: serde_json::Map<String, serde_json::Value>,
 ) {
-    map.read_batch_request =
-        read_batch_request_from_ranges(repo_map_read_ranges(map), tool, base_arguments);
+    attach_repo_map_read_batch_request_with_limit(
+        map,
+        tool,
+        base_arguments,
+        DEFAULT_REPO_MAP_READ_BATCH_RANGES,
+    );
+}
+
+pub fn attach_repo_map_read_batch_request_with_limit(
+    map: &mut RepoMap,
+    tool: &str,
+    base_arguments: serde_json::Map<String, serde_json::Value>,
+    read_limit: usize,
+) {
+    map.read_batch_request = read_batch_request_from_ranges_with_limit(
+        repo_map_read_ranges(map),
+        tool,
+        base_arguments,
+        read_limit,
+    );
 }
 
 fn read_request_from_range(
@@ -3763,11 +3782,25 @@ fn read_request_from_range(
 fn read_batch_request_from_ranges(
     ranges: Vec<ResultReadRange>,
     tool: &str,
+    base_arguments: serde_json::Map<String, serde_json::Value>,
+) -> Option<ResultToolRequest> {
+    read_batch_request_from_ranges_with_limit(
+        ranges,
+        tool,
+        base_arguments,
+        MAX_RESULT_READ_BATCH_RANGES,
+    )
+}
+
+fn read_batch_request_from_ranges_with_limit(
+    ranges: Vec<ResultReadRange>,
+    tool: &str,
     mut base_arguments: serde_json::Map<String, serde_json::Value>,
+    read_limit: usize,
 ) -> Option<ResultToolRequest> {
     let ranges = ranges
         .into_iter()
-        .take(MAX_RESULT_READ_BATCH_RANGES)
+        .take(read_limit.min(MAX_RESULT_READ_BATCH_RANGES))
         .map(|read_range| {
             serde_json::json!({
                 "path": read_range.path,

@@ -4,10 +4,11 @@ use crate::discover::{
 use crate::fast_index::{FastIndex, RefreshStats};
 use crate::query::{merge_filters, normalize_symbol_kind, parse_query, query_text};
 use crate::repo_index::{
-    MAX_ATTACHED_CONTEXT_LINES, MAX_READ_RANGE_LINES, MAX_SEARCH_RESULTS, QueryPlan,
-    QueryPlanFilter, RepoIndexer, RepoMapDetail, ResultToolRequest, SearchFilters, SearchResult,
-    SnippetMode, Symbol, SymbolLookupResult, attach_repo_map_read_batch_request,
-    attach_result_context, attach_result_read_requests, attach_result_related_requests,
+    DEFAULT_REPO_MAP_READ_BATCH_RANGES, MAX_ATTACHED_CONTEXT_LINES, MAX_READ_RANGE_LINES,
+    MAX_RESULT_READ_BATCH_RANGES, MAX_SEARCH_RESULTS, QueryPlan, QueryPlanFilter, RepoIndexer,
+    RepoMapDetail, ResultToolRequest, SearchFilters, SearchResult, SnippetMode, Symbol,
+    SymbolLookupResult, attach_repo_map_read_batch_request_with_limit, attach_result_context,
+    attach_result_read_requests, attach_result_related_requests,
     attach_result_related_symbol_requests, finalize_results, normalize_token, read_file_range,
     related_file_lookup_results, related_symbol_lookup_results, result_read_batch_request,
     search_repo_fast_filtered, symbol_lookup_read_batch_request, symbol_lookup_results,
@@ -385,13 +386,13 @@ pub fn tool_manifest() -> Value {
             "repo_map",
             "Return entrypoints, tests, top symbols, known commands, and important files for a local repository.",
             &["repo"],
-            &["symbols", "tests", "detail"],
+            &["symbols", "tests", "detail", "read_limit"],
         ),
         tool_entry(
             "indexed_repo_map",
             "Return repo-map orientation from a persistent single-repo index.",
             &["index"],
-            &["symbols", "tests", "detail"],
+            &["symbols", "tests", "detail", "read_limit"],
         ),
         tool_entry(
             "read_range",
@@ -613,7 +614,14 @@ pub fn tool_manifest() -> Value {
             "shard_repo_map",
             "Return repo-map orientation for every matching repo in a local shard directory.",
             &["index_dir"],
-            &["symbols", "tests", "detail", "repo", "repo_filter"],
+            &[
+                "symbols",
+                "tests",
+                "detail",
+                "read_limit",
+                "repo",
+                "repo_filter",
+            ],
         ),
         tool_entry(
             "find_shard_symbol",
@@ -775,7 +783,7 @@ pub fn agent_guide(
             "live_repo_map": {
                 "id": "map",
                 "tool": "repo_map",
-                "arguments": {"repo": repo, "symbols": 50, "tests": 50, "detail": "compact"}
+                "arguments": {"repo": repo, "symbols": 50, "tests": 50, "detail": "compact", "read_limit": DEFAULT_REPO_MAP_READ_BATCH_RANGES}
             },
             "live_search": {
                 "id": "search",
@@ -795,7 +803,7 @@ pub fn agent_guide(
             "indexed_repo_map": {
                 "id": "map",
                 "tool": "indexed_repo_map",
-                "arguments": {"index": index, "symbols": 50, "tests": 50, "detail": "compact"}
+                "arguments": {"index": index, "symbols": 50, "tests": 50, "detail": "compact", "read_limit": DEFAULT_REPO_MAP_READ_BATCH_RANGES}
             },
             "indexed_search": {
                 "id": "search",
@@ -805,7 +813,7 @@ pub fn agent_guide(
             "shard_repo_map": {
                 "id": "map",
                 "tool": "shard_repo_map",
-                "arguments": {"index_dir": index_dir, "symbols": 50, "tests": 50, "detail": "compact"}
+                "arguments": {"index_dir": index_dir, "symbols": 50, "tests": 50, "detail": "compact", "read_limit": DEFAULT_REPO_MAP_READ_BATCH_RANGES}
             },
             "shard_search": {
                 "id": "search",
@@ -1025,7 +1033,7 @@ fn argument_schema(tool_name: &str, name: &str) -> Value {
             schema.insert("type".to_string(), json!("boolean"));
         }
         "limit" | "max_depth" | "discover_limit" | "family_limit" | "symbols" | "start"
-        | "lines" | "tests" | "context_lines" => {
+        | "lines" | "tests" | "context_lines" | "read_limit" => {
             schema.insert("type".to_string(), json!("integer"));
             schema.insert(
                 "minimum".to_string(),
@@ -1127,7 +1135,7 @@ fn daemon_default_kind(tool_name: &str) -> Option<DaemonDefaultKind> {
 fn argument_type(name: &str) -> &'static str {
     match name {
         "limit" | "max_depth" | "discover_limit" | "family_limit" | "symbols" | "start"
-        | "lines" | "tests" | "context_lines" => "integer",
+        | "lines" | "tests" | "context_lines" | "read_limit" => "integer",
         "test" | "explain" | "require_all" | "any_terms" | "refresh_if_stale" | "git_metadata"
         | "tracked_files" | "nested_manifests" => "boolean",
         name if string_list_argument(name) => "string|string[]",
@@ -1173,6 +1181,7 @@ fn argument_default(tool_name: &str, name: &str) -> Option<Value> {
         (_, "max_depth") => Some(json!(4)),
         (_, "discover_limit") => Some(json!(500)),
         (_, "symbols" | "tests") => Some(json!(50)),
+        (_, "read_limit") => Some(json!(DEFAULT_REPO_MAP_READ_BATCH_RANGES)),
         (_, "start") => Some(json!(1)),
         (_, "lines") => Some(json!(80)),
         (_, "snippet") => Some(json!("medium")),
@@ -1200,6 +1209,7 @@ fn argument_maximum(tool_name: &str, name: &str) -> Option<usize> {
     match name {
         "lines" => Some(MAX_READ_RANGE_LINES),
         "context_lines" => Some(MAX_ATTACHED_CONTEXT_LINES),
+        "read_limit" => Some(MAX_RESULT_READ_BATCH_RANGES),
         "limit" if tool_has_result_limit(tool_name) => Some(MAX_SEARCH_RESULTS),
         _ => None,
     }
@@ -1336,6 +1346,9 @@ fn argument_description(tool_name: &str, name: &str) -> &'static str {
         }
         "symbols" => "Maximum top symbols to include in repo maps.",
         "tests" => "Maximum test files to include in repo maps.",
+        "read_limit" => {
+            "Maximum ranges to include in a repo-map read_batch_request; raise it when the agent intentionally wants more files opened at once."
+        }
         "start" => "One-based start line for range reads.",
         "lines" => "Number of lines to read, capped to the maximum bounded range size.",
         _ => "Tool argument.",
@@ -1438,6 +1451,10 @@ fn auto_repo_map_request<T: Serialize>(
     let mut arguments = Map::new();
     arguments.insert(target_name.to_string(), json!(target_value));
     arguments.insert("detail".to_string(), json!("compact"));
+    arguments.insert(
+        "read_limit".to_string(),
+        json!(DEFAULT_REPO_MAP_READ_BATCH_RANGES),
+    );
     if tool == "shard_repo_map" {
         if let Some(source) = source_arguments.as_object() {
             if let Some(repo) = source.get("repo").or_else(|| source.get("repo_filter")) {
@@ -1651,12 +1668,14 @@ impl ToolRuntime {
                 let symbol_limit = positive_usize_arg(&request.arguments, "symbols", 50)?;
                 let test_limit = positive_usize_arg(&request.arguments, "tests", 50)?;
                 let detail = repo_map_detail_arg(&request.arguments)?;
+                let read_limit = repo_map_read_limit_arg(&request.arguments)?;
                 let index = RepoIndexer::new(&repo).build()?;
                 let mut map = index.repo_map_with_detail(symbol_limit, test_limit, detail);
-                attach_repo_map_read_batch_request(
+                attach_repo_map_read_batch_request_with_limit(
                     &mut map,
                     "read_ranges",
                     read_request_args("repo", &repo),
+                    read_limit,
                 );
                 Ok(serde_json::to_value(map)?)
             }
@@ -1665,12 +1684,14 @@ impl ToolRuntime {
                 let symbol_limit = positive_usize_arg(&request.arguments, "symbols", 50)?;
                 let test_limit = positive_usize_arg(&request.arguments, "tests", 50)?;
                 let detail = repo_map_detail_arg(&request.arguments)?;
+                let read_limit = repo_map_read_limit_arg(&request.arguments)?;
                 let index = self.cached_index(index_path.clone())?;
                 let mut map = index.repo_map_with_detail(symbol_limit, test_limit, detail);
-                attach_repo_map_read_batch_request(
+                attach_repo_map_read_batch_request_with_limit(
                     &mut map,
                     "read_index_ranges",
                     read_request_args("index", &index_path),
+                    read_limit,
                 );
                 Ok(serde_json::to_value(map)?)
             }
@@ -2105,11 +2126,13 @@ impl ToolRuntime {
                 let symbol_limit = positive_usize_arg(&request.arguments, "symbols", 50)?;
                 let test_limit = positive_usize_arg(&request.arguments, "tests", 50)?;
                 let detail = repo_map_detail_arg(&request.arguments)?;
+                let read_limit = repo_map_read_limit_arg(&request.arguments)?;
                 Ok(serde_json::to_value(self.shard_repo_maps_cached(
                     &index_dir,
                     symbol_limit,
                     test_limit,
                     detail,
+                    read_limit,
                     &search_filters(&request.arguments, true)?,
                 )?)?)
             }
@@ -3149,6 +3172,7 @@ impl ToolRuntime {
         symbol_limit: usize,
         test_limit: usize,
         detail: RepoMapDetail,
+        read_limit: usize,
         filters: &SearchFilters,
     ) -> Result<Vec<ShardRepoMap>> {
         let manifest = self.cached_shard_manifest(index_dir)?;
@@ -3171,10 +3195,11 @@ impl ToolRuntime {
                     map.top_symbols.truncate(symbol_limit);
                 }
                 prefix_repo_map_paths(&mut map, &scope);
-                attach_repo_map_read_batch_request(
+                attach_repo_map_read_batch_request_with_limit(
                     &mut map,
                     "read_shard_ranges",
                     read_request_args("index_dir", index_dir),
+                    read_limit,
                 );
                 maps.push(ShardRepoMap {
                     aliases: shard
@@ -3951,6 +3976,16 @@ fn context_lines_arg(arguments: &Value) -> Result<usize> {
         0,
         0,
         Some(MAX_ATTACHED_CONTEXT_LINES),
+    )
+}
+
+fn repo_map_read_limit_arg(arguments: &Value) -> Result<usize> {
+    bounded_usize_arg(
+        arguments,
+        "read_limit",
+        DEFAULT_REPO_MAP_READ_BATCH_RANGES,
+        1,
+        Some(MAX_RESULT_READ_BATCH_RANGES),
     )
 }
 

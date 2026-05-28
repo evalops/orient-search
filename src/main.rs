@@ -7,8 +7,9 @@ use orient::discover::{
 use orient::fast_index::{FastIndex, RefreshStats};
 use orient::query::normalize_symbol_kind;
 use orient::repo_index::{
-    QueryPlan, RepoIndexer, RepoMapDetail, ResultToolRequest, SearchFilters, SearchResult,
-    SnippetMode, SymbolLookupResult, attach_repo_map_read_batch_request, attach_result_context,
+    DEFAULT_REPO_MAP_READ_BATCH_RANGES, MAX_RESULT_READ_BATCH_RANGES, QueryPlan, RepoIndexer,
+    RepoMapDetail, ResultToolRequest, SearchFilters, SearchResult, SnippetMode, SymbolLookupResult,
+    attach_repo_map_read_batch_request_with_limit, attach_result_context,
     attach_result_read_requests, attach_result_related_requests,
     attach_result_related_symbol_requests, read_file_range, related_file_lookup_results,
     related_symbol_lookup_results, result_read_batch_request, search_repo_fast_filtered,
@@ -239,6 +240,8 @@ enum Commands {
         repo: Option<String>,
         #[arg(long, default_value = "compact", value_parser = ["compact", "full"])]
         detail: String,
+        #[arg(long = "read-limit", default_value_t = DEFAULT_REPO_MAP_READ_BATCH_RANGES)]
+        read_limit: usize,
     },
     Brief {
         #[arg(long, default_value = ".")]
@@ -255,6 +258,8 @@ enum Commands {
         tests: usize,
         #[arg(long, default_value = "compact", value_parser = ["compact", "full"])]
         detail: String,
+        #[arg(long = "read-limit", default_value_t = DEFAULT_REPO_MAP_READ_BATCH_RANGES)]
+        read_limit: usize,
     },
     IndexMap {
         #[arg(long)]
@@ -265,6 +270,8 @@ enum Commands {
         tests: usize,
         #[arg(long, default_value = "compact", value_parser = ["compact", "full"])]
         detail: String,
+        #[arg(long = "read-limit", default_value_t = DEFAULT_REPO_MAP_READ_BATCH_RANGES)]
+        read_limit: usize,
     },
     IndexPlan {
         #[arg(long)]
@@ -935,6 +942,13 @@ fn repo_map_detail_from_cli(value: &str) -> Result<RepoMapDetail> {
     }
 }
 
+fn repo_map_read_limit_from_cli(value: usize) -> Result<usize> {
+    if value == 0 || value > MAX_RESULT_READ_BATCH_RANGES {
+        bail!("repo map read limit must be between 1 and {MAX_RESULT_READ_BATCH_RANGES}");
+    }
+    Ok(value)
+}
+
 fn attach_cli_retry_requests<T: Serialize>(
     mut plan: QueryPlan,
     search_tool: &str,
@@ -1377,8 +1391,10 @@ fn run() -> Result<()> {
             tests,
             repo,
             detail,
+            read_limit,
         } => {
             let detail = repo_map_detail_from_cli(&detail)?;
+            let read_limit = repo_map_read_limit_from_cli(read_limit)?;
             let mut maps = shard_repo_maps(
                 &index_dir,
                 symbols,
@@ -1390,10 +1406,11 @@ fn run() -> Result<()> {
                 },
             )?;
             for shard_map in &mut maps {
-                attach_repo_map_read_batch_request(
+                attach_repo_map_read_batch_request_with_limit(
                     &mut shard_map.map,
                     "read_shard_ranges",
                     read_request_args("index_dir", &index_dir),
+                    read_limit,
                 );
             }
             println!("{}", serde_json::to_string(&maps)?);
@@ -1411,14 +1428,17 @@ fn run() -> Result<()> {
             symbols,
             tests,
             detail,
+            read_limit,
         } => {
             let detail = repo_map_detail_from_cli(&detail)?;
+            let read_limit = repo_map_read_limit_from_cli(read_limit)?;
             let index = RepoIndexer::new(&repo).build()?;
             let mut map = index.repo_map_with_detail(symbols, tests, detail);
-            attach_repo_map_read_batch_request(
+            attach_repo_map_read_batch_request_with_limit(
                 &mut map,
                 "read_ranges",
                 read_request_args("repo", &repo),
+                read_limit,
             );
             println!("{}", serde_json::to_string(&map)?);
         }
@@ -1427,15 +1447,18 @@ fn run() -> Result<()> {
             symbols,
             tests,
             detail,
+            read_limit,
         } => {
             let detail = repo_map_detail_from_cli(&detail)?;
+            let read_limit = repo_map_read_limit_from_cli(read_limit)?;
             let index_path = index;
             let index = FastIndex::load(&index_path)?;
             let mut map = index.repo_map_with_detail(symbols, tests, detail);
-            attach_repo_map_read_batch_request(
+            attach_repo_map_read_batch_request_with_limit(
                 &mut map,
                 "read_index_ranges",
                 read_request_args("index", &index_path),
+                read_limit,
             );
             println!("{}", serde_json::to_string(&map)?);
         }
@@ -1636,7 +1659,7 @@ fn run() -> Result<()> {
                     },
                     "repo_map_request": {
                         "tool": "shard_repo_map",
-                        "arguments": {"index_dir": index_dir, "detail": "compact"}
+                        "arguments": {"index_dir": index_dir, "detail": "compact", "read_limit": DEFAULT_REPO_MAP_READ_BATCH_RANGES}
                     },
                     "read_batch_request": result_read_batch_request(
                         &results,
@@ -1691,7 +1714,7 @@ fn run() -> Result<()> {
                     },
                     "repo_map_request": {
                         "tool": "indexed_repo_map",
-                        "arguments": {"index": index_path, "detail": "compact"}
+                        "arguments": {"index": index_path, "detail": "compact", "read_limit": DEFAULT_REPO_MAP_READ_BATCH_RANGES}
                     },
                     "read_batch_request": result_read_batch_request(
                         &results,
@@ -1747,7 +1770,7 @@ fn run() -> Result<()> {
                     },
                     "repo_map_request": {
                         "tool": "repo_map",
-                        "arguments": {"repo": repo, "detail": "compact"}
+                        "arguments": {"repo": repo, "detail": "compact", "read_limit": DEFAULT_REPO_MAP_READ_BATCH_RANGES}
                     },
                     "read_batch_request": result_read_batch_request(
                         &results,
@@ -1816,7 +1839,7 @@ fn run() -> Result<()> {
                         },
                         "repo_map_request": {
                             "tool": "shard_repo_map",
-                            "arguments": {"index_dir": index_dir, "detail": "compact"}
+                            "arguments": {"index_dir": index_dir, "detail": "compact", "read_limit": DEFAULT_REPO_MAP_READ_BATCH_RANGES}
                         },
                         "read_batch_request": result_read_batch_request(
                             &results,
@@ -1873,7 +1896,7 @@ fn run() -> Result<()> {
                         },
                         "repo_map_request": {
                             "tool": "indexed_repo_map",
-                            "arguments": {"index": index_path, "detail": "compact"}
+                            "arguments": {"index": index_path, "detail": "compact", "read_limit": DEFAULT_REPO_MAP_READ_BATCH_RANGES}
                         },
                         "read_batch_request": result_read_batch_request(
                             &results,
@@ -1931,7 +1954,7 @@ fn run() -> Result<()> {
                         },
                         "repo_map_request": {
                             "tool": "repo_map",
-                            "arguments": {"repo": repo, "detail": "compact"}
+                            "arguments": {"repo": repo, "detail": "compact", "read_limit": DEFAULT_REPO_MAP_READ_BATCH_RANGES}
                         },
                         "read_batch_request": result_read_batch_request(
                             &results,

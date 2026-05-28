@@ -1021,6 +1021,15 @@ fn cli_repo_map_detail_controls_import_payload_size() {
         &repo.path().join("src/other.rs"),
         "use beta::Client;\nuse gamma::Config;\npub fn call() {}\n",
     );
+    write(&repo.path().join("README.md"), "# sample\n");
+    write(
+        &repo.path().join("Cargo.toml"),
+        "[package]\nname='sample'\nversion='0.1.0'\n",
+    );
+    write(
+        &repo.path().join("tests/other_test.rs"),
+        "#[test]\nfn it_works() {}\n",
+    );
 
     let compact = Command::cargo_bin("orient")
         .unwrap()
@@ -1060,6 +1069,31 @@ fn cli_repo_map_detail_controls_import_payload_size() {
     assert!(full.status.success());
     let full: serde_json::Value = serde_json::from_slice(&full.stdout).unwrap();
     assert_eq!(full["brief"]["import_hints"].as_array().unwrap().len(), 42);
+
+    let narrow_reads = Command::cargo_bin("orient")
+        .unwrap()
+        .args([
+            "repo-map",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--symbols",
+            "5",
+            "--tests",
+            "5",
+            "--read-limit",
+            "2",
+        ])
+        .output()
+        .unwrap();
+    assert!(narrow_reads.status.success());
+    let narrow_reads: serde_json::Value = serde_json::from_slice(&narrow_reads.stdout).unwrap();
+    assert_eq!(
+        narrow_reads["read_batch_request"]["arguments"]["ranges"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
 }
 
 #[test]
