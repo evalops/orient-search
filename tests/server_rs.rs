@@ -2562,6 +2562,52 @@ fn unix_daemon_refuses_to_replace_non_socket_path() {
     assert_eq!(fs::read_to_string(&socket).unwrap(), "not a socket");
 }
 
+#[cfg(unix)]
+#[test]
+fn unix_daemon_refuses_to_replace_active_socket() {
+    let socket_dir = tempfile::tempdir().unwrap();
+    let socket = socket_dir.path().join("orient.sock");
+    let binary = assert_cmd::cargo::cargo_bin("orient");
+    let mut child = Command::new(&binary)
+        .args(["serve-unix", "--socket", socket.to_str().unwrap()])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let stdout = child.stdout.take().unwrap();
+    let mut startup_reader = BufReader::new(stdout);
+    let mut startup = String::new();
+    startup_reader.read_line(&mut startup).unwrap();
+
+    let output = Command::new(&binary)
+        .args(["serve-unix", "--socket", socket.to_str().unwrap()])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        stderr.contains("refusing to replace active unix socket"),
+        "{stderr}"
+    );
+
+    let mut stream = UnixStream::connect(&socket).unwrap();
+    let mut reader = BufReader::new(stream.try_clone().unwrap());
+    let request = serde_json::json!({
+        "id": "status",
+        "tool": "daemon_status",
+        "arguments": {}
+    });
+    writeln!(stream, "{request}").unwrap();
+    let mut response = String::new();
+    reader.read_line(&mut response).unwrap();
+
+    child.kill().unwrap();
+    let _ = child.wait();
+
+    assert!(response.contains("\"id\":\"status\""), "{response}");
+}
+
 #[test]
 fn tcp_daemon_starts_with_warmed_index() {
     let repo = tempfile::tempdir().unwrap();

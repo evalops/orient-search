@@ -1284,12 +1284,7 @@ fn main() -> Result<()> {
             family_limit,
             nested_manifests,
         } => {
-            if socket.exists() {
-                if !fs::symlink_metadata(&socket)?.file_type().is_socket() {
-                    bail!("refusing to remove non-socket path: {}", socket.display());
-                }
-                fs::remove_file(&socket)?;
-            }
+            prepare_unix_socket_path(&socket)?;
             if let Some(parent) = socket.parent() {
                 fs::create_dir_all(parent)?;
             }
@@ -1410,6 +1405,24 @@ fn serve_unix(listener: UnixListener, runtime: ToolRuntime) -> Result<()> {
             let _ = serve_jsonl_stream(stream, runtime);
         });
     }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn prepare_unix_socket_path(socket: &Path) -> Result<()> {
+    if !socket.exists() {
+        return Ok(());
+    }
+    if !fs::symlink_metadata(socket)?.file_type().is_socket() {
+        bail!("refusing to remove non-socket path: {}", socket.display());
+    }
+    if UnixStream::connect(socket).is_ok() {
+        bail!(
+            "refusing to replace active unix socket: {}",
+            socket.display()
+        );
+    }
+    fs::remove_file(socket)?;
     Ok(())
 }
 
