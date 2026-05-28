@@ -1596,7 +1596,12 @@ impl RepoIndex {
                 return Vec::new();
             }
         }
-        let (query_terms, query_symbol) = related_query_terms_and_symbol(query);
+        let (query_terms, query_symbol, filters) = related_query_terms_symbol_and_filters(query);
+        if !repo_matches(&self.root, &filters)
+            || !dependency_filters_match(&self.dependency_hints(), &filters)
+        {
+            return Vec::new();
+        }
         let query_tokens = query_terms.into_iter().collect::<HashSet<_>>();
         let path_stem = normalized_path
             .as_deref()
@@ -1612,6 +1617,9 @@ impl RepoIndex {
         let mut related = Vec::new();
 
         for symbol in &self.symbols {
+            if !self.related_symbol_matches_filters(symbol, &filters) {
+                continue;
+            }
             let mut score = 0.0;
             let mut reasons = Vec::new();
             if let Some(path) = &normalized_path {
@@ -1687,6 +1695,28 @@ impl RepoIndex {
         });
         related.truncate(limit);
         related
+    }
+
+    fn related_symbol_matches_filters(&self, symbol: &Symbol, filters: &SearchFilters) -> bool {
+        let Some(file) = self.files.get(&symbol.path) else {
+            return false;
+        };
+        let path_lower = symbol.path.to_ascii_lowercase();
+        let file_name_lower = Path::new(&symbol.path)
+            .file_name()
+            .map(|value| value.to_string_lossy().to_ascii_lowercase())
+            .unwrap_or_default();
+        let extension_lower = Path::new(&symbol.path)
+            .extension()
+            .map(|value| value.to_string_lossy().to_lowercase());
+        matches_filters_with_path_metadata(
+            &path_lower,
+            &file_name_lower,
+            extension_lower.as_deref(),
+            Some(&file.language),
+            filters,
+        ) && source_import_filters_match(&symbol.path, &file.text, filters)
+            && symbol_matches_related_filters(&symbol.name, &symbol.kind, filters)
     }
 
     pub fn repo_brief(&self) -> RepoBrief {
@@ -3165,9 +3195,11 @@ pub(crate) fn normalize_token(text: &str) -> String {
     tokenize(text).join("")
 }
 
-pub(crate) fn related_query_terms_and_symbol(query: Option<&str>) -> (Vec<String>, String) {
+pub(crate) fn related_query_terms_symbol_and_filters(
+    query: Option<&str>,
+) -> (Vec<String>, String, SearchFilters) {
     let Some(query) = query else {
-        return (Vec::new(), String::new());
+        return (Vec::new(), String::new(), SearchFilters::default());
     };
     let parsed = parse_query(query);
     let text = query_text(&parsed.terms, &parsed.filters);
@@ -3175,7 +3207,37 @@ pub(crate) fn related_query_terms_and_symbol(query: Option<&str>) -> (Vec<String
     tokens.sort();
     tokens.dedup();
     let symbol = normalize_token(&text);
-    (tokens, symbol)
+    (tokens, symbol, parsed.filters)
+}
+
+pub(crate) fn symbol_matches_related_filters(
+    name: &str,
+    kind: &str,
+    filters: &SearchFilters,
+) -> bool {
+    let normalized_name = normalize_token(name);
+    if let Some(wanted) = &filters.symbol {
+        let wanted = normalize_token(wanted);
+        if wanted.is_empty() || normalized_name != wanted {
+            return false;
+        }
+    }
+    if filters
+        .exclude_symbol
+        .iter()
+        .any(|excluded| normalize_token(excluded) == normalized_name)
+    {
+        return false;
+    }
+    if let Some(wanted) = &filters.symbol_kind {
+        if !kind.eq_ignore_ascii_case(wanted) {
+            return false;
+        }
+    }
+    !filters
+        .exclude_symbol_kind
+        .iter()
+        .any(|excluded| kind.eq_ignore_ascii_case(excluded))
 }
 
 pub(crate) fn related_stem_terms(stem: &str) -> Vec<String> {

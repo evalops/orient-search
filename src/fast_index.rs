@@ -11,10 +11,11 @@ use crate::repo_index::{
     import_hints_from_source_texts, is_entrypoint_path, is_ignored, is_important_file,
     is_manifest_file, is_test_path, known_commands_from_hints, language_for,
     matches_filters_with_path_metadata, normalize_token, regular_file_metadata,
-    related_query_terms_and_symbol, related_stem_terms, repo_map_seed_paths, repo_matches,
+    related_query_terms_symbol_and_filters, related_stem_terms, repo_map_seed_paths, repo_matches,
     result_matches_all_tokens, result_matches_symbol_filters, round4, score_filter_only_path,
     source_import_filters_match, symbol_exact_phrase_bonus, symbol_kind_rank,
-    symbol_query_match_score, token_counts, tokenize, unique_query_tokens,
+    symbol_matches_related_filters, symbol_query_match_score, token_counts, tokenize,
+    unique_query_tokens,
 };
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use anyhow::{Context, Result};
@@ -896,7 +897,10 @@ impl FastIndex {
                 return Vec::new();
             }
         }
-        let (query_terms, query_symbol) = related_query_terms_and_symbol(query);
+        let (query_terms, query_symbol, filters) = related_query_terms_symbol_and_filters(query);
+        if !repo_matches(&self.root, &filters) || !self.matches_dependency_filters(&filters) {
+            return Vec::new();
+        }
         let query_tokens = query_terms.into_iter().collect::<HashSet<_>>();
         let path_stem = normalized_path
             .as_deref()
@@ -918,8 +922,14 @@ impl FastIndex {
                     let Some(file) = self.files.get(posting.file_id as usize) else {
                         continue;
                     };
+                    if !indexed_file_matches_related_symbol_filters(file, &filters) {
+                        continue;
+                    }
                     for indexed_symbol in &file.symbols {
                         if indexed_symbol.normalized != query_symbol {
+                            continue;
+                        }
+                        if !indexed_symbol_matches_related_filters(indexed_symbol, &filters) {
                             continue;
                         }
                         let symbol = Symbol {
@@ -962,7 +972,13 @@ impl FastIndex {
 
         if related.len() < limit {
             for file in &self.files {
+                if !indexed_file_matches_related_symbol_filters(file, &filters) {
+                    continue;
+                }
                 for indexed_symbol in &file.symbols {
+                    if !indexed_symbol_matches_related_filters(indexed_symbol, &filters) {
+                        continue;
+                    }
                     if seen.contains(&(
                         file.path.clone(),
                         indexed_symbol.line,
@@ -2382,6 +2398,23 @@ fn indexed_path_matches_symbol_kind_filter(file: &IndexedPath, wanted: &str) -> 
             ..SearchFilters::default()
         },
     )
+}
+
+fn indexed_file_matches_related_symbol_filters(
+    file: &IndexedPath,
+    filters: &SearchFilters,
+) -> bool {
+    matches_filters_with_path_metadata(
+        &file.path_lower,
+        &file.file_name_lower,
+        file.extension_lower.as_deref(),
+        Some(&file.language),
+        filters,
+    ) && source_import_filters_match(&file.path, &file.content, filters)
+}
+
+fn indexed_symbol_matches_related_filters(symbol: &IndexedSymbol, filters: &SearchFilters) -> bool {
+    symbol_matches_related_filters(&symbol.name, &symbol.kind, filters)
 }
 
 fn indexed_query_plan(

@@ -99,17 +99,37 @@ def test_issue_token_round_trip():
 
     write(
         &temp.path().join("src/billing.rs"),
-        "pub fn repo_lookup_total() {}\npub fn invoice_total() {}\n",
+        "pub fn repo_lookup_total() {}\npub fn invoice_total() {}\npub struct InvoiceTotal;\n",
     );
     let billing_index = RepoIndexer::new(temp.path()).build().unwrap();
-    let filter_query_symbols =
-        billing_index.related_symbols(Some("src/billing.rs"), Some("repo:sample invoice total"), 5);
-    assert_eq!(filter_query_symbols[0].symbol.name, "invoice_total");
+    let filter_query_symbols = billing_index.related_symbols(
+        Some("src/billing.rs"),
+        Some("path:billing invoice total"),
+        5,
+    );
+    let invoice_rank = filter_query_symbols
+        .iter()
+        .position(|item| item.symbol.name == "invoice_total")
+        .unwrap();
+    let repo_lookup_rank = filter_query_symbols
+        .iter()
+        .position(|item| item.symbol.name == "repo_lookup_total")
+        .unwrap();
+    assert!(invoice_rank < repo_lookup_rank, "{filter_query_symbols:?}");
     assert!(
-        filter_query_symbols[0]
+        filter_query_symbols[invoice_rank]
             .reason
             .contains("exact query symbol"),
         "{filter_query_symbols:?}"
+    );
+    let kind_filtered_symbols =
+        billing_index.related_symbols(Some("src/billing.rs"), Some("kind:struct invoice total"), 5);
+    assert_eq!(kind_filtered_symbols[0].symbol.name, "InvoiceTotal");
+    assert!(
+        kind_filtered_symbols
+            .iter()
+            .all(|item| item.symbol.kind == "struct"),
+        "{kind_filtered_symbols:?}"
     );
 
     let brief = index.repo_brief();
