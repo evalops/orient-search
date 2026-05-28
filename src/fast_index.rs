@@ -909,80 +909,141 @@ impl FastIndex {
             .map(|value| value.to_string_lossy().to_string())
             .unwrap_or_default();
         let mut related = Vec::new();
+        let mut seen = HashSet::new();
 
-        for file in &self.files {
-            for indexed_symbol in &file.symbols {
-                let symbol = Symbol {
-                    name: indexed_symbol.name.clone(),
-                    kind: indexed_symbol.kind.clone(),
-                    path: file.path.clone(),
-                    line: indexed_symbol.line,
-                };
-                let mut score = 0.0;
-                let mut reasons = Vec::new();
-
-                if let Some(path) = &normalized_path {
-                    if &symbol.path == path {
-                        score += 20.0;
-                        reasons.push("same file".to_string());
-                    }
-                    if !path_dir.is_empty()
-                        && Path::new(&symbol.path)
-                            .parent()
-                            .map(|value| value.to_string_lossy() == path_dir)
-                            .unwrap_or(false)
-                    {
-                        score += 4.0;
-                        reasons.push("same directory".to_string());
-                    }
-                    let symbol_path_lower = symbol.path.to_ascii_lowercase();
-                    if !path_stem.is_empty()
-                        && (symbol.name.to_ascii_lowercase().contains(&path_stem)
-                            || symbol_path_lower.contains(&path_stem))
-                    {
-                        score += 3.0;
-                        reasons.push(format!("shares stem {path_stem}"));
-                    }
-                    if path_stem_terms.iter().any(|term| {
-                        symbol.name.to_ascii_lowercase().contains(term)
-                            || symbol_path_lower.contains(term)
-                    }) {
-                        score += 3.0;
-                        reasons.push("shares normalized stem".to_string());
-                    }
-                }
-
-                if !query_tokens.is_empty() {
-                    let symbol_tokens = indexed_symbol
-                        .tokens
-                        .iter()
-                        .cloned()
-                        .chain(tokenize(&symbol.path))
-                        .collect::<HashSet<_>>();
-                    let overlap = query_tokens
-                        .iter()
-                        .filter(|token| symbol_tokens.contains(*token))
-                        .count();
-                    if overlap > 0 {
-                        score += 5.0 * overlap as f64;
-                        reasons.push(format!("query overlap {overlap}"));
-                    }
-                    if !query_symbol.is_empty() && indexed_symbol.normalized == query_symbol {
-                        score += 15.0;
-                        reasons.push("exact query symbol".to_string());
-                    }
-                }
-
-                if score > 0.0 {
-                    score += match symbol.kind.as_str() {
-                        "class" | "struct" | "enum" | "interface" => 2.0,
-                        _ => 0.0,
+        if normalized_path.is_none() && !query_symbol.is_empty() {
+            if let Some(postings) = self.symbol_postings.get(&query_symbol) {
+                for posting in postings {
+                    let Some(file) = self.files.get(posting.file_id as usize) else {
+                        continue;
                     };
-                    related.push(RelatedSymbol {
-                        symbol,
-                        reason: reasons.join("; "),
-                        score: round4(score),
-                    });
+                    for indexed_symbol in &file.symbols {
+                        if indexed_symbol.normalized != query_symbol {
+                            continue;
+                        }
+                        let symbol = Symbol {
+                            name: indexed_symbol.name.clone(),
+                            kind: indexed_symbol.kind.clone(),
+                            path: file.path.clone(),
+                            line: indexed_symbol.line,
+                        };
+                        let symbol_tokens = indexed_symbol
+                            .tokens
+                            .iter()
+                            .cloned()
+                            .chain(tokenize(&symbol.path))
+                            .collect::<HashSet<_>>();
+                        let overlap = query_tokens
+                            .iter()
+                            .filter(|token| symbol_tokens.contains(*token))
+                            .count();
+                        let mut score = 15.0 + 5.0 * overlap as f64;
+                        let mut reasons = vec!["exact query symbol".to_string()];
+                        if overlap > 0 {
+                            reasons.push(format!("query overlap {overlap}"));
+                        }
+                        score += match symbol.kind.as_str() {
+                            "class" | "struct" | "enum" | "interface" => 2.0,
+                            _ => 0.0,
+                        };
+                        let key = (symbol.path.clone(), symbol.line, symbol.name.clone());
+                        if seen.insert(key) {
+                            related.push(RelatedSymbol {
+                                symbol,
+                                reason: reasons.join("; "),
+                                score: round4(score),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        if related.len() < limit {
+            for file in &self.files {
+                for indexed_symbol in &file.symbols {
+                    if seen.contains(&(
+                        file.path.clone(),
+                        indexed_symbol.line,
+                        indexed_symbol.name.clone(),
+                    )) {
+                        continue;
+                    }
+                    let symbol = Symbol {
+                        name: indexed_symbol.name.clone(),
+                        kind: indexed_symbol.kind.clone(),
+                        path: file.path.clone(),
+                        line: indexed_symbol.line,
+                    };
+                    let mut score = 0.0;
+                    let mut reasons = Vec::new();
+
+                    if let Some(path) = &normalized_path {
+                        if &symbol.path == path {
+                            score += 20.0;
+                            reasons.push("same file".to_string());
+                        }
+                        if !path_dir.is_empty()
+                            && Path::new(&symbol.path)
+                                .parent()
+                                .map(|value| value.to_string_lossy() == path_dir)
+                                .unwrap_or(false)
+                        {
+                            score += 4.0;
+                            reasons.push("same directory".to_string());
+                        }
+                        let symbol_path_lower = symbol.path.to_ascii_lowercase();
+                        if !path_stem.is_empty()
+                            && (symbol.name.to_ascii_lowercase().contains(&path_stem)
+                                || symbol_path_lower.contains(&path_stem))
+                        {
+                            score += 3.0;
+                            reasons.push(format!("shares stem {path_stem}"));
+                        }
+                        if path_stem_terms.iter().any(|term| {
+                            symbol.name.to_ascii_lowercase().contains(term)
+                                || symbol_path_lower.contains(term)
+                        }) {
+                            score += 3.0;
+                            reasons.push("shares normalized stem".to_string());
+                        }
+                    }
+
+                    if !query_tokens.is_empty() {
+                        let symbol_tokens = indexed_symbol
+                            .tokens
+                            .iter()
+                            .cloned()
+                            .chain(tokenize(&symbol.path))
+                            .collect::<HashSet<_>>();
+                        let overlap = query_tokens
+                            .iter()
+                            .filter(|token| symbol_tokens.contains(*token))
+                            .count();
+                        if overlap > 0 {
+                            score += 5.0 * overlap as f64;
+                            reasons.push(format!("query overlap {overlap}"));
+                        }
+                        if !query_symbol.is_empty() && indexed_symbol.normalized == query_symbol {
+                            score += 15.0;
+                            reasons.push("exact query symbol".to_string());
+                        }
+                    }
+
+                    if score > 0.0 {
+                        score += match symbol.kind.as_str() {
+                            "class" | "struct" | "enum" | "interface" => 2.0,
+                            _ => 0.0,
+                        };
+                        let key = (symbol.path.clone(), symbol.line, symbol.name.clone());
+                        if seen.insert(key) {
+                            related.push(RelatedSymbol {
+                                symbol,
+                                reason: reasons.join("; "),
+                                score: round4(score),
+                            });
+                        }
+                    }
                 }
             }
         }

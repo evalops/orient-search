@@ -960,6 +960,14 @@ fn indexed_related_context_uses_persisted_metadata() {
         }),
         "{related_symbols:?}"
     );
+    let exact_query_symbols = loaded.related_symbols(None, Some("SessionManager"), 1);
+    assert_eq!(exact_query_symbols.len(), 1);
+    assert_eq!(exact_query_symbols[0].symbol.name, "SessionManager");
+    assert_eq!(exact_query_symbols[0].symbol.path, "src/auth.rs");
+    assert!(
+        exact_query_symbols[0].reason.contains("exact query symbol"),
+        "{exact_query_symbols:?}"
+    );
     let test_related_symbols = loaded.related_symbols(Some("tests/auth_test.rs"), None, 10);
     assert!(
         test_related_symbols
@@ -967,6 +975,13 @@ fn indexed_related_context_uses_persisted_metadata() {
             .any(|symbol| symbol.symbol.name == "SessionManager"
                 && symbol.symbol.path == "src/auth.rs"),
         "{test_related_symbols:?}"
+    );
+    let fuzzy_query_symbols = loaded.related_symbols(None, Some("issue"), 10);
+    assert!(
+        fuzzy_query_symbols
+            .iter()
+            .any(|symbol| symbol.symbol.name == "issue_token"),
+        "{fuzzy_query_symbols:?}"
     );
 }
 
