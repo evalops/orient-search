@@ -670,8 +670,10 @@ enum Commands {
     BenchShards {
         #[arg(long)]
         index_dir: PathBuf,
-        #[arg(long)]
+        #[arg(long, conflicts_with = "cold")]
         cached: bool,
+        #[arg(long)]
+        cold: bool,
         #[arg(long, default_value_t = 10)]
         runs: usize,
         #[arg(long, default_value_t = 3)]
@@ -2871,6 +2873,7 @@ fn run() -> Result<()> {
         Commands::BenchShards {
             index_dir,
             cached,
+            cold,
             runs,
             warmup,
             limit,
@@ -2885,7 +2888,7 @@ fn run() -> Result<()> {
             let filters = search_filters_from_args(&filters, repo)?;
             let report = bench_shards(ShardBenchConfig {
                 index_dir,
-                cached,
+                cached: cached || !cold,
                 runs,
                 warmup,
                 limit,
