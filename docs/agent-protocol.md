@@ -123,6 +123,8 @@ Read-range tools accept `/` or `\` separators in repo-relative paths and reject 
 
 `read_range` / `open_range` and `read_ranges` / `open_ranges` are target-aware convenience tools: pass `repo`, `index`, or `index_dir` to read from a live repository, persistent index, or shard directory with one adapter path. The explicit `read_index_range` and `read_shard_range` families remain available for wrappers that want surface-specific tools.
 
+`related_files` and `related_symbols` are target-aware too: pass `repo`, `index`, or `index_dir` to get nearby files or definitions from the same target style as `search`. For shard `related_symbols`, include the search-hit `path` so Orient can keep the lookup inside the right shard or alias scope. The explicit `related_index_*` and `related_shard_*` tools remain available.
+
 Examples:
 
 ```json

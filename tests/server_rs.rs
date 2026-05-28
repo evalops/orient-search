@@ -140,6 +140,14 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         .iter()
         .find(|tool| tool["name"] == "repo_map")
         .unwrap();
+    let related_files = tools
+        .iter()
+        .find(|tool| tool["name"] == "related_files")
+        .unwrap();
+    let related_symbols = tools
+        .iter()
+        .find(|tool| tool["name"] == "related_symbols")
+        .unwrap();
 
     assert_eq!(search["required"], serde_json::json!(["repo", "query"]));
     assert_eq!(search_auto["required"], serde_json::json!(["query"]));
@@ -521,6 +529,28 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
     assert_eq!(
         read_index_range["input_schema"]["properties"]["path"]["description"],
         "Index-relative result path, such as src/lib.rs."
+    );
+    assert_eq!(related_files["required"], serde_json::json!(["path"]));
+    assert_eq!(
+        related_files["input_schema"]["properties"]["index"]["type"],
+        "string"
+    );
+    assert_eq!(
+        related_files["input_schema"]["properties"]["index_dir"]["type"],
+        "string"
+    );
+    assert_eq!(
+        related_files["input_schema"]["properties"]["path"]["description"],
+        "Result path for the selected target; use repo/index-relative paths for repo or index targets, and shard-prefixed or unique shard-relative paths for index_dir targets."
+    );
+    assert_eq!(related_symbols["required"], serde_json::json!([]));
+    assert_eq!(
+        related_symbols["input_schema"]["properties"]["index"]["type"],
+        "string"
+    );
+    assert_eq!(
+        related_symbols["input_schema"]["properties"]["index_dir"]["type"],
+        "string"
     );
     assert_eq!(agent_guide_tool["required"], serde_json::json!([]));
     assert_eq!(
@@ -1201,11 +1231,12 @@ fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
         indexed["repo_map_request"]["arguments"]["read_limit"],
         serde_json::json!(DEFAULT_REPO_MAP_READ_BATCH_RANGES)
     );
+    assert_eq!(indexed["results"][0]["read_request"]["tool"], "read_range");
     assert_eq!(
-        indexed["results"][0]["read_request"]["tool"],
-        "read_index_range"
+        indexed["results"][0]["read_request"]["arguments"]["index"],
+        serde_json::json!(index_path.canonicalize().unwrap())
     );
-    assert_eq!(indexed["read_batch_request"]["tool"], "read_index_ranges");
+    assert_eq!(indexed["read_batch_request"]["tool"], "read_ranges");
 
     let empty_indexed = runtime.dispatch(ToolRequest {
         id: serde_json::json!("empty-indexed"),
@@ -1322,8 +1353,16 @@ fn runtime_search_alias_accepts_live_index_and_shard_targets() {
     assert!(indexed.error.is_none(), "{:?}", indexed.error);
     let indexed = indexed.result.unwrap();
     assert_eq!(indexed[0]["path"], "src/auth.rs");
-    assert_eq!(indexed[0]["read_request"]["tool"], "read_index_range");
-    assert_eq!(indexed[0]["related_request"]["tool"], "related_index_files");
+    assert_eq!(indexed[0]["read_request"]["tool"], "read_range");
+    assert_eq!(indexed[0]["related_request"]["tool"], "related_files");
+    assert_eq!(
+        indexed[0]["related_symbols_request"]["tool"],
+        "related_symbols"
+    );
+    assert_eq!(
+        indexed[0]["read_request"]["arguments"]["index"],
+        serde_json::json!(index_path)
+    );
 
     let sharded = runtime.dispatch(ToolRequest {
         id: serde_json::json!("sharded"),
@@ -1343,8 +1382,16 @@ fn runtime_search_alias_accepts_live_index_and_shard_targets() {
             .unwrap()
             .ends_with("src/auth.rs")
     );
-    assert_eq!(sharded[0]["read_request"]["tool"], "read_shard_range");
-    assert_eq!(sharded[0]["related_request"]["tool"], "related_shard_files");
+    assert_eq!(sharded[0]["read_request"]["tool"], "read_range");
+    assert_eq!(sharded[0]["related_request"]["tool"], "related_files");
+    assert_eq!(
+        sharded[0]["related_symbols_request"]["tool"],
+        "related_symbols"
+    );
+    assert_eq!(
+        sharded[0]["read_request"]["arguments"]["index_dir"],
+        serde_json::json!(shard_dir)
+    );
 
     let conflicted = runtime.dispatch(ToolRequest {
         id: serde_json::json!("conflicted"),
@@ -1397,11 +1444,15 @@ fn runtime_search_alias_accepts_live_index_and_shard_targets() {
     let indexed_batch = indexed_batch.result.unwrap();
     assert_eq!(
         indexed_batch[0]["read_batch_request"]["tool"],
-        "read_index_ranges"
+        "read_ranges"
     );
     assert_eq!(
         indexed_batch[0]["results"][0]["read_request"]["tool"],
-        "read_index_range"
+        "read_range"
+    );
+    assert_eq!(
+        indexed_batch[0]["results"][0]["read_request"]["arguments"]["index"],
+        serde_json::json!(repo.path().join(".orient/index"))
     );
 
     let shard_batch = runtime.dispatch(ToolRequest {
@@ -1416,13 +1467,14 @@ fn runtime_search_alias_accepts_live_index_and_shard_targets() {
     });
     assert!(shard_batch.error.is_none(), "{:?}", shard_batch.error);
     let shard_batch = shard_batch.result.unwrap();
-    assert_eq!(
-        shard_batch[0]["read_batch_request"]["tool"],
-        "read_shard_ranges"
-    );
+    assert_eq!(shard_batch[0]["read_batch_request"]["tool"], "read_ranges");
     assert_eq!(
         shard_batch[0]["results"][0]["read_request"]["tool"],
-        "read_shard_range"
+        "read_range"
+    );
+    assert_eq!(
+        shard_batch[0]["results"][0]["read_request"]["arguments"]["index_dir"],
+        serde_json::json!(repo.path().join(".orient-shards"))
     );
 
     let conflicted_batch = runtime.dispatch(ToolRequest {
@@ -1581,6 +1633,125 @@ fn runtime_read_alias_accepts_live_index_and_shard_targets() {
             .contains("only one of index or index_dir"),
         "{:?}",
         conflicted.error
+    );
+}
+
+#[test]
+fn runtime_related_alias_accepts_live_index_and_shard_targets() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/auth.rs"),
+        "pub struct SessionManager;\npub fn issue_token() {}\n",
+    );
+    write(
+        &repo.path().join("tests/auth_test.rs"),
+        "#[test]\nfn issues_tokens() { super::issue_token(); }\n",
+    );
+    write(
+        &repo.path().join("Cargo.toml"),
+        "[package]\nname='sample'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    let index_path = repo.path().join(".orient/index");
+    FastIndex::build(repo.path())
+        .unwrap()
+        .save(&index_path)
+        .unwrap();
+    let shard_dir = repo.path().join(".orient-shards");
+    build_shards(&[repo.path().to_path_buf()], &shard_dir).unwrap();
+
+    let runtime = ToolRuntime::default();
+    let live = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("live-related"),
+        tool: "related_files".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "path": "src/auth.rs",
+            "limit": 5
+        }),
+    });
+    assert!(live.error.is_none(), "{:?}", live.error);
+    let live = live.result.unwrap();
+    assert!(
+        live.as_array()
+            .unwrap()
+            .iter()
+            .any(|file| file["path"] == "tests/auth_test.rs"),
+        "{live:?}"
+    );
+    assert_eq!(live[0]["read_request"]["tool"], "read_range");
+
+    let indexed = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("indexed-related"),
+        tool: "related_files".to_string(),
+        arguments: serde_json::json!({
+            "index": repo.path().join(".orient/index"),
+            "path": "src/auth.rs",
+            "limit": 5
+        }),
+    });
+    assert!(indexed.error.is_none(), "{:?}", indexed.error);
+    let indexed = indexed.result.unwrap();
+    assert_eq!(indexed[0]["read_request"]["tool"], "read_range");
+    assert_eq!(
+        indexed[0]["read_request"]["arguments"]["index"],
+        serde_json::json!(index_path)
+    );
+
+    let sharded = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("shard-related"),
+        tool: "related_files".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": repo.path().join(".orient-shards"),
+            "path": "src/auth.rs",
+            "limit": 5
+        }),
+    });
+    assert!(sharded.error.is_none(), "{:?}", sharded.error);
+    let sharded = sharded.result.unwrap();
+    assert_eq!(sharded[0]["read_request"]["tool"], "read_range");
+    assert_eq!(
+        sharded[0]["read_request"]["arguments"]["index_dir"],
+        serde_json::json!(shard_dir)
+    );
+
+    let indexed_symbols = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("indexed-related-symbols"),
+        tool: "related_symbols".to_string(),
+        arguments: serde_json::json!({
+            "index": repo.path().join(".orient/index"),
+            "path": "src/auth.rs",
+            "query": "SessionManager",
+            "limit": 5
+        }),
+    });
+    assert!(
+        indexed_symbols.error.is_none(),
+        "{:?}",
+        indexed_symbols.error
+    );
+    let indexed_symbols = indexed_symbols.result.unwrap();
+    assert_eq!(
+        indexed_symbols[0]["read_request"]["arguments"]["index"],
+        serde_json::json!(index_path)
+    );
+    assert_eq!(indexed_symbols[0]["read_request"]["tool"], "read_range");
+
+    let missing_shard_path = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("missing-shard-path"),
+        tool: "related_symbols".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": repo.path().join(".orient-shards"),
+            "query": "SessionManager"
+        }),
+    });
+    assert!(
+        missing_shard_path
+            .error
+            .as_ref()
+            .unwrap()
+            .contains("path is required for shard related_symbols"),
+        "{:?}",
+        missing_shard_path.error
     );
 }
 
@@ -1752,11 +1923,8 @@ fn runtime_search_auto_batch_uses_single_warmed_index() {
         batch[0]["repo_map_request"]["arguments"]["read_limit"],
         serde_json::json!(DEFAULT_REPO_MAP_READ_BATCH_RANGES)
     );
-    assert_eq!(
-        batch[0]["results"][0]["read_request"]["tool"],
-        "read_index_range"
-    );
-    assert_eq!(batch[0]["read_batch_request"]["tool"], "read_index_ranges");
+    assert_eq!(batch[0]["results"][0]["read_request"]["tool"], "read_range");
+    assert_eq!(batch[0]["read_batch_request"]["tool"], "read_ranges");
     assert!(batch[0]["read_batch_request"]["arguments"]["ranges"].is_array());
     assert_eq!(batch[1]["query"], "SessionManager");
     assert_eq!(batch[1]["surface"], "indexed");

@@ -662,9 +662,9 @@ pub fn tool_manifest() -> Value {
         ),
         tool_entry(
             "related_files",
-            "Find nearby source/test files related to a repository-relative path.",
-            &["repo", "path"],
-            &["limit"],
+            "Find nearby source/test files related to a path in a live repo, persistent index, or shard directory.",
+            &["path"],
+            RELATED_TARGET_OPTIONAL_ARGS,
         ),
         tool_entry(
             "related_index_files",
@@ -680,9 +680,9 @@ pub fn tool_manifest() -> Value {
         ),
         tool_entry(
             "related_symbols",
-            "Find symbols related to a path and optional search-language query.",
-            &["repo"],
-            &["path", "query", "limit"],
+            "Find symbols related to a path and optional search-language query in a live repo, persistent index, or shard directory.",
+            &[],
+            RELATED_SYMBOLS_TARGET_OPTIONAL_ARGS,
         ),
         tool_entry(
             "related_index_symbols",
@@ -1262,7 +1262,7 @@ fn argument_description(tool_name: &str, name: &str) -> &'static str {
         "queries" => "Agent query strings to run as one batch against the same search target.",
         "name" => "Symbol name to look up.",
         "names" => "Symbol names to look up as one batch against the same target and filters.",
-        "path" if is_target_range_tool(tool_name) => {
+        "path" if is_target_context_tool(tool_name) => {
             "Result path for the selected target; use repo/index-relative paths for repo or index targets, and shard-prefixed or unique shard-relative paths for index_dir targets."
         }
         "path" if is_shard_path_tool(tool_name) => {
@@ -1366,7 +1366,7 @@ fn argument_description(tool_name: &str, name: &str) -> &'static str {
 }
 
 fn range_path_description(tool_name: &str) -> &'static str {
-    if is_target_range_tool(tool_name) {
+    if is_target_context_tool(tool_name) {
         "Result path for the selected target; use repo/index-relative paths for repo or index targets, and shard-prefixed or unique shard-relative paths for index_dir targets."
     } else if is_shard_range_tool(tool_name) {
         "Shard-prefixed result path, such as repo/src/lib.rs, or a unique unqualified shard-relative path, such as src/lib.rs."
@@ -1377,10 +1377,15 @@ fn range_path_description(tool_name: &str) -> &'static str {
     }
 }
 
-fn is_target_range_tool(tool_name: &str) -> bool {
+fn is_target_context_tool(tool_name: &str) -> bool {
     matches!(
         tool_name,
-        "read_range" | "open_range" | "read_ranges" | "open_ranges"
+        "read_range"
+            | "open_range"
+            | "read_ranges"
+            | "open_ranges"
+            | "related_files"
+            | "related_symbols"
     )
 }
 
@@ -1887,13 +1892,30 @@ impl ToolRuntime {
                     if bool_arg(&request.arguments, "refresh_if_stale") {
                         self.refresh_shards_if_stale(&index_dir)?;
                     }
-                    return Ok(serde_json::to_value(self.search_shards_cached(
+                    let mut results = self.search_shards_cached(
                         &index_dir,
                         &query,
                         limit,
                         &search_filters(&request.arguments, true)?,
                         context_lines,
-                    )?)?);
+                    )?;
+                    attach_result_read_requests(
+                        &mut results,
+                        "read_range",
+                        read_request_args("index_dir", &index_dir),
+                    );
+                    attach_result_related_requests(
+                        &mut results,
+                        "related_files",
+                        read_request_args("index_dir", &index_dir),
+                    );
+                    attach_result_related_symbol_requests(
+                        &mut results,
+                        "related_symbols",
+                        Some(&query),
+                        read_request_args("index_dir", &index_dir),
+                    );
+                    return Ok(serde_json::to_value(results)?);
                 }
                 if let Some(index_path) =
                     optional_string_arg(&request.arguments, "index").map(PathBuf::from)
@@ -1911,17 +1933,17 @@ impl ToolRuntime {
                     })?;
                     attach_result_read_requests(
                         &mut results,
-                        "read_index_range",
+                        "read_range",
                         read_request_args("index", &index_path),
                     );
                     attach_result_related_requests(
                         &mut results,
-                        "related_index_files",
+                        "related_files",
                         read_request_args("index", &index_path),
                     );
                     attach_result_related_symbol_requests(
                         &mut results,
-                        "related_index_symbols",
+                        "related_symbols",
                         Some(&query),
                         read_request_args("index", &index_path),
                     );
@@ -2015,16 +2037,32 @@ impl ToolRuntime {
                     }
                     let filters = search_filters(&request.arguments, true)?;
                     for query in queries {
-                        let results = self.search_shards_cached(
+                        let mut results = self.search_shards_cached(
                             &index_dir,
                             &query,
                             limit,
                             &filters,
                             context_lines,
                         )?;
+                        attach_result_read_requests(
+                            &mut results,
+                            "read_range",
+                            read_request_args("index_dir", &index_dir),
+                        );
+                        attach_result_related_requests(
+                            &mut results,
+                            "related_files",
+                            read_request_args("index_dir", &index_dir),
+                        );
+                        attach_result_related_symbol_requests(
+                            &mut results,
+                            "related_symbols",
+                            Some(&query),
+                            read_request_args("index_dir", &index_dir),
+                        );
                         let read_batch_request = result_read_batch_request(
                             &results,
-                            "read_shard_ranges",
+                            "read_ranges",
                             read_request_args("index_dir", &index_dir),
                         );
                         batch.push(SearchBatchResult {
@@ -2051,23 +2089,23 @@ impl ToolRuntime {
                         )?;
                         attach_result_read_requests(
                             &mut results,
-                            "read_index_range",
+                            "read_range",
                             read_request_args("index", &index_path),
                         );
                         attach_result_related_requests(
                             &mut results,
-                            "related_index_files",
+                            "related_files",
                             read_request_args("index", &index_path),
                         );
                         attach_result_related_symbol_requests(
                             &mut results,
-                            "related_index_symbols",
+                            "related_symbols",
                             Some(&query),
                             read_request_args("index", &index_path),
                         );
                         let read_batch_request = result_read_batch_request(
                             &results,
-                            "read_index_ranges",
+                            "read_ranges",
                             read_request_args("index", &index_path),
                         );
                         batch.push(SearchBatchResult {
@@ -2693,9 +2731,43 @@ impl ToolRuntime {
                 Ok(serde_json::to_value(batch)?)
             }
             "related_files" => {
-                let repo = path_arg(&request.arguments, "repo")?;
                 let path = string_arg(&request.arguments, "path")?;
                 let limit = positive_usize_arg(&request.arguments, "limit", 10)?;
+                if request.arguments.get("index").is_some()
+                    && request.arguments.get("index_dir").is_some()
+                {
+                    return Err(anyhow!(
+                        "related_files accepts only one of index or index_dir"
+                    ));
+                }
+                if let Some(index_dir) =
+                    optional_string_arg(&request.arguments, "index_dir").map(PathBuf::from)
+                {
+                    let related = self.related_shard_files_cached(&index_dir, &path, limit)?;
+                    return Ok(serde_json::to_value(related_file_lookup_results(
+                        related,
+                        "read_range",
+                        read_request_args("index_dir", &index_dir),
+                    ))?);
+                }
+                if let Some(index_path) =
+                    optional_string_arg(&request.arguments, "index").map(PathBuf::from)
+                {
+                    let index = self.cached_index(index_path.clone())?;
+                    let related = index.related_files(&path, limit);
+                    return Ok(serde_json::to_value(related_file_lookup_results(
+                        related,
+                        "read_range",
+                        read_request_args("index", &index_path),
+                    ))?);
+                }
+                let repo = optional_string_arg(&request.arguments, "repo")
+                    .map(PathBuf::from)
+                    .map(Ok)
+                    .unwrap_or_else(|| {
+                        std::env::current_dir()
+                            .context("resolve current directory for related_files")
+                    })?;
                 let index = RepoIndexer::new(&repo).build()?;
                 let related = index.related_files(&path, limit);
                 Ok(serde_json::to_value(related_file_lookup_results(
@@ -2728,10 +2800,52 @@ impl ToolRuntime {
                 ))?)
             }
             "related_symbols" => {
-                let repo = path_arg(&request.arguments, "repo")?;
                 let path = optional_string_arg(&request.arguments, "path");
                 let query = optional_string_arg(&request.arguments, "query");
                 let limit = positive_usize_arg(&request.arguments, "limit", 10)?;
+                if request.arguments.get("index").is_some()
+                    && request.arguments.get("index_dir").is_some()
+                {
+                    return Err(anyhow!(
+                        "related_symbols accepts only one of index or index_dir"
+                    ));
+                }
+                if let Some(index_dir) =
+                    optional_string_arg(&request.arguments, "index_dir").map(PathBuf::from)
+                {
+                    let path = path
+                        .as_deref()
+                        .ok_or_else(|| anyhow!("path is required for shard related_symbols"))?;
+                    let related = self.related_shard_symbols_cached(
+                        &index_dir,
+                        path,
+                        query.as_deref(),
+                        limit,
+                    )?;
+                    return Ok(serde_json::to_value(related_symbol_lookup_results(
+                        related,
+                        "read_range",
+                        read_request_args("index_dir", &index_dir),
+                    ))?);
+                }
+                if let Some(index_path) =
+                    optional_string_arg(&request.arguments, "index").map(PathBuf::from)
+                {
+                    let index = self.cached_index(index_path.clone())?;
+                    let related = index.related_symbols(path.as_deref(), query.as_deref(), limit);
+                    return Ok(serde_json::to_value(related_symbol_lookup_results(
+                        related,
+                        "read_range",
+                        read_request_args("index", &index_path),
+                    ))?);
+                }
+                let repo = optional_string_arg(&request.arguments, "repo")
+                    .map(PathBuf::from)
+                    .map(Ok)
+                    .unwrap_or_else(|| {
+                        std::env::current_dir()
+                            .context("resolve current directory for related_symbols")
+                    })?;
                 let index = RepoIndexer::new(&repo).build()?;
                 let related = index.related_symbols(path.as_deref(), query.as_deref(), limit);
                 Ok(serde_json::to_value(related_symbol_lookup_results(
@@ -2985,8 +3099,24 @@ impl ToolRuntime {
             self.refresh_shards_if_stale(&index_dir)?;
         }
         let filters = search_filters(arguments, true)?;
-        let results =
+        let mut results =
             self.search_shards_cached(&index_dir, query, limit, &filters, context_lines)?;
+        attach_result_read_requests(
+            &mut results,
+            "read_range",
+            read_request_args("index_dir", &index_dir),
+        );
+        attach_result_related_requests(
+            &mut results,
+            "related_files",
+            read_request_args("index_dir", &index_dir),
+        );
+        attach_result_related_symbol_requests(
+            &mut results,
+            "related_symbols",
+            Some(query),
+            read_request_args("index_dir", &index_dir),
+        );
         let query_plan_result = if diagnose || results.is_empty() {
             let mut plans = self.shard_query_plans_cached(&index_dir, query, &filters)?;
             attach_shard_retry_requests(&mut plans, &index_dir, arguments);
@@ -3014,7 +3144,7 @@ impl ToolRuntime {
             ),
             read_batch_request: result_read_batch_request(
                 &results,
-                "read_shard_ranges",
+                "read_ranges",
                 read_request_args("index_dir", &index_dir),
             ),
             results,
@@ -3039,17 +3169,17 @@ impl ToolRuntime {
         })?;
         attach_result_read_requests(
             &mut results,
-            "read_index_range",
+            "read_range",
             read_request_args("index", &index_path),
         );
         attach_result_related_requests(
             &mut results,
-            "related_index_files",
+            "related_files",
             read_request_args("index", &index_path),
         );
         attach_result_related_symbol_requests(
             &mut results,
-            "related_index_symbols",
+            "related_symbols",
             Some(query),
             read_request_args("index", &index_path),
         );
@@ -3083,7 +3213,7 @@ impl ToolRuntime {
             ),
             read_batch_request: result_read_batch_request(
                 &results,
-                "read_index_ranges",
+                "read_ranges",
                 read_request_args("index", &index_path),
             ),
             results,
@@ -3931,6 +4061,11 @@ const SEARCH_TARGET_OPTIONAL_ARGS: &[&str] = &[
 const READ_TARGET_OPTIONAL_ARGS: &[&str] = &["repo", "index", "index_dir", "start", "lines"];
 
 const READ_BATCH_TARGET_OPTIONAL_ARGS: &[&str] = &["repo", "index", "index_dir"];
+
+const RELATED_TARGET_OPTIONAL_ARGS: &[&str] = &["repo", "index", "index_dir", "limit"];
+
+const RELATED_SYMBOLS_TARGET_OPTIONAL_ARGS: &[&str] =
+    &["repo", "index", "index_dir", "path", "query", "limit"];
 
 const SYMBOL_OPTIONAL_ARGS: &[&str] = &[
     "limit",

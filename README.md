@@ -74,6 +74,8 @@ bounded batch read.
 `read_range` and `read_ranges` accept the same `repo`, `index`, or `index_dir`
 target style as `search`, so simple adapters do not need separate read tools for
 live repos, persisted indexes, and shard directories.
+`related_files` and `related_symbols` follow the same target style for nearby
+tests, source counterparts, definitions, and types.
 Repo maps default to `detail:"compact"` for small first-orientation payloads;
 use `detail:"full"` only when an agent needs the full available import/module
 hint set. Their bundled `read_batch_request` defaults to 16 ranges and accepts
