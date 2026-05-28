@@ -105,10 +105,13 @@ pub struct ResultReadRange {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ResultToolRequest {
+    pub id: String,
     pub tool: String,
     pub arguments: serde_json::Value,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cli: Option<String>,
+    pub jsonl: String,
+    pub client_cli: String,
 }
 
 pub type ResultReadRequest = ResultToolRequest;
@@ -116,12 +119,62 @@ pub type ResultReadRequest = ResultToolRequest;
 impl ResultToolRequest {
     pub fn new(tool: impl Into<String>, arguments: serde_json::Value) -> Self {
         let tool = tool.into();
+        Self::with_id(default_tool_request_id(&tool), tool, arguments)
+    }
+
+    pub fn with_id(
+        id: impl Into<String>,
+        tool: impl Into<String>,
+        arguments: serde_json::Value,
+    ) -> Self {
+        let id = id.into();
+        let tool = tool.into();
         let cli = cli_command_for_request(&tool, &arguments);
+        let jsonl = serde_json::json!({
+            "id": id.clone(),
+            "tool": tool.clone(),
+            "arguments": arguments.clone()
+        })
+        .to_string();
+        let client_cli = format!(
+            "printf '%s\\n' {} | orient client-jsonl",
+            shell_quote(&jsonl)
+        );
         Self {
+            id,
             tool,
             arguments,
             cli,
+            jsonl,
+            client_cli,
         }
+    }
+}
+
+fn default_tool_request_id(tool: &str) -> &'static str {
+    match tool {
+        "repo_map" | "indexed_repo_map" | "shard_repo_map" => "map",
+        "search_query_plan" | "search_plan" | "indexed_query_plan" | "index_plan"
+        | "shard_query_plan" | "shard_plan" => "plan",
+        "search" | "search_code" | "indexed_search" | "indexed_search_code" | "search_shards" => {
+            "search"
+        }
+        "related_files"
+        | "related_index_files"
+        | "related_shard_files"
+        | "related_symbols"
+        | "related_index_symbols"
+        | "related_shard_symbols" => "related",
+        "find_symbol"
+        | "find_symbol_batch"
+        | "find_index_symbol"
+        | "find_index_symbol_batch"
+        | "find_shard_symbol"
+        | "find_shard_symbol_batch" => "symbol",
+        "read_range" | "open_range" | "read_ranges" | "open_ranges" | "read_index_range"
+        | "open_index_range" | "read_index_ranges" | "open_index_ranges" | "read_shard_range"
+        | "open_shard_range" | "read_shard_ranges" | "open_shard_ranges" => "read",
+        _ => "request",
     }
 }
 
@@ -5152,6 +5205,18 @@ mod tests {
         assert_eq!(
             request.cli.as_deref(),
             Some("orient read-range --repo '/tmp/my repo' 'src/it'\\''ll work.rs:3:4'")
+        );
+        assert_eq!(request.id, "read");
+        assert!(
+            request.client_cli.contains("| orient client-jsonl"),
+            "{request:?}"
+        );
+        let jsonl: serde_json::Value = serde_json::from_str(&request.jsonl).unwrap();
+        assert_eq!(jsonl["id"], serde_json::json!("read"));
+        assert_eq!(jsonl["tool"], serde_json::json!("read_range"));
+        assert_eq!(
+            jsonl["arguments"]["path"],
+            serde_json::json!("src/it'll work.rs")
         );
     }
 

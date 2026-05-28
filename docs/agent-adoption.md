@@ -56,7 +56,10 @@ and `client_cli` fields for direct terminal use.
 Start with `agent_guide` or `tool_manifest` once, then use `search_auto`.
 Follow returned `read_batch_request`, `read_request`, `related_request`,
 `related_symbols_request`, `query_plan_result`, `query_plan_request`,
-`repo_map_request`, and query-plan `retry_requests` objects directly.
+`repo_map_request`, and query-plan `retry_requests` objects directly. These
+follow-up request objects include complete `jsonl` and `client_cli` fields, so
+shell-native agents can replay the exact next call through `orient client-jsonl`
+without constructing JSON by hand.
 Use `refresh_if_stale:true` for indexed or shard searches when live files may
 have changed.
 If Orient is unavailable or returns no useful plan, fall back to normal shell

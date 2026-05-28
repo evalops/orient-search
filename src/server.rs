@@ -758,7 +758,7 @@ pub fn agent_guide(
             "status": status_command,
             "one_shot_search": "orient search-auto \"symbol:SessionManager token\"",
             "agent_rules": format!("orient agent-instructions --index-dir {index_dir}"),
-            "read_cli_hints": "Search results include read_request.cli and read_batch_request.cli for terminal-native follow-up reads."
+            "followup_request_hints": "Generated follow-up requests include jsonl, client_cli, and compact cli hints where available."
         },
         "recommended_loop": [
             "Call tool_manifest or mcp_manifest once.",
@@ -902,7 +902,7 @@ For one repo, bootstrap it with `orient ensure-index --repo {repo} --index {inde
 Start each session with `daemon_status` or `agent_guide`, then use `search_auto` for normal lookup and `search_auto_batch` for alternate query phrasings.\n\
 Trust `daemon_status.search_auto_default` to see whether no-target `search_auto` will use a warmed shard directory, warmed index, or the daemon current directory; use `daemon_status.default_requests` for copyable first repo-map/search/query-plan calls.\n\
 Use query filters directly: `file:`, `path:`, `lang:`, `ext:`, `symbol:`, `type:`, `repo:`, `test:`, quoted literals, and negative filters like `-path:vendor`.\n\
-After search, follow returned `read_batch_request`, `read_request`, `related_request`, and `related_symbols_request` instead of reopening files manually.\n\
+After search, follow returned `read_batch_request`, `read_request`, `related_request`, and `related_symbols_request`; each includes `jsonl` and `client_cli` for direct replay through `orient client-jsonl`.\n\
 When results are empty, noisy, or suspicious, use the returned `query_plan_request` or inline `query_plan_result` before broadening the search.\n\
 Orient is local code search only and exposes no session analytics."
     )
@@ -5185,28 +5185,8 @@ fn daemon_default_query_plan_request(search_auto_default: &Value, target: Option
 }
 
 fn daemon_default_request(id: &str, tool: &str, arguments: Value) -> Value {
-    let mut request = json!({
-        "id": id,
-        "tool": tool,
-        "arguments": arguments
-    });
-    let jsonl = request.to_string();
-    let client_cli = format!(
-        "printf '%s\\n' {} | orient client-jsonl",
-        shell_quote(&jsonl)
-    );
-    if let Value::Object(object) = &mut request {
-        object.insert("jsonl".to_string(), json!(jsonl));
-        object.insert("client_cli".to_string(), json!(client_cli));
-    }
-    request
-}
-
-fn shell_quote(value: &str) -> String {
-    if value.is_empty() {
-        return "''".to_string();
-    }
-    format!("'{}'", value.replace('\'', "'\\''"))
+    serde_json::to_value(ResultToolRequest::with_id(id, tool, arguments))
+        .expect("serialize daemon default request")
 }
 
 fn optional_string_arg_any(arguments: &Value, names: &[&str]) -> Option<String> {

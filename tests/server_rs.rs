@@ -1292,6 +1292,29 @@ fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
         live["read_batch_request"]["arguments"]["ranges"][0]["path"],
         "src/auth.rs"
     );
+    let read_jsonl: serde_json::Value =
+        serde_json::from_str(live["read_batch_request"]["jsonl"].as_str().unwrap()).unwrap();
+    assert_eq!(read_jsonl["id"], serde_json::json!("read"));
+    assert_eq!(read_jsonl["tool"], serde_json::json!("read_ranges"));
+    assert!(
+        live["read_batch_request"]["client_cli"]
+            .as_str()
+            .unwrap()
+            .contains("| orient client-jsonl")
+    );
+    let read_batch_from_jsonl =
+        runtime.dispatch_line(live["read_batch_request"]["jsonl"].as_str().unwrap());
+    assert!(
+        read_batch_from_jsonl.error.is_none(),
+        "{:?}",
+        read_batch_from_jsonl.error
+    );
+    assert!(
+        read_batch_from_jsonl.result.unwrap()[0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("issue_token")
+    );
     assert!(live.get("query_plan_result").is_none());
 
     let diagnosed_live = runtime.dispatch(ToolRequest {
