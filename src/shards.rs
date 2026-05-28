@@ -127,6 +127,13 @@ pub struct ShardFreshness {
     pub shard_count: usize,
     pub stale: bool,
     pub stale_shards: usize,
+    pub source_bytes: u64,
+    pub terms: usize,
+    pub path_terms: usize,
+    pub trigrams: usize,
+    pub posting_entries: usize,
+    pub compressed_posting_bytes: usize,
+    pub symbols: usize,
     pub changed_files: usize,
     pub deleted_files: usize,
     pub added_files: usize,
@@ -319,6 +326,13 @@ pub fn shard_status(index_dir: impl AsRef<Path>) -> Result<ShardFreshness> {
     let mut changed_files = 0usize;
     let mut deleted_files = 0usize;
     let mut added_files = 0usize;
+    let mut source_bytes = 0u64;
+    let mut terms = 0usize;
+    let mut path_terms = 0usize;
+    let mut trigrams = 0usize;
+    let mut posting_entries = 0usize;
+    let mut compressed_posting_bytes = 0usize;
+    let mut symbols = 0usize;
 
     for shard in &manifest.shards {
         let index = FastIndex::load(index_dir.join(&shard.index))
@@ -330,6 +344,13 @@ pub fn shard_status(index_dir: impl AsRef<Path>) -> Result<ShardFreshness> {
         changed_files += status.changed_files;
         deleted_files += status.deleted_files;
         added_files += status.added_files;
+        source_bytes += status.source_bytes;
+        terms += status.terms;
+        path_terms += status.path_terms;
+        trigrams += status.trigrams;
+        posting_entries += status.posting_entries;
+        compressed_posting_bytes += status.compressed_posting_bytes;
+        symbols += status.symbols;
         shards.push(ShardIndexFreshness {
             name: shard.name.clone(),
             root: shard.root.clone(),
@@ -349,6 +370,13 @@ pub fn shard_status(index_dir: impl AsRef<Path>) -> Result<ShardFreshness> {
         shard_count: manifest.shards.len(),
         stale: stale_shards > 0,
         stale_shards,
+        source_bytes,
+        terms,
+        path_terms,
+        trigrams,
+        posting_entries,
+        compressed_posting_bytes,
+        symbols,
         changed_files,
         deleted_files,
         added_files,

@@ -1215,6 +1215,15 @@ fn runtime_ensures_shards_builds_refreshes_and_warms() {
     let status = status.result.unwrap();
     assert_eq!(status["stale"], serde_json::json!(true));
     assert_eq!(status["stale_shards"], serde_json::json!(1));
+    assert!(status["source_bytes"].as_u64().unwrap() > 0);
+    assert!(status["posting_entries"].as_u64().unwrap() > 0);
+    assert!(status["compressed_posting_bytes"].as_u64().unwrap() > 0);
+    assert!(
+        status["shards"][0]["status"]["source_bytes"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
     assert_eq!(status["added_files"], serde_json::json!(1));
 
     let stale_search = runtime.dispatch(ToolRequest {
@@ -1532,10 +1541,11 @@ fn runtime_reports_index_status_for_cached_indexes() {
         arguments: serde_json::json!({ "index": index_path }),
     });
     assert!(clean.error.is_none(), "{:?}", clean.error);
-    assert_eq!(
-        clean.result.as_ref().unwrap()["stale"],
-        serde_json::json!(false)
-    );
+    let clean_result = clean.result.as_ref().unwrap();
+    assert_eq!(clean_result["stale"], serde_json::json!(false));
+    assert!(clean_result["source_bytes"].as_u64().unwrap() > 0);
+    assert!(clean_result["posting_entries"].as_u64().unwrap() > 0);
+    assert!(clean_result["compressed_posting_bytes"].as_u64().unwrap() > 0);
 
     write(
         &repo.path().join("src/auth.rs"),

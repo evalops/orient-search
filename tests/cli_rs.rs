@@ -1203,7 +1203,10 @@ fn cli_reports_index_and_shard_freshness() {
         .args(["index-status", "--index", index_path.to_str().unwrap()])
         .assert()
         .success()
-        .stdout(predicate::str::contains("\"stale\":false"));
+        .stdout(predicate::str::contains("\"stale\":false"))
+        .stdout(predicate::str::contains("\"source_bytes\""))
+        .stdout(predicate::str::contains("\"posting_entries\""))
+        .stdout(predicate::str::contains("\"compressed_posting_bytes\""));
 
     write(
         &repo.path().join("src/auth.rs"),
@@ -1286,6 +1289,9 @@ fn cli_reports_index_and_shard_freshness() {
         .success()
         .stdout(predicate::str::contains("\"stale\":true"))
         .stdout(predicate::str::contains("\"stale_shards\":1"))
+        .stdout(predicate::str::contains("\"source_bytes\""))
+        .stdout(predicate::str::contains("\"posting_entries\""))
+        .stdout(predicate::str::contains("\"compressed_posting_bytes\""))
         .stdout(predicate::str::contains("src/after_shard.rs"));
 
     let mut stale_shard_search = Command::cargo_bin("orient").unwrap();

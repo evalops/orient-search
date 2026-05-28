@@ -147,6 +147,13 @@ pub struct IndexFreshness {
     pub root_exists: bool,
     pub stale: bool,
     pub indexed_files: usize,
+    pub source_bytes: u64,
+    pub terms: usize,
+    pub path_terms: usize,
+    pub trigrams: usize,
+    pub posting_entries: usize,
+    pub compressed_posting_bytes: usize,
+    pub symbols: usize,
     pub checked_files: usize,
     pub changed_files: usize,
     pub deleted_files: usize,
@@ -392,6 +399,7 @@ impl FastIndex {
     }
 
     pub fn freshness(&self) -> Result<IndexFreshness> {
+        let stats = self.stats();
         if !self.root.exists() {
             let mut deleted_paths = self
                 .files
@@ -405,6 +413,13 @@ impl FastIndex {
                 root_exists: false,
                 stale: !deleted_paths.is_empty(),
                 indexed_files: self.files.len(),
+                source_bytes: stats.source_bytes,
+                terms: stats.terms,
+                path_terms: stats.path_terms,
+                trigrams: stats.trigrams,
+                posting_entries: stats.posting_entries,
+                compressed_posting_bytes: stats.compressed_posting_bytes,
+                symbols: stats.symbols,
                 checked_files: 0,
                 changed_files: 0,
                 deleted_files: deleted_paths.len(),
@@ -473,6 +488,13 @@ impl FastIndex {
                 && deleted_paths.is_empty()
                 && added_paths.is_empty()),
             indexed_files: self.files.len(),
+            source_bytes: stats.source_bytes,
+            terms: stats.terms,
+            path_terms: stats.path_terms,
+            trigrams: stats.trigrams,
+            posting_entries: stats.posting_entries,
+            compressed_posting_bytes: stats.compressed_posting_bytes,
+            symbols: stats.symbols,
             checked_files,
             changed_files: changed_paths.len(),
             deleted_files: deleted_paths.len(),
