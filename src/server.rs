@@ -1504,6 +1504,7 @@ fn auto_repo_map_request<T: Serialize>(
     target_name: &str,
     target_value: T,
     source_arguments: &Value,
+    shard_scope_filters: Option<&SearchFilters>,
 ) -> ResultToolRequest {
     let mut arguments = Map::new();
     arguments.insert(target_name.to_string(), json!(target_value));
@@ -1513,13 +1514,36 @@ fn auto_repo_map_request<T: Serialize>(
         json!(DEFAULT_REPO_MAP_READ_BATCH_RANGES),
     );
     if target_name == "index_dir" {
-        if let Some(source) = source_arguments.as_object() {
+        if let Some(filters) = shard_scope_filters {
+            add_shard_scope_filter_args(&mut arguments, filters);
+        } else if let Some(source) = source_arguments.as_object() {
             if let Some(repo) = source.get("repo").or_else(|| source.get("repo_filter")) {
                 arguments.insert("repo".to_string(), repo.clone());
             }
         }
     }
     ResultToolRequest::new(tool.to_string(), Value::Object(arguments))
+}
+
+fn add_shard_scope_filter_args(arguments: &mut Map<String, Value>, filters: &SearchFilters) {
+    if let Some(repo) = &filters.repo {
+        arguments.insert("repo".to_string(), json!(repo));
+    }
+    if let Some(branch) = &filters.branch {
+        arguments.insert("branch".to_string(), json!(branch));
+    }
+    if let Some(origin) = &filters.origin {
+        arguments.insert("origin".to_string(), json!(origin));
+    }
+    if !filters.exclude_repo.is_empty() {
+        arguments.insert("exclude_repo".to_string(), json!(&filters.exclude_repo));
+    }
+    if !filters.exclude_branch.is_empty() {
+        arguments.insert("exclude_branch".to_string(), json!(&filters.exclude_branch));
+    }
+    if !filters.exclude_origin.is_empty() {
+        arguments.insert("exclude_origin".to_string(), json!(&filters.exclude_origin));
+    }
 }
 
 fn attach_retry_requests<T: Serialize>(
@@ -3283,7 +3307,7 @@ impl ToolRuntime {
             } else {
                 None
             },
-            repo_map_request: auto_repo_map_request("repo_map", "repo", &repo, arguments),
+            repo_map_request: auto_repo_map_request("repo_map", "repo", &repo, arguments, None),
             read_batch_request: result_read_batch_request(
                 &results,
                 "read_ranges",
@@ -3307,6 +3331,7 @@ impl ToolRuntime {
             self.refresh_shards_if_stale(&index_dir)?;
         }
         let filters = search_filters(arguments, true)?;
+        let shard_scope_filters = merge_filters(filters.clone(), parse_query(query).filters);
         let mut results =
             self.search_shards_cached(&index_dir, query, limit, &filters, context_lines)?;
         attach_result_read_requests(
@@ -3344,7 +3369,13 @@ impl ToolRuntime {
                 query,
             ),
             query_plan_result,
-            repo_map_request: auto_repo_map_request("repo_map", "index_dir", &index_dir, arguments),
+            repo_map_request: auto_repo_map_request(
+                "repo_map",
+                "index_dir",
+                &index_dir,
+                arguments,
+                Some(&shard_scope_filters),
+            ),
             read_batch_request: result_read_batch_request(
                 &results,
                 "read_ranges",
@@ -3408,7 +3439,13 @@ impl ToolRuntime {
             } else {
                 None
             },
-            repo_map_request: auto_repo_map_request("repo_map", "index", &index_path, arguments),
+            repo_map_request: auto_repo_map_request(
+                "repo_map",
+                "index",
+                &index_path,
+                arguments,
+                None,
+            ),
             read_batch_request: result_read_batch_request(
                 &results,
                 "read_ranges",

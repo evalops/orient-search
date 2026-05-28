@@ -5,7 +5,7 @@ use orient::discover::{
     DiscoverOptions, DiscoverySelectionSummary, discover_repos, discovery_selection_summary,
 };
 use orient::fast_index::{FastIndex, RefreshStats};
-use orient::query::normalize_symbol_kind;
+use orient::query::{merge_filters, normalize_symbol_kind, parse_query};
 use orient::repo_index::{
     DEFAULT_REPO_MAP_READ_BATCH_RANGES, MAX_READ_RANGE_LINES, MAX_RESULT_READ_BATCH_RANGES,
     QueryPlan, RepoIndexer, RepoMapDetail, ResultToolRequest, SearchFilters, SearchResult,
@@ -1232,6 +1232,34 @@ fn insert_string_array_arg(arguments: &mut Map<String, Value>, name: &str, value
     }
 }
 
+fn shard_scope_filters_for_query(filters: &SearchFilters, query: &str) -> SearchFilters {
+    merge_filters(filters.clone(), parse_query(query).filters)
+}
+
+fn shard_repo_map_request(index_dir: &Path, filters: &SearchFilters) -> Value {
+    let mut arguments = Map::new();
+    arguments.insert("index_dir".to_string(), serde_json::json!(index_dir));
+    arguments.insert("detail".to_string(), serde_json::json!("compact"));
+    arguments.insert(
+        "read_limit".to_string(),
+        serde_json::json!(DEFAULT_REPO_MAP_READ_BATCH_RANGES),
+    );
+    add_shard_scope_filter_args(&mut arguments, filters);
+    serde_json::json!({
+        "tool": "shard_repo_map",
+        "arguments": arguments
+    })
+}
+
+fn add_shard_scope_filter_args(arguments: &mut Map<String, Value>, filters: &SearchFilters) {
+    insert_string_arg(arguments, "repo", filters.repo.as_ref());
+    insert_string_arg(arguments, "branch", filters.branch.as_ref());
+    insert_string_arg(arguments, "origin", filters.origin.as_ref());
+    insert_string_array_arg(arguments, "exclude_repo", &filters.exclude_repo);
+    insert_string_array_arg(arguments, "exclude_branch", &filters.exclude_branch);
+    insert_string_array_arg(arguments, "exclude_origin", &filters.exclude_origin);
+}
+
 fn add_plan_filter_retry_args(
     arguments: &mut Map<String, Value>,
     plan: &QueryPlan,
@@ -2015,6 +2043,7 @@ fn run() -> Result<()> {
                     refresh_shards(&index_dir)?;
                 }
                 let filters = search_filters_from_args(&filters, repo_filter)?;
+                let shard_scope_filters = shard_scope_filters_for_query(&filters, &query);
                 let mut results = search_shards(&index_dir, &query, limit, &filters)?;
                 attach_result_context(&mut results, context_lines, |path, start, lines| {
                     read_shard_range(&index_dir, path, start, lines)
@@ -2050,10 +2079,7 @@ fn run() -> Result<()> {
                         "tool": "shard_query_plan",
                         "arguments": {"index_dir": index_dir, "query": query}
                     },
-                    "repo_map_request": {
-                        "tool": "shard_repo_map",
-                        "arguments": {"index_dir": index_dir, "detail": "compact", "read_limit": DEFAULT_REPO_MAP_READ_BATCH_RANGES}
-                    },
+                    "repo_map_request": shard_repo_map_request(&index_dir, &shard_scope_filters),
                     "read_batch_request": result_read_batch_request(
                         &results,
                         "read_shard_ranges",
@@ -2196,6 +2222,7 @@ fn run() -> Result<()> {
                 }
                 let filters = search_filters_from_args(&filters, repo_filter)?;
                 for query in queries {
+                    let shard_scope_filters = shard_scope_filters_for_query(&filters, &query);
                     let mut results = search_shards(&index_dir, &query, limit, &filters)?;
                     attach_result_context(&mut results, context_lines, |path, start, lines| {
                         read_shard_range(&index_dir, path, start, lines)
@@ -2231,10 +2258,7 @@ fn run() -> Result<()> {
                             "tool": "shard_query_plan",
                             "arguments": {"index_dir": index_dir, "query": query}
                         },
-                        "repo_map_request": {
-                            "tool": "shard_repo_map",
-                            "arguments": {"index_dir": index_dir, "detail": "compact", "read_limit": DEFAULT_REPO_MAP_READ_BATCH_RANGES}
-                        },
+                        "repo_map_request": shard_repo_map_request(&index_dir, &shard_scope_filters),
                         "read_batch_request": result_read_batch_request(
                             &results,
                             "read_shard_ranges",

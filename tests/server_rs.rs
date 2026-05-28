@@ -3386,6 +3386,49 @@ fn runtime_shard_repo_map_reports_git_metadata() {
     let origin_result = serde_json::to_string(&search_by_origin.result).unwrap();
     assert!(origin_result.contains("src/lib.rs"), "{origin_result}");
 
+    let auto_by_git_scope = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("auto-git-scope"),
+        tool: "search_auto".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": shard_dir.path(),
+            "query": "branch:shard-feature-branch origin:evalops/shard-project unique_branch_token",
+            "limit": 5
+        }),
+    });
+    assert!(
+        auto_by_git_scope.error.is_none(),
+        "{:?}",
+        auto_by_git_scope.error
+    );
+    let auto_by_git_scope = auto_by_git_scope.result.unwrap();
+    assert_eq!(auto_by_git_scope["surface"], "shards");
+    assert_eq!(
+        auto_by_git_scope["repo_map_request"]["arguments"]["branch"],
+        "shard-feature-branch"
+    );
+    assert_eq!(
+        auto_by_git_scope["repo_map_request"]["arguments"]["origin"],
+        "evalops/shard-project"
+    );
+    let scoped_auto_map = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("auto-git-scope-map"),
+        tool: auto_by_git_scope["repo_map_request"]["tool"]
+            .as_str()
+            .unwrap()
+            .to_string(),
+        arguments: auto_by_git_scope["repo_map_request"]["arguments"].clone(),
+    });
+    assert!(
+        scoped_auto_map.error.is_none(),
+        "{:?}",
+        scoped_auto_map.error
+    );
+    let scoped_auto_map = serde_json::to_string(&scoped_auto_map.result).unwrap();
+    assert!(
+        scoped_auto_map.contains("\"branch\":\"shard-feature-branch\""),
+        "{scoped_auto_map}"
+    );
+
     let excluded_branch = runtime.dispatch(ToolRequest {
         id: serde_json::json!("exclude-branch"),
         tool: "search_shards".to_string(),

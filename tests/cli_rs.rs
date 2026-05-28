@@ -2939,6 +2939,28 @@ fn cli_shard_manifest_records_git_metadata() {
         .success()
         .stdout(predicate::str::contains("src/lib.rs"));
 
+    let mut auto_by_git_scope = Command::cargo_bin("orient").unwrap();
+    let output = auto_by_git_scope
+        .args([
+            "search-auto",
+            "--index-dir",
+            shard_dir.path().to_str().unwrap(),
+            "branch:shard-feature-branch origin:evalops/shard-project unique_branch_token",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["surface"], "shards");
+    assert_eq!(
+        value["repo_map_request"]["arguments"]["branch"],
+        "shard-feature-branch"
+    );
+    assert_eq!(
+        value["repo_map_request"]["arguments"]["origin"],
+        "evalops/shard-project"
+    );
+
     let mut exclude_branch = Command::cargo_bin("orient").unwrap();
     exclude_branch
         .args([
