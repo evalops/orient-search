@@ -373,6 +373,28 @@ export const useSearch = () => null;
     assert!(indexed_results[0].reason.contains("symbol:useSearch"));
 }
 
+#[test]
+fn fallback_line_range_tracks_displayed_contiguous_snippet_block() {
+    let repo = tempfile::tempdir().unwrap();
+    let mut source = String::from("alpha first hit\n");
+    for line in 2..100 {
+        source.push_str(&format!("filler {line}\n"));
+    }
+    source.push_str("omega second hit\n");
+    write(&repo.path().join("src/lib.rs"), &source);
+
+    let results =
+        search_repo_fast_filtered(repo.path(), "mode:any alpha omega", 5, &Default::default())
+            .unwrap();
+
+    assert_eq!(results.len(), 1);
+    assert!(results[0].snippet.contains("1: alpha first hit"));
+    assert!(results[0].snippet.contains("100: omega second hit"));
+    assert_eq!(results[0].line_range.as_ref().unwrap().start_line, 1);
+    assert_eq!(results[0].line_range.as_ref().unwrap().end_line, 1);
+    assert_eq!(results[0].match_lines, vec![1, 100]);
+}
+
 fn assert_symbol(symbol: &orient::repo_index::Symbol, path: &str, kind: &str) {
     assert_eq!(symbol.path, path);
     assert_eq!(symbol.kind, kind);

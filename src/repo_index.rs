@@ -3090,8 +3090,8 @@ fn compact_rank_signals(signals: Vec<RankSignal>) -> Vec<RankSignal> {
 }
 
 fn line_range_from_snippet(snippet: &str) -> Option<ResultLineRange> {
-    let mut start_line = usize::MAX;
-    let mut end_line = 0usize;
+    let mut start_line = None;
+    let mut end_line = None;
     for line in snippet.lines() {
         let Some(number) = line
             .split_once(':')
@@ -3099,12 +3099,21 @@ fn line_range_from_snippet(snippet: &str) -> Option<ResultLineRange> {
         else {
             continue;
         };
-        start_line = start_line.min(number);
-        end_line = end_line.max(number);
+        match (start_line, end_line) {
+            (None, _) => {
+                start_line = Some(number);
+                end_line = Some(number);
+            }
+            (Some(_), Some(end)) if number == end + 1 => {
+                end_line = Some(number);
+            }
+            (Some(_), Some(_)) => break,
+            _ => {}
+        }
     }
-    (end_line > 0).then_some(ResultLineRange {
-        start_line,
-        end_line,
+    Some(ResultLineRange {
+        start_line: start_line?,
+        end_line: end_line?,
     })
 }
 
