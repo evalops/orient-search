@@ -1605,6 +1605,7 @@ impl FastIndex {
             read_range: None,
             read_request: None,
             related_request: None,
+            related_symbols_request: None,
         })
     }
 }

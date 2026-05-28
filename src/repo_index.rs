@@ -85,6 +85,8 @@ pub struct SearchResult {
     pub read_request: Option<ResultToolRequest>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub related_request: Option<ResultToolRequest>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub related_symbols_request: Option<ResultToolRequest>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1337,6 +1339,7 @@ fn merge_match_result(
             read_range: None,
             read_request: None,
             related_request: None,
+            related_symbols_request: None,
         });
 }
 
@@ -1485,6 +1488,7 @@ impl RepoIndex {
                     read_range: None,
                     read_request: None,
                     related_request: None,
+                    related_symbols_request: None,
                 });
             }
         }
@@ -2954,6 +2958,7 @@ fn score_text_file(
         read_range: None,
         read_request: None,
         related_request: None,
+        related_symbols_request: None,
     })
 }
 
@@ -3423,6 +3428,21 @@ pub fn attach_result_related_requests(
         let mut arguments = base_arguments.clone();
         arguments.insert("path".to_string(), serde_json::json!(result.path.clone()));
         result.related_request = Some(ResultToolRequest {
+            tool: tool.to_string(),
+            arguments: serde_json::Value::Object(arguments),
+        });
+    }
+}
+
+pub fn attach_result_related_symbol_requests(
+    results: &mut [SearchResult],
+    tool: &str,
+    base_arguments: serde_json::Map<String, serde_json::Value>,
+) {
+    for result in results {
+        let mut arguments = base_arguments.clone();
+        arguments.insert("path".to_string(), serde_json::json!(result.path.clone()));
+        result.related_symbols_request = Some(ResultToolRequest {
             tool: tool.to_string(),
             arguments: serde_json::Value::Object(arguments),
         });
@@ -3916,6 +3936,7 @@ pub(crate) fn filter_only_search_result(
         read_range: None,
         read_request: None,
         related_request: None,
+        related_symbols_request: None,
     }
 }
 

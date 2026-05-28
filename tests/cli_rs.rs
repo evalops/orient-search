@@ -808,6 +808,8 @@ fn cli_searches_symbols_and_related_files() {
         .stdout(predicate::str::contains("\"tool\":\"read_range\""))
         .stdout(predicate::str::contains("\"related_request\""))
         .stdout(predicate::str::contains("\"tool\":\"related_files\""))
+        .stdout(predicate::str::contains("\"related_symbols_request\""))
+        .stdout(predicate::str::contains("\"tool\":\"related_symbols\""))
         .stdout(predicate::str::contains("\"lines\":80"))
         .stdout(predicate::str::contains("\"explanation\""))
         .stdout(predicate::str::contains("\"context\""))
@@ -1496,6 +1498,10 @@ fn cli_builds_and_searches_persistent_index() {
         .stdout(predicate::str::contains("\"tool\":\"read_index_range\""))
         .stdout(predicate::str::contains("\"related_request\""))
         .stdout(predicate::str::contains("\"tool\":\"related_index_files\""))
+        .stdout(predicate::str::contains("\"related_symbols_request\""))
+        .stdout(predicate::str::contains(
+            "\"tool\":\"related_index_symbols\"",
+        ))
         .stdout(predicate::str::contains("\"query_plan\""))
         .stdout(predicate::str::contains("\"planned_postings\""))
         .stdout(predicate::str::contains("\"context\""));

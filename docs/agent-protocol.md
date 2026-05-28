@@ -67,6 +67,7 @@ Search results include:
 - `read_range`: a ready-to-pass `{path,start,lines}` follow-up range.
 - `read_request`: a ready-to-send JSON-lines request body with the correct read tool and target arguments for the search surface.
 - `related_request`: a ready-to-send JSON-lines request body for nearby source/test files using the matching live, indexed, or shard related-file tool.
+- `related_symbols_request`: a ready-to-send JSON-lines request body for nearby definitions/types using the matching live, indexed, or shard related-symbol tool.
 - `context`: optional attached file context when `context_lines` is set.
 - `explanation` and `query_plan` when `explain` is set.
 
@@ -82,6 +83,7 @@ For most agents, the handoff is:
 2. Collect one or more `read_range` objects from results.
 3. Pass one object or an array of objects directly to the matching batch read tool, or send a result's `read_request` when the wrapper wants a single ready-made follow-up call.
 4. Use `related_request` when the likely next step is finding nearby tests, source counterparts, or sibling files for a hit.
+5. Use `related_symbols_request` when the likely next step is finding nearby definitions, types, or other symbols for a hit.
 
 Read-range tools accept `/` or `\` separators in repo-relative paths and reject parent-directory escapes after separator normalization. Shard range and related-context tools accept exact shard-prefixed paths from search hits, such as `platform/src/auth.rs`, and also accept unqualified paths like `src/auth.rs` when they resolve to exactly one shard. Ambiguous unqualified paths fail with a prompt to use `<repo>/<path>`.
 
