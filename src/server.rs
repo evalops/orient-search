@@ -535,7 +535,7 @@ pub fn tool_manifest() -> Value {
         ),
         tool_entry(
             "read_shard_range",
-            "Read a bounded line range from a repo-prefixed shard search result path.",
+            "Read a bounded line range from a shard search result path or unique shard-relative path.",
             &["index_dir", "path"],
             &["start", "lines"],
         ),
@@ -547,7 +547,7 @@ pub fn tool_manifest() -> Value {
         ),
         tool_entry(
             "read_shard_ranges",
-            "Read several bounded line ranges from repo-prefixed shard result paths in one request.",
+            "Read several bounded line ranges from shard result paths or unique shard-relative paths in one request.",
             &["index_dir", "ranges"],
             &[],
         ),
@@ -595,7 +595,7 @@ pub fn tool_manifest() -> Value {
         ),
         tool_entry(
             "related_shard_files",
-            "Find nearby source/test files related to a shard result path.",
+            "Find nearby source/test files related to a shard result path or unique shard-relative path.",
             &["index_dir", "path"],
             &["limit"],
         ),
@@ -613,7 +613,7 @@ pub fn tool_manifest() -> Value {
         ),
         tool_entry(
             "related_shard_symbols",
-            "Find symbols related to a shard result path and optional query.",
+            "Find symbols related to a shard result path or unique shard-relative path and optional query.",
             &["index_dir", "path"],
             &["query", "limit"],
         ),
@@ -710,7 +710,10 @@ fn argument_metadata_entry(tool_name: &str, name: &str, required: bool) -> Value
     entry.insert("name".to_string(), json!(name));
     entry.insert("required".to_string(), json!(required));
     entry.insert("type".to_string(), json!(argument_type(name)));
-    entry.insert("description".to_string(), json!(argument_description(name)));
+    entry.insert(
+        "description".to_string(),
+        json!(argument_description(tool_name, name)),
+    );
     if let Some(default) = argument_default(tool_name, name) {
         entry.insert("default".to_string(), default);
     }
@@ -763,11 +766,12 @@ fn argument_schema(tool_name: &str, name: &str) -> Value {
             );
         }
         "ranges" => {
+            let path_description = range_path_description(tool_name);
             let range_schema = json!({
                 "type": "object",
                 "required": ["path"],
                 "properties": {
-                    "path": {"type": "string"},
+                    "path": {"type": "string", "description": path_description},
                     "start": {"type": "integer", "minimum": 1, "default": 1},
                     "lines": {"type": "integer", "minimum": 1, "maximum": MAX_READ_RANGE_LINES, "default": 80}
                 }
@@ -818,7 +822,10 @@ fn argument_schema(tool_name: &str, name: &str) -> Value {
             schema.insert("type".to_string(), json!("string"));
         }
     }
-    schema.insert("description".to_string(), json!(argument_description(name)));
+    schema.insert(
+        "description".to_string(),
+        json!(argument_description(tool_name, name)),
+    );
     if let Some(default) = argument_default(tool_name, name) {
         schema.insert("default".to_string(), default);
     }
@@ -978,7 +985,7 @@ fn tool_has_result_limit(tool_name: &str) -> bool {
     )
 }
 
-fn argument_description(name: &str) -> &'static str {
+fn argument_description(tool_name: &str, name: &str) -> &'static str {
     match name {
         "repo" => "Local repository root or shard repo filter, depending on the tool.",
         "repo_filter" => "Repository name filter when repo is already used as a root path.",
@@ -991,9 +998,26 @@ fn argument_description(name: &str) -> &'static str {
         "output_dir" => "Directory where shard indexes and manifest.json should be written.",
         "query" => "Agent query string with filters, quoted phrases, and normal search terms.",
         "queries" => "Agent query strings to run as one batch against the same search target.",
-        "path" => "Repository-relative, index-relative, or shard-prefixed result path.",
+        "path" if is_shard_path_tool(tool_name) => {
+            "Shard-prefixed result path, such as repo/src/lib.rs, or a unique unqualified shard-relative path, such as src/lib.rs."
+        }
+        "path" if is_index_path_tool(tool_name) => {
+            "Index-relative result path, such as src/lib.rs."
+        }
+        "path" if is_live_path_tool(tool_name) => {
+            "Repository-relative result path, such as src/lib.rs."
+        }
+        "path" => "Path substring filter or result path, depending on the tool.",
         "dir" => "Alias for path when filtering search results to a directory or path substring.",
-        "ranges" => "A {path,start,lines} object or array of them for batch range reads.",
+        "ranges" if is_shard_range_tool(tool_name) => {
+            "A {path,start,lines} object or array of them; path may be shard-prefixed or a unique unqualified shard-relative path."
+        }
+        "ranges" if is_index_range_tool(tool_name) => {
+            "A {path,start,lines} object or array of them for index-relative batch range reads."
+        }
+        "ranges" => {
+            "A {path,start,lines} object or array of them for repository-relative batch range reads."
+        }
         "limit" => "Maximum number of results to return.",
         "language" => "Detected language filter, such as rust, python, or typescript.",
         "extension" => "File extension filter with or without a leading dot.",
@@ -1048,6 +1072,45 @@ fn argument_description(name: &str) -> &'static str {
         "name" => "Symbol name or search-like symbol query.",
         _ => "Tool argument.",
     }
+}
+
+fn range_path_description(tool_name: &str) -> &'static str {
+    if is_shard_range_tool(tool_name) {
+        "Shard-prefixed result path, such as repo/src/lib.rs, or a unique unqualified shard-relative path, such as src/lib.rs."
+    } else if is_index_range_tool(tool_name) {
+        "Index-relative result path, such as src/lib.rs."
+    } else {
+        "Repository-relative result path, such as src/lib.rs."
+    }
+}
+
+fn is_shard_path_tool(tool_name: &str) -> bool {
+    matches!(
+        tool_name,
+        "read_shard_range" | "open_shard_range" | "related_shard_files" | "related_shard_symbols"
+    )
+}
+
+fn is_shard_range_tool(tool_name: &str) -> bool {
+    matches!(tool_name, "read_shard_ranges" | "open_shard_ranges")
+}
+
+fn is_index_path_tool(tool_name: &str) -> bool {
+    matches!(
+        tool_name,
+        "read_index_range" | "open_index_range" | "related_index_files" | "related_index_symbols"
+    )
+}
+
+fn is_index_range_tool(tool_name: &str) -> bool {
+    matches!(tool_name, "read_index_ranges" | "open_index_ranges")
+}
+
+fn is_live_path_tool(tool_name: &str) -> bool {
+    matches!(
+        tool_name,
+        "read_range" | "open_range" | "related_files" | "related_symbols"
+    )
 }
 
 impl ToolRuntime {

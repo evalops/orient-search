@@ -92,6 +92,18 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         .iter()
         .find(|tool| tool["name"] == "shard_query_plan_batch")
         .unwrap();
+    let read_shard_range = tools
+        .iter()
+        .find(|tool| tool["name"] == "read_shard_range")
+        .unwrap();
+    let read_shard_ranges = tools
+        .iter()
+        .find(|tool| tool["name"] == "read_shard_ranges")
+        .unwrap();
+    let read_index_range = tools
+        .iter()
+        .find(|tool| tool["name"] == "read_index_range")
+        .unwrap();
 
     assert_eq!(search["required"], serde_json::json!(["repo", "query"]));
     assert_eq!(search["input_schema"]["properties"]["limit"]["default"], 10);
@@ -329,6 +341,27 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         serde_json::json!(MAX_BATCH_RANGES)
     );
     assert_eq!(
+        read_shard_range["input_schema"]["properties"]["path"]["description"],
+        "Shard-prefixed result path, such as repo/src/lib.rs, or a unique unqualified shard-relative path, such as src/lib.rs."
+    );
+    assert_eq!(
+        read_shard_range["arguments"][1]["description"],
+        "Shard-prefixed result path, such as repo/src/lib.rs, or a unique unqualified shard-relative path, such as src/lib.rs."
+    );
+    assert_eq!(
+        read_shard_ranges["input_schema"]["properties"]["ranges"]["description"],
+        "A {path,start,lines} object or array of them; path may be shard-prefixed or a unique unqualified shard-relative path."
+    );
+    assert_eq!(
+        read_shard_ranges["input_schema"]["properties"]["ranges"]["oneOf"][0]["properties"]["path"]
+            ["description"],
+        "Shard-prefixed result path, such as repo/src/lib.rs, or a unique unqualified shard-relative path, such as src/lib.rs."
+    );
+    assert_eq!(
+        read_index_range["input_schema"]["properties"]["path"]["description"],
+        "Index-relative result path, such as src/lib.rs."
+    );
+    assert_eq!(
         search["input_schema"]["properties"]["context_lines"]["maximum"],
         serde_json::json!(MAX_ATTACHED_CONTEXT_LINES)
     );
@@ -430,6 +463,7 @@ fn server_reports_tool_manifest_for_agent_wrappers() {
     assert!(stdout.contains("read_shard_range"));
     assert!(stdout.contains("related_shard_files"));
     assert!(stdout.contains("related_shard_symbols"));
+    assert!(stdout.contains("unique unqualified shard-relative path"));
     assert!(stdout.contains("shard_repo_map"));
     assert!(stdout.contains("find_shard_symbol"));
     assert!(stdout.contains("daemon_status"));
@@ -457,6 +491,10 @@ fn mcp_manifest_exposes_input_schema_for_adapter_wrappers() {
         .iter()
         .find(|tool| tool["name"] == "ensure_index")
         .unwrap();
+    let read_shard_range = tools
+        .iter()
+        .find(|tool| tool["name"] == "read_shard_range")
+        .unwrap();
 
     assert_eq!(
         search["description"],
@@ -479,6 +517,16 @@ fn mcp_manifest_exposes_input_schema_for_adapter_wrappers() {
     assert_eq!(search["annotations"]["destructiveHint"], false);
     assert_eq!(search["annotations"]["idempotentHint"], true);
     assert_eq!(search["annotations"]["openWorldHint"], false);
+    assert_eq!(
+        read_shard_range["inputSchema"]["properties"]["path"]["description"],
+        "Shard-prefixed result path, such as repo/src/lib.rs, or a unique unqualified shard-relative path, such as src/lib.rs."
+    );
+    assert!(
+        read_shard_range["description"]
+            .as_str()
+            .unwrap()
+            .contains("unique shard-relative path")
+    );
     assert_eq!(ensure_index["annotations"]["readOnlyHint"], false);
     assert_eq!(ensure_index["annotations"]["destructiveHint"], false);
     assert_eq!(ensure_index["annotations"]["idempotentHint"], false);
