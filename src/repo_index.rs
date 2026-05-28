@@ -2918,14 +2918,7 @@ pub(crate) fn language_for(path: &Path) -> Option<String> {
     let file_name = path.file_name()?.to_string_lossy();
     if matches!(
         file_name.as_ref(),
-        "README"
-            | "README.md"
-            | "AGENTS.md"
-            | "CLAUDE.md"
-            | "Makefile"
-            | "yarn.lock"
-            | "bun.lock"
-            | "bun.lockb"
+        "README" | "Makefile" | "yarn.lock" | "bun.lock" | "bun.lockb"
     ) {
         return Some("text".to_string());
     }

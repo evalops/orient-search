@@ -1144,7 +1144,7 @@ impl FastIndex {
         if query_tokens.len() > 1 && !filters.match_any {
             filters.require_all = true;
         }
-        let exact_symbol_query = exact_symbol_query_name(&parsed.terms, filters.symbol.as_deref());
+        let exact_symbol_query = planned_symbol_query_name(&parsed.terms, &filters);
 
         let mut token_postings = query_tokens
             .iter()
@@ -1399,7 +1399,7 @@ impl FastIndex {
         if query_tokens.len() > 1 && !filters.match_any {
             filters.require_all = true;
         }
-        let exact_symbol_query = exact_symbol_query_name(&parsed.terms, filters.symbol.as_deref());
+        let exact_symbol_query = planned_symbol_query_name(&parsed.terms, &filters);
         if query_tokens.is_empty() && query_trigrams.is_empty() {
             if filter_only_query(&filters) {
                 let candidate_ids = filter_only_candidate_ids(&symbol_kind_postings);
@@ -2980,6 +2980,32 @@ fn exact_symbol_query_name(
     }
     let normalized = normalize_token(term);
     (normalized.len() >= 3).then_some(normalized)
+}
+
+fn planned_symbol_query_name(terms: &[String], filters: &SearchFilters) -> Option<String> {
+    if filters.symbol.is_none() && !language_scope_can_contain_symbols(filters.language.as_deref())
+    {
+        return None;
+    }
+    exact_symbol_query_name(terms, filters.symbol.as_deref())
+}
+
+fn language_scope_can_contain_symbols(language: Option<&str>) -> bool {
+    let Some(language) = language.map(normalize_language_filter) else {
+        return true;
+    };
+    matches!(
+        language.as_str(),
+        "python"
+            | "rust"
+            | "javascript"
+            | "typescript"
+            | "go"
+            | "ruby"
+            | "java"
+            | "kotlin"
+            | "swift"
+    )
 }
 
 fn identifier_shaped_query_term(term: &str) -> bool {

@@ -1137,6 +1137,10 @@ fn query_language_filters_fallback_and_indexed_search() {
         &repo.path().join("docs/auth.md"),
         "SessionManager issue token docs.\n",
     );
+    write(
+        &repo.path().join("README.md"),
+        "SessionManager daemon status docs.\n",
+    );
 
     let query = r#"symbol:sessionmanager lang:Rust ext:.RS dir:SRC -dir:DOCS "issue token""#;
     let fallback =
@@ -1164,6 +1168,23 @@ fn query_language_filters_fallback_and_indexed_search() {
         .unwrap();
     assert_eq!(result_paths(&indexed_ts), vec!["src/session.ts"]);
 
+    let fallback_markdown = search_repo_fast_filtered(
+        repo.path(),
+        "lang:md SessionManager",
+        10,
+        &Default::default(),
+    )
+    .unwrap();
+    let fallback_markdown_paths = result_paths(&fallback_markdown);
+    assert!(fallback_markdown_paths.contains(&"docs/auth.md".to_string()));
+    assert!(fallback_markdown_paths.contains(&"README.md".to_string()));
+    let indexed_markdown = indexed
+        .search_filtered("lang:md SessionManager", 10, &Default::default())
+        .unwrap();
+    let indexed_markdown_paths = result_paths(&indexed_markdown);
+    assert!(indexed_markdown_paths.contains(&"docs/auth.md".to_string()));
+    assert!(indexed_markdown_paths.contains(&"README.md".to_string()));
+
     let fallback_without_markdown = search_repo_fast_filtered(
         repo.path(),
         "-lang:md SessionManager",
@@ -1171,11 +1192,15 @@ fn query_language_filters_fallback_and_indexed_search() {
         &Default::default(),
     )
     .unwrap();
-    assert!(!result_paths(&fallback_without_markdown).contains(&"docs/auth.md".to_string()));
+    let fallback_without_markdown_paths = result_paths(&fallback_without_markdown);
+    assert!(!fallback_without_markdown_paths.contains(&"docs/auth.md".to_string()));
+    assert!(!fallback_without_markdown_paths.contains(&"README.md".to_string()));
     let indexed_without_markdown = indexed
         .search_filtered("-lang:md SessionManager", 10, &Default::default())
         .unwrap();
-    assert!(!result_paths(&indexed_without_markdown).contains(&"docs/auth.md".to_string()));
+    let indexed_without_markdown_paths = result_paths(&indexed_without_markdown);
+    assert!(!indexed_without_markdown_paths.contains(&"docs/auth.md".to_string()));
+    assert!(!indexed_without_markdown_paths.contains(&"README.md".to_string()));
 
     let file_filtered = search_repo_fast_filtered(
         repo.path(),
