@@ -37,7 +37,8 @@ orient client-jsonl --addr 127.0.0.1:8796
 
 The intended agent loop is simple: ask for the tool manifest, get a repo map,
 search the shard set, read the returned `read_range` objects, and inspect the
-query plan when results are empty or noisy.
+query plan when results are empty or noisy. See [Agent adoption](docs/agent-adoption.md)
+for copyable Codex, Claude Code, and Amp instructions.
 Once a daemon has exactly one shard directory or index warmed, `search_auto`
 lets wrappers search that target with just a query.
 Use `search_auto_batch` when an agent wants to try several query formulations in
@@ -58,6 +59,8 @@ separators.
 
 The adoption eval: run the same 20 repo-editing tasks with and without Orient.
 Measure time to first relevant file, local-search command count, wrong file
-opens, tool calls before edit, edit success rate, and wall-clock time.
+opens, tool calls before edit, edit success rate, and wall-clock time. See
+[Adoption eval](docs/adoption-eval.md).
 
-More: [Agent protocol](docs/agent-protocol.md), [Fast search roadmap](docs/fast-search-roadmap.md).
+More: [Agent adoption](docs/agent-adoption.md), [Agent protocol](docs/agent-protocol.md),
+[Adoption eval](docs/adoption-eval.md), [Fast search roadmap](docs/fast-search-roadmap.md).
