@@ -19,6 +19,7 @@ use orient::shards::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::any::Any;
 use std::fs;
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -735,7 +736,43 @@ struct ShardQueryPlanBatchResult {
     plans: Vec<ShardQueryPlan>,
 }
 
-fn main() -> Result<()> {
+fn main() {
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        if !panic_payload_is_broken_pipe(info.payload()) {
+            default_hook(info);
+        }
+    }));
+
+    match std::panic::catch_unwind(run) {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => {
+            eprintln!("Error: {error:?}");
+            std::process::exit(1);
+        }
+        Err(payload) if panic_payload_is_broken_pipe(payload.as_ref()) => {
+            std::process::exit(0);
+        }
+        Err(payload) => std::panic::resume_unwind(payload),
+    }
+}
+
+fn panic_payload_is_broken_pipe(payload: &(dyn Any + Send)) -> bool {
+    let Some(message) = panic_payload_message(payload) else {
+        return false;
+    };
+    message.contains("failed printing to stdout") && message.contains("Broken pipe")
+}
+
+fn panic_payload_message(payload: &(dyn Any + Send)) -> Option<&str> {
+    if let Some(message) = payload.downcast_ref::<&str>() {
+        Some(*message)
+    } else {
+        payload.downcast_ref::<String>().map(String::as_str)
+    }
+}
+
+fn run() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Commands::DiscoverRepos {

@@ -1,6 +1,7 @@
 use std::fs;
+use std::io::Read;
 use std::path::Path;
-use std::process::Command as ProcessCommand;
+use std::process::{Command as ProcessCommand, Stdio};
 
 use assert_cmd::Command;
 use orient::server::{MAX_BATCH_QUERIES, MAX_BATCH_RANGES};
@@ -102,6 +103,28 @@ fn cli_outputs_tool_manifest() {
         .stdout(predicate::str::contains("\"maxItems\":32"))
         .stdout(predicate::str::contains("\"maxItems\":64"))
         .stdout(predicate::str::contains("\"type\":\"range|range[]\""));
+}
+
+#[test]
+fn cli_suppresses_broken_pipe_when_output_consumer_closes() {
+    let binary = assert_cmd::cargo::cargo_bin("orient");
+    let mut child = ProcessCommand::new(binary)
+        .arg("tool-manifest")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdout = child.stdout.take().unwrap();
+    let mut buffer = [0u8; 128];
+    let read = stdout.read(&mut buffer).unwrap();
+    assert!(read > 0);
+    drop(stdout);
+
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!stderr.contains("panicked"), "{stderr}");
+    assert!(!stderr.contains("Broken pipe"), "{stderr}");
 }
 
 #[test]
