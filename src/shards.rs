@@ -321,7 +321,7 @@ pub fn refresh_shards(index_dir: impl AsRef<Path>) -> Result<ShardRefreshStats> 
 pub fn shard_status(index_dir: impl AsRef<Path>) -> Result<ShardFreshness> {
     let index_dir = index_dir.as_ref();
     let manifest = load_manifest(index_dir)?;
-    let mut shards = Vec::new();
+    let shards = shard_status_jobs(index_dir, &manifest.shards)?;
     let mut stale_shards = 0usize;
     let mut changed_files = 0usize;
     let mut deleted_files = 0usize;
@@ -334,10 +334,8 @@ pub fn shard_status(index_dir: impl AsRef<Path>) -> Result<ShardFreshness> {
     let mut compressed_posting_bytes = 0usize;
     let mut symbols = 0usize;
 
-    for shard in &manifest.shards {
-        let index = FastIndex::load(index_dir.join(&shard.index))
-            .with_context(|| format!("load shard {}", shard.index))?;
-        let status = index.freshness()?;
+    for shard in &shards {
+        let status = &shard.status;
         if status.stale {
             stale_shards += 1;
         }
@@ -351,17 +349,6 @@ pub fn shard_status(index_dir: impl AsRef<Path>) -> Result<ShardFreshness> {
         posting_entries += status.posting_entries;
         compressed_posting_bytes += status.compressed_posting_bytes;
         symbols += status.symbols;
-        shards.push(ShardIndexFreshness {
-            name: shard.name.clone(),
-            root: shard.root.clone(),
-            aliases: shard
-                .aliases
-                .iter()
-                .map(|alias| alias.name.clone())
-                .collect(),
-            index: shard.index.clone(),
-            status,
-        });
     }
 
     Ok(ShardFreshness {
@@ -382,6 +369,85 @@ pub fn shard_status(index_dir: impl AsRef<Path>) -> Result<ShardFreshness> {
         added_files,
         shards,
     })
+}
+
+fn shard_status_jobs(index_dir: &Path, shards: &[ShardEntry]) -> Result<Vec<ShardIndexFreshness>> {
+    if shards.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let workers = std::thread::available_parallelism()
+        .map(|count| count.get())
+        .unwrap_or(1)
+        .min(shards.len());
+    if workers <= 1 {
+        return shard_status_job_batch(index_dir, 0, shards)
+            .map(|items| ordered_status_items(items, shards.len()));
+    }
+
+    let chunk_size = shards.len().div_ceil(workers);
+    let mut items = Vec::with_capacity(shards.len());
+    thread::scope(|scope| {
+        let handles = shards
+            .chunks(chunk_size)
+            .enumerate()
+            .map(|(chunk_index, chunk)| {
+                let offset = chunk_index * chunk_size;
+                scope.spawn(move || shard_status_job_batch(index_dir, offset, chunk))
+            })
+            .collect::<Vec<_>>();
+
+        for handle in handles {
+            let batch = handle
+                .join()
+                .map_err(|_| anyhow::anyhow!("shard status worker panicked"))??;
+            items.extend(batch);
+        }
+        Ok::<(), anyhow::Error>(())
+    })?;
+    Ok(ordered_status_items(items, shards.len()))
+}
+
+fn shard_status_job_batch(
+    index_dir: &Path,
+    offset: usize,
+    shards: &[ShardEntry],
+) -> Result<Vec<(usize, ShardIndexFreshness)>> {
+    let mut statuses = Vec::with_capacity(shards.len());
+    for (index, shard) in shards.iter().enumerate() {
+        let loaded = FastIndex::load(index_dir.join(&shard.index))
+            .with_context(|| format!("load shard {}", shard.index))?;
+        let status = loaded
+            .freshness()
+            .with_context(|| format!("check shard freshness {}", shard.name))?;
+        statuses.push((
+            offset + index,
+            ShardIndexFreshness {
+                name: shard.name.clone(),
+                root: shard.root.clone(),
+                aliases: shard
+                    .aliases
+                    .iter()
+                    .map(|alias| alias.name.clone())
+                    .collect(),
+                index: shard.index.clone(),
+                status,
+            },
+        ));
+    }
+    Ok(statuses)
+}
+
+fn ordered_status_items(
+    mut items: Vec<(usize, ShardIndexFreshness)>,
+    expected_len: usize,
+) -> Vec<ShardIndexFreshness> {
+    items.sort_by_key(|(index, _)| *index);
+    items
+        .into_iter()
+        .take(expected_len)
+        .map(|(_, status)| status)
+        .collect()
 }
 
 fn ensure_action(removed: usize, added: usize) -> String {

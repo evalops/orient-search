@@ -1214,10 +1214,18 @@ fn runtime_ensures_shards_builds_refreshes_and_warms() {
     assert!(status.error.is_none(), "{:?}", status.error);
     let status = status.result.unwrap();
     assert_eq!(status["stale"], serde_json::json!(true));
+    assert_eq!(status["shard_count"], serde_json::json!(2));
     assert_eq!(status["stale_shards"], serde_json::json!(1));
     assert!(status["source_bytes"].as_u64().unwrap() > 0);
     assert!(status["posting_entries"].as_u64().unwrap() > 0);
     assert!(status["compressed_posting_bytes"].as_u64().unwrap() > 0);
+    let shard_names = status["shards"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|shard| shard["name"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(shard_names, vec!["platform", "billing"]);
     assert!(
         status["shards"][0]["status"]["source_bytes"]
             .as_u64()
