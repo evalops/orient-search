@@ -5082,6 +5082,23 @@ fn tcp_daemon_status_cli_reports_runtime_cache() {
         status["default_requests"]["query_plan"]["tool"],
         serde_json::json!("search_query_plan")
     );
+    let search_jsonl: serde_json::Value = serde_json::from_str(
+        status["default_requests"]["search"]["jsonl"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(search_jsonl["tool"], serde_json::json!("search_auto"));
+    assert_eq!(
+        search_jsonl["arguments"]["query"],
+        serde_json::json!("symbol:SessionManager token")
+    );
+    assert!(
+        status["default_requests"]["search"]["client_cli"]
+            .as_str()
+            .unwrap()
+            .contains("| orient client-jsonl")
+    );
     assert!(status.get("id").is_none(), "{status}");
 }
 
@@ -5366,6 +5383,17 @@ fn tcp_daemon_starts_with_warmed_index() {
     assert_eq!(
         startup_json["daemon_status"]["default_requests"]["query_plan"]["tool"],
         serde_json::json!("indexed_query_plan")
+    );
+    let map_jsonl: serde_json::Value = serde_json::from_str(
+        startup_json["daemon_status"]["default_requests"]["repo_map"]["jsonl"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(map_jsonl["tool"], serde_json::json!("indexed_repo_map"));
+    assert_eq!(
+        map_jsonl["arguments"]["index"],
+        serde_json::json!(index_path.canonicalize().unwrap().to_string_lossy())
     );
 
     let mut stream = TcpStream::connect(addr).unwrap();
@@ -5653,6 +5681,17 @@ fn tcp_daemon_starts_with_warmed_shards() {
     assert_eq!(
         startup_json["daemon_status"]["default_requests"]["query_plan"]["tool"],
         serde_json::json!("shard_query_plan")
+    );
+    let plan_jsonl: serde_json::Value = serde_json::from_str(
+        startup_json["daemon_status"]["default_requests"]["query_plan"]["jsonl"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(plan_jsonl["tool"], serde_json::json!("shard_query_plan"));
+    assert_eq!(
+        plan_jsonl["arguments"]["index_dir"],
+        serde_json::json!(shard_dir.path().canonicalize().unwrap().to_string_lossy())
     );
 
     let mut stream = TcpStream::connect(addr).unwrap();

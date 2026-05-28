@@ -5099,40 +5099,32 @@ fn process_cwd_status() -> Value {
 fn daemon_default_requests(search_auto_default: &Value) -> Value {
     let target = search_auto_default.get("target").and_then(Value::as_str);
     json!({
-        "manifest": {
-            "id": "tools",
-            "tool": "tool_manifest",
-            "arguments": {}
-        },
-        "agent_guide": {
-            "id": "guide",
-            "tool": "agent_guide",
-            "arguments": {}
-        },
+        "manifest": daemon_default_request("tools", "tool_manifest", json!({})),
+        "agent_guide": daemon_default_request("guide", "agent_guide", json!({})),
         "repo_map": daemon_default_repo_map_request(search_auto_default, target),
-        "search": {
-            "id": "search",
-            "tool": "search_auto",
-            "arguments": {
+        "search": daemon_default_request(
+            "search",
+            "search_auto",
+            json!({
                 "query": "symbol:SessionManager token",
                 "limit": 10,
                 "explain": true
-            }
-        },
-        "search_batch": {
-            "id": "searches",
-            "tool": "search_auto_batch",
-            "arguments": {
+            }),
+        ),
+        "search_batch": daemon_default_request(
+            "searches",
+            "search_auto_batch",
+            json!({
                 "queries": [
                     "symbol:SessionManager token",
                     "path:src token"
                 ],
                 "limit": 10,
                 "explain": true
-            }
-        },
+            }),
+        ),
         "query_plan": daemon_default_query_plan_request(search_auto_default, target),
-        "note": "Use search_auto without an explicit target when search_auto_default is trusted; use the targeted repo_map and query_plan requests when orienting or diagnosing."
+        "note": "Use search_auto without an explicit target when search_auto_default is trusted; use the targeted repo_map and query_plan requests when orienting or diagnosing. Each default request includes jsonl and client_cli for direct terminal use."
     })
 }
 
@@ -5161,11 +5153,7 @@ fn daemon_default_repo_map_request(search_auto_default: &Value, target: Option<&
         }
         _ => "repo_map",
     };
-    json!({
-        "id": "map",
-        "tool": tool,
-        "arguments": arguments
-    })
+    daemon_default_request("map", tool, Value::Object(arguments))
 }
 
 fn daemon_default_query_plan_request(search_auto_default: &Value, target: Option<&str>) -> Value {
@@ -5193,11 +5181,32 @@ fn daemon_default_query_plan_request(search_auto_default: &Value, target: Option
         }
         _ => "search_query_plan",
     };
-    json!({
-        "id": "plan",
+    daemon_default_request("plan", tool, Value::Object(arguments))
+}
+
+fn daemon_default_request(id: &str, tool: &str, arguments: Value) -> Value {
+    let mut request = json!({
+        "id": id,
         "tool": tool,
         "arguments": arguments
-    })
+    });
+    let jsonl = request.to_string();
+    let client_cli = format!(
+        "printf '%s\\n' {} | orient client-jsonl",
+        shell_quote(&jsonl)
+    );
+    if let Value::Object(object) = &mut request {
+        object.insert("jsonl".to_string(), json!(jsonl));
+        object.insert("client_cli".to_string(), json!(client_cli));
+    }
+    request
+}
+
+fn shell_quote(value: &str) -> String {
+    if value.is_empty() {
+        return "''".to_string();
+    }
+    format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 fn optional_string_arg_any(arguments: &Value, names: &[&str]) -> Option<String> {
