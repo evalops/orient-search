@@ -45,7 +45,7 @@ Implemented now:
 - Search snippet modes: `short`, `medium`, `block`, and `symbol`.
 - Search results include structured `line_range` metadata, exact `match_lines` from indexed token-to-line tables when available, and a ready-to-pass `read_range` hint, allowing direct batch range reads and jump-to-line follow-up calls.
 - Search requests can attach bounded line-numbered `context` ranges with `context_lines` / `--context-lines`, letting agents search and inspect edit context in one fallback, indexed, or shard round trip.
-- Persistent indexes store bounded source snapshots, so indexed snippets, `read-index-range`, `read-index-ranges`, and shard range reads can return context from the saved index even when the live workspace file is unavailable.
+- Persistent indexes store bounded source snapshots and line-offset tables, so indexed snippets, `read-index-range`, `read-index-ranges`, and shard range reads can return context directly from the saved index even when the live workspace file is unavailable.
 - Path, file, repo, extension, language, and symbol filters match case-insensitively across fallback, indexed, and shard search surfaces.
 - Filter-only discovery queries like `file:Cargo.toml` or `lang:rust test:true` work across fallback, indexed, shard, CLI, and JSON-lines search surfaces; indexed explain output reports them as `filter_scan`.
 - JSON-lines search tools accept structured `exclude_*` filters as strings or arrays, so wrappers can express negative filters without query-string rewriting.

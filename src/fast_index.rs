@@ -2,11 +2,11 @@
 
 use crate::query::{merge_filters, normalize_phrase_text, parse_query, query_phrases, query_text};
 use crate::repo_index::{
-    FileRange, QueryPlan, QueryPlanFilter, QueryPlanPosting, QueryPlanRepairHint, RankSignal,
-    RelatedFile, RelatedSymbol, RepoBrief, RepoMap, SearchFilters, SearchResult, SnippetMode,
-    Symbol, apply_phrase_matches, best_snippet_for_path, capped_search_limit,
-    command_hints_from_manifest_texts, dependency_filters_match,
-    dependency_hints_from_manifest_texts, extract_symbols, file_range_from_text, filter_only_query,
+    FileRange, MAX_READ_RANGE_LINES, QueryPlan, QueryPlanFilter, QueryPlanPosting,
+    QueryPlanRepairHint, RankSignal, RelatedFile, RelatedSymbol, RepoBrief, RepoMap, SearchFilters,
+    SearchResult, SnippetMode, Symbol, apply_phrase_matches, best_snippet_for_path,
+    capped_search_limit, command_hints_from_manifest_texts, dependency_filters_match,
+    dependency_hints_from_manifest_texts, extract_symbols, filter_only_query,
     filter_only_search_result, filter_value_matches, finalize_results,
     import_hints_from_source_texts, is_entrypoint_path, is_ignored, is_important_file,
     is_manifest_file, is_test_path, known_commands_from_hints, language_for,
@@ -746,12 +746,7 @@ impl FastIndex {
             .iter()
             .find(|file| file.path == normalized)
             .ok_or_else(|| anyhow::anyhow!("path is not present in index: {normalized}"))?;
-        Ok(file_range_from_text(
-            file.path.clone(),
-            &file.content,
-            start_line,
-            line_count,
-        ))
+        Ok(indexed_file_range(file, start_line, line_count))
     }
 
     pub fn related_files(&self, path: &str, limit: usize) -> Vec<RelatedFile> {
@@ -2759,6 +2754,41 @@ fn render_indexed_window(
     }
 
     rendered.join("\n").chars().take(mode.max_chars()).collect()
+}
+
+fn indexed_file_range(file: &IndexedPath, start_line: usize, line_count: usize) -> FileRange {
+    let bytes = file.content.as_bytes();
+    if bytes.is_empty() || file.line_offsets.is_empty() {
+        return FileRange {
+            path: file.path.clone(),
+            start_line: 1,
+            end_line: 0,
+            total_lines: 0,
+            text: String::new(),
+        };
+    }
+
+    let total_lines = file.line_offsets.len();
+    let start = start_line.max(1).min(total_lines.max(1));
+    let count = line_count.max(1).min(MAX_READ_RANGE_LINES);
+    let end_line = (start + count - 1).min(total_lines);
+    let mut rendered = Vec::with_capacity(end_line.saturating_sub(start) + 1);
+
+    for line in start..=end_line {
+        let index = line - 1;
+        let start_byte = file.line_offsets[index] as usize;
+        let end_byte = line_end(bytes, &file.line_offsets, index);
+        let text = String::from_utf8_lossy(&bytes[start_byte..end_byte]);
+        rendered.push(format!("{line}: {}", text.trim_end_matches(['\r', '\n'])));
+    }
+
+    FileRange {
+        path: file.path.clone(),
+        start_line: start,
+        end_line,
+        total_lines,
+        text: rendered.join("\n"),
+    }
 }
 
 fn line_end(bytes: &[u8], offsets: &[u32], index: usize) -> usize {

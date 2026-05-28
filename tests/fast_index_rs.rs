@@ -126,6 +126,10 @@ fn indexed_search_and_read_range_use_persisted_snapshot_text() {
         .map(|line| format!("pub fn line_{line}() {{}}\n"))
         .collect::<String>();
     write(&repo.path().join("src/long.rs"), &long_text);
+    write(
+        &repo.path().join("src/no_trailing_newline.rs"),
+        "pub fn first() {}\npub fn second() {}",
+    );
     let index_path = repo.path().join(".orient/auth.index");
     let index = FastIndex::build(repo.path()).unwrap();
     index.save(&index_path).unwrap();
@@ -171,6 +175,13 @@ fn indexed_search_and_read_range_use_persisted_snapshot_text() {
         MAX_READ_RANGE_LINES + 1,
         MAX_READ_RANGE_LINES + 1
     )));
+    let no_trailing = loaded
+        .read_range("src/no_trailing_newline.rs", 2, 1)
+        .unwrap();
+    assert_eq!(no_trailing.start_line, 2);
+    assert_eq!(no_trailing.end_line, 2);
+    assert_eq!(no_trailing.total_lines, 2);
+    assert_eq!(no_trailing.text, "2: pub fn second() {}");
     assert!(loaded.read_range("../src/auth.rs", 1, 1).is_err());
     assert!(loaded.read_range("src/../auth.rs", 1, 1).is_err());
     assert!(loaded.read_range("src\\..\\auth.rs", 1, 1).is_err());
