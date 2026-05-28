@@ -51,7 +51,7 @@ orient search --index-dir /tmp/orient-shards "repo:api issue token"
 {"id":"auto","tool":"search_auto","arguments":{"query":"repo:api symbol:AuthSession token","limit":10,"explain":true}}
 {"id":"autos","tool":"search_auto_batch","arguments":{"queries":["repo:api symbol:AuthSession token","repo:api path:auth token"],"limit":10}}
 {"id":"shards","tool":"search_shards","arguments":{"query":"repo:api symbol:AuthSession token","limit":10,"explain":true}}
-{"id":"read","tool":"read_shard_ranges","arguments":{"ranges":[{"path":"api/src/auth.rs","start":40,"lines":80}]}}
+{"id":"read","tool":"read_ranges","arguments":{"index_dir":"/tmp/orient-shards","ranges":[{"path":"api/src/auth.rs","start":40,"lines":80}]}}
 ```
 
 The intended agent loop is simple: ask for the tool manifest, get a repo map,
@@ -71,6 +71,9 @@ Both return a `query_plan_request` for noisy result sets and inline
 They also return a `repo_map_request` for quick orientation on the chosen
 search surface and a `read_batch_request` when results can be opened in one
 bounded batch read.
+`read_range` and `read_ranges` accept the same `repo`, `index`, or `index_dir`
+target style as `search`, so simple adapters do not need separate read tools for
+live repos, persisted indexes, and shard directories.
 Repo maps default to `detail:"compact"` for small first-orientation payloads;
 use `detail:"full"` only when an agent needs the full available import/module
 hint set. Their bundled `read_batch_request` defaults to 16 ranges and accepts

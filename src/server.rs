@@ -397,27 +397,27 @@ pub fn tool_manifest() -> Value {
         ),
         tool_entry(
             "read_range",
-            "Read a bounded line range from a repository-relative path.",
-            &["repo", "path"],
-            &["start", "lines"],
+            "Read a bounded line range from a live repo, persistent index, or shard directory.",
+            &["path"],
+            READ_TARGET_OPTIONAL_ARGS,
         ),
         tool_entry(
             "open_range",
             "Alias for read_range for agents that phrase context fetches as opening a file range.",
-            &["repo", "path"],
-            &["start", "lines"],
+            &["path"],
+            READ_TARGET_OPTIONAL_ARGS,
         ),
         tool_entry(
             "read_ranges",
-            "Read several bounded line ranges from repository-relative paths in one request.",
-            &["repo", "ranges"],
-            &[],
+            "Read several bounded line ranges from a live repo, persistent index, or shard directory in one request.",
+            &["ranges"],
+            READ_BATCH_TARGET_OPTIONAL_ARGS,
         ),
         tool_entry(
             "open_ranges",
             "Alias for read_ranges for agents that phrase context fetches as opening file ranges.",
-            &["repo", "ranges"],
-            &[],
+            &["ranges"],
+            READ_BATCH_TARGET_OPTIONAL_ARGS,
         ),
         tool_entry(
             "search_code",
@@ -1262,6 +1262,9 @@ fn argument_description(tool_name: &str, name: &str) -> &'static str {
         "queries" => "Agent query strings to run as one batch against the same search target.",
         "name" => "Symbol name to look up.",
         "names" => "Symbol names to look up as one batch against the same target and filters.",
+        "path" if is_target_range_tool(tool_name) => {
+            "Result path for the selected target; use repo/index-relative paths for repo or index targets, and shard-prefixed or unique shard-relative paths for index_dir targets."
+        }
         "path" if is_shard_path_tool(tool_name) => {
             "Shard-prefixed result path, such as repo/src/lib.rs, or a unique unqualified shard-relative path, such as src/lib.rs."
         }
@@ -1363,13 +1366,22 @@ fn argument_description(tool_name: &str, name: &str) -> &'static str {
 }
 
 fn range_path_description(tool_name: &str) -> &'static str {
-    if is_shard_range_tool(tool_name) {
+    if is_target_range_tool(tool_name) {
+        "Result path for the selected target; use repo/index-relative paths for repo or index targets, and shard-prefixed or unique shard-relative paths for index_dir targets."
+    } else if is_shard_range_tool(tool_name) {
         "Shard-prefixed result path, such as repo/src/lib.rs, or a unique unqualified shard-relative path, such as src/lib.rs."
     } else if is_index_range_tool(tool_name) {
         "Index-relative result path, such as src/lib.rs."
     } else {
         "Repository-relative result path, such as src/lib.rs."
     }
+}
+
+fn is_target_range_tool(tool_name: &str) -> bool {
+    matches!(
+        tool_name,
+        "read_range" | "open_range" | "read_ranges" | "open_ranges"
+    )
 }
 
 fn is_shard_path_tool(tool_name: &str) -> bool {
@@ -1746,16 +1758,77 @@ impl ToolRuntime {
                 Ok(serde_json::to_value(map)?)
             }
             "read_range" | "open_range" => {
-                let repo = path_arg(&request.arguments, "repo")?;
                 let path = string_arg(&request.arguments, "path")?;
                 let (start, lines) = read_window_args(&request.arguments)?;
+                if request.arguments.get("index").is_some()
+                    && request.arguments.get("index_dir").is_some()
+                {
+                    return Err(anyhow!("read_range accepts only one of index or index_dir"));
+                }
+                if let Some(index_dir) =
+                    optional_string_arg(&request.arguments, "index_dir").map(PathBuf::from)
+                {
+                    return Ok(serde_json::to_value(
+                        self.read_shard_range_cached(&index_dir, &path, start, lines)?,
+                    )?);
+                }
+                if let Some(index_path) =
+                    optional_string_arg(&request.arguments, "index").map(PathBuf::from)
+                {
+                    let index = self.cached_index(index_path)?;
+                    return Ok(serde_json::to_value(
+                        index.read_range(&path, start, lines)?,
+                    )?);
+                }
+                let repo = optional_string_arg(&request.arguments, "repo")
+                    .map(PathBuf::from)
+                    .map(Ok)
+                    .unwrap_or_else(|| {
+                        std::env::current_dir().context("resolve current directory for read_range")
+                    })?;
                 Ok(serde_json::to_value(read_file_range(
                     repo, &path, start, lines,
                 )?)?)
             }
             "read_ranges" | "open_ranges" => {
-                let repo = path_arg(&request.arguments, "repo")?;
                 let ranges = range_args(&request.arguments)?;
+                if request.arguments.get("index").is_some()
+                    && request.arguments.get("index_dir").is_some()
+                {
+                    return Err(anyhow!(
+                        "read_ranges accepts only one of index or index_dir"
+                    ));
+                }
+                if let Some(index_dir) =
+                    optional_string_arg(&request.arguments, "index_dir").map(PathBuf::from)
+                {
+                    let mut results = Vec::new();
+                    for range in ranges {
+                        results.push(self.read_shard_range_cached(
+                            &index_dir,
+                            &range.path,
+                            range.start,
+                            range.lines,
+                        )?);
+                    }
+                    return Ok(serde_json::to_value(results)?);
+                }
+                if let Some(index_path) =
+                    optional_string_arg(&request.arguments, "index").map(PathBuf::from)
+                {
+                    let index = self.cached_index(index_path)?;
+                    let mut results = Vec::new();
+                    for range in ranges {
+                        results.push(index.read_range(&range.path, range.start, range.lines)?);
+                    }
+                    return Ok(serde_json::to_value(results)?);
+                }
+                let repo = optional_string_arg(&request.arguments, "repo")
+                    .map(PathBuf::from)
+                    .map(Ok)
+                    .unwrap_or_else(|| {
+                        std::env::current_dir().context("resolve current directory for read_ranges")
+                    })?;
                 let mut results = Vec::new();
                 for range in ranges {
                     results.push(read_file_range(
@@ -3854,6 +3927,10 @@ const SEARCH_TARGET_OPTIONAL_ARGS: &[&str] = &[
     "exclude_use",
     "exclude_uses",
 ];
+
+const READ_TARGET_OPTIONAL_ARGS: &[&str] = &["repo", "index", "index_dir", "start", "lines"];
+
+const READ_BATCH_TARGET_OPTIONAL_ARGS: &[&str] = &["repo", "index", "index_dir"];
 
 const SYMBOL_OPTIONAL_ARGS: &[&str] = &[
     "limit",

@@ -121,14 +121,14 @@ For most agents, the handoff is:
 
 Read-range tools accept `/` or `\` separators in repo-relative paths and reject parent-directory escapes after separator normalization. Shard range and related-context tools accept exact shard-prefixed paths from search hits, such as `platform/src/auth.rs`, and also accept unqualified paths like `src/auth.rs` when they resolve to exactly one shard. Ambiguous unqualified paths fail with a prompt to use `<repo>/<path>`.
 
-`open_range`, `open_index_range`, and `open_shard_range` are aliases for agents that phrase context fetches as opening a file range.
+`read_range` / `open_range` and `read_ranges` / `open_ranges` are target-aware convenience tools: pass `repo`, `index`, or `index_dir` to read from a live repository, persistent index, or shard directory with one adapter path. The explicit `read_index_range` and `read_shard_range` families remain available for wrappers that want surface-specific tools.
 
 Examples:
 
 ```json
-{"id":"read-one","tool":"read_index_ranges","arguments":{"index":"/tmp/orient.index","ranges":{"path":"src/auth.rs","start":1,"lines":80}}}
-{"id":"read","tool":"read_index_ranges","arguments":{"index":"/tmp/orient.index","ranges":[{"path":"src/auth.rs","start":1,"lines":80}]}}
-{"id":"read-shards","tool":"read_shard_ranges","arguments":{"index_dir":"/tmp/orient-shards","ranges":[{"path":"platform/src/auth.rs","start":40,"lines":80}]}}
+{"id":"read-one","tool":"read_ranges","arguments":{"index":"/tmp/orient.index","ranges":{"path":"src/auth.rs","start":1,"lines":80}}}
+{"id":"read","tool":"read_ranges","arguments":{"index":"/tmp/orient.index","ranges":[{"path":"src/auth.rs","start":1,"lines":80}]}}
+{"id":"read-shards","tool":"read_ranges","arguments":{"index_dir":"/tmp/orient-shards","ranges":[{"path":"platform/src/auth.rs","start":40,"lines":80}]}}
 ```
 
 CLI equivalents support repeatable `--range path:start:lines`:
