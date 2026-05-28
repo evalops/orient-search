@@ -1175,6 +1175,47 @@ fn indexed_snippets_anchor_on_strongest_matching_line() {
 }
 
 #[test]
+fn indexed_query_plan_dedupes_identifier_tokens() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/shards.rs"),
+        "pub fn shard_status_jobs() { ordered_status_items(); }\nfn ordered_status_items() {}\n",
+    );
+
+    let index = FastIndex::build(repo.path()).unwrap();
+    let plan = index
+        .query_plan(
+            "shard_status_jobs ordered_status_items",
+            &SearchFilters::default(),
+        )
+        .unwrap();
+
+    assert_eq!(
+        plan.query_tokens,
+        vec!["shard", "status", "jobs", "ordered", "items"]
+    );
+    assert_eq!(
+        plan.planned_postings
+            .iter()
+            .filter(|posting| posting.kind == "content" && posting.value == "status")
+            .count(),
+        1
+    );
+
+    let results = index
+        .search_filtered(
+            "shard_status_jobs ordered_status_items",
+            10,
+            &SearchFilters {
+                snippet: SnippetMode::Short,
+                ..SearchFilters::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(results[0].match_lines[0], 1);
+}
+
+#[test]
 fn indexed_search_uses_trigram_postings_for_substring_queries() {
     let repo = tempfile::tempdir().unwrap();
     write(

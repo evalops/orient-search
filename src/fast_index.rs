@@ -13,7 +13,7 @@ use crate::repo_index::{
     regular_file_metadata, related_stem_terms, repo_map_seed_paths, repo_matches,
     result_matches_all_tokens, result_matches_symbol_filters, round4, score_filter_only_path,
     source_content_filters_match, source_import_filters_match, symbol_kind_rank, token_counts,
-    tokenize,
+    tokenize, unique_query_tokens,
 };
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use anyhow::{Context, Result};
@@ -964,7 +964,7 @@ impl FastIndex {
             return Ok(Vec::new());
         }
         let query = query_text(&parsed.terms, &filters);
-        let query_tokens = tokenize(&query);
+        let query_tokens = unique_query_tokens(&query);
         let query_trigrams = query_trigrams(&query);
         if limit == 0 {
             return Ok(Vec::new());
@@ -1200,7 +1200,7 @@ impl FastIndex {
             });
         }
         let query = query_text(&parsed.terms, &filters);
-        let query_tokens = tokenize(&query);
+        let query_tokens = unique_query_tokens(&query);
         let query_trigrams = query_trigrams(&query);
         if query_tokens.len() > 1 {
             filters.require_all = true;

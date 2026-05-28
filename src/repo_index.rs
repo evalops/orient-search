@@ -386,7 +386,7 @@ pub fn search_repo_fast_filtered_with_timeout(
         return Ok(Vec::new());
     }
     let query = query_text(&parsed.terms, &filters);
-    let query_tokens = tokenize(&query);
+    let query_tokens = unique_query_tokens(&query);
     if limit == 0 {
         return Ok(Vec::new());
     }
@@ -946,7 +946,7 @@ impl RepoIndex {
     }
 
     pub fn search_code(&self, query: &str, limit: usize) -> Vec<SearchResult> {
-        let query_tokens = tokenize(query);
+        let query_tokens = unique_query_tokens(query);
         if query_tokens.is_empty() {
             return Vec::new();
         }
@@ -2454,6 +2454,14 @@ pub(crate) fn tokenize(text: &str) -> Vec<String> {
         .find_iter(&split)
         .map(|m| m.as_str().to_lowercase())
         .filter(|token| token.len() > 1)
+        .collect()
+}
+
+pub(crate) fn unique_query_tokens(text: &str) -> Vec<String> {
+    let mut seen = HashSet::new();
+    tokenize(text)
+        .into_iter()
+        .filter(|token| seen.insert(token.clone()))
         .collect()
 }
 
