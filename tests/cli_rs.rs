@@ -1011,6 +1011,58 @@ fn cli_outputs_repo_map_and_reads_ranges() {
 }
 
 #[test]
+fn cli_repo_map_detail_controls_import_payload_size() {
+    let repo = tempfile::tempdir().unwrap();
+    let bulk_imports = (0..40)
+        .map(|index| format!("use alpha::Module{index};\n"))
+        .collect::<String>();
+    write(&repo.path().join("src/bulk.rs"), &bulk_imports);
+    write(
+        &repo.path().join("src/other.rs"),
+        "use beta::Client;\nuse gamma::Config;\npub fn call() {}\n",
+    );
+
+    let compact = Command::cargo_bin("orient")
+        .unwrap()
+        .args([
+            "repo-map",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--symbols",
+            "1",
+            "--tests",
+            "1",
+        ])
+        .output()
+        .unwrap();
+    assert!(compact.status.success());
+    let compact: serde_json::Value = serde_json::from_slice(&compact.stdout).unwrap();
+    assert_eq!(
+        compact["brief"]["import_hints"].as_array().unwrap().len(),
+        32
+    );
+
+    let full = Command::cargo_bin("orient")
+        .unwrap()
+        .args([
+            "repo-map",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--symbols",
+            "1",
+            "--tests",
+            "1",
+            "--detail",
+            "full",
+        ])
+        .output()
+        .unwrap();
+    assert!(full.status.success());
+    let full: serde_json::Value = serde_json::from_slice(&full.stdout).unwrap();
+    assert_eq!(full["brief"]["import_hints"].as_array().unwrap().len(), 42);
+}
+
+#[test]
 fn cli_searches_symbols_and_related_files() {
     let repo = sample_repo();
 

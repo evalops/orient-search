@@ -7,8 +7,8 @@ use orient::discover::{
 use orient::fast_index::{FastIndex, RefreshStats};
 use orient::query::normalize_symbol_kind;
 use orient::repo_index::{
-    QueryPlan, RepoIndexer, ResultToolRequest, SearchFilters, SearchResult, SnippetMode,
-    SymbolLookupResult, attach_repo_map_read_batch_request, attach_result_context,
+    QueryPlan, RepoIndexer, RepoMapDetail, ResultToolRequest, SearchFilters, SearchResult,
+    SnippetMode, SymbolLookupResult, attach_repo_map_read_batch_request, attach_result_context,
     attach_result_read_requests, attach_result_related_requests,
     attach_result_related_symbol_requests, read_file_range, related_file_lookup_results,
     related_symbol_lookup_results, result_read_batch_request, search_repo_fast_filtered,
@@ -237,10 +237,14 @@ enum Commands {
         tests: usize,
         #[arg(long = "repo")]
         repo: Option<String>,
+        #[arg(long, default_value = "compact", value_parser = ["compact", "full"])]
+        detail: String,
     },
     Brief {
         #[arg(long, default_value = ".")]
         repo: PathBuf,
+        #[arg(long, default_value = "compact", value_parser = ["compact", "full"])]
+        detail: String,
     },
     RepoMap {
         #[arg(long, default_value = ".")]
@@ -249,6 +253,8 @@ enum Commands {
         symbols: usize,
         #[arg(long, default_value_t = 50)]
         tests: usize,
+        #[arg(long, default_value = "compact", value_parser = ["compact", "full"])]
+        detail: String,
     },
     IndexMap {
         #[arg(long)]
@@ -257,6 +263,8 @@ enum Commands {
         symbols: usize,
         #[arg(long, default_value_t = 50)]
         tests: usize,
+        #[arg(long, default_value = "compact", value_parser = ["compact", "full"])]
+        detail: String,
     },
     IndexPlan {
         #[arg(long)]
@@ -919,6 +927,14 @@ fn read_request_args<T: Serialize>(name: &str, value: T) -> Map<String, Value> {
     arguments
 }
 
+fn repo_map_detail_from_cli(value: &str) -> Result<RepoMapDetail> {
+    match value {
+        "compact" => Ok(RepoMapDetail::Compact),
+        "full" => Ok(RepoMapDetail::Full),
+        _ => bail!("repo map detail must be compact or full"),
+    }
+}
+
 fn attach_cli_retry_requests<T: Serialize>(
     mut plan: QueryPlan,
     search_tool: &str,
@@ -1360,11 +1376,14 @@ fn run() -> Result<()> {
             symbols,
             tests,
             repo,
+            detail,
         } => {
+            let detail = repo_map_detail_from_cli(&detail)?;
             let mut maps = shard_repo_maps(
                 &index_dir,
                 symbols,
                 tests,
+                detail,
                 &SearchFilters {
                     repo,
                     ..SearchFilters::default()
@@ -1379,17 +1398,23 @@ fn run() -> Result<()> {
             }
             println!("{}", serde_json::to_string(&maps)?);
         }
-        Commands::Brief { repo } => {
+        Commands::Brief { repo, detail } => {
+            let detail = repo_map_detail_from_cli(&detail)?;
             let index = RepoIndexer::new(repo).build()?;
-            println!("{}", serde_json::to_string(&index.repo_brief())?);
+            println!(
+                "{}",
+                serde_json::to_string(&index.repo_brief_with_detail(detail))?
+            );
         }
         Commands::RepoMap {
             repo,
             symbols,
             tests,
+            detail,
         } => {
+            let detail = repo_map_detail_from_cli(&detail)?;
             let index = RepoIndexer::new(&repo).build()?;
-            let mut map = index.repo_map(symbols, tests);
+            let mut map = index.repo_map_with_detail(symbols, tests, detail);
             attach_repo_map_read_batch_request(
                 &mut map,
                 "read_ranges",
@@ -1401,10 +1426,12 @@ fn run() -> Result<()> {
             index,
             symbols,
             tests,
+            detail,
         } => {
+            let detail = repo_map_detail_from_cli(&detail)?;
             let index_path = index;
             let index = FastIndex::load(&index_path)?;
-            let mut map = index.repo_map(symbols, tests);
+            let mut map = index.repo_map_with_detail(symbols, tests, detail);
             attach_repo_map_read_batch_request(
                 &mut map,
                 "read_index_ranges",
@@ -1609,7 +1636,7 @@ fn run() -> Result<()> {
                     },
                     "repo_map_request": {
                         "tool": "shard_repo_map",
-                        "arguments": {"index_dir": index_dir}
+                        "arguments": {"index_dir": index_dir, "detail": "compact"}
                     },
                     "read_batch_request": result_read_batch_request(
                         &results,
@@ -1664,7 +1691,7 @@ fn run() -> Result<()> {
                     },
                     "repo_map_request": {
                         "tool": "indexed_repo_map",
-                        "arguments": {"index": index_path}
+                        "arguments": {"index": index_path, "detail": "compact"}
                     },
                     "read_batch_request": result_read_batch_request(
                         &results,
@@ -1720,7 +1747,7 @@ fn run() -> Result<()> {
                     },
                     "repo_map_request": {
                         "tool": "repo_map",
-                        "arguments": {"repo": repo}
+                        "arguments": {"repo": repo, "detail": "compact"}
                     },
                     "read_batch_request": result_read_batch_request(
                         &results,
@@ -1789,7 +1816,7 @@ fn run() -> Result<()> {
                         },
                         "repo_map_request": {
                             "tool": "shard_repo_map",
-                            "arguments": {"index_dir": index_dir}
+                            "arguments": {"index_dir": index_dir, "detail": "compact"}
                         },
                         "read_batch_request": result_read_batch_request(
                             &results,
@@ -1846,7 +1873,7 @@ fn run() -> Result<()> {
                         },
                         "repo_map_request": {
                             "tool": "indexed_repo_map",
-                            "arguments": {"index": index_path}
+                            "arguments": {"index": index_path, "detail": "compact"}
                         },
                         "read_batch_request": result_read_batch_request(
                             &results,
@@ -1904,7 +1931,7 @@ fn run() -> Result<()> {
                         },
                         "repo_map_request": {
                             "tool": "repo_map",
-                            "arguments": {"repo": repo}
+                            "arguments": {"repo": repo, "detail": "compact"}
                         },
                         "read_batch_request": result_read_batch_request(
                             &results,

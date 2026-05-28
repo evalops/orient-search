@@ -35,7 +35,7 @@ orient search-auto "symbol:AuthSession token"
 ```jsonl
 {"id":"tools","tool":"tool_manifest","arguments":{}}
 {"id":"guide","tool":"agent_guide","arguments":{"index_dir":"/tmp/orient-shards"}}
-{"id":"map","tool":"shard_repo_map","arguments":{"symbols":25,"tests":25}}
+{"id":"map","tool":"shard_repo_map","arguments":{"symbols":25,"tests":25,"detail":"compact"}}
 {"id":"auto","tool":"search_auto","arguments":{"query":"repo:api symbol:AuthSession token","limit":10,"explain":true}}
 {"id":"autos","tool":"search_auto_batch","arguments":{"queries":["repo:api symbol:AuthSession token","repo:api path:auth token"],"limit":10}}
 {"id":"search","tool":"search_shards","arguments":{"query":"repo:api symbol:AuthSession token","limit":10,"explain":true}}
@@ -58,6 +58,9 @@ Both return a `query_plan_request` for noisy result sets and inline
 They also return a `repo_map_request` for quick orientation on the chosen
 search surface and a `read_batch_request` when results can be opened in one
 bounded batch read.
+Repo maps default to `detail:"compact"` for small first-orientation payloads;
+use `detail:"full"` only when an agent needs the full available import/module
+hint set.
 
 For a repo without a saved index, use `orient search-plan --repo . "query"` or
 the JSON-lines `search_query_plan` tool to get the same missing-term and retry

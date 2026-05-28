@@ -121,6 +121,10 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         .iter()
         .find(|tool| tool["name"] == "agent_instructions")
         .unwrap();
+    let repo_map = tools
+        .iter()
+        .find(|tool| tool["name"] == "repo_map")
+        .unwrap();
 
     assert_eq!(search["required"], serde_json::json!(["repo", "query"]));
     assert_eq!(search_auto["required"], serde_json::json!(["query"]));
@@ -430,6 +434,14 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         "127.0.0.1:8796"
     );
     assert_eq!(
+        repo_map["input_schema"]["properties"]["detail"]["default"],
+        "compact"
+    );
+    assert_eq!(
+        repo_map["input_schema"]["properties"]["detail"]["enum"],
+        serde_json::json!(["compact", "full"])
+    );
+    assert_eq!(
         search["input_schema"]["properties"]["context_lines"]["maximum"],
         serde_json::json!(MAX_ATTACHED_CONTEXT_LINES)
     );
@@ -577,6 +589,10 @@ fn mcp_manifest_exposes_input_schema_for_adapter_wrappers() {
         .iter()
         .find(|tool| tool["name"] == "read_shard_range")
         .unwrap();
+    let repo_map = tools
+        .iter()
+        .find(|tool| tool["name"] == "repo_map")
+        .unwrap();
 
     assert_eq!(
         search["description"],
@@ -603,6 +619,10 @@ fn mcp_manifest_exposes_input_schema_for_adapter_wrappers() {
     assert_eq!(
         agent_instructions_tool["inputSchema"]["properties"]["addr"]["default"],
         "127.0.0.1:8796"
+    );
+    assert_eq!(
+        repo_map["inputSchema"]["properties"]["detail"]["enum"],
+        serde_json::json!(["compact", "full"])
     );
     assert_eq!(agent_instructions_tool["annotations"]["readOnlyHint"], true);
     assert_eq!(search["annotations"]["readOnlyHint"], true);
@@ -656,6 +676,18 @@ fn agent_guide_returns_local_agent_request_templates() {
     assert_eq!(
         guide["request_templates"]["live_search"]["arguments"]["repo"],
         "/work/repo"
+    );
+    assert_eq!(
+        guide["request_templates"]["live_repo_map"]["arguments"]["detail"],
+        "compact"
+    );
+    assert_eq!(
+        guide["request_templates"]["indexed_repo_map"]["arguments"]["detail"],
+        "compact"
+    );
+    assert_eq!(
+        guide["request_templates"]["shard_repo_map"]["arguments"]["detail"],
+        "compact"
     );
     assert_eq!(
         guide["request_templates"]["indexed_search"]["arguments"]["index"],
@@ -779,6 +811,60 @@ fn runtime_serves_agent_instructions_for_local_rule_files() {
 }
 
 #[test]
+fn runtime_repo_map_detail_defaults_to_compact_and_allows_full_imports() {
+    let repo = tempfile::tempdir().unwrap();
+    let bulk_imports = (0..40)
+        .map(|index| format!("use alpha::Module{index};\n"))
+        .collect::<String>();
+    write(&repo.path().join("src/bulk.rs"), &bulk_imports);
+    write(
+        &repo.path().join("src/other.rs"),
+        "use beta::Client;\nuse gamma::Config;\npub fn call() {}\n",
+    );
+
+    let runtime = ToolRuntime::default();
+    let compact = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("compact"),
+        tool: "repo_map".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "symbols": 5,
+            "tests": 5
+        }),
+    });
+    assert!(compact.error.is_none(), "{:?}", compact.error);
+    let compact = compact.result.unwrap();
+    assert_eq!(
+        compact["brief"]["import_hints"].as_array().unwrap().len(),
+        32
+    );
+
+    let full = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("full"),
+        tool: "repo_map".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "symbols": 5,
+            "tests": 5,
+            "detail": "full"
+        }),
+    });
+    assert!(full.error.is_none(), "{:?}", full.error);
+    let full = full.result.unwrap();
+    assert_eq!(full["brief"]["import_hints"].as_array().unwrap().len(), 42);
+
+    let invalid = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("bad-detail"),
+        tool: "repo_map".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "detail": "verbose"
+        }),
+    });
+    assert!(invalid.error.unwrap().contains("expected compact or full"));
+}
+
+#[test]
 fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
     let repo = tempfile::tempdir().unwrap();
     write(
@@ -805,6 +891,7 @@ fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
         live["repo_map_request"]["arguments"]["repo"],
         serde_json::json!(repo.path())
     );
+    assert_eq!(live["repo_map_request"]["arguments"]["detail"], "compact");
     assert_eq!(
         live["query_plan_request"]["arguments"]["query"],
         "issue_token"
@@ -912,6 +999,10 @@ fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
     assert_eq!(indexed["query_plan_request"]["tool"], "indexed_query_plan");
     assert_eq!(indexed["repo_map_request"]["tool"], "indexed_repo_map");
     assert_eq!(
+        indexed["repo_map_request"]["arguments"]["detail"],
+        "compact"
+    );
+    assert_eq!(
         indexed["results"][0]["read_request"]["tool"],
         "read_index_range"
     );
@@ -1018,6 +1109,10 @@ fn runtime_search_auto_batch_uses_single_warmed_index() {
     assert_eq!(batch[0]["surface"], "indexed");
     assert_eq!(batch[0]["query_plan_request"]["tool"], "indexed_query_plan");
     assert_eq!(batch[0]["repo_map_request"]["tool"], "indexed_repo_map");
+    assert_eq!(
+        batch[0]["repo_map_request"]["arguments"]["detail"],
+        "compact"
+    );
     assert_eq!(
         batch[0]["results"][0]["read_request"]["tool"],
         "read_index_range"

@@ -4,8 +4,9 @@ use crate::discover::{RepoGitMetadata, git_metadata_for_repo};
 use crate::fast_index::{FastIndex, IndexFreshness, IndexStats};
 use crate::query::{merge_filters, parse_query, query_text};
 use crate::repo_index::{
-    CommandHint, FileRange, QueryPlan, RelatedFile, RelatedSymbol, RepoMap, SearchFilters,
-    SearchResult, Symbol, finalize_results, is_manifest_file, language_for, normalize_token,
+    CommandHint, FileRange, QueryPlan, RelatedFile, RelatedSymbol, RepoMap, RepoMapDetail,
+    SearchFilters, SearchResult, Symbol, finalize_results, is_manifest_file, language_for,
+    normalize_token,
 };
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use anyhow::{Context, Result};
@@ -755,6 +756,7 @@ pub fn shard_repo_maps(
     index_dir: impl AsRef<Path>,
     symbol_limit: usize,
     test_limit: usize,
+    detail: RepoMapDetail,
     filters: &SearchFilters,
 ) -> Result<Vec<ShardRepoMap>> {
     let index_dir = index_dir.as_ref();
@@ -771,7 +773,7 @@ pub fn shard_repo_maps(
         let base_symbol_limit = if scoped { usize::MAX } else { symbol_limit };
         let base_test_limit = if scoped { usize::MAX } else { test_limit };
         for scope in scopes {
-            let mut map = index.repo_map(base_symbol_limit, base_test_limit);
+            let mut map = index.repo_map_with_detail(base_symbol_limit, base_test_limit, detail);
             if let Some(prefix) = scope.path_prefix.as_deref() {
                 filter_repo_map_by_prefix(&mut map, prefix);
                 map.test_files.truncate(test_limit);

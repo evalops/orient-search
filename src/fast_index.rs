@@ -3,9 +3,9 @@
 use crate::query::{merge_filters, normalize_phrase_text, parse_query, query_phrases, query_text};
 use crate::repo_index::{
     FileRange, MAX_READ_RANGE_LINES, QueryPlan, QueryPlanFilter, QueryPlanPosting,
-    QueryPlanRepairHint, RankSignal, RelatedFile, RelatedSymbol, RepoBrief, RepoMap, SearchFilters,
-    SearchResult, SnippetMode, Symbol, best_snippet_for_path_with_phrases, capped_search_limit,
-    command_hints_from_manifest_texts, dependency_filters_match,
+    QueryPlanRepairHint, RankSignal, RelatedFile, RelatedSymbol, RepoBrief, RepoMap, RepoMapDetail,
+    SearchFilters, SearchResult, SnippetMode, Symbol, best_snippet_for_path_with_phrases,
+    capped_search_limit, command_hints_from_manifest_texts, dependency_filters_match,
     dependency_hints_from_manifest_texts, extract_symbols, filter_only_query,
     filter_only_search_result, filter_value_matches, finalize_results,
     import_hints_from_source_texts, is_entrypoint_path, is_ignored, is_important_file,
@@ -567,6 +567,15 @@ impl FastIndex {
     }
 
     pub fn repo_map(&self, symbol_limit: usize, test_limit: usize) -> RepoMap {
+        self.repo_map_with_detail(symbol_limit, test_limit, RepoMapDetail::Compact)
+    }
+
+    pub fn repo_map_with_detail(
+        &self,
+        symbol_limit: usize,
+        test_limit: usize,
+        detail: RepoMapDetail,
+    ) -> RepoMap {
         let mut language_counts = HashMap::new();
         for file in &self.files {
             *language_counts.entry(file.language.clone()).or_insert(0) += 1;
@@ -629,8 +638,12 @@ impl FastIndex {
         let command_hints = command_hints_from_indexed_files(&self.files);
         let known_commands = known_commands_from_hints(&command_hints);
         let dependency_hints = dependency_hints_from_indexed_files(&self.files);
-        let import_hints =
-            select_repo_brief_import_hints(import_hints_from_indexed_files(&self.files));
+        let import_hints = match detail {
+            RepoMapDetail::Compact => {
+                select_repo_brief_import_hints(import_hints_from_indexed_files(&self.files))
+            }
+            RepoMapDetail::Full => import_hints_from_indexed_files(&self.files),
+        };
 
         RepoMap {
             brief: RepoBrief {

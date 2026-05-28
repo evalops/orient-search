@@ -3,7 +3,8 @@ use std::path::Path;
 
 use orient::fast_index::FastIndex;
 use orient::repo_index::{
-    MAX_READ_RANGE_LINES, RepoIndexer, SearchFilters, read_file_range, search_repo_fast_filtered,
+    MAX_READ_RANGE_LINES, RepoIndexer, RepoMapDetail, SearchFilters, read_file_range,
+    search_repo_fast_filtered,
 };
 
 fn write(path: &Path, text: &str) {
@@ -563,6 +564,8 @@ fn repo_briefs_keep_import_hints_compact_without_breaking_import_filters() {
     let live = RepoIndexer::new(repo.path()).build().unwrap();
     let live_brief = live.repo_brief();
     assert_eq!(live_brief.import_hints.len(), 32);
+    let full_live_brief = live.repo_brief_with_detail(RepoMapDetail::Full);
+    assert_eq!(full_live_brief.import_hints.len(), 42);
     assert!(
         live_brief
             .import_hints
@@ -588,6 +591,10 @@ fn repo_briefs_keep_import_hints_compact_without_breaking_import_filters() {
     let indexed = FastIndex::build(repo.path()).unwrap();
     let indexed_brief = indexed.repo_map(10, 10).brief;
     assert_eq!(indexed_brief.import_hints.len(), 32);
+    let full_indexed_brief = indexed
+        .repo_map_with_detail(10, 10, RepoMapDetail::Full)
+        .brief;
+    assert_eq!(full_indexed_brief.import_hints.len(), 42);
     assert!(
         indexed_brief
             .import_hints

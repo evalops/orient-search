@@ -5,9 +5,9 @@ use crate::fast_index::{FastIndex, RefreshStats};
 use crate::query::{merge_filters, normalize_symbol_kind, parse_query, query_text};
 use crate::repo_index::{
     MAX_ATTACHED_CONTEXT_LINES, MAX_READ_RANGE_LINES, MAX_SEARCH_RESULTS, QueryPlan,
-    QueryPlanFilter, RepoIndexer, ResultToolRequest, SearchFilters, SearchResult, SnippetMode,
-    Symbol, SymbolLookupResult, attach_repo_map_read_batch_request, attach_result_context,
-    attach_result_read_requests, attach_result_related_requests,
+    QueryPlanFilter, RepoIndexer, RepoMapDetail, ResultToolRequest, SearchFilters, SearchResult,
+    SnippetMode, Symbol, SymbolLookupResult, attach_repo_map_read_batch_request,
+    attach_result_context, attach_result_read_requests, attach_result_related_requests,
     attach_result_related_symbol_requests, finalize_results, normalize_token, read_file_range,
     related_file_lookup_results, related_symbol_lookup_results, result_read_batch_request,
     search_repo_fast_filtered, symbol_lookup_read_batch_request, symbol_lookup_results,
@@ -379,19 +379,19 @@ pub fn tool_manifest() -> Value {
             "repo_brief",
             "Summarize a local repository with language counts, important files, and known commands.",
             &["repo"],
-            &[],
+            &["detail"],
         ),
         tool_entry(
             "repo_map",
             "Return entrypoints, tests, top symbols, known commands, and important files for a local repository.",
             &["repo"],
-            &["symbols", "tests"],
+            &["symbols", "tests", "detail"],
         ),
         tool_entry(
             "indexed_repo_map",
             "Return repo-map orientation from a persistent single-repo index.",
             &["index"],
-            &["symbols", "tests"],
+            &["symbols", "tests", "detail"],
         ),
         tool_entry(
             "read_range",
@@ -613,7 +613,7 @@ pub fn tool_manifest() -> Value {
             "shard_repo_map",
             "Return repo-map orientation for every matching repo in a local shard directory.",
             &["index_dir"],
-            &["symbols", "tests", "repo", "repo_filter"],
+            &["symbols", "tests", "detail", "repo", "repo_filter"],
         ),
         tool_entry(
             "find_shard_symbol",
@@ -775,7 +775,7 @@ pub fn agent_guide(
             "live_repo_map": {
                 "id": "map",
                 "tool": "repo_map",
-                "arguments": {"repo": repo, "symbols": 50, "tests": 50}
+                "arguments": {"repo": repo, "symbols": 50, "tests": 50, "detail": "compact"}
             },
             "live_search": {
                 "id": "search",
@@ -795,7 +795,7 @@ pub fn agent_guide(
             "indexed_repo_map": {
                 "id": "map",
                 "tool": "indexed_repo_map",
-                "arguments": {"index": index, "symbols": 50, "tests": 50}
+                "arguments": {"index": index, "symbols": 50, "tests": 50, "detail": "compact"}
             },
             "indexed_search": {
                 "id": "search",
@@ -805,7 +805,7 @@ pub fn agent_guide(
             "shard_repo_map": {
                 "id": "map",
                 "tool": "shard_repo_map",
-                "arguments": {"index_dir": index_dir, "symbols": 50, "tests": 50}
+                "arguments": {"index_dir": index_dir, "symbols": 50, "tests": 50, "detail": "compact"}
             },
             "shard_search": {
                 "id": "search",
@@ -1176,6 +1176,7 @@ fn argument_default(tool_name: &str, name: &str) -> Option<Value> {
         (_, "start") => Some(json!(1)),
         (_, "lines") => Some(json!(80)),
         (_, "snippet") => Some(json!("medium")),
+        (_, "detail") => Some(json!("compact")),
         (_, "context_lines") => Some(json!(0)),
         ("agent_guide" | "agent_instructions", "addr") => Some(json!("127.0.0.1:8796")),
         (
@@ -1190,6 +1191,7 @@ fn argument_default(tool_name: &str, name: &str) -> Option<Value> {
 fn argument_enum(name: &str) -> Option<&'static [&'static str]> {
     match name {
         "snippet" => Some(&["short", "medium", "block", "symbol"]),
+        "detail" => Some(&["compact", "full"]),
         _ => None,
     }
 }
@@ -1287,6 +1289,9 @@ fn argument_description(tool_name: &str, name: &str) -> &'static str {
         "file" => "File basename substring filter.",
         "test" => "When true, include only test paths; when false, exclude test paths.",
         "snippet" => "Snippet mode: short, medium, block, or symbol.",
+        "detail" => {
+            "Repo-map detail level: compact keeps first-orientation payloads small; full includes all available import hints."
+        }
         "explain" => "Include structured rank signals and indexed query plans.",
         "require_all" => "Require all normalized query tokens to appear in each result.",
         "any_terms" => {
@@ -1432,6 +1437,7 @@ fn auto_repo_map_request<T: Serialize>(
 ) -> ResultToolRequest {
     let mut arguments = Map::new();
     arguments.insert(target_name.to_string(), json!(target_value));
+    arguments.insert("detail".to_string(), json!("compact"));
     if tool == "shard_repo_map" {
         if let Some(source) = source_arguments.as_object() {
             if let Some(repo) = source.get("repo").or_else(|| source.get("repo_filter")) {
@@ -1636,15 +1642,17 @@ impl ToolRuntime {
             }
             "repo_brief" => {
                 let repo = path_arg(&request.arguments, "repo")?;
+                let detail = repo_map_detail_arg(&request.arguments)?;
                 let index = RepoIndexer::new(repo).build()?;
-                Ok(serde_json::to_value(index.repo_brief())?)
+                Ok(serde_json::to_value(index.repo_brief_with_detail(detail))?)
             }
             "repo_map" => {
                 let repo = path_arg(&request.arguments, "repo")?;
                 let symbol_limit = positive_usize_arg(&request.arguments, "symbols", 50)?;
                 let test_limit = positive_usize_arg(&request.arguments, "tests", 50)?;
+                let detail = repo_map_detail_arg(&request.arguments)?;
                 let index = RepoIndexer::new(&repo).build()?;
-                let mut map = index.repo_map(symbol_limit, test_limit);
+                let mut map = index.repo_map_with_detail(symbol_limit, test_limit, detail);
                 attach_repo_map_read_batch_request(
                     &mut map,
                     "read_ranges",
@@ -1656,8 +1664,9 @@ impl ToolRuntime {
                 let index_path = self.index_path_arg_or_single_cached(&request.arguments)?;
                 let symbol_limit = positive_usize_arg(&request.arguments, "symbols", 50)?;
                 let test_limit = positive_usize_arg(&request.arguments, "tests", 50)?;
+                let detail = repo_map_detail_arg(&request.arguments)?;
                 let index = self.cached_index(index_path.clone())?;
-                let mut map = index.repo_map(symbol_limit, test_limit);
+                let mut map = index.repo_map_with_detail(symbol_limit, test_limit, detail);
                 attach_repo_map_read_batch_request(
                     &mut map,
                     "read_index_ranges",
@@ -2095,10 +2104,12 @@ impl ToolRuntime {
                 let index_dir = self.shard_dir_arg_or_single_cached(&request.arguments)?;
                 let symbol_limit = positive_usize_arg(&request.arguments, "symbols", 50)?;
                 let test_limit = positive_usize_arg(&request.arguments, "tests", 50)?;
+                let detail = repo_map_detail_arg(&request.arguments)?;
                 Ok(serde_json::to_value(self.shard_repo_maps_cached(
                     &index_dir,
                     symbol_limit,
                     test_limit,
+                    detail,
                     &search_filters(&request.arguments, true)?,
                 )?)?)
             }
@@ -3137,6 +3148,7 @@ impl ToolRuntime {
         index_dir: &std::path::Path,
         symbol_limit: usize,
         test_limit: usize,
+        detail: RepoMapDetail,
         filters: &SearchFilters,
     ) -> Result<Vec<ShardRepoMap>> {
         let manifest = self.cached_shard_manifest(index_dir)?;
@@ -3151,7 +3163,8 @@ impl ToolRuntime {
             let base_symbol_limit = if scoped { usize::MAX } else { symbol_limit };
             let base_test_limit = if scoped { usize::MAX } else { test_limit };
             for scope in scopes {
-                let mut map = index.repo_map(base_symbol_limit, base_test_limit);
+                let mut map =
+                    index.repo_map_with_detail(base_symbol_limit, base_test_limit, detail);
                 if let Some(prefix) = scope.path_prefix.as_deref() {
                     filter_repo_map_by_prefix(&mut map, prefix);
                     map.test_files.truncate(test_limit);
@@ -3729,6 +3742,20 @@ fn bool_arg(arguments: &Value, name: &str) -> bool {
         .get(name)
         .and_then(Value::as_bool)
         .unwrap_or(false)
+}
+
+fn repo_map_detail_arg(arguments: &Value) -> Result<RepoMapDetail> {
+    match arguments
+        .get("detail")
+        .and_then(Value::as_str)
+        .unwrap_or("compact")
+    {
+        "compact" => Ok(RepoMapDetail::Compact),
+        "full" => Ok(RepoMapDetail::Full),
+        value => Err(anyhow!(
+            "invalid repo map detail {value:?}; expected compact or full"
+        )),
+    }
 }
 
 fn read_window_args(arguments: &Value) -> Result<(usize, usize)> {

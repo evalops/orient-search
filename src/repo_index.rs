@@ -368,6 +368,12 @@ pub struct ImportHint {
     pub line: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RepoMapDetail {
+    Compact,
+    Full,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RepoMap {
     pub brief: RepoBrief,
@@ -1768,6 +1774,10 @@ impl RepoIndex {
     }
 
     pub fn repo_brief(&self) -> RepoBrief {
+        self.repo_brief_with_detail(RepoMapDetail::Compact)
+    }
+
+    pub fn repo_brief_with_detail(&self, detail: RepoMapDetail) -> RepoBrief {
         let mut language_counts = HashMap::new();
         for file in self.files.values() {
             *language_counts.entry(file.language.clone()).or_insert(0) += 1;
@@ -1791,7 +1801,10 @@ impl RepoIndex {
         let command_hints = self.command_hints();
         let known_commands = known_commands_from_hints(&command_hints);
         let dependency_hints = self.dependency_hints();
-        let import_hints = select_repo_brief_import_hints(self.import_hints());
+        let import_hints = match detail {
+            RepoMapDetail::Compact => select_repo_brief_import_hints(self.import_hints()),
+            RepoMapDetail::Full => self.import_hints(),
+        };
 
         RepoBrief {
             root_name: self
@@ -1811,6 +1824,15 @@ impl RepoIndex {
     }
 
     pub fn repo_map(&self, symbol_limit: usize, test_limit: usize) -> RepoMap {
+        self.repo_map_with_detail(symbol_limit, test_limit, RepoMapDetail::Compact)
+    }
+
+    pub fn repo_map_with_detail(
+        &self,
+        symbol_limit: usize,
+        test_limit: usize,
+        detail: RepoMapDetail,
+    ) -> RepoMap {
         let mut entrypoints = self
             .files
             .keys()
@@ -1830,7 +1852,7 @@ impl RepoIndex {
 
         let top_symbols = select_repo_map_top_symbols(self.symbols.clone(), symbol_limit);
 
-        let brief = self.repo_brief();
+        let brief = self.repo_brief_with_detail(detail);
         let mut related_file_seeds = brief.important_files.clone();
         related_file_seeds.extend(top_symbols.iter().map(|symbol| symbol.path.clone()));
         let related_files =
