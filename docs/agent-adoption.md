@@ -28,6 +28,12 @@ orient serve-tcp --addr 127.0.0.1:8796 --index /tmp/orient.index
 
 ## Agent Instruction
 
+Generate the current recommended snippet with:
+
+```bash
+orient agent-instructions --index-dir /tmp/orient-shards
+```
+
 Add this to `AGENTS.md`, `CLAUDE.md`, an Amp rule, or the equivalent local
 agent instruction file:
 
@@ -59,6 +65,7 @@ process current directory as a live repo.
 
 ```bash
 printf '%s\n' \
+  '{"id":"instructions","tool":"agent_instructions","arguments":{"index_dir":"/tmp/orient-shards"}}' \
   '{"id":"guide","tool":"agent_guide","arguments":{}}' \
   '{"id":"status","tool":"daemon_status","arguments":{}}' \
   | orient client-jsonl --addr 127.0.0.1:8796

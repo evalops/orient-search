@@ -311,6 +311,12 @@ pub fn tool_manifest() -> Value {
             &["repo", "index", "index_dir", "addr"],
         ),
         tool_entry(
+            "agent_instructions",
+            "Return compact copyable AGENTS.md, CLAUDE.md, or Amp instructions for using Orient first.",
+            &[],
+            &["repo", "index", "index_dir", "addr"],
+        ),
+        tool_entry(
             "daemon_status",
             "Return local daemon runtime cache status for warm-index clients.",
             &[],
@@ -692,6 +698,7 @@ pub fn agent_guide(
     json!({
         "name": "Orient Search",
         "purpose": "Fast local code search for coding agents; no session analytics.",
+        "instruction_snippet": agent_instructions(Some(repo), Some(index), Some(index_dir), Some(addr)),
         "recommended_loop": [
             "Call tool_manifest or mcp_manifest once.",
             "Use repo_map, indexed_repo_map, or shard_repo_map before editing unfamiliar code.",
@@ -811,6 +818,30 @@ pub fn agent_guide(
             "max_attached_context_lines": MAX_ATTACHED_CONTEXT_LINES
         }
     })
+}
+
+pub fn agent_instructions(
+    repo: Option<&str>,
+    index: Option<&str>,
+    index_dir: Option<&str>,
+    addr: Option<&str>,
+) -> String {
+    let repo = repo.unwrap_or("/path/to/repo");
+    let index = index.unwrap_or("/tmp/orient.index");
+    let index_dir = index_dir.unwrap_or("/tmp/orient-shards");
+    let addr = addr.unwrap_or("127.0.0.1:8796");
+    format!(
+        "## Orient Search\n\
+Use Orient as the first local code-discovery step before repeated `rg`, `find`, `ls`, or `cat`.\n\
+Prefer the shared daemon when it is running: `orient client-jsonl --addr {addr}`.\n\
+For many local repos, bootstrap it with `orient ensure-shards --discover-root ~/Documents/Projects --output-dir {index_dir} --family-limit 2` and `orient serve-tcp --addr {addr} --index-dir {index_dir}`.\n\
+For one repo, bootstrap it with `orient ensure-index --repo {repo} --index {index}` and `orient serve-tcp --addr {addr} --index {index}`.\n\
+Start each session with `daemon_status` or `agent_guide`, then use `search_auto` for normal lookup and `search_auto_batch` for alternate query phrasings.\n\
+Use query filters directly: `file:`, `path:`, `lang:`, `ext:`, `symbol:`, `type:`, `repo:`, `test:`, quoted literals, and negative filters like `-path:vendor`.\n\
+After search, follow returned `read_batch_request`, `read_request`, `related_request`, and `related_symbols_request` instead of reopening files manually.\n\
+When results are empty, noisy, or suspicious, use the returned `query_plan_request` or inline `query_plan_result` before broadening the search.\n\
+Orient is local code search only and exposes no session analytics."
+    )
 }
 
 fn mcp_tool_annotations(name: &str) -> Value {
@@ -1118,7 +1149,7 @@ fn argument_default(tool_name: &str, name: &str) -> Option<Value> {
         (_, "lines") => Some(json!(80)),
         (_, "snippet") => Some(json!("medium")),
         (_, "context_lines") => Some(json!(0)),
-        ("agent_guide", "addr") => Some(json!("127.0.0.1:8796")),
+        ("agent_guide" | "agent_instructions", "addr") => Some(json!("127.0.0.1:8796")),
         (
             _,
             "explain" | "require_all" | "any_terms" | "refresh_if_stale" | "git_metadata"
@@ -1499,6 +1530,14 @@ impl ToolRuntime {
                 optional_string_arg(&request.arguments, "index_dir").as_deref(),
                 optional_string_arg(&request.arguments, "addr").as_deref(),
             )),
+            "agent_instructions" => Ok(json!({
+                "instructions": agent_instructions(
+                    optional_string_arg(&request.arguments, "repo").as_deref(),
+                    optional_string_arg(&request.arguments, "index").as_deref(),
+                    optional_string_arg(&request.arguments, "index_dir").as_deref(),
+                    optional_string_arg(&request.arguments, "addr").as_deref(),
+                )
+            })),
             "discover_repos" => {
                 let root = path_arg(&request.arguments, "root")?;
                 let max_depth = positive_usize_arg(&request.arguments, "max_depth", 4)?;

@@ -13,8 +13,8 @@ use orient::repo_index::{
     search_repo_fast_filtered,
 };
 use orient::server::{
-    MAX_BATCH_QUERIES, MAX_BATCH_RANGES, ToolRuntime, agent_guide, mcp_tool_manifest, serve_jsonl,
-    serve_jsonl_stream, serve_tcp, tool_manifest,
+    MAX_BATCH_QUERIES, MAX_BATCH_RANGES, ToolRuntime, agent_guide, agent_instructions,
+    mcp_tool_manifest, serve_jsonl, serve_jsonl_stream, serve_tcp, tool_manifest,
 };
 use orient::shards::{
     ShardQueryPlan, build_shards, ensure_shards, find_shard_symbol, read_shard_range,
@@ -562,6 +562,16 @@ enum Commands {
     ToolManifest,
     McpManifest,
     AgentGuide {
+        #[arg(long)]
+        repo: Option<String>,
+        #[arg(long)]
+        index: Option<String>,
+        #[arg(long)]
+        index_dir: Option<String>,
+        #[arg(long, default_value = "127.0.0.1:8796")]
+        addr: String,
+    },
+    AgentInstructions {
         #[arg(long)]
         repo: Option<String>,
         #[arg(long)]
@@ -2144,6 +2154,22 @@ fn run() -> Result<()> {
                     index_dir.as_deref(),
                     Some(&addr),
                 ))?
+            );
+        }
+        Commands::AgentInstructions {
+            repo,
+            index,
+            index_dir,
+            addr,
+        } => {
+            println!(
+                "{}",
+                agent_instructions(
+                    repo.as_deref(),
+                    index.as_deref(),
+                    index_dir.as_deref(),
+                    Some(&addr),
+                )
             );
         }
         Commands::ServeJsonl => {

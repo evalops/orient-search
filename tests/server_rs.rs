@@ -11,8 +11,8 @@ use std::thread;
 use orient::fast_index::FastIndex;
 use orient::repo_index::{MAX_ATTACHED_CONTEXT_LINES, MAX_READ_RANGE_LINES, MAX_SEARCH_RESULTS};
 use orient::server::{
-    MAX_BATCH_QUERIES, MAX_BATCH_RANGES, ToolRequest, ToolRuntime, agent_guide, mcp_tool_manifest,
-    tool_manifest,
+    MAX_BATCH_QUERIES, MAX_BATCH_RANGES, ToolRequest, ToolRuntime, agent_guide, agent_instructions,
+    mcp_tool_manifest, tool_manifest,
 };
 use orient::shards::{build_shards, refresh_shards};
 
@@ -116,6 +116,10 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
     let agent_guide_tool = tools
         .iter()
         .find(|tool| tool["name"] == "agent_guide")
+        .unwrap();
+    let agent_instructions_tool = tools
+        .iter()
+        .find(|tool| tool["name"] == "agent_instructions")
         .unwrap();
 
     assert_eq!(search["required"], serde_json::json!(["repo", "query"]));
@@ -420,6 +424,11 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         agent_guide_tool["input_schema"]["properties"]["addr"]["default"],
         "127.0.0.1:8796"
     );
+    assert_eq!(agent_instructions_tool["required"], serde_json::json!([]));
+    assert_eq!(
+        agent_instructions_tool["input_schema"]["properties"]["addr"]["default"],
+        "127.0.0.1:8796"
+    );
     assert_eq!(
         search["input_schema"]["properties"]["context_lines"]["maximum"],
         serde_json::json!(MAX_ATTACHED_CONTEXT_LINES)
@@ -553,6 +562,10 @@ fn mcp_manifest_exposes_input_schema_for_adapter_wrappers() {
         .iter()
         .find(|tool| tool["name"] == "agent_guide")
         .unwrap();
+    let agent_instructions_tool = tools
+        .iter()
+        .find(|tool| tool["name"] == "agent_instructions")
+        .unwrap();
     let ensure_index = tools
         .iter()
         .find(|tool| tool["name"] == "ensure_index")
@@ -584,6 +597,11 @@ fn mcp_manifest_exposes_input_schema_for_adapter_wrappers() {
         "127.0.0.1:8796"
     );
     assert_eq!(agent_guide_tool["annotations"]["readOnlyHint"], true);
+    assert_eq!(
+        agent_instructions_tool["inputSchema"]["properties"]["addr"]["default"],
+        "127.0.0.1:8796"
+    );
+    assert_eq!(agent_instructions_tool["annotations"]["readOnlyHint"], true);
     assert_eq!(search["annotations"]["readOnlyHint"], true);
     assert_eq!(search["annotations"]["destructiveHint"], false);
     assert_eq!(search["annotations"]["idempotentHint"], true);
@@ -664,6 +682,37 @@ fn agent_guide_returns_local_agent_request_templates() {
             .unwrap()
             .contains("no session analytics")
     );
+    assert!(
+        guide["instruction_snippet"]
+            .as_str()
+            .unwrap()
+            .contains("Use Orient as the first local code-discovery step")
+    );
+}
+
+#[test]
+fn agent_instructions_returns_copyable_local_agent_rules() {
+    let instructions = agent_instructions(
+        Some("/work/repo"),
+        Some("/tmp/repo.index"),
+        Some("/tmp/orient-shards"),
+        Some("127.0.0.1:9999"),
+    );
+    for expected in [
+        "## Orient Search",
+        "Use Orient as the first local code-discovery step",
+        "orient client-jsonl --addr 127.0.0.1:9999",
+        "orient ensure-shards --discover-root ~/Documents/Projects --output-dir /tmp/orient-shards --family-limit 2",
+        "orient ensure-index --repo /work/repo --index /tmp/repo.index",
+        "search_auto_batch",
+        "`file:`, `path:`, `lang:`, `ext:`, `symbol:`, `type:`, `repo:`, `test:`",
+        "no session analytics",
+    ] {
+        assert!(
+            instructions.contains(expected),
+            "missing instruction text: {expected}\n{instructions}"
+        );
+    }
 }
 
 #[test]
@@ -702,6 +751,28 @@ fn runtime_serves_agent_guide_for_json_lines_wrappers() {
             "missing follow-up: {expected}"
         );
     }
+}
+
+#[test]
+fn runtime_serves_agent_instructions_for_local_rule_files() {
+    let runtime = ToolRuntime::default();
+    let response = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("instructions"),
+        tool: "agent_instructions".to_string(),
+        arguments: serde_json::json!({
+            "repo": "/work/repo",
+            "index": "/tmp/repo.index",
+            "index_dir": "/tmp/orient-shards",
+            "addr": "127.0.0.1:9999"
+        }),
+    });
+    assert!(response.error.is_none(), "{:?}", response.error);
+    let result = response.result.unwrap();
+    let instructions = result["instructions"].as_str().unwrap();
+    assert!(instructions.contains("orient client-jsonl --addr 127.0.0.1:9999"));
+    assert!(instructions.contains("search_auto"));
+    assert!(instructions.contains("read_batch_request"));
+    assert!(instructions.contains("no session analytics"));
 }
 
 #[test]
