@@ -1028,8 +1028,8 @@ fn argument_schema(tool_name: &str, name: &str) -> Value {
             schema.insert("type".to_string(), json!("array"));
             schema.insert("items".to_string(), json!({"type": "string"}));
         }
-        "test" | "explain" | "require_all" | "any_terms" | "refresh_if_stale" | "git_metadata"
-        | "tracked_files" | "nested_manifests" => {
+        "test" | "explain" | "require_all" | "any_terms" | "refresh_if_stale" | "diagnose"
+        | "git_metadata" | "tracked_files" | "nested_manifests" => {
             schema.insert("type".to_string(), json!("boolean"));
         }
         "limit" | "max_depth" | "discover_limit" | "family_limit" | "symbols" | "start"
@@ -1190,8 +1190,8 @@ fn argument_default(tool_name: &str, name: &str) -> Option<Value> {
         ("agent_guide" | "agent_instructions", "addr") => Some(json!("127.0.0.1:8796")),
         (
             _,
-            "explain" | "require_all" | "any_terms" | "refresh_if_stale" | "git_metadata"
-            | "tracked_files" | "nested_manifests",
+            "explain" | "require_all" | "any_terms" | "refresh_if_stale" | "diagnose"
+            | "git_metadata" | "tracked_files" | "nested_manifests",
         ) => Some(json!(false)),
         _ => None,
     }
@@ -1311,6 +1311,9 @@ fn argument_description(tool_name: &str, name: &str) -> &'static str {
         "refresh_if_stale" => {
             "When true, refresh a stale persistent index or shard directory before searching."
         }
+        "diagnose" => {
+            "When true, include query_plan_result even when search_auto or search_auto_batch returns hits, saving a follow-up query-plan call for suspicious searches."
+        }
         "exclude_file" => "File basename substring or list of substrings to exclude.",
         "exclude_path" => "Path substring or list of substrings to exclude.",
         "exclude_language" => "Language or list of languages to exclude.",
@@ -1426,7 +1429,7 @@ fn auto_query_plan_request<T: Serialize>(
 fn auto_query_plan_passthrough_arg(name: &str, target_name: &str) -> bool {
     if matches!(
         name,
-        "query" | "queries" | "limit" | "context_lines" | "snippet" | "explain"
+        "query" | "queries" | "limit" | "context_lines" | "snippet" | "explain" | "diagnose"
     ) {
         return false;
     }
@@ -1543,7 +1546,7 @@ fn retry_search_requests<T: Serialize>(
 fn retry_search_passthrough_arg(name: &str, target_name: &str) -> bool {
     if matches!(
         name,
-        "query" | "queries" | "limit" | "context_lines" | "snippet" | "explain"
+        "query" | "queries" | "limit" | "context_lines" | "snippet" | "explain" | "diagnose"
     ) {
         return false;
     }
@@ -1754,12 +1757,14 @@ impl ToolRuntime {
                 let limit = search_limit_arg(&request.arguments)?;
                 let context_lines = context_lines_arg(&request.arguments)?;
                 let refresh_if_stale = bool_arg(&request.arguments, "refresh_if_stale");
+                let diagnose = bool_arg(&request.arguments, "diagnose");
                 let result = self.search_auto(
                     &request.arguments,
                     &query,
                     limit,
                     context_lines,
                     refresh_if_stale,
+                    diagnose,
                 )?;
                 Ok(serde_json::to_value(result)?)
             }
@@ -1768,6 +1773,7 @@ impl ToolRuntime {
                 let limit = search_limit_arg(&request.arguments)?;
                 let context_lines = context_lines_arg(&request.arguments)?;
                 let refresh_if_stale = bool_arg(&request.arguments, "refresh_if_stale");
+                let diagnose = bool_arg(&request.arguments, "diagnose");
                 let mut batch = Vec::new();
                 for query in queries {
                     batch.push(self.search_auto(
@@ -1776,6 +1782,7 @@ impl ToolRuntime {
                         limit,
                         context_lines,
                         refresh_if_stale,
+                        diagnose,
                     )?);
                 }
                 Ok(serde_json::to_value(batch)?)
@@ -2428,6 +2435,7 @@ impl ToolRuntime {
         limit: usize,
         context_lines: usize,
         refresh_if_stale: bool,
+        diagnose: bool,
     ) -> Result<SearchAutoResult> {
         if let Some(index_dir) = optional_string_arg(arguments, "index_dir").map(PathBuf::from) {
             return self.search_auto_shards(
@@ -2437,6 +2445,7 @@ impl ToolRuntime {
                 limit,
                 context_lines,
                 refresh_if_stale,
+                diagnose,
             );
         }
         if let Some(index_path) = optional_string_arg(arguments, "index").map(PathBuf::from) {
@@ -2447,10 +2456,11 @@ impl ToolRuntime {
                 limit,
                 context_lines,
                 refresh_if_stale,
+                diagnose,
             );
         }
         if let Some(repo) = optional_string_arg(arguments, "repo").map(PathBuf::from) {
-            return self.search_auto_live(repo, arguments, query, limit, context_lines);
+            return self.search_auto_live(repo, arguments, query, limit, context_lines, diagnose);
         }
         if let Ok(index_dir) = self.single_cached_shard_manifest_path() {
             return self.search_auto_shards(
@@ -2460,6 +2470,7 @@ impl ToolRuntime {
                 limit,
                 context_lines,
                 refresh_if_stale,
+                diagnose,
             );
         }
         if let Ok(index_path) = self.single_cached_index_path() {
@@ -2470,10 +2481,11 @@ impl ToolRuntime {
                 limit,
                 context_lines,
                 refresh_if_stale,
+                diagnose,
             );
         }
         let repo = std::env::current_dir().context("resolve current directory for search_auto")?;
-        self.search_auto_live(repo, arguments, query, limit, context_lines)
+        self.search_auto_live(repo, arguments, query, limit, context_lines, diagnose)
     }
 
     fn search_auto_live(
@@ -2483,6 +2495,7 @@ impl ToolRuntime {
         query: &str,
         limit: usize,
         context_lines: usize,
+        diagnose: bool,
     ) -> Result<SearchAutoResult> {
         let filters = search_filters(arguments, false)?;
         let mut results = search_repo_fast_filtered(&repo, query, limit, &filters)?;
@@ -2512,7 +2525,7 @@ impl ToolRuntime {
                 arguments,
                 query,
             ),
-            query_plan_result: if results.is_empty() {
+            query_plan_result: if diagnose || results.is_empty() {
                 let index = FastIndex::build(&repo)?;
                 Some(serde_json::to_value(attach_retry_requests(
                     index.query_plan(query, &filters)?,
@@ -2542,6 +2555,7 @@ impl ToolRuntime {
         limit: usize,
         context_lines: usize,
         refresh_if_stale: bool,
+        diagnose: bool,
     ) -> Result<SearchAutoResult> {
         if refresh_if_stale {
             self.refresh_shards_if_stale(&index_dir)?;
@@ -2549,7 +2563,7 @@ impl ToolRuntime {
         let filters = search_filters(arguments, true)?;
         let results =
             self.search_shards_cached(&index_dir, query, limit, &filters, context_lines)?;
-        let query_plan_result = if results.is_empty() {
+        let query_plan_result = if diagnose || results.is_empty() {
             let mut plans = self.shard_query_plans_cached(&index_dir, query, &filters)?;
             attach_shard_retry_requests(&mut plans, &index_dir, arguments);
             Some(serde_json::to_value(plans)?)
@@ -2591,6 +2605,7 @@ impl ToolRuntime {
         limit: usize,
         context_lines: usize,
         refresh_if_stale: bool,
+        diagnose: bool,
     ) -> Result<SearchAutoResult> {
         let index = self.cached_index_maybe_refresh(index_path.clone(), refresh_if_stale)?;
         let filters = search_filters(arguments, true)?;
@@ -2625,7 +2640,7 @@ impl ToolRuntime {
                 arguments,
                 query,
             ),
-            query_plan_result: if results.is_empty() {
+            query_plan_result: if diagnose || results.is_empty() {
                 Some(serde_json::to_value(attach_retry_requests(
                     index.query_plan(query, &filters)?,
                     "indexed_search_code",
@@ -3559,6 +3574,7 @@ const SEARCH_AUTO_OPTIONAL_ARGS: &[&str] = &[
     "any_terms",
     "context_lines",
     "refresh_if_stale",
+    "diagnose",
     "exclude_file",
     "exclude_path",
     "exclude_language",

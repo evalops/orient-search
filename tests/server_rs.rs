@@ -147,6 +147,18 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         search_auto["input_schema"]["properties"]["limit"]["maximum"],
         serde_json::json!(MAX_SEARCH_RESULTS)
     );
+    assert_eq!(
+        search_auto["input_schema"]["properties"]["diagnose"]["type"],
+        "boolean"
+    );
+    assert_eq!(
+        search_auto["input_schema"]["properties"]["diagnose"]["default"],
+        false
+    );
+    assert_eq!(
+        search_auto_batch["input_schema"]["properties"]["diagnose"]["type"],
+        "boolean"
+    );
     assert_eq!(search["input_schema"]["properties"]["limit"]["default"], 10);
     assert_eq!(
         search["input_schema"]["properties"]["limit"]["maximum"],
@@ -977,6 +989,30 @@ fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
         live["read_batch_request"]["arguments"]["ranges"][0]["path"],
         "src/auth.rs"
     );
+    assert!(live.get("query_plan_result").is_none());
+
+    let diagnosed_live = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("diagnosed-live"),
+        tool: "search_auto".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "query": "issue_token",
+            "limit": 5,
+            "diagnose": true
+        }),
+    });
+    assert!(diagnosed_live.error.is_none(), "{:?}", diagnosed_live.error);
+    let diagnosed_live = diagnosed_live.result.unwrap();
+    assert!(!diagnosed_live["results"].as_array().unwrap().is_empty());
+    assert_eq!(
+        diagnosed_live["query_plan_result"]["final_match_count"],
+        serde_json::json!(1)
+    );
+    assert!(
+        diagnosed_live["query_plan_request"]["arguments"]
+            .get("diagnose")
+            .is_none()
+    );
     let read_batch = runtime.dispatch(ToolRequest {
         id: serde_json::json!("read-live-batch"),
         tool: live["read_batch_request"]["tool"]
@@ -1204,6 +1240,28 @@ fn runtime_search_auto_batch_uses_single_warmed_index() {
     assert!(batch[0]["read_batch_request"]["arguments"]["ranges"].is_array());
     assert_eq!(batch[1]["query"], "SessionManager");
     assert_eq!(batch[1]["surface"], "indexed");
+    assert!(batch[0].get("query_plan_result").is_none());
+
+    let diagnosed_batch = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("diagnosed-batch"),
+        tool: "search_auto_batch".to_string(),
+        arguments: serde_json::json!({
+            "queries": ["issue_token"],
+            "limit": 5,
+            "diagnose": true
+        }),
+    });
+    assert!(
+        diagnosed_batch.error.is_none(),
+        "{:?}",
+        diagnosed_batch.error
+    );
+    let diagnosed_batch = diagnosed_batch.result.unwrap();
+    assert!(!diagnosed_batch[0]["results"].as_array().unwrap().is_empty());
+    assert_eq!(
+        diagnosed_batch[0]["query_plan_result"]["final_match_count"],
+        serde_json::json!(1)
+    );
 
     let empty_batch = runtime.dispatch(ToolRequest {
         id: serde_json::json!("empty-batch"),

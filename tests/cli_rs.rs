@@ -314,6 +314,20 @@ fn cli_search_auto_selects_live_indexed_and_shard_surfaces() {
         .stdout(predicate::str::contains("\"query_plan_result\""))
         .stdout(predicate::str::contains("drop_missing_terms"))
         .stdout(predicate::str::contains("\"tool\":\"search_code\""));
+
+    let mut diagnosed_live = Command::cargo_bin("orient").unwrap();
+    diagnosed_live
+        .args([
+            "search-auto",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--diagnose",
+            "issue_token",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"query_plan_result\""))
+        .stdout(predicate::str::contains("\"final_match_count\":1"));
 }
 
 #[test]
@@ -364,6 +378,20 @@ fn cli_search_auto_batch_returns_query_surfaces() {
         .success()
         .stdout(predicate::str::contains("\"query_plan_result\""))
         .stdout(predicate::str::contains("\"tool\":\"indexed_search_code\""));
+
+    let mut diagnosed_batch = Command::cargo_bin("orient").unwrap();
+    diagnosed_batch
+        .args([
+            "search-auto-batch",
+            "--index",
+            index_path.to_str().unwrap(),
+            "--diagnose",
+            "issue_token",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"query_plan_result\""))
+        .stdout(predicate::str::contains("\"final_match_count\":1"));
 
     let mut default_live_batch = Command::cargo_bin("orient").unwrap();
     default_live_batch

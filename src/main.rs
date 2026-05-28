@@ -371,6 +371,8 @@ enum Commands {
         context_lines: usize,
         #[arg(long)]
         refresh_if_stale: bool,
+        #[arg(long)]
+        diagnose: bool,
     },
     SearchAutoBatch {
         #[arg(required = true)]
@@ -391,6 +393,8 @@ enum Commands {
         context_lines: usize,
         #[arg(long)]
         refresh_if_stale: bool,
+        #[arg(long)]
+        diagnose: bool,
     },
     SearchBatch {
         #[arg(long, default_value = ".")]
@@ -1616,6 +1620,7 @@ fn run() -> Result<()> {
             filters,
             context_lines,
             refresh_if_stale,
+            diagnose,
         } => {
             if let Some(index_dir) = index_dir {
                 if refresh_if_stale && shard_status(&index_dir)?.stale {
@@ -1642,7 +1647,7 @@ fn run() -> Result<()> {
                     Some(&query),
                     read_request_args("index_dir", &index_dir),
                 );
-                let query_plan_result = if results.is_empty() {
+                let query_plan_result = if diagnose || results.is_empty() {
                     let mut plans = shard_query_plans(&index_dir, &query, &filters)?;
                     attach_cli_shard_retry_requests(&mut plans, &index_dir, &filters);
                     Some(serde_json::to_value(plans)?)
@@ -1693,7 +1698,7 @@ fn run() -> Result<()> {
                     Some(&query),
                     read_request_args("index", &index_path),
                 );
-                let query_plan_result = if results.is_empty() {
+                let query_plan_result = if diagnose || results.is_empty() {
                     Some(serde_json::to_value(attach_cli_retry_requests(
                         index.query_plan(&query, &filters)?,
                         "indexed_search_code",
@@ -1748,7 +1753,7 @@ fn run() -> Result<()> {
                     Some(&query),
                     read_request_args("repo", &repo),
                 );
-                let query_plan_result = if results.is_empty() {
+                let query_plan_result = if diagnose || results.is_empty() {
                     let index = FastIndex::build(&repo)?;
                     Some(serde_json::to_value(attach_cli_retry_requests(
                         index.query_plan(&query, &filters)?,
@@ -1793,6 +1798,7 @@ fn run() -> Result<()> {
             filters,
             context_lines,
             refresh_if_stale,
+            diagnose,
         } => {
             let queries = cli_batch_queries(queries)?;
             let mut batch = Vec::new();
@@ -1822,7 +1828,7 @@ fn run() -> Result<()> {
                         Some(&query),
                         read_request_args("index_dir", &index_dir),
                     );
-                    let query_plan_result = if results.is_empty() {
+                    let query_plan_result = if diagnose || results.is_empty() {
                         let mut plans = shard_query_plans(&index_dir, &query, &filters)?;
                         attach_cli_shard_retry_requests(&mut plans, &index_dir, &filters);
                         Some(serde_json::to_value(plans)?)
@@ -1875,7 +1881,7 @@ fn run() -> Result<()> {
                         Some(&query),
                         read_request_args("index", &index_path),
                     );
-                    let query_plan_result = if results.is_empty() {
+                    let query_plan_result = if diagnose || results.is_empty() {
                         Some(serde_json::to_value(attach_cli_retry_requests(
                             index.query_plan(&query, &filters)?,
                             "indexed_search_code",
@@ -1932,7 +1938,7 @@ fn run() -> Result<()> {
                         Some(&query),
                         read_request_args("repo", &repo),
                     );
-                    let query_plan_result = if results.is_empty() {
+                    let query_plan_result = if diagnose || results.is_empty() {
                         let index = FastIndex::build(&repo)?;
                         Some(serde_json::to_value(attach_cli_retry_requests(
                             index.query_plan(&query, &filters)?,

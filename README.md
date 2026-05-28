@@ -54,7 +54,8 @@ current directory after explicit and warmed targets.
 Use `search_auto_batch` when an agent wants to try several query formulations in
 one daemon round trip.
 Both return a `query_plan_request` for noisy result sets and inline
-`query_plan_result` diagnostics when an automatic search is empty.
+`query_plan_result` diagnostics when an automatic search is empty. Add
+`diagnose:true` / `--diagnose` to include the plan even when results exist.
 They also return a `repo_map_request` for quick orientation on the chosen
 search surface and a `read_batch_request` when results can be opened in one
 bounded batch read.
