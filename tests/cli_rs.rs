@@ -899,9 +899,13 @@ fn cli_search_surfaces_accept_structured_filters() {
             "--index",
             index_path.to_str().unwrap(),
             "SessionManager definitely_missing",
+            "--dir",
+            "src",
         ])
         .assert()
         .success()
+        .stdout(predicate::str::contains("\"active_filters\""))
+        .stdout(predicate::str::contains("\"field\":\"path\""))
         .stdout(predicate::str::contains("\"missing_terms\""))
         .stdout(predicate::str::contains("definitely"))
         .stdout(predicate::str::contains("missing"))

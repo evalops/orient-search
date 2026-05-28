@@ -87,6 +87,8 @@ pub struct QueryPlan {
     pub query_tokens: Vec<String>,
     pub query_phrases: Vec<String>,
     pub query_trigrams: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub active_filters: Vec<QueryPlanFilter>,
     pub planned_postings: Vec<QueryPlanPosting>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub missing_terms: Vec<String>,
@@ -112,6 +114,13 @@ pub struct QueryPlanPosting {
     pub kind: String,
     pub value: String,
     pub postings: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QueryPlanFilter {
+    pub field: String,
+    pub value: String,
+    pub negated: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

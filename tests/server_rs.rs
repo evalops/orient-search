@@ -2857,7 +2857,8 @@ fn server_handles_indexed_search_request() {
         "tool": "indexed_query_plan",
         "arguments": {
             "index": index_path,
-            "query": "SessionManager definitely_missing"
+            "query": "SessionManager definitely_missing",
+            "path": "src"
         }
     });
     writeln!(child.stdin.as_mut().unwrap(), "{request}").unwrap();
@@ -2896,6 +2897,8 @@ fn server_handles_indexed_search_request() {
     assert!(stdout.contains("\"id\":\"related-index-symbols\""));
     assert!(stdout.contains("SessionManager"));
     assert!(stdout.contains("\"id\":\"indexed-query-plan\""));
+    assert!(stdout.contains("\"active_filters\""));
+    assert!(stdout.contains("\"field\":\"path\""));
     assert!(stdout.contains("\"missing_terms\""));
     assert!(stdout.contains("definitely"));
     assert!(stdout.contains("missing"));

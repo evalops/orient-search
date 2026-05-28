@@ -2,9 +2,9 @@
 
 use crate::query::{merge_filters, normalize_phrase_text, parse_query, query_phrases, query_text};
 use crate::repo_index::{
-    FileRange, QueryPlan, QueryPlanPosting, QueryPlanRepairHint, RankSignal, RelatedFile,
-    RelatedSymbol, RepoBrief, RepoMap, SearchFilters, SearchResult, SnippetMode, Symbol,
-    apply_phrase_matches, best_snippet_for_path, capped_search_limit,
+    FileRange, QueryPlan, QueryPlanFilter, QueryPlanPosting, QueryPlanRepairHint, RankSignal,
+    RelatedFile, RelatedSymbol, RepoBrief, RepoMap, SearchFilters, SearchResult, SnippetMode,
+    Symbol, apply_phrase_matches, best_snippet_for_path, capped_search_limit,
     command_hints_from_manifest_texts, extract_symbols, file_range_from_text, filter_only_query,
     filter_only_search_result, finalize_results, is_entrypoint_path, is_ignored, is_important_file,
     is_manifest_file, is_test_path, known_commands_from_hints, language_for, matches_filters,
@@ -1067,6 +1067,7 @@ impl FastIndex {
                 &missing_terms,
                 &missing_trigrams,
                 use_trigrams,
+                &filters,
                 filters.require_all,
                 candidate_count,
                 candidate_cap,
@@ -1093,6 +1094,7 @@ impl FastIndex {
                 query_tokens: Vec::new(),
                 query_phrases,
                 query_trigrams: Vec::new(),
+                active_filters: query_plan_filters(&filters),
                 planned_postings: Vec::new(),
                 missing_terms: Vec::new(),
                 missing_trigrams: Vec::new(),
@@ -1128,6 +1130,7 @@ impl FastIndex {
                     query_tokens,
                     query_phrases,
                     query_trigrams,
+                    active_filters: query_plan_filters(&filters),
                     planned_postings: Vec::new(),
                     missing_terms: Vec::new(),
                     missing_trigrams: Vec::new(),
@@ -1146,6 +1149,7 @@ impl FastIndex {
                 query_tokens,
                 query_phrases,
                 query_trigrams,
+                active_filters: query_plan_filters(&filters),
                 planned_postings: Vec::new(),
                 missing_terms: Vec::new(),
                 missing_trigrams: Vec::new(),
@@ -1330,6 +1334,7 @@ impl FastIndex {
             &missing_terms,
             &missing_trigrams,
             use_trigrams,
+            &filters,
             filters.require_all,
             candidate_count,
             candidate_cap,
@@ -1363,6 +1368,7 @@ impl FastIndex {
                 query_tokens: Vec::new(),
                 query_phrases: Vec::new(),
                 query_trigrams: Vec::new(),
+                active_filters: query_plan_filters(filters),
                 planned_postings: Vec::new(),
                 missing_terms: Vec::new(),
                 missing_trigrams: Vec::new(),
@@ -1587,6 +1593,58 @@ fn rank_signal(kind: &str, value: &str, score: f64) -> RankSignal {
     }
 }
 
+fn query_plan_filters(filters: &SearchFilters) -> Vec<QueryPlanFilter> {
+    let mut active = Vec::new();
+    if let Some(value) = &filters.file {
+        active.push(plan_filter("file", value, false));
+    }
+    if let Some(value) = &filters.path {
+        active.push(plan_filter("path", value, false));
+    }
+    if let Some(value) = &filters.language {
+        active.push(plan_filter("language", value, false));
+    }
+    if let Some(value) = &filters.extension {
+        active.push(plan_filter("extension", value, false));
+    }
+    if let Some(value) = &filters.symbol {
+        active.push(plan_filter("symbol", value, false));
+    }
+    if let Some(value) = &filters.repo {
+        active.push(plan_filter("repo", value, false));
+    }
+    if let Some(value) = filters.test {
+        active.push(plan_filter("test", &value.to_string(), false));
+    }
+    for value in &filters.exclude_file {
+        active.push(plan_filter("file", value, true));
+    }
+    for value in &filters.exclude_path {
+        active.push(plan_filter("path", value, true));
+    }
+    for value in &filters.exclude_language {
+        active.push(plan_filter("language", value, true));
+    }
+    for value in &filters.exclude_extension {
+        active.push(plan_filter("extension", value, true));
+    }
+    for value in &filters.exclude_symbol {
+        active.push(plan_filter("symbol", value, true));
+    }
+    for value in &filters.exclude_repo {
+        active.push(plan_filter("repo", value, true));
+    }
+    active
+}
+
+fn plan_filter(field: &str, value: &str, negated: bool) -> QueryPlanFilter {
+    QueryPlanFilter {
+        field: field.to_string(),
+        value: value.to_string(),
+        negated,
+    }
+}
+
 fn indexed_query_plan(
     query_tokens: &[String],
     query_phrases: &[String],
@@ -1597,6 +1655,7 @@ fn indexed_query_plan(
     missing_terms: &[String],
     missing_trigrams: &[String],
     use_trigrams: bool,
+    filters: &SearchFilters,
     require_all: bool,
     candidate_count: usize,
     candidate_cap: usize,
@@ -1640,6 +1699,7 @@ fn indexed_query_plan(
         query_tokens: query_tokens.to_vec(),
         query_phrases: query_phrases.to_vec(),
         query_trigrams: query_trigrams.to_vec(),
+        active_filters: query_plan_filters(filters),
         planned_postings,
         missing_terms: missing_terms.to_vec(),
         missing_trigrams: missing_trigrams.to_vec(),

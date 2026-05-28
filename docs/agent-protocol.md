@@ -93,4 +93,4 @@ Range reads are capped by the manifest `lines.maximum`, and batch range arrays b
 
 Use `repo_map`, `indexed_repo_map`, or `shard_repo_map` before editing unfamiliar code. They return entrypoints, manifests, tests, important files, top symbols, related files/symbols, and command hints.
 
-For empty or surprising indexed results, call `indexed_query_plan`, `shard_query_plan`, or their batch forms `indexed_query_plan_batch` / `shard_query_plan_batch`. Plans separate missing postings, filter rejections, phrase/scoring rejections, and final AND/symbol rejections, with repair hints agents can retry.
+For empty or surprising indexed results, call `indexed_query_plan`, `shard_query_plan`, or their batch forms `indexed_query_plan_batch` / `shard_query_plan_batch`. Plans include active filters and separate missing postings, filter rejections, phrase/scoring rejections, and final AND/symbol rejections, with repair hints agents can retry.

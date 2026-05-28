@@ -471,6 +471,17 @@ fn indexed_query_plan_reports_missing_terms_without_results() {
     assert_eq!(filter_plan.final_match_count, 1);
     assert!(filter_plan.repair_hints.is_empty());
     assert!(filter_plan.missing_terms.is_empty());
+    assert!(
+        filter_plan.active_filters.iter().any(|filter| {
+            filter.field == "language" && filter.value == "rust" && !filter.negated
+        })
+    );
+    assert!(
+        filter_plan
+            .active_filters
+            .iter()
+            .any(|filter| { filter.field == "test" && filter.value == "true" && !filter.negated })
+    );
 }
 
 #[test]
@@ -495,6 +506,10 @@ fn indexed_query_plan_counts_filter_and_phrase_rejections() {
     assert_eq!(filter_rejected.filtered_candidate_count, 0);
     assert_eq!(filter_rejected.scored_candidate_count, 0);
     assert_eq!(filter_rejected.final_match_count, 0);
+    assert_eq!(filter_rejected.active_filters.len(), 1);
+    assert_eq!(filter_rejected.active_filters[0].field, "path");
+    assert_eq!(filter_rejected.active_filters[0].value, "tests");
+    assert!(!filter_rejected.active_filters[0].negated);
     assert!(filter_rejected.repair_hints.iter().any(|hint| {
         hint.kind == "relax_filters" && hint.suggested_query.as_deref() == Some("session manager")
     }));
