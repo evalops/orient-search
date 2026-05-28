@@ -25,7 +25,7 @@ Each request is one JSON object per line:
 
 Responses preserve `id` and return either `result` or `error`. Use `tool_manifest` for the complete tool list, argument metadata, daemon-default hints, defaults, enums, and JSON-schema-like input schemas.
 Adapters that want MCP-shaped definitions can call `mcp_manifest` or `orient mcp-manifest`; it returns `tools` entries with `name`, `description`, `inputSchema`, and `annotations`. Search, read, map, status, and plan tools are marked read-only. Index/shard build, refresh, and warm-cache tools are marked non-destructive but not read-only.
-Agents and wrappers that want a compact first-use recipe can call `agent_guide` or run `orient agent-guide`; it returns the recommended search loop, request templates for live/indexed/shard modes, transport commands, query-language examples, and follow-up guidance without exposing any session analytics surface. For copyable local rule files, call `agent_instructions` or run `orient agent-instructions`; it emits an AGENTS.md/CLAUDE.md/Amp-ready instruction snippet.
+Agents and wrappers that want a compact first-use recipe can call `agent_guide` or run `orient agent-guide`; it returns a `quickstart` block with install, shard bootstrap, daemon, client, status, one-shot search, and local-rule commands, plus the recommended search loop, request templates for live/indexed/shard modes, transport commands, query-language examples, and follow-up guidance without exposing any session analytics surface. For copyable local rule files, call `agent_instructions` or run `orient agent-instructions`; it emits an AGENTS.md/CLAUDE.md/Amp-ready instruction snippet.
 
 ## Bootstrap
 

@@ -736,6 +736,22 @@ pub fn agent_guide(
         "name": "Orient Search",
         "purpose": "Fast local code search for coding agents; no session analytics.",
         "instruction_snippet": agent_instructions(Some(repo), Some(index), Some(index_dir), Some(addr)),
+        "quickstart": {
+            "install": "cargo install --git https://github.com/evalops/orient-search",
+            "multi_repo": [
+                format!("orient ensure-shards --discover-root ~/Documents/Projects --output-dir {index_dir} --family-limit 2"),
+                format!("orient serve-tcp --addr {addr} --index-dir {index_dir}")
+            ],
+            "single_repo": [
+                format!("orient ensure-index --repo {repo} --index {index}"),
+                format!("orient serve-tcp --addr {addr} --index {index}")
+            ],
+            "client": format!("orient client-jsonl --addr {addr}"),
+            "status": format!("orient daemon-status --addr {addr}"),
+            "one_shot_search": "orient search-auto \"symbol:SessionManager token\"",
+            "agent_rules": format!("orient agent-instructions --index-dir {index_dir}"),
+            "read_cli_hints": "Search results include read_request.cli and read_batch_request.cli for terminal-native follow-up reads."
+        },
         "recommended_loop": [
             "Call tool_manifest or mcp_manifest once.",
             "Use repo_map, indexed_repo_map, or shard_repo_map before editing unfamiliar code.",

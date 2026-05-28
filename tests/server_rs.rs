@@ -842,6 +842,42 @@ fn agent_guide_returns_local_agent_request_templates() {
         "search_auto_batch"
     );
     assert_eq!(
+        guide["quickstart"]["install"],
+        "cargo install --git https://github.com/evalops/orient-search"
+    );
+    assert_eq!(
+        guide["quickstart"]["client"],
+        "orient client-jsonl --addr 127.0.0.1:9999"
+    );
+    assert_eq!(
+        guide["quickstart"]["status"],
+        "orient daemon-status --addr 127.0.0.1:9999"
+    );
+    assert_eq!(
+        guide["quickstart"]["one_shot_search"],
+        "orient search-auto \"symbol:SessionManager token\""
+    );
+    assert!(
+        guide["quickstart"]["multi_repo"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|command| command
+                .as_str()
+                .unwrap()
+                .contains("orient ensure-shards --discover-root ~/Documents/Projects --output-dir /tmp/orient-shards"))
+    );
+    assert!(
+        guide["quickstart"]["single_repo"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|command| command
+                .as_str()
+                .unwrap()
+                .contains("orient ensure-index --repo /work/repo --index /tmp/repo.index"))
+    );
+    assert_eq!(
         guide["request_templates"]["shard_search"]["tool"],
         "search_shards"
     );

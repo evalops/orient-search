@@ -32,10 +32,13 @@ Generate the current recommended snippet with:
 
 ```bash
 orient agent-instructions --index-dir /tmp/orient-shards
+orient agent-guide --index-dir /tmp/orient-shards
 ```
 
 Add this to `AGENTS.md`, `CLAUDE.md`, an Amp rule, or the equivalent local
-agent instruction file:
+agent instruction file. `agent-guide` also returns a machine-readable
+`quickstart` block with the install, daemon, client, status, one-shot search,
+and local-rule commands an adapter can render directly:
 
 ```markdown
 Before using `rg`, `find`, `ls`, or `cat` for code discovery, prefer Orient.
