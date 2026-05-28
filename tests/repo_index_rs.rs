@@ -3,7 +3,7 @@ use std::path::Path;
 
 use orient::fast_index::FastIndex;
 use orient::repo_index::{
-    MAX_READ_RANGE_LINES, RepoIndexer, read_file_range, search_repo_fast_filtered,
+    MAX_READ_RANGE_LINES, RepoIndexer, SearchFilters, read_file_range, search_repo_fast_filtered,
 };
 
 fn write(path: &Path, text: &str) {
@@ -56,6 +56,33 @@ def test_issue_token_round_trip():
     assert_eq!(symbol.kind, "class");
     assert!(index.find_symbol("", 10).is_empty());
     assert!(index.find_symbol("SessionManager", 0).is_empty());
+    assert!(
+        index
+            .find_symbol_filtered(
+                "SessionManager",
+                10,
+                &SearchFilters {
+                    symbol_kind: Some("function".to_string()),
+                    ..SearchFilters::default()
+                },
+            )
+            .is_empty()
+    );
+    let function_symbols = index.find_symbol_filtered(
+        "token",
+        10,
+        &SearchFilters {
+            symbol_kind: Some("function".to_string()),
+            path: Some("src/auth.py".to_string()),
+            ..SearchFilters::default()
+        },
+    );
+    assert!(
+        function_symbols
+            .iter()
+            .all(|symbol| symbol.kind == "function" && symbol.path == "src/auth.py"),
+        "{function_symbols:?}"
+    );
 
     let search = index.search_code("issue token user session", 3);
     assert_eq!(search[0].path, "src/auth.py");

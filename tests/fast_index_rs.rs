@@ -628,6 +628,10 @@ fn indexed_symbol_lookup_returns_definition_paths() {
         &repo.path().join("src/session.rs"),
         "pub fn session_manager_helper() {}\n",
     );
+    write(
+        &repo.path().join("tests/auth_test.rs"),
+        "pub struct SessionManager;\n",
+    );
 
     let index = FastIndex::build(repo.path()).unwrap();
     let symbols = index.find_symbol("SessionManager", 10);
@@ -649,6 +653,40 @@ fn indexed_symbol_lookup_returns_definition_paths() {
 
     let normalized = index.find_symbol("issue token", 10);
     assert_eq!(normalized[0].name, "issue_token");
+    let source_symbols = index.find_symbol_filtered(
+        "SessionManager",
+        10,
+        &SearchFilters {
+            test: Some(false),
+            ..SearchFilters::default()
+        },
+    );
+    assert!(
+        source_symbols
+            .iter()
+            .all(|symbol| symbol.path != "tests/auth_test.rs"),
+        "{source_symbols:?}"
+    );
+    let function_symbols = index.find_symbol_filtered(
+        "SessionManager",
+        10,
+        &SearchFilters {
+            symbol_kind: Some("function".to_string()),
+            ..SearchFilters::default()
+        },
+    );
+    assert!(
+        function_symbols
+            .iter()
+            .all(|symbol| symbol.kind == "function"),
+        "{function_symbols:?}"
+    );
+    assert!(
+        function_symbols
+            .iter()
+            .any(|symbol| symbol.name == "session_manager_helper"),
+        "{function_symbols:?}"
+    );
     assert!(index.find_symbol("", 10).is_empty());
     assert!(index.find_symbol("SessionManager", 0).is_empty());
 }

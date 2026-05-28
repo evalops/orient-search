@@ -211,6 +211,8 @@ enum Commands {
         limit: usize,
         #[arg(long = "repo")]
         repo: Option<String>,
+        #[command(flatten)]
+        filters: CommonSearchArgs,
     },
     ShardMap {
         #[arg(long)]
@@ -437,6 +439,8 @@ enum Commands {
         name: String,
         #[arg(long, default_value_t = 10)]
         limit: usize,
+        #[command(flatten)]
+        filters: CommonSearchArgs,
     },
     IndexSymbol {
         #[arg(long)]
@@ -444,6 +448,10 @@ enum Commands {
         name: String,
         #[arg(long, default_value_t = 10)]
         limit: usize,
+        #[arg(long = "repo")]
+        repo_filter: Option<String>,
+        #[command(flatten)]
+        filters: CommonSearchArgs,
     },
     Related {
         #[arg(long, default_value = ".")]
@@ -1261,18 +1269,12 @@ fn run() -> Result<()> {
             name,
             limit,
             repo,
+            filters,
         } => {
+            let filters = search_filters_from_args(&filters, repo)?;
             println!(
                 "{}",
-                serde_json::to_string(&find_shard_symbol(
-                    index_dir,
-                    &name,
-                    limit,
-                    &SearchFilters {
-                        repo,
-                        ..SearchFilters::default()
-                    },
-                )?)?
+                serde_json::to_string(&find_shard_symbol(index_dir, &name, limit, &filters)?)?
             );
         }
         Commands::ShardMap {
@@ -1982,18 +1984,31 @@ fn run() -> Result<()> {
             }
             println!("{}", serde_json::to_string(&results)?);
         }
-        Commands::Symbol { repo, name, limit } => {
+        Commands::Symbol {
+            repo,
+            name,
+            limit,
+            filters,
+        } => {
+            let filters = search_filters_from_args(&filters, None)?;
             let index = RepoIndexer::new(repo).build()?;
             println!(
                 "{}",
-                serde_json::to_string(&index.find_symbol(&name, limit))?
+                serde_json::to_string(&index.find_symbol_filtered(&name, limit, &filters))?
             );
         }
-        Commands::IndexSymbol { index, name, limit } => {
+        Commands::IndexSymbol {
+            index,
+            name,
+            limit,
+            repo_filter,
+            filters,
+        } => {
+            let filters = search_filters_from_args(&filters, repo_filter)?;
             let index = FastIndex::load(index)?;
             println!(
                 "{}",
-                serde_json::to_string(&index.find_symbol(&name, limit))?
+                serde_json::to_string(&index.find_symbol_filtered(&name, limit, &filters))?
             );
         }
         Commands::Related {

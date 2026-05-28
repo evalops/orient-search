@@ -609,19 +609,19 @@ pub fn tool_manifest() -> Value {
             "find_shard_symbol",
             "Find symbol definitions across a local multi-repo shard directory.",
             &["index_dir", "name"],
-            &["limit", "repo", "repo_filter"],
+            SYMBOL_INDEX_OPTIONAL_ARGS,
         ),
         tool_entry(
             "find_symbol",
             "Find symbol definitions in a local repository.",
             &["repo", "name"],
-            &["limit"],
+            SYMBOL_OPTIONAL_ARGS,
         ),
         tool_entry(
             "find_index_symbol",
             "Find symbol definitions directly from a persistent index.",
             &["index", "name"],
-            &["limit"],
+            SYMBOL_INDEX_OPTIONAL_ARGS,
         ),
         tool_entry(
             "related_files",
@@ -2074,15 +2074,21 @@ impl ToolRuntime {
                 let repo = path_arg(&request.arguments, "repo")?;
                 let name = string_arg(&request.arguments, "name")?;
                 let limit = positive_usize_arg(&request.arguments, "limit", 10)?;
+                let filters = search_filters(&request.arguments, false)?;
                 let index = RepoIndexer::new(repo).build()?;
-                Ok(serde_json::to_value(index.find_symbol(&name, limit))?)
+                Ok(serde_json::to_value(
+                    index.find_symbol_filtered(&name, limit, &filters),
+                )?)
             }
             "find_index_symbol" => {
                 let index_path = self.index_path_arg_or_single_cached(&request.arguments)?;
                 let name = string_arg(&request.arguments, "name")?;
                 let limit = positive_usize_arg(&request.arguments, "limit", 10)?;
+                let filters = search_filters(&request.arguments, true)?;
                 let index = self.cached_index(index_path)?;
-                Ok(serde_json::to_value(index.find_symbol(&name, limit))?)
+                Ok(serde_json::to_value(
+                    index.find_symbol_filtered(&name, limit, &filters),
+                )?)
             }
             "related_files" => {
                 let repo = path_arg(&request.arguments, "repo")?;
@@ -3037,7 +3043,8 @@ impl ToolRuntime {
             }
             let index = self.cached_index(index_dir.join(&shard.index))?;
             for scope in scopes {
-                for mut symbol in index.find_symbol(name, limit) {
+                let scoped_filters = filters_for_shard_scope(filters, scope.path_prefix.as_deref());
+                for mut symbol in index.find_symbol_filtered(name, limit, &scoped_filters) {
                     if let Some(prefix) = &scope.path_prefix {
                         if !symbol.path.starts_with(prefix) {
                             continue;
@@ -3209,6 +3216,98 @@ const SEARCH_OPTIONAL_ARGS: &[&str] = &[
     "require_all",
     "any_terms",
     "context_lines",
+    "exclude_file",
+    "exclude_path",
+    "exclude_language",
+    "exclude_lang",
+    "exclude_extension",
+    "exclude_ext",
+    "exclude_symbol",
+    "exclude_symbol_kind",
+    "exclude_kind",
+    "exclude_type",
+    "exclude_repo",
+    "exclude_dependency",
+    "exclude_dep",
+    "exclude_deps",
+    "exclude_import",
+    "exclude_imports",
+    "exclude_module",
+    "exclude_modules",
+    "exclude_use",
+    "exclude_uses",
+];
+
+const SYMBOL_OPTIONAL_ARGS: &[&str] = &[
+    "limit",
+    "path",
+    "dir",
+    "language",
+    "lang",
+    "extension",
+    "ext",
+    "symbol",
+    "symbol_kind",
+    "kind",
+    "type",
+    "dependency",
+    "dep",
+    "deps",
+    "import",
+    "imports",
+    "module",
+    "modules",
+    "use",
+    "uses",
+    "file",
+    "repo_filter",
+    "test",
+    "exclude_file",
+    "exclude_path",
+    "exclude_language",
+    "exclude_lang",
+    "exclude_extension",
+    "exclude_ext",
+    "exclude_symbol",
+    "exclude_symbol_kind",
+    "exclude_kind",
+    "exclude_type",
+    "exclude_dependency",
+    "exclude_dep",
+    "exclude_deps",
+    "exclude_import",
+    "exclude_imports",
+    "exclude_module",
+    "exclude_modules",
+    "exclude_use",
+    "exclude_uses",
+];
+
+const SYMBOL_INDEX_OPTIONAL_ARGS: &[&str] = &[
+    "limit",
+    "path",
+    "dir",
+    "language",
+    "lang",
+    "extension",
+    "ext",
+    "symbol",
+    "symbol_kind",
+    "kind",
+    "type",
+    "dependency",
+    "dep",
+    "deps",
+    "import",
+    "imports",
+    "module",
+    "modules",
+    "use",
+    "uses",
+    "file",
+    "repo",
+    "repo_filter",
+    "test",
     "exclude_file",
     "exclude_path",
     "exclude_language",

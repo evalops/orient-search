@@ -727,7 +727,8 @@ pub fn find_shard_symbol(
         let index = FastIndex::load(index_dir.join(&shard.index))
             .with_context(|| format!("load shard {}", shard.index))?;
         for scope in scopes {
-            for mut symbol in index.find_symbol(name, limit) {
+            let scoped_filters = filters_for_shard_scope(filters, scope.path_prefix.as_deref());
+            for mut symbol in index.find_symbol_filtered(name, limit, &scoped_filters) {
                 if let Some(prefix) = &scope.path_prefix {
                     if !symbol.path.starts_with(prefix) {
                         continue;

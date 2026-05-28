@@ -1412,13 +1412,29 @@ impl RepoIndexer {
 
 impl RepoIndex {
     pub fn find_symbol(&self, name: &str, limit: usize) -> Vec<Symbol> {
+        self.find_symbol_filtered(name, limit, &SearchFilters::default())
+    }
+
+    pub fn find_symbol_filtered(
+        &self,
+        name: &str,
+        limit: usize,
+        filters: &SearchFilters,
+    ) -> Vec<Symbol> {
         let needle = normalize_token(name);
-        if needle.is_empty() || limit == 0 {
+        if needle.is_empty()
+            || limit == 0
+            || !repo_matches(&self.root, filters)
+            || !dependency_filters_match(&self.dependency_hints(), filters)
+        {
             return Vec::new();
         }
 
         let mut scored = Vec::new();
         for symbol in &self.symbols {
+            if !self.related_symbol_matches_filters(symbol, filters) {
+                continue;
+            }
             let symbol_token = normalize_token(&symbol.name);
             let score = if symbol.name == name {
                 100

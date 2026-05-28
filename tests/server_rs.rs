@@ -4131,6 +4131,7 @@ fn server_handles_indexed_search_request() {
         "arguments": {
             "index": index_path,
             "name": "SessionManager",
+            "kind": "struct",
             "limit": 5
         }
     });

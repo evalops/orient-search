@@ -737,8 +737,21 @@ impl FastIndex {
     }
 
     pub fn find_symbol(&self, name: &str, limit: usize) -> Vec<Symbol> {
+        self.find_symbol_filtered(name, limit, &SearchFilters::default())
+    }
+
+    pub fn find_symbol_filtered(
+        &self,
+        name: &str,
+        limit: usize,
+        filters: &SearchFilters,
+    ) -> Vec<Symbol> {
         let needle = normalize_token(name);
-        if needle.is_empty() || limit == 0 {
+        if needle.is_empty()
+            || limit == 0
+            || !repo_matches(&self.root, filters)
+            || !self.matches_dependency_filters(filters)
+        {
             return Vec::new();
         }
 
@@ -750,8 +763,14 @@ impl FastIndex {
                 let Some(file) = self.files.get(posting.file_id as usize) else {
                     continue;
                 };
+                if !indexed_file_matches_related_symbol_filters(file, filters) {
+                    continue;
+                }
                 for symbol in &file.symbols {
                     if symbol.normalized != needle {
+                        continue;
+                    }
+                    if !indexed_symbol_matches_related_filters(symbol, filters) {
                         continue;
                     }
                     push_symbol_match(name, file, symbol, 90, &mut scored, &mut seen);
@@ -761,7 +780,13 @@ impl FastIndex {
 
         if scored.len() < limit {
             for file in &self.files {
+                if !indexed_file_matches_related_symbol_filters(file, filters) {
+                    continue;
+                }
                 for symbol in &file.symbols {
+                    if !indexed_symbol_matches_related_filters(symbol, filters) {
+                        continue;
+                    }
                     let score = if symbol.name == name {
                         100
                     } else if symbol.normalized == needle {
