@@ -5085,6 +5085,46 @@ fn tcp_daemon_status_cli_reports_runtime_cache() {
     assert!(status.get("id").is_none(), "{status}");
 }
 
+#[test]
+fn tcp_client_uses_default_addr_when_omitted() {
+    let binary = assert_cmd::cargo::cargo_bin("orient");
+    let mut child = Command::new(&binary)
+        .args(["serve-tcp"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let stdout = child.stdout.take().unwrap();
+    let mut startup_reader = BufReader::new(stdout);
+    let mut startup = String::new();
+    startup_reader.read_line(&mut startup).unwrap();
+    let startup_json: serde_json::Value = serde_json::from_str(&startup).unwrap();
+    assert_eq!(startup_json["addr"], serde_json::json!("127.0.0.1:8796"));
+
+    let mut client = Command::new(binary)
+        .arg("client-jsonl")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let request = serde_json::json!({
+        "id": "status",
+        "tool": "daemon_status",
+        "arguments": {}
+    });
+    writeln!(client.stdin.as_mut().unwrap(), "{request}").unwrap();
+    drop(client.stdin.take());
+    let output = client.wait_with_output().unwrap();
+
+    child.kill().unwrap();
+    let _ = child.wait();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("\"id\":\"status\""), "{stdout}");
+    assert!(stdout.contains("\"default_requests\""), "{stdout}");
+}
+
 #[cfg(unix)]
 #[test]
 fn unix_daemon_serves_json_lines_requests() {

@@ -151,6 +151,23 @@ fn cli_outputs_mcp_manifest() {
 }
 
 #[test]
+fn cli_help_shows_default_daemon_addr_for_agent_clients() {
+    let mut client = Command::cargo_bin("orient").unwrap();
+    client
+        .args(["client-jsonl", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("[default: 127.0.0.1:8796]"));
+
+    let mut status = Command::cargo_bin("orient").unwrap();
+    status
+        .args(["daemon-status", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("[default: 127.0.0.1:8796]"));
+}
+
+#[test]
 fn cli_outputs_agent_guide() {
     let mut cmd = Command::cargo_bin("orient").unwrap();
     cmd.args([

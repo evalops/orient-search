@@ -39,6 +39,8 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Instant;
 
+const DEFAULT_DAEMON_ADDR: &str = "127.0.0.1:8796";
+
 #[derive(Debug, Parser)]
 #[command(name = "orient")]
 #[command(about = "Fast local code search for coding agents")]
@@ -738,7 +740,7 @@ enum Commands {
     DaemonStatus {
         #[arg(long)]
         socket: Option<PathBuf>,
-        #[arg(long)]
+        #[arg(long, default_value = DEFAULT_DAEMON_ADDR)]
         addr: Option<String>,
     },
     ServeJsonl,
@@ -790,7 +792,7 @@ enum Commands {
     ClientJsonl {
         #[arg(long)]
         socket: Option<PathBuf>,
-        #[arg(long)]
+        #[arg(long, default_value = DEFAULT_DAEMON_ADDR)]
         addr: Option<String>,
     },
 }
@@ -3043,7 +3045,7 @@ fn run() -> Result<()> {
             let status = if let Some(socket) = socket {
                 daemon_status_unix(&socket)?
             } else {
-                daemon_status_tcp(addr.as_deref().unwrap_or("127.0.0.1:8796"))?
+                daemon_status_tcp(addr.as_deref().unwrap_or(DEFAULT_DAEMON_ADDR))?
             };
             println!("{}", serde_json::to_string(&status)?);
         }
@@ -3135,7 +3137,7 @@ fn run() -> Result<()> {
             if let Some(socket) = socket {
                 client_jsonl_unix(&socket)?;
             } else {
-                client_jsonl_tcp(addr.as_deref().unwrap_or("127.0.0.1:8796"))?;
+                client_jsonl_tcp(addr.as_deref().unwrap_or(DEFAULT_DAEMON_ADDR))?;
             }
         }
     }

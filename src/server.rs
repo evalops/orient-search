@@ -32,6 +32,7 @@ use std::thread;
 
 pub const MAX_BATCH_QUERIES: usize = 32;
 pub const MAX_BATCH_RANGES: usize = 64;
+const DEFAULT_DAEMON_ADDR: &str = "127.0.0.1:8796";
 
 #[derive(Debug, Deserialize)]
 pub struct ToolRequest {
@@ -736,7 +737,9 @@ pub fn agent_guide(
     let repo = repo.unwrap_or("/path/to/repo");
     let index = index.unwrap_or("/tmp/orient.index");
     let index_dir = index_dir.unwrap_or("/tmp/orient-shards");
-    let addr = addr.unwrap_or("127.0.0.1:8796");
+    let addr = addr.unwrap_or(DEFAULT_DAEMON_ADDR);
+    let client_command = tcp_client_command(addr);
+    let status_command = daemon_status_command(addr);
     json!({
         "name": "Orient Search",
         "purpose": "Fast local code search for coding agents; no session analytics.",
@@ -751,8 +754,8 @@ pub fn agent_guide(
                 format!("orient ensure-index --repo {repo} --index {index}"),
                 format!("orient serve-tcp --addr {addr} --index {index}")
             ],
-            "client": format!("orient client-jsonl --addr {addr}"),
-            "status": format!("orient daemon-status --addr {addr}"),
+            "client": client_command,
+            "status": status_command,
             "one_shot_search": "orient search-auto \"symbol:SessionManager token\"",
             "agent_rules": format!("orient agent-instructions --index-dir {index_dir}"),
             "read_cli_hints": "Search results include read_request.cli and read_batch_request.cli for terminal-native follow-up reads."
@@ -788,7 +791,7 @@ pub fn agent_guide(
         "transports": {
             "stdio": "orient serve-jsonl",
             "tcp_daemon": format!("orient serve-tcp --addr {addr} --index-dir {index_dir}"),
-            "tcp_client": format!("orient client-jsonl --addr {addr}")
+            "tcp_client": tcp_client_command(addr)
         },
         "setup_commands": {
             "single_repo": [
@@ -888,11 +891,12 @@ pub fn agent_instructions(
     let repo = repo.unwrap_or("/path/to/repo");
     let index = index.unwrap_or("/tmp/orient.index");
     let index_dir = index_dir.unwrap_or("/tmp/orient-shards");
-    let addr = addr.unwrap_or("127.0.0.1:8796");
+    let addr = addr.unwrap_or(DEFAULT_DAEMON_ADDR);
+    let client_command = tcp_client_command(addr);
     format!(
         "## Orient Search\n\
 Use Orient as the first local code-discovery step before repeated `rg`, `find`, `ls`, or `cat`.\n\
-Prefer the shared daemon when it is running: `orient client-jsonl --addr {addr}`.\n\
+Prefer the shared daemon when it is running: `{client_command}`.\n\
 For many local repos, bootstrap it with `orient ensure-shards --discover-root ~/Documents/Projects --output-dir {index_dir} --family-limit 2` and `orient serve-tcp --addr {addr} --index-dir {index_dir}`.\n\
 For one repo, bootstrap it with `orient ensure-index --repo {repo} --index {index}` and `orient serve-tcp --addr {addr} --index {index}`.\n\
 Start each session with `daemon_status` or `agent_guide`, then use `search_auto` for normal lookup and `search_auto_batch` for alternate query phrasings.\n\
@@ -902,6 +906,22 @@ After search, follow returned `read_batch_request`, `read_request`, `related_req
 When results are empty, noisy, or suspicious, use the returned `query_plan_request` or inline `query_plan_result` before broadening the search.\n\
 Orient is local code search only and exposes no session analytics."
     )
+}
+
+fn tcp_client_command(addr: &str) -> String {
+    if addr == DEFAULT_DAEMON_ADDR {
+        "orient client-jsonl".to_string()
+    } else {
+        format!("orient client-jsonl --addr {addr}")
+    }
+}
+
+fn daemon_status_command(addr: &str) -> String {
+    if addr == DEFAULT_DAEMON_ADDR {
+        "orient daemon-status".to_string()
+    } else {
+        format!("orient daemon-status --addr {addr}")
+    }
 }
 
 fn mcp_tool_annotations(name: &str) -> Value {

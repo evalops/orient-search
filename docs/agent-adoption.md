@@ -44,12 +44,13 @@ and local-rule commands an adapter can render directly:
 Before using `rg`, `find`, `ls`, or `cat` for code discovery, prefer Orient.
 Send JSON-lines requests through:
 
-`orient client-jsonl --addr 127.0.0.1:8796`
+`orient client-jsonl`
 
-Use `orient daemon-status --addr 127.0.0.1:8796` when a new agent session
+Use `orient daemon-status` when a new agent session
 needs to confirm the shared daemon has the expected warmed index or shard set.
-Check `search_auto_default` in that response to see the exact target no-argument
-`search_auto` will use.
+Check `search_auto_default` and `default_requests` in that response to see the
+exact target no-argument `search_auto` will use and copy the right first
+repo-map/search/query-plan requests.
 
 Start with `agent_guide` or `tool_manifest` once, then use `search_auto`.
 Follow returned `read_batch_request`, `read_request`, `related_request`,
@@ -76,19 +77,19 @@ printf '%s\n' \
   '{"id":"instructions","tool":"agent_instructions","arguments":{"index_dir":"/tmp/orient-shards"}}' \
   '{"id":"guide","tool":"agent_guide","arguments":{}}' \
   '{"id":"status","tool":"daemon_status","arguments":{}}' \
-  | orient client-jsonl --addr 127.0.0.1:8796
+  | orient client-jsonl
 ```
 
 ```bash
 printf '%s\n' \
   '{"id":"search","tool":"search_auto","arguments":{"query":"repo:api branch:main symbol:AuthSession token","limit":10,"explain":true,"refresh_if_stale":true}}' \
-  | orient client-jsonl --addr 127.0.0.1:8796
+  | orient client-jsonl
 ```
 
 ```bash
 printf '%s\n' \
   '{"id":"searches","tool":"search_auto_batch","arguments":{"queries":["repo:api symbol:AuthSession token","origin:evalops/api path:auth token","repo:api mode:any AuthSession token"],"limit":10,"explain":true,"refresh_if_stale":true}}' \
-  | orient client-jsonl --addr 127.0.0.1:8796
+  | orient client-jsonl
 ```
 
 For adapter authors, `orient mcp-manifest` returns MCP-shaped tool definitions

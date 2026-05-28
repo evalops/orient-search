@@ -10,8 +10,8 @@ Run either a one-shot stdio server or a shared TCP daemon:
 target/release/orient serve-jsonl
 target/release/orient serve-tcp --addr 127.0.0.1:8796 --index-dir /tmp/orient-shards
 target/release/orient serve-tcp --addr 127.0.0.1:8796 --ensure-shards-dir /tmp/orient-shards --repo /path/to/repo-a --repo /path/to/repo-b
-target/release/orient daemon-status --addr 127.0.0.1:8796
-target/release/orient client-jsonl --addr 127.0.0.1:8796
+target/release/orient daemon-status
+target/release/orient client-jsonl
 target/release/orient serve-unix --socket /tmp/orient.sock --index-dir /tmp/orient-shards
 target/release/orient daemon-status --socket /tmp/orient.sock
 target/release/orient client-jsonl --socket /tmp/orient.sock

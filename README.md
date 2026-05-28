@@ -23,7 +23,7 @@ Give an agent the generated local rule snippet:
 ```bash
 orient agent-instructions --index-dir /tmp/orient-shards
 orient agent-guide --index-dir /tmp/orient-shards
-orient client-jsonl --addr 127.0.0.1:8796
+orient client-jsonl
 ```
 
 The intended loop is simple: get the tool manifest or agent guide, ask for a
