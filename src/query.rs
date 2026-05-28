@@ -161,7 +161,7 @@ fn test_filter_from_is_value(value: &str) -> Option<bool> {
     }
 }
 
-pub(crate) fn normalize_symbol_kind(value: &str) -> String {
+pub fn normalize_symbol_kind(value: &str) -> String {
     match value.trim().to_ascii_lowercase().as_str() {
         "func" | "function" | "functions" | "method" | "methods" => "function".to_string(),
         "consts" | "constant" | "constants" => "const".to_string(),

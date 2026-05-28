@@ -5,6 +5,7 @@ use orient::discover::{
     DiscoverOptions, DiscoverySelectionSummary, discover_repos, discovery_selection_summary,
 };
 use orient::fast_index::{FastIndex, RefreshStats};
+use orient::query::normalize_symbol_kind;
 use orient::repo_index::{
     QueryPlan, RepoIndexer, ResultToolRequest, SearchFilters, SearchResult, SnippetMode,
     attach_result_context, attach_result_read_requests, attach_result_related_requests,
@@ -628,19 +629,31 @@ enum Commands {
 struct CommonSearchArgs {
     #[arg(long, alias = "dir")]
     path: Option<String>,
-    #[arg(long)]
+    #[arg(long, alias = "lang")]
     language: Option<String>,
-    #[arg(long)]
+    #[arg(long, alias = "ext")]
     extension: Option<String>,
     #[arg(long)]
     file: Option<String>,
     #[arg(long)]
     symbol: Option<String>,
-    #[arg(long = "kind", alias = "symbol-kind", alias = "symbol_kind")]
+    #[arg(
+        long = "kind",
+        alias = "type",
+        alias = "symbol-kind",
+        alias = "symbol_kind"
+    )]
     symbol_kind: Option<String>,
     #[arg(long, alias = "dep", alias = "deps")]
     dependency: Option<String>,
-    #[arg(long, alias = "module", alias = "uses")]
+    #[arg(
+        long,
+        alias = "imports",
+        alias = "module",
+        alias = "modules",
+        alias = "use",
+        alias = "uses"
+    )]
     import: Option<String>,
     #[arg(long)]
     test: Option<bool>,
@@ -656,14 +669,23 @@ struct CommonSearchArgs {
     exclude_file: Vec<String>,
     #[arg(long = "exclude-path")]
     exclude_path: Vec<String>,
-    #[arg(long = "exclude-language")]
+    #[arg(
+        long = "exclude-language",
+        alias = "exclude-lang",
+        alias = "exclude_language"
+    )]
     exclude_language: Vec<String>,
-    #[arg(long = "exclude-extension")]
+    #[arg(
+        long = "exclude-extension",
+        alias = "exclude-ext",
+        alias = "exclude_extension"
+    )]
     exclude_extension: Vec<String>,
     #[arg(long = "exclude-symbol")]
     exclude_symbol: Vec<String>,
     #[arg(
         long = "exclude-kind",
+        alias = "exclude-type",
         alias = "exclude-symbol-kind",
         alias = "exclude_symbol_kind"
     )]
@@ -678,7 +700,10 @@ struct CommonSearchArgs {
     exclude_dependency: Vec<String>,
     #[arg(
         long = "exclude-import",
+        alias = "exclude-imports",
         alias = "exclude-module",
+        alias = "exclude-modules",
+        alias = "exclude-use",
         alias = "exclude-uses"
     )]
     exclude_import: Vec<String>,
@@ -700,7 +725,7 @@ fn search_filters_from_args(
         symbol_kind: args
             .symbol_kind
             .as_ref()
-            .map(|value| normalize_filter(value)),
+            .map(|value| normalize_symbol_kind(value)),
         repo,
         dependency: args
             .dependency
@@ -728,7 +753,7 @@ fn search_filters_from_args(
         exclude_symbol_kind: args
             .exclude_symbol_kind
             .iter()
-            .map(|value| normalize_filter(value))
+            .map(|value| normalize_symbol_kind(value))
             .collect(),
         exclude_repo: args.exclude_repo.clone(),
         exclude_dependency: args

@@ -69,6 +69,8 @@ Structured JSON arguments accept the same common aliases for wrapper authors:
 `exclude_dep`, and `exclude_module`. Symbol-kind values normalize common
 singular/plural forms such as `function`/`functions`, `class`/`classes`, and
 `interface`/`interfaces`.
+CLI flags accept the same common aliases, including `--lang`, `--ext`,
+`--type`, `--exclude-lang`, `--exclude-ext`, and `--exclude-type`.
 
 Search results include:
 
