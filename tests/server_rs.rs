@@ -1528,6 +1528,51 @@ fn retry_requests_preserve_boolean_test_filters() {
 }
 
 #[test]
+fn relax_filter_retries_preserve_term_match_mode() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/alpha.rs"),
+        "pub fn alpha_only() {}\n",
+    );
+    write(
+        &repo.path().join("src/gamma.rs"),
+        "pub fn gamma_only() {}\n",
+    );
+    let runtime = ToolRuntime::default();
+
+    let plan = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("plan"),
+        tool: "search_plan".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "query": "alpha gamma path:not-real",
+            "any_terms": true
+        }),
+    });
+    assert!(plan.error.is_none(), "{:?}", plan.error);
+    let plan = plan.result.as_ref().unwrap();
+    assert_eq!(plan["repair_hints"][0]["kind"], "relax_filters");
+    assert_eq!(
+        plan["retry_requests"][0]["arguments"]["any_terms"],
+        serde_json::json!(true)
+    );
+    assert!(plan["retry_requests"][0]["arguments"]["path"].is_null());
+
+    let retry = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("retry"),
+        tool: plan["retry_requests"][0]["tool"]
+            .as_str()
+            .unwrap()
+            .to_string(),
+        arguments: plan["retry_requests"][0]["arguments"].clone(),
+    });
+    assert!(retry.error.is_none(), "{:?}", retry.error);
+    let retry_result = serde_json::to_string(&retry.result).unwrap();
+    assert!(retry_result.contains("src/alpha.rs"), "{retry_result}");
+    assert!(retry_result.contains("src/gamma.rs"), "{retry_result}");
+}
+
+#[test]
 fn runtime_accepts_structured_negative_search_filters() {
     let repo = tempfile::tempdir().unwrap();
     write(

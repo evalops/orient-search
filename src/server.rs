@@ -1447,8 +1447,10 @@ fn retry_search_requests<T: Serialize>(
         let replace_symbol_kind = hint.kind == "replace_symbol_kind_filter";
         if hint.kind == "relax_filters" {
             if let Some(source) = source_arguments.as_object() {
-                if let Some(refresh) = source.get("refresh_if_stale") {
-                    arguments.insert("refresh_if_stale".to_string(), refresh.clone());
+                for name in ["refresh_if_stale", "require_all", "any_terms"] {
+                    if let Some(value) = source.get(name) {
+                        arguments.insert(name.to_string(), value.clone());
+                    }
                 }
             }
         } else if let Some(source) = source_arguments.as_object() {
