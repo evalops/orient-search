@@ -13,9 +13,9 @@ use crate::repo_index::{
     matches_filters_with_path_metadata, normalize_token, regular_file_metadata,
     related_query_terms_symbol_and_filters, related_stem_terms, repo_map_seed_paths, repo_matches,
     result_matches_all_tokens, result_matches_symbol_filters, round4, score_filter_only_path,
-    select_repo_map_top_symbols, source_import_filters_match, symbol_exact_phrase_bonus,
-    symbol_matches_related_filters, symbol_query_match_score, token_counts, tokenize,
-    unique_query_tokens,
+    select_repo_brief_import_hints, select_repo_map_top_symbols, source_import_filters_match,
+    symbol_exact_phrase_bonus, symbol_matches_related_filters, symbol_query_match_score,
+    token_counts, tokenize, unique_query_tokens,
 };
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use anyhow::{Context, Result};
@@ -629,7 +629,8 @@ impl FastIndex {
         let command_hints = command_hints_from_indexed_files(&self.files);
         let known_commands = known_commands_from_hints(&command_hints);
         let dependency_hints = dependency_hints_from_indexed_files(&self.files);
-        let import_hints = import_hints_from_indexed_files(&self.files);
+        let import_hints =
+            select_repo_brief_import_hints(import_hints_from_indexed_files(&self.files));
 
         RepoMap {
             brief: RepoBrief {

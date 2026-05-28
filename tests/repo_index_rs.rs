@@ -549,6 +549,65 @@ fn repo_maps_diversify_top_symbols_across_files() {
 }
 
 #[test]
+fn repo_briefs_keep_import_hints_compact_without_breaking_import_filters() {
+    let repo = tempfile::tempdir().unwrap();
+    let bulk_imports = (0..40)
+        .map(|index| format!("use alpha::Module{index};\n"))
+        .collect::<String>();
+    write(&repo.path().join("src/bulk.rs"), &bulk_imports);
+    write(
+        &repo.path().join("src/other.rs"),
+        "use beta::Client;\nuse gamma::Config;\npub fn call() {}\n",
+    );
+
+    let live = RepoIndexer::new(repo.path()).build().unwrap();
+    let live_brief = live.repo_brief();
+    assert_eq!(live_brief.import_hints.len(), 32);
+    assert!(
+        live_brief
+            .import_hints
+            .iter()
+            .any(|hint| hint.source == "src/other.rs" && hint.module == "beta::Client"),
+        "{:?}",
+        live_brief.import_hints
+    );
+    let live_filtered = search_repo_fast_filtered(
+        repo.path(),
+        "import:Module39",
+        10,
+        &SearchFilters::default(),
+    )
+    .unwrap();
+    assert!(
+        live_filtered
+            .iter()
+            .any(|result| result.path == "src/bulk.rs"),
+        "{live_filtered:?}"
+    );
+
+    let indexed = FastIndex::build(repo.path()).unwrap();
+    let indexed_brief = indexed.repo_map(10, 10).brief;
+    assert_eq!(indexed_brief.import_hints.len(), 32);
+    assert!(
+        indexed_brief
+            .import_hints
+            .iter()
+            .any(|hint| hint.source == "src/other.rs" && hint.module == "beta::Client"),
+        "{:?}",
+        indexed_brief.import_hints
+    );
+    let indexed_filtered = indexed
+        .search_filtered("import:Module39", 10, &SearchFilters::default())
+        .unwrap();
+    assert!(
+        indexed_filtered
+            .iter()
+            .any(|result| result.path == "src/bulk.rs"),
+        "{indexed_filtered:?}"
+    );
+}
+
+#[test]
 fn fallback_line_range_tracks_displayed_contiguous_snippet_block() {
     let repo = tempfile::tempdir().unwrap();
     let mut source = String::from("alpha first hit\n");

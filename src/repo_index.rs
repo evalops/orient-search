@@ -20,6 +20,7 @@ pub const MAX_ATTACHED_CONTEXT_LINES: usize = 500;
 pub const MAX_READ_RANGE_LINES: usize = 1_000;
 pub const MAX_SEARCH_RESULTS: usize = 100;
 const MAX_RESULT_READ_BATCH_RANGES: usize = 64;
+const MAX_REPO_BRIEF_IMPORT_HINTS: usize = 32;
 const DEFAULT_RESULT_READ_LINES: usize = 80;
 const DEFAULT_RELATED_FILE_READ_LINES: usize = 80;
 const DEFAULT_SYMBOL_READ_CONTEXT_BEFORE: usize = 20;
@@ -1790,7 +1791,7 @@ impl RepoIndex {
         let command_hints = self.command_hints();
         let known_commands = known_commands_from_hints(&command_hints);
         let dependency_hints = self.dependency_hints();
-        let import_hints = self.import_hints();
+        let import_hints = select_repo_brief_import_hints(self.import_hints());
 
         RepoBrief {
             root_name: self
@@ -2179,6 +2180,49 @@ pub(crate) fn import_hints_from_source_texts<'a>(
     });
     hints.truncate(80);
     hints
+}
+
+pub(crate) fn select_repo_brief_import_hints(mut hints: Vec<ImportHint>) -> Vec<ImportHint> {
+    if hints.len() <= MAX_REPO_BRIEF_IMPORT_HINTS {
+        return hints;
+    }
+    hints.sort_by(|left, right| {
+        left.source
+            .cmp(&right.source)
+            .then_with(|| left.line.cmp(&right.line))
+            .then_with(|| left.kind.cmp(&right.kind))
+            .then_with(|| left.module.cmp(&right.module))
+    });
+
+    let per_source_cap = (MAX_REPO_BRIEF_IMPORT_HINTS / 4).max(4);
+    let mut selected = Vec::with_capacity(MAX_REPO_BRIEF_IMPORT_HINTS);
+    let mut source_counts = HashMap::<String, usize>::new();
+    for hint in &hints {
+        let count = source_counts.entry(hint.source.clone()).or_default();
+        if *count < per_source_cap {
+            selected.push(hint.clone());
+            *count += 1;
+        }
+        if selected.len() == MAX_REPO_BRIEF_IMPORT_HINTS {
+            return selected;
+        }
+    }
+
+    for hint in hints {
+        if selected.iter().any(|selected| {
+            selected.source == hint.source
+                && selected.line == hint.line
+                && selected.kind == hint.kind
+                && selected.module == hint.module
+        }) {
+            continue;
+        }
+        selected.push(hint);
+        if selected.len() == MAX_REPO_BRIEF_IMPORT_HINTS {
+            break;
+        }
+    }
+    selected
 }
 
 pub(crate) fn import_filters_active(filters: &SearchFilters) -> bool {
