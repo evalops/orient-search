@@ -777,6 +777,27 @@ fn indexed_query_plan_reports_missing_terms_without_results() {
             .iter()
             .any(|filter| { filter.field == "test" && filter.value == "true" && !filter.negated })
     );
+
+    let kind_typo_plan = index
+        .query_plan("kind:functoin", &SearchFilters::default())
+        .unwrap();
+    assert_eq!(kind_typo_plan.strategy, "filter_scan");
+    assert_eq!(kind_typo_plan.candidate_count, 0);
+    assert_eq!(
+        kind_typo_plan.repair_hints[0].kind,
+        "replace_symbol_kind_filter"
+    );
+    assert_eq!(
+        kind_typo_plan.repair_hints[0].suggested_query.as_deref(),
+        Some("kind:function")
+    );
+    assert!(
+        kind_typo_plan.repair_hints[0]
+            .message
+            .contains("Available kinds: function, struct"),
+        "{:?}",
+        kind_typo_plan.repair_hints
+    );
 }
 
 #[test]

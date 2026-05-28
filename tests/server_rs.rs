@@ -930,6 +930,47 @@ fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
         empty_indexed["query_plan_result"]["retry_requests"][0]["tool"],
         "indexed_search_code"
     );
+
+    let kind_typo = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("kind-typo"),
+        tool: "search_auto".to_string(),
+        arguments: serde_json::json!({
+            "query": "kind:functoin",
+            "limit": 5
+        }),
+    });
+    assert!(kind_typo.error.is_none(), "{:?}", kind_typo.error);
+    let kind_typo = kind_typo.result.unwrap();
+    assert_eq!(
+        kind_typo["query_plan_result"]["repair_hints"][0]["kind"],
+        "replace_symbol_kind_filter"
+    );
+    assert_eq!(
+        kind_typo["query_plan_result"]["retry_requests"][0]["arguments"]["query"],
+        "kind:function"
+    );
+    assert!(
+        kind_typo["query_plan_result"]["retry_requests"][0]["arguments"]
+            .get("symbol_kind")
+            .is_none(),
+        "{:?}",
+        kind_typo["query_plan_result"]["retry_requests"][0]["arguments"]
+    );
+    let kind_retry = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("kind-typo-retry"),
+        tool: kind_typo["query_plan_result"]["retry_requests"][0]["tool"]
+            .as_str()
+            .unwrap()
+            .to_string(),
+        arguments: kind_typo["query_plan_result"]["retry_requests"][0]["arguments"].clone(),
+    });
+    assert!(kind_retry.error.is_none(), "{:?}", kind_retry.error);
+    assert!(
+        serde_json::to_string(&kind_retry.result)
+            .unwrap()
+            .contains("issue_token")
+    );
+
     let map_request = indexed["repo_map_request"].clone();
     let map = runtime.dispatch(ToolRequest {
         id: serde_json::json!("map"),

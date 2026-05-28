@@ -1336,7 +1336,11 @@ impl FastIndex {
                     filtered_candidate_count: final_match_count,
                     scored_candidate_count: final_match_count,
                     final_match_count,
-                    repair_hints: filter_scan_repair_hints(final_match_count),
+                    repair_hints: filter_scan_repair_hints(
+                        &filters,
+                        &self.symbol_kind_postings,
+                        final_match_count,
+                    ),
                     retry_requests: Vec::new(),
                 });
             }
@@ -1595,7 +1599,11 @@ impl FastIndex {
                 filtered_candidate_count: final_match_count,
                 scored_candidate_count: final_match_count,
                 final_match_count,
-                repair_hints: filter_scan_repair_hints(final_match_count),
+                repair_hints: filter_scan_repair_hints(
+                    filters,
+                    &self.symbol_kind_postings,
+                    final_match_count,
+                ),
                 retry_requests: Vec::new(),
             };
             for result in &mut results {
@@ -2453,16 +2461,93 @@ fn query_plan_repair_hints(
     hints
 }
 
-fn filter_scan_repair_hints(candidate_count: usize) -> Vec<QueryPlanRepairHint> {
-    if candidate_count == 0 {
-        vec![repair_hint(
-            "relax_filters",
-            "No files matched the filter-only query. Relax file/path/language/extension/test filters.",
-            None,
-        )]
-    } else {
-        Vec::new()
+fn filter_scan_repair_hints(
+    filters: &SearchFilters,
+    symbol_kind_postings: &HashMap<String, Vec<Posting>>,
+    candidate_count: usize,
+) -> Vec<QueryPlanRepairHint> {
+    if candidate_count != 0 {
+        return Vec::new();
     }
+    if let Some(kind) = &filters.symbol_kind {
+        if !symbol_kind_postings.contains_key(kind) {
+            let suggested_query = suggested_symbol_kind_query(kind, symbol_kind_postings);
+            let available = available_symbol_kinds(symbol_kind_postings);
+            let message = if available.is_empty() {
+                format!("No indexed symbols use kind `{kind}`.")
+            } else {
+                format!(
+                    "No indexed symbols use kind `{kind}`. Available kinds: {}.",
+                    available.join(", ")
+                )
+            };
+            return vec![repair_hint(
+                "replace_symbol_kind_filter",
+                message,
+                suggested_query,
+            )];
+        }
+    }
+    vec![repair_hint(
+        "relax_filters",
+        "No files matched the filter-only query. Relax file/path/language/extension/test filters.",
+        None,
+    )]
+}
+
+fn available_symbol_kinds(symbol_kind_postings: &HashMap<String, Vec<Posting>>) -> Vec<String> {
+    let mut kinds = symbol_kind_postings.keys().cloned().collect::<Vec<_>>();
+    kinds.sort();
+    kinds.truncate(8);
+    kinds
+}
+
+fn suggested_symbol_kind_query(
+    wanted: &str,
+    symbol_kind_postings: &HashMap<String, Vec<Posting>>,
+) -> Option<String> {
+    let wanted = wanted.trim().to_ascii_lowercase();
+    if wanted.is_empty() {
+        return None;
+    }
+    let mut best = symbol_kind_postings
+        .keys()
+        .map(|kind| (kind.as_str(), edit_distance_at_most(&wanted, kind, 3)))
+        .filter_map(|(kind, distance)| distance.map(|distance| (kind, distance)))
+        .collect::<Vec<_>>();
+    best.sort_by(|left, right| {
+        left.1
+            .cmp(&right.1)
+            .then_with(|| left.0.len().cmp(&right.0.len()))
+            .then_with(|| left.0.cmp(right.0))
+    });
+    best.first()
+        .filter(|(_, distance)| *distance <= 2)
+        .map(|(kind, _)| format!("kind:{kind}"))
+}
+
+fn edit_distance_at_most(left: &str, right: &str, max_distance: usize) -> Option<usize> {
+    if left.len().abs_diff(right.len()) > max_distance {
+        return None;
+    }
+    let mut previous = (0..=right.len()).collect::<Vec<_>>();
+    let mut current = vec![0; right.len() + 1];
+    for (left_index, left_byte) in left.bytes().enumerate() {
+        current[0] = left_index + 1;
+        let mut row_min = current[0];
+        for (right_index, right_byte) in right.bytes().enumerate() {
+            let substitution = usize::from(left_byte != right_byte);
+            current[right_index + 1] = (previous[right_index + 1] + 1)
+                .min(current[right_index] + 1)
+                .min(previous[right_index] + substitution);
+            row_min = row_min.min(current[right_index + 1]);
+        }
+        if row_min > max_distance {
+            return None;
+        }
+        std::mem::swap(&mut previous, &mut current);
+    }
+    (previous[right.len()] <= max_distance).then_some(previous[right.len()])
 }
 
 fn repair_hint(

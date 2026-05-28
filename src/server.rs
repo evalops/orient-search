@@ -1444,6 +1444,7 @@ fn retry_search_requests<T: Serialize>(
             continue;
         }
         let mut arguments = Map::new();
+        let replace_symbol_kind = hint.kind == "replace_symbol_kind_filter";
         if hint.kind == "relax_filters" {
             if let Some(source) = source_arguments.as_object() {
                 if let Some(refresh) = source.get("refresh_if_stale") {
@@ -1452,13 +1453,21 @@ fn retry_search_requests<T: Serialize>(
             }
         } else if let Some(source) = source_arguments.as_object() {
             for (name, value) in source {
+                if replace_symbol_kind && matches!(name.as_str(), "symbol_kind" | "kind" | "type") {
+                    continue;
+                }
                 if retry_search_passthrough_arg(name, target_name) {
                     arguments.insert(name.clone(), value.clone());
                 }
             }
         }
         if hint.kind != "relax_filters" {
-            add_plan_filter_args(&mut arguments, plan, target_name);
+            add_plan_filter_args(
+                &mut arguments,
+                plan,
+                target_name,
+                replace_symbol_kind.then_some("symbol_kind"),
+            );
         }
         arguments.insert(target_name.to_string(), json!(target_value));
         arguments.insert("query".to_string(), json!(query));
@@ -1487,9 +1496,17 @@ fn retry_search_passthrough_arg(name: &str, target_name: &str) -> bool {
     true
 }
 
-fn add_plan_filter_args(arguments: &mut Map<String, Value>, plan: &QueryPlan, target_name: &str) {
+fn add_plan_filter_args(
+    arguments: &mut Map<String, Value>,
+    plan: &QueryPlan,
+    target_name: &str,
+    skip_field: Option<&str>,
+) {
     let mut negated: HashMap<String, Vec<String>> = HashMap::default();
     for filter in &plan.active_filters {
+        if skip_field == Some(filter.field.as_str()) {
+            continue;
+        }
         if !filter.negated {
             if filter.field == "repo" && target_name == "repo" {
                 continue;

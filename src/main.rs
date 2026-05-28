@@ -897,8 +897,9 @@ fn cli_retry_requests<T: Serialize>(
         }
         let mut arguments = Map::new();
         if hint.kind != "relax_filters" {
-            add_filter_retry_args(&mut arguments, filters, target_name);
-            add_plan_filter_retry_args(&mut arguments, plan, target_name);
+            let skip_field = (hint.kind == "replace_symbol_kind_filter").then_some("symbol_kind");
+            add_filter_retry_args(&mut arguments, filters, target_name, skip_field);
+            add_plan_filter_retry_args(&mut arguments, plan, target_name, skip_field);
         }
         arguments.insert(target_name.to_string(), serde_json::json!(target_value));
         arguments.insert("query".to_string(), serde_json::json!(query));
@@ -915,13 +916,16 @@ fn add_filter_retry_args(
     arguments: &mut Map<String, Value>,
     filters: &SearchFilters,
     target_name: &str,
+    skip_field: Option<&str>,
 ) {
     insert_string_arg(arguments, "file", filters.file.as_ref());
     insert_string_arg(arguments, "path", filters.path.as_ref());
     insert_string_arg(arguments, "language", filters.language.as_ref());
     insert_string_arg(arguments, "extension", filters.extension.as_ref());
     insert_string_arg(arguments, "symbol", filters.symbol.as_ref());
-    insert_string_arg(arguments, "symbol_kind", filters.symbol_kind.as_ref());
+    if skip_field != Some("symbol_kind") {
+        insert_string_arg(arguments, "symbol_kind", filters.symbol_kind.as_ref());
+    }
     if target_name != "repo" {
         insert_string_arg(arguments, "repo", filters.repo.as_ref());
     }
@@ -961,9 +965,13 @@ fn add_plan_filter_retry_args(
     arguments: &mut Map<String, Value>,
     plan: &QueryPlan,
     target_name: &str,
+    skip_field: Option<&str>,
 ) {
     let mut negated: Map<String, Value> = Map::new();
     for filter in &plan.active_filters {
+        if skip_field == Some(filter.field.as_str()) {
+            continue;
+        }
         if !filter.negated {
             if filter.field == "repo" && target_name == "repo" {
                 continue;
