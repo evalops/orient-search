@@ -408,6 +408,7 @@ pub fn search_repo_fast_filtered_with_timeout(
 
     if let Some(results) = search_repo_ripgrep(
         &root,
+        &parsed.terms,
         &query_tokens,
         &query_phrases,
         limit,
@@ -493,8 +494,37 @@ fn search_repo_filter_only(
     Ok(finalize_results(results, limit))
 }
 
+fn ripgrep_patterns(
+    raw_terms: &[String],
+    query_tokens: &[String],
+    query_phrases: &[String],
+    filters: &SearchFilters,
+) -> Vec<String> {
+    let mut patterns = Vec::new();
+    if let Some(symbol) = &filters.symbol {
+        let symbol = symbol.trim();
+        if !symbol.is_empty() {
+            patterns.push(symbol.to_string());
+        }
+    }
+
+    let token_source = if filters.symbol.is_some() && !raw_terms.is_empty() {
+        unique_query_tokens(&raw_terms.join(" "))
+    } else if filters.symbol.is_some() {
+        Vec::new()
+    } else {
+        query_tokens.to_vec()
+    };
+    patterns.extend(token_source);
+    patterns.extend(query_phrases.iter().cloned());
+    patterns.sort();
+    patterns.dedup();
+    patterns
+}
+
 fn search_repo_ripgrep(
     root: &Path,
+    raw_terms: &[String],
     query_tokens: &[String],
     query_phrases: &[String],
     limit: usize,
@@ -536,11 +566,8 @@ fn search_repo_ripgrep(
         .arg("--glob")
         .arg("!target/**");
 
-    for token in query_tokens {
-        command.arg("-e").arg(token);
-    }
-    for phrase in query_phrases {
-        command.arg("-e").arg(phrase);
+    for pattern in ripgrep_patterns(raw_terms, query_tokens, query_phrases, filters) {
+        command.arg("-e").arg(pattern);
     }
     command.arg(".");
 
@@ -650,13 +677,13 @@ fn search_repo_ripgrep(
 
     let _ = child.wait();
     let mut results = scored.into_values().collect::<Vec<_>>();
+    retain_results_matching_file_symbol_filters(root, &mut results, filters);
     if filters.require_all {
         results.retain(|result| result_matches_all_tokens(result, query_tokens));
     }
     if !query_phrases.is_empty() {
         results.retain(|result| result_or_file_matches_phrases(root, result, query_phrases));
     }
-    results.retain(|result| result_matches_symbol_filters(result, filters));
     Ok(Some(finalize_results(results, limit)))
 }
 
@@ -706,11 +733,103 @@ fn search_repo_streaming(
         }
     }
 
+    retain_results_matching_file_symbol_filters(root, &mut results, filters);
     if filters.require_all {
         results.retain(|result| result_matches_all_tokens(result, query_tokens));
     }
-    results.retain(|result| result_matches_symbol_filters(result, filters));
     Ok(finalize_results(results, limit))
+}
+
+fn retain_results_matching_file_symbol_filters(
+    root: &Path,
+    results: &mut Vec<SearchResult>,
+    filters: &SearchFilters,
+) {
+    if filters.symbol.is_none() && filters.exclude_symbol.is_empty() {
+        return;
+    }
+    results.retain_mut(|result| result_matches_file_symbol_filters(root, result, filters));
+}
+
+fn result_matches_file_symbol_filters(
+    root: &Path,
+    result: &mut SearchResult,
+    filters: &SearchFilters,
+) -> bool {
+    let needs_file_check = filters
+        .symbol
+        .as_ref()
+        .is_some_and(|symbol| !reason_contains_symbol(&result.reason, symbol))
+        || !filters.exclude_symbol.is_empty();
+    if !needs_file_check {
+        return true;
+    }
+
+    let text = fs::read_to_string(root.join(&result.path)).unwrap_or_default();
+    if text.contains('\0') {
+        return false;
+    }
+    let Some(language) = language_for(Path::new(&result.path)) else {
+        return false;
+    };
+    let symbols = extract_symbols(&result.path, &text, &language);
+    if filters.exclude_symbol.iter().any(|wanted| {
+        symbols
+            .iter()
+            .any(|symbol| symbol_name_matches(symbol, wanted))
+    }) {
+        return false;
+    }
+    if let Some(wanted) = &filters.symbol {
+        let Some(symbol) = symbols
+            .iter()
+            .find(|symbol| symbol_name_matches(symbol, wanted))
+        else {
+            return false;
+        };
+        append_symbol_reason(result, &symbol.name);
+        anchor_result_on_symbol(result, &text, symbol, filters.snippet);
+    }
+    true
+}
+
+fn symbol_name_matches(symbol: &Symbol, wanted: &str) -> bool {
+    let wanted = normalize_token(wanted);
+    !wanted.is_empty() && normalize_token(&symbol.name) == wanted
+}
+
+fn append_symbol_reason(result: &mut SearchResult, symbol_name: &str) {
+    if reason_contains_symbol(&result.reason, symbol_name) {
+        return;
+    }
+    if result.reason.trim().is_empty() {
+        result.reason = format!("matched symbol:{symbol_name}");
+    } else {
+        result.reason.push_str(", symbol:");
+        result.reason.push_str(symbol_name);
+    }
+    result.score = round4(result.score + 20.0);
+}
+
+fn anchor_result_on_symbol(
+    result: &mut SearchResult,
+    text: &str,
+    symbol: &Symbol,
+    snippet_mode: SnippetMode,
+) {
+    if result
+        .snippet
+        .to_ascii_lowercase()
+        .contains(&symbol.name.to_ascii_lowercase())
+    {
+        return;
+    }
+    let (before, after) = snippet_mode.window();
+    let start_line = symbol.line.saturating_sub(before).max(1);
+    let line_count = before + after + 1;
+    let range = file_range_from_text(&result.path, text, start_line, line_count);
+    result.snippet = range.text.chars().take(snippet_mode.max_chars()).collect();
+    result.match_lines.push(symbol.line);
 }
 
 fn merge_match_result(

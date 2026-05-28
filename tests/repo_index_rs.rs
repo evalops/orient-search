@@ -2,7 +2,9 @@ use std::fs;
 use std::path::Path;
 
 use orient::fast_index::FastIndex;
-use orient::repo_index::{MAX_READ_RANGE_LINES, RepoIndexer, read_file_range};
+use orient::repo_index::{
+    MAX_READ_RANGE_LINES, RepoIndexer, read_file_range, search_repo_fast_filtered,
+};
 
 fn write(path: &Path, text: &str) {
     fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -153,6 +155,43 @@ def test_issue_token_round_trip():
         "{:?}",
         map.related_symbols
     );
+}
+
+#[test]
+fn fallback_symbol_filter_finds_deep_private_definition_after_broad_hits() {
+    let repo = tempfile::tempdir().unwrap();
+    let mut source = String::new();
+    for index in 0..40 {
+        source.push_str(&format!(
+            "// early broad token noise {index}: target symbol name routing\n"
+        ));
+    }
+    source.push_str("fn target_symbol_name() -> bool { true }\n");
+    write(&repo.path().join("src/lib.rs"), &source);
+
+    let results = search_repo_fast_filtered(
+        repo.path(),
+        "symbol:target_symbol_name",
+        5,
+        &Default::default(),
+    )
+    .unwrap();
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].path, "src/lib.rs");
+    assert!(results[0].reason.contains("symbol:target_symbol_name"));
+    assert!(results[0].snippet.contains("target_symbol_name"));
+
+    let mixed = search_repo_fast_filtered(
+        repo.path(),
+        "routing symbol:target_symbol_name",
+        5,
+        &Default::default(),
+    )
+    .unwrap();
+    assert_eq!(mixed.len(), 1);
+    assert!(mixed[0].reason.contains("symbol:target_symbol_name"));
+    assert!(mixed[0].snippet.contains("target_symbol_name"));
 }
 
 #[test]
