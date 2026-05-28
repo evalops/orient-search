@@ -1554,6 +1554,29 @@ fn cli_search_surfaces_accept_structured_filters() {
         .stdout(predicate::str::contains("\"query\":\"session manager\""))
         .stdout(predicate::str::contains("\"path\":\"src\""));
 
+    let mut generic_index_plan = Command::cargo_bin("orient").unwrap();
+    generic_index_plan
+        .args([
+            "search-plan",
+            "--index",
+            index_path.to_str().unwrap(),
+            "SessionManager definitely_missing",
+            "--dir",
+            "src",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"active_filters\""))
+        .stdout(predicate::str::contains("\"missing_terms\""))
+        .stdout(predicate::str::contains("drop_missing_terms"))
+        .stdout(predicate::str::contains("\"retry_requests\""))
+        .stdout(predicate::str::contains("\"tool\":\"search\""))
+        .stdout(predicate::str::contains(&format!(
+            "\"index\":\"{}\"",
+            index_path.display()
+        )))
+        .stdout(predicate::str::contains("\"query\":\"session manager\""));
+
     let mut index_plan_batch = Command::cargo_bin("orient").unwrap();
     index_plan_batch
         .args([
@@ -1573,6 +1596,27 @@ fn cli_search_surfaces_accept_structured_filters() {
         .stdout(predicate::str::contains("\"missing_terms\""))
         .stdout(predicate::str::contains("absentterm"))
         .stdout(predicate::str::contains("drop_missing_terms"));
+
+    let mut generic_index_plan_batch = Command::cargo_bin("orient").unwrap();
+    generic_index_plan_batch
+        .args([
+            "search-plan-batch",
+            "--index",
+            index_path.to_str().unwrap(),
+            "--require-all",
+            "SessionManager definitely_missing",
+            "issue absentterm",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "\"query\":\"SessionManager definitely_missing\"",
+        ))
+        .stdout(predicate::str::contains("\"query\":\"issue absentterm\""))
+        .stdout(predicate::str::contains("\"missing_terms\""))
+        .stdout(predicate::str::contains("drop_missing_terms"))
+        .stdout(predicate::str::contains("\"tool\":\"search\""))
+        .stdout(predicate::str::contains("\"index\""));
 
     let shard_dir = tempfile::tempdir().unwrap();
     let mut build_shards = Command::cargo_bin("orient").unwrap();
@@ -1791,6 +1835,28 @@ fn cli_batches_searches_across_fallback_indexed_and_shards() {
         .stdout(predicate::str::contains("\"plans\""))
         .stdout(predicate::str::contains("\"missing_terms\""))
         .stdout(predicate::str::contains("drop_missing_terms"));
+
+    let mut generic_shard_plan_batch = Command::cargo_bin("orient").unwrap();
+    generic_shard_plan_batch
+        .args([
+            "search-plan-batch",
+            "--index-dir",
+            shard_dir.path().to_str().unwrap(),
+            "--require-all",
+            "SessionManager missingterm",
+            "invoice absentterm",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "\"query\":\"SessionManager missingterm\"",
+        ))
+        .stdout(predicate::str::contains("\"query\":\"invoice absentterm\""))
+        .stdout(predicate::str::contains("\"plans\""))
+        .stdout(predicate::str::contains("\"missing_terms\""))
+        .stdout(predicate::str::contains("drop_missing_terms"))
+        .stdout(predicate::str::contains("\"tool\":\"search\""))
+        .stdout(predicate::str::contains("\"index_dir\""));
 }
 
 #[test]
@@ -2859,6 +2925,26 @@ fn cli_filters_shard_search_by_nested_repo_alias() {
         .stdout(predicate::str::contains("\"tool\":\"search_shards\""))
         .stdout(predicate::str::contains("\"query\":\"invoice\""))
         .stdout(predicate::str::contains("\"path\":\"billing\""))
+        .stdout(predicate::str::contains("\"name\":\"auth\"").not());
+
+    let mut generic_shard_plan = Command::cargo_bin("orient").unwrap();
+    generic_shard_plan
+        .args([
+            "search-plan",
+            "--index-dir",
+            shard_dir.path().to_str().unwrap(),
+            "repo:billing invoice missingterm",
+            "--require-all",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"name\":\"billing\""))
+        .stdout(predicate::str::contains("\"missing_terms\""))
+        .stdout(predicate::str::contains("missingterm"))
+        .stdout(predicate::str::contains("\"retry_requests\""))
+        .stdout(predicate::str::contains("\"tool\":\"search\""))
+        .stdout(predicate::str::contains("\"index_dir\""))
+        .stdout(predicate::str::contains("\"query\":\"invoice\""))
         .stdout(predicate::str::contains("\"name\":\"auth\"").not());
 
     let mut shard_symbol = Command::cargo_bin("orient").unwrap();

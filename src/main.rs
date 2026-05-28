@@ -308,22 +308,34 @@ enum Commands {
     SearchPlan {
         #[arg(long, default_value = ".")]
         repo: PathBuf,
+        #[arg(long, conflicts_with = "index_dir")]
+        index: Option<PathBuf>,
+        #[arg(long, conflicts_with = "index")]
+        index_dir: Option<PathBuf>,
         #[arg(allow_hyphen_values = true)]
         query: String,
         #[arg(long = "repo-filter")]
         repo_filter: Option<String>,
         #[command(flatten)]
         filters: CommonSearchArgs,
+        #[arg(long)]
+        refresh_if_stale: bool,
     },
     SearchPlanBatch {
         #[arg(long, default_value = ".")]
         repo: PathBuf,
+        #[arg(long, conflicts_with = "index_dir")]
+        index: Option<PathBuf>,
+        #[arg(long, conflicts_with = "index")]
+        index_dir: Option<PathBuf>,
         #[arg(required = true, allow_hyphen_values = true)]
         queries: Vec<String>,
         #[arg(long = "repo-filter")]
         repo_filter: Option<String>,
         #[command(flatten)]
         filters: CommonSearchArgs,
+        #[arg(long)]
+        refresh_if_stale: bool,
     },
     #[command(alias = "open-range")]
     ReadRange {
@@ -1177,10 +1189,19 @@ fn attach_cli_shard_retry_requests(
     index_dir: &Path,
     filters: &SearchFilters,
 ) {
+    attach_cli_shard_retry_requests_with_tool(plans, "search_shards", index_dir, filters);
+}
+
+fn attach_cli_shard_retry_requests_with_tool(
+    plans: &mut [ShardQueryPlan],
+    search_tool: &str,
+    index_dir: &Path,
+    filters: &SearchFilters,
+) {
     for shard_plan in plans {
         shard_plan.plan = attach_cli_retry_requests(
             shard_plan.plan.clone(),
-            "search_shards",
+            search_tool,
             "index_dir",
             index_dir,
             filters,
@@ -1642,42 +1663,98 @@ fn run() -> Result<()> {
         }
         Commands::SearchPlan {
             repo,
+            index,
+            index_dir,
             query,
             repo_filter,
             filters,
+            refresh_if_stale,
         } => {
-            let index = FastIndex::build(repo)?;
             let filters = search_filters_from_args(&filters, repo_filter)?;
-            let plan = attach_cli_retry_requests(
-                index.query_plan(&query, &filters)?,
-                "search_code",
-                "repo",
-                &index.root,
-                &filters,
-            );
-            println!("{}", serde_json::to_string(&plan)?);
-        }
-        Commands::SearchPlanBatch {
-            repo,
-            queries,
-            repo_filter,
-            filters,
-        } => {
-            let queries = cli_batch_queries(queries)?;
-            let index = FastIndex::build(repo)?;
-            let filters = search_filters_from_args(&filters, repo_filter)?;
-            let mut batch = Vec::new();
-            for query in queries {
+            if let Some(index_dir) = index_dir {
+                if refresh_if_stale && shard_status(&index_dir)?.stale {
+                    refresh_shards(&index_dir)?;
+                }
+                let mut plans = shard_query_plans(&index_dir, &query, &filters)?;
+                attach_cli_shard_retry_requests_with_tool(
+                    &mut plans, "search", &index_dir, &filters,
+                );
+                println!("{}", serde_json::to_string(&plans)?);
+            } else if let Some(index_path) = index {
+                let index = load_index_for_search(index_path.clone(), refresh_if_stale)?;
                 let plan = attach_cli_retry_requests(
                     index.query_plan(&query, &filters)?,
-                    "search_code",
+                    "search",
+                    "index",
+                    &index_path,
+                    &filters,
+                );
+                println!("{}", serde_json::to_string(&plan)?);
+            } else {
+                let index = FastIndex::build(repo)?;
+                let plan = attach_cli_retry_requests(
+                    index.query_plan(&query, &filters)?,
+                    "search",
                     "repo",
                     &index.root,
                     &filters,
                 );
-                batch.push(QueryPlanBatchResult { query, plan });
+                println!("{}", serde_json::to_string(&plan)?);
             }
-            println!("{}", serde_json::to_string(&batch)?);
+        }
+        Commands::SearchPlanBatch {
+            repo,
+            index,
+            index_dir,
+            queries,
+            repo_filter,
+            filters,
+            refresh_if_stale,
+        } => {
+            let queries = cli_batch_queries(queries)?;
+            let filters = search_filters_from_args(&filters, repo_filter)?;
+            if let Some(index_dir) = index_dir {
+                if refresh_if_stale && shard_status(&index_dir)?.stale {
+                    refresh_shards(&index_dir)?;
+                }
+                let mut batch = Vec::new();
+                for query in queries {
+                    let mut plans = shard_query_plans(&index_dir, &query, &filters)?;
+                    attach_cli_shard_retry_requests_with_tool(
+                        &mut plans, "search", &index_dir, &filters,
+                    );
+                    batch.push(ShardQueryPlanBatchResult { query, plans });
+                }
+                println!("{}", serde_json::to_string(&batch)?);
+            } else if let Some(index_path) = index {
+                let index = load_index_for_search(index_path.clone(), refresh_if_stale)?;
+                let mut batch = Vec::new();
+                for query in queries {
+                    let plan = attach_cli_retry_requests(
+                        index.query_plan(&query, &filters)?,
+                        "search",
+                        "index",
+                        &index_path,
+                        &filters,
+                    );
+                    batch.push(QueryPlanBatchResult { query, plan });
+                }
+                println!("{}", serde_json::to_string(&batch)?);
+            } else {
+                let index = FastIndex::build(repo)?;
+                let mut batch = Vec::new();
+                for query in queries {
+                    let plan = attach_cli_retry_requests(
+                        index.query_plan(&query, &filters)?,
+                        "search",
+                        "repo",
+                        &index.root,
+                        &filters,
+                    );
+                    batch.push(QueryPlanBatchResult { query, plan });
+                }
+                println!("{}", serde_json::to_string(&batch)?);
+            }
         }
         Commands::ReadRange {
             repo,

@@ -89,9 +89,10 @@ use `detail:"full"` only when an agent needs the full available import/module
 hint set. Their bundled `read_batch_request` defaults to 16 ranges and accepts
 `read_limit` up to 64 for deliberate wider reads.
 
-For a repo without a saved index, use `orient search-plan --repo . "query"` or
-the JSON-lines `search_query_plan` tool to get the same missing-term and retry
-diagnostics from a transient local index.
+For empty or noisy searches, use `orient search-plan --repo . "query"`,
+`orient search-plan --index /tmp/repo.index "query"`, or
+`orient search-plan --index-dir /tmp/orient-shards "query"` to get missing-term
+and retry diagnostics on the same target style as search.
 
 Filters: `repo:`, `path:`/`dir:`, `file:`, `lang:`, `ext:`, `symbol:`,
 `kind:`/`type:`, `dep:`, `import:`, `test:`, `is:test`, `is:source`,
