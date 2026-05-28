@@ -2500,6 +2500,18 @@ fn runtime_filters_shard_search_by_nested_repo_alias() {
         search_result[0]["read_request"]["arguments"]["index_dir"],
         serde_json::json!(shard_dir.path())
     );
+    assert_eq!(
+        search_result[0]["related_request"]["tool"],
+        serde_json::json!("related_shard_files")
+    );
+    assert_eq!(
+        search_result[0]["related_request"]["arguments"]["path"],
+        serde_json::json!("billing/src/billing.rs")
+    );
+    assert_eq!(
+        search_result[0]["related_request"]["arguments"]["index_dir"],
+        serde_json::json!(shard_dir.path())
+    );
     let result = serde_json::to_string(&search.result).unwrap();
     assert!(result.contains("billing/src/billing.rs"), "{result}");
     assert!(!result.contains("auth/src/auth.rs"), "{result}");
@@ -3423,6 +3435,8 @@ fn server_handles_indexed_search_request() {
     assert!(stdout.contains("\"read_range\""));
     assert!(stdout.contains("\"read_request\""));
     assert!(stdout.contains("\"tool\":\"read_index_range\""));
+    assert!(stdout.contains("\"related_request\""));
+    assert!(stdout.contains("\"tool\":\"related_index_files\""));
     assert!(stdout.contains("\"context\""));
     assert!(stdout.contains("\"id\":\"read-index-range\""));
     assert!(stdout.contains("\"path\":\"src/auth.rs\""));

@@ -1604,6 +1604,7 @@ impl FastIndex {
             context: None,
             read_range: None,
             read_request: None,
+            related_request: None,
         })
     }
 }

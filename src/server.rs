@@ -6,8 +6,8 @@ use crate::query::{merge_filters, parse_query, query_text};
 use crate::repo_index::{
     MAX_ATTACHED_CONTEXT_LINES, MAX_READ_RANGE_LINES, MAX_SEARCH_RESULTS, QueryPlan, RepoIndexer,
     SearchFilters, SearchResult, SnippetMode, Symbol, attach_result_context,
-    attach_result_read_requests, finalize_results, normalize_token, read_file_range,
-    search_repo_fast_filtered,
+    attach_result_read_requests, attach_result_related_requests, finalize_results, normalize_token,
+    read_file_range, search_repo_fast_filtered,
 };
 use crate::shards::{
     ShardEntry, ShardManifest, ShardQueryPlan, ShardRepoMap, ShardSearchScope, build_shards,
@@ -1219,6 +1219,11 @@ impl ToolRuntime {
                     "read_range",
                     read_request_args("repo", &repo),
                 );
+                attach_result_related_requests(
+                    &mut results,
+                    "related_files",
+                    read_request_args("repo", &repo),
+                );
                 Ok(serde_json::to_value(results)?)
             }
             "search_batch" => {
@@ -1236,6 +1241,11 @@ impl ToolRuntime {
                     attach_result_read_requests(
                         &mut results,
                         "read_range",
+                        read_request_args("repo", &repo),
+                    );
+                    attach_result_related_requests(
+                        &mut results,
+                        "related_files",
                         read_request_args("repo", &repo),
                     );
                     batch.push(SearchBatchResult { query, results });
@@ -1284,6 +1294,11 @@ impl ToolRuntime {
                     "read_index_range",
                     read_request_args("index", &index_path),
                 );
+                attach_result_related_requests(
+                    &mut results,
+                    "related_index_files",
+                    read_request_args("index", &index_path),
+                );
                 Ok(serde_json::to_value(results)?)
             }
             "indexed_search_batch" => {
@@ -1304,6 +1319,11 @@ impl ToolRuntime {
                     attach_result_read_requests(
                         &mut results,
                         "read_index_range",
+                        read_request_args("index", &index_path),
+                    );
+                    attach_result_related_requests(
+                        &mut results,
+                        "related_index_files",
                         read_request_args("index", &index_path),
                     );
                     batch.push(SearchBatchResult { query, results });
@@ -1935,6 +1955,11 @@ impl ToolRuntime {
         attach_result_read_requests(
             &mut results,
             "read_shard_range",
+            read_request_args("index_dir", index_dir),
+        );
+        attach_result_related_requests(
+            &mut results,
+            "related_shard_files",
             read_request_args("index_dir", index_dir),
         );
         Ok(results)

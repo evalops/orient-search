@@ -82,7 +82,9 @@ pub struct SearchResult {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub read_range: Option<ResultReadRange>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub read_request: Option<ResultReadRequest>,
+    pub read_request: Option<ResultToolRequest>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub related_request: Option<ResultToolRequest>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -93,10 +95,12 @@ pub struct ResultReadRange {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ResultReadRequest {
+pub struct ResultToolRequest {
     pub tool: String,
     pub arguments: serde_json::Value,
 }
+
+pub type ResultReadRequest = ResultToolRequest;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RankSignal {
@@ -1332,6 +1336,7 @@ fn merge_match_result(
             context: None,
             read_range: None,
             read_request: None,
+            related_request: None,
         });
 }
 
@@ -1479,6 +1484,7 @@ impl RepoIndex {
                     context: None,
                     read_range: None,
                     read_request: None,
+                    related_request: None,
                 });
             }
         }
@@ -2947,6 +2953,7 @@ fn score_text_file(
         context: None,
         read_range: None,
         read_request: None,
+        related_request: None,
     })
 }
 
@@ -3401,6 +3408,21 @@ pub fn attach_result_read_requests(
         arguments.insert("start".to_string(), serde_json::json!(read_range.start));
         arguments.insert("lines".to_string(), serde_json::json!(read_range.lines));
         result.read_request = Some(ResultReadRequest {
+            tool: tool.to_string(),
+            arguments: serde_json::Value::Object(arguments),
+        });
+    }
+}
+
+pub fn attach_result_related_requests(
+    results: &mut [SearchResult],
+    tool: &str,
+    base_arguments: serde_json::Map<String, serde_json::Value>,
+) {
+    for result in results {
+        let mut arguments = base_arguments.clone();
+        arguments.insert("path".to_string(), serde_json::json!(result.path.clone()));
+        result.related_request = Some(ResultToolRequest {
             tool: tool.to_string(),
             arguments: serde_json::Value::Object(arguments),
         });
@@ -3893,6 +3915,7 @@ pub(crate) fn filter_only_search_result(
         context: None,
         read_range: None,
         read_request: None,
+        related_request: None,
     }
 }
 

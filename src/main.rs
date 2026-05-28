@@ -6,7 +6,8 @@ use orient::discover::{
 use orient::fast_index::{FastIndex, RefreshStats};
 use orient::repo_index::{
     QueryPlan, RepoIndexer, SearchFilters, SearchResult, SnippetMode, attach_result_context,
-    attach_result_read_requests, read_file_range, search_repo_fast_filtered,
+    attach_result_read_requests, attach_result_related_requests, read_file_range,
+    search_repo_fast_filtered,
 };
 use orient::server::{
     MAX_BATCH_QUERIES, MAX_BATCH_RANGES, ToolRuntime, mcp_tool_manifest, serve_jsonl,
@@ -894,6 +895,11 @@ fn run() -> Result<()> {
                 "read_shard_range",
                 read_request_args("index_dir", &index_dir),
             );
+            attach_result_related_requests(
+                &mut results,
+                "related_shard_files",
+                read_request_args("index_dir", &index_dir),
+            );
             println!("{}", serde_json::to_string(&results)?);
         }
         Commands::SearchShardsBatch {
@@ -919,6 +925,11 @@ fn run() -> Result<()> {
                 attach_result_read_requests(
                     &mut results,
                     "read_shard_range",
+                    read_request_args("index_dir", &index_dir),
+                );
+                attach_result_related_requests(
+                    &mut results,
+                    "related_shard_files",
                     read_request_args("index_dir", &index_dir),
                 );
                 batch.push(SearchBatchResult { query, results });
@@ -1169,6 +1180,11 @@ fn run() -> Result<()> {
                 "read_range",
                 read_request_args("repo", &repo),
             );
+            attach_result_related_requests(
+                &mut results,
+                "related_files",
+                read_request_args("repo", &repo),
+            );
             println!("{}", serde_json::to_string(&results)?);
         }
         Commands::SearchBatch {
@@ -1190,6 +1206,11 @@ fn run() -> Result<()> {
                 attach_result_read_requests(
                     &mut results,
                     "read_range",
+                    read_request_args("repo", &repo),
+                );
+                attach_result_related_requests(
+                    &mut results,
+                    "related_files",
                     read_request_args("repo", &repo),
                 );
                 batch.push(SearchBatchResult { query, results });
@@ -1217,6 +1238,11 @@ fn run() -> Result<()> {
                 "read_index_range",
                 read_request_args("index", &index_path),
             );
+            attach_result_related_requests(
+                &mut results,
+                "related_index_files",
+                read_request_args("index", &index_path),
+            );
             println!("{}", serde_json::to_string(&results)?);
         }
         Commands::IndexedSearchBatch {
@@ -1241,6 +1267,11 @@ fn run() -> Result<()> {
                 attach_result_read_requests(
                     &mut results,
                     "read_index_range",
+                    read_request_args("index", &index_path),
+                );
+                attach_result_related_requests(
+                    &mut results,
+                    "related_index_files",
                     read_request_args("index", &index_path),
                 );
                 batch.push(SearchBatchResult { query, results });
