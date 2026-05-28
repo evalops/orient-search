@@ -661,7 +661,7 @@ fn argument_schema(tool_name: &str, name: &str) -> Value {
     let mut schema = Map::new();
     match name {
         "exclude_file" | "exclude_path" | "exclude_language" | "exclude_extension"
-        | "exclude_symbol" | "exclude_repo" => {
+        | "exclude_symbol" | "exclude_repo" | "exclude_dependency" => {
             schema.insert(
                 "oneOf".to_string(),
                 json!([
@@ -802,7 +802,7 @@ fn argument_type(name: &str) -> &'static str {
         "test" | "explain" | "require_all" | "refresh_if_stale" | "git_metadata"
         | "tracked_files" | "nested_manifests" => "boolean",
         "exclude_file" | "exclude_path" | "exclude_language" | "exclude_extension"
-        | "exclude_symbol" | "exclude_repo" => "string|string[]",
+        | "exclude_symbol" | "exclude_repo" | "exclude_dependency" => "string|string[]",
         "ranges" => "range[]",
         "repos" | "discover_roots" | "queries" => "string[]",
         _ => "string",
@@ -888,6 +888,7 @@ fn argument_description(name: &str) -> &'static str {
         "language" => "Detected language filter, such as rust, python, or typescript.",
         "extension" => "File extension filter with or without a leading dot.",
         "symbol" => "Symbol name to require or boost.",
+        "dependency" => "Dependency name substring used as a repo-level search filter.",
         "file" => "File basename substring filter.",
         "test" => "When true, include only test paths; when false, exclude test paths.",
         "snippet" => "Snippet mode: short, medium, block, or symbol.",
@@ -903,6 +904,7 @@ fn argument_description(name: &str) -> &'static str {
         "exclude_extension" => "Extension or list of extensions to exclude.",
         "exclude_symbol" => "Symbol name or list of symbols to exclude.",
         "exclude_repo" => "Repository name substring or list of substrings to exclude.",
+        "exclude_dependency" => "Dependency name or list of dependency substrings to exclude.",
         "root" | "discover_root" => "Workspace root to scan for repositories.",
         "discover_roots" => "Workspace roots to scan for repositories.",
         "repos" => "Explicit repository roots to add to a shard directory.",
@@ -2161,6 +2163,7 @@ const SEARCH_OPTIONAL_ARGS: &[&str] = &[
     "language",
     "extension",
     "symbol",
+    "dependency",
     "file",
     "repo_filter",
     "test",
@@ -2174,6 +2177,7 @@ const SEARCH_OPTIONAL_ARGS: &[&str] = &[
     "exclude_extension",
     "exclude_symbol",
     "exclude_repo",
+    "exclude_dependency",
 ];
 
 const SEARCH_INDEX_OPTIONAL_ARGS: &[&str] = &[
@@ -2183,6 +2187,7 @@ const SEARCH_INDEX_OPTIONAL_ARGS: &[&str] = &[
     "language",
     "extension",
     "symbol",
+    "dependency",
     "file",
     "repo",
     "repo_filter",
@@ -2198,6 +2203,7 @@ const SEARCH_INDEX_OPTIONAL_ARGS: &[&str] = &[
     "exclude_extension",
     "exclude_symbol",
     "exclude_repo",
+    "exclude_dependency",
 ];
 
 const PLAN_INDEX_OPTIONAL_ARGS: &[&str] = &[
@@ -2206,6 +2212,7 @@ const PLAN_INDEX_OPTIONAL_ARGS: &[&str] = &[
     "language",
     "extension",
     "symbol",
+    "dependency",
     "file",
     "repo",
     "repo_filter",
@@ -2218,6 +2225,7 @@ const PLAN_INDEX_OPTIONAL_ARGS: &[&str] = &[
     "exclude_extension",
     "exclude_symbol",
     "exclude_repo",
+    "exclude_dependency",
 ];
 
 const SHARD_BUILD_OPTIONAL_ARGS: &[&str] = &[
@@ -2570,6 +2578,8 @@ fn search_filters(arguments: &Value, allow_repo_alias: bool) -> Result<SearchFil
         language: optional_string_arg(arguments, "language"),
         extension: optional_string_arg(arguments, "extension"),
         symbol: optional_string_arg(arguments, "symbol"),
+        dependency: optional_string_arg(arguments, "dependency")
+            .map(|value| value.to_ascii_lowercase()),
         file: optional_string_arg(arguments, "file"),
         repo: if allow_repo_alias {
             optional_string_arg_any(arguments, &["repo", "repo_filter"])
@@ -2595,6 +2605,7 @@ fn search_filters(arguments: &Value, allow_repo_alias: bool) -> Result<SearchFil
         exclude_extension: normalized_string_list_arg(arguments, "exclude_extension")?,
         exclude_symbol: optional_string_list_arg(arguments, "exclude_symbol")?,
         exclude_repo: optional_string_list_arg(arguments, "exclude_repo")?,
+        exclude_dependency: normalized_string_list_arg(arguments, "exclude_dependency")?,
         ..SearchFilters::default()
     })
 }

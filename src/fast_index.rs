@@ -5,11 +5,11 @@ use crate::repo_index::{
     FileRange, QueryPlan, QueryPlanFilter, QueryPlanPosting, QueryPlanRepairHint, RankSignal,
     RelatedFile, RelatedSymbol, RepoBrief, RepoMap, SearchFilters, SearchResult, SnippetMode,
     Symbol, apply_phrase_matches, best_snippet_for_path, capped_search_limit,
-    command_hints_from_manifest_texts, dependency_hints_from_manifest_texts, extract_symbols,
-    file_range_from_text, filter_only_query, filter_only_search_result, finalize_results,
-    is_entrypoint_path, is_ignored, is_important_file, is_manifest_file, is_test_path,
-    known_commands_from_hints, language_for, matches_filters, normalize_token,
-    regular_file_metadata, related_stem_terms, repo_map_seed_paths, repo_matches,
+    command_hints_from_manifest_texts, dependency_filters_match,
+    dependency_hints_from_manifest_texts, extract_symbols, file_range_from_text, filter_only_query,
+    filter_only_search_result, finalize_results, is_entrypoint_path, is_ignored, is_important_file,
+    is_manifest_file, is_test_path, known_commands_from_hints, language_for, matches_filters,
+    normalize_token, regular_file_metadata, related_stem_terms, repo_map_seed_paths, repo_matches,
     result_matches_all_tokens, result_matches_symbol_filters, round4, score_filter_only_path,
     symbol_kind_rank, token_counts, tokenize,
 };
@@ -593,6 +593,13 @@ impl FastIndex {
         related
     }
 
+    fn matches_dependency_filters(&self, filters: &SearchFilters) -> bool {
+        if filters.dependency.is_none() && filters.exclude_dependency.is_empty() {
+            return true;
+        }
+        dependency_filters_match(&dependency_hints_from_indexed_files(&self.files), filters)
+    }
+
     pub fn find_symbol(&self, name: &str, limit: usize) -> Vec<Symbol> {
         let needle = normalize_token(name);
         if needle.is_empty() || limit == 0 {
@@ -880,6 +887,9 @@ impl FastIndex {
         if !repo_matches(&self.root, &filters) {
             return Ok(Vec::new());
         }
+        if !self.matches_dependency_filters(&filters) {
+            return Ok(Vec::new());
+        }
         let query = query_text(&parsed.terms, &filters);
         let query_tokens = tokenize(&query);
         let query_trigrams = query_trigrams(&query);
@@ -1112,6 +1122,30 @@ impl FastIndex {
                 repair_hints: vec![repair_hint(
                     "repo_filter_mismatch",
                     "The repo: filter does not match this index root. Relax repo: or choose a matching shard/index.",
+                    None,
+                )],
+            });
+        }
+        if !self.matches_dependency_filters(&filters) {
+            return Ok(QueryPlan {
+                strategy: "dependency_filter_mismatch".to_string(),
+                require_all: filters.require_all,
+                query_tokens: Vec::new(),
+                query_phrases,
+                query_trigrams: Vec::new(),
+                active_filters: query_plan_filters(&filters),
+                planned_postings: Vec::new(),
+                missing_terms: Vec::new(),
+                missing_trigrams: Vec::new(),
+                candidate_count: 0,
+                candidate_cap: MAX_INDEX_CANDIDATES_TO_SCORE,
+                candidate_cap_hit: false,
+                filtered_candidate_count: 0,
+                scored_candidate_count: 0,
+                final_match_count: 0,
+                repair_hints: vec![repair_hint(
+                    "dependency_filter_mismatch",
+                    "The dependency filter does not match this index. Relax dep: or choose a matching shard/index.",
                     None,
                 )],
             });
@@ -1620,6 +1654,9 @@ fn query_plan_filters(filters: &SearchFilters) -> Vec<QueryPlanFilter> {
     if let Some(value) = &filters.repo {
         active.push(plan_filter("repo", value, false));
     }
+    if let Some(value) = &filters.dependency {
+        active.push(plan_filter("dependency", value, false));
+    }
     if let Some(value) = filters.test {
         active.push(plan_filter("test", &value.to_string(), false));
     }
@@ -1640,6 +1677,9 @@ fn query_plan_filters(filters: &SearchFilters) -> Vec<QueryPlanFilter> {
     }
     for value in &filters.exclude_repo {
         active.push(plan_filter("repo", value, true));
+    }
+    for value in &filters.exclude_dependency {
+        active.push(plan_filter("dependency", value, true));
     }
     active
 }
@@ -1663,7 +1703,7 @@ fn query_plan_filters_for_candidates(
     query_plan_filters(filters)
         .into_iter()
         .map(|mut filter| {
-            if filter.field != "repo" {
+            if !matches!(filter.field.as_str(), "repo" | "dependency") {
                 let matched = candidate_ids
                     .iter()
                     .filter_map(|file_id| files.get(*file_id as usize))

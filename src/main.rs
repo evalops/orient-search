@@ -543,6 +543,8 @@ struct CommonSearchArgs {
     file: Option<String>,
     #[arg(long)]
     symbol: Option<String>,
+    #[arg(long, alias = "dep", alias = "deps")]
+    dependency: Option<String>,
     #[arg(long)]
     test: Option<bool>,
     #[arg(long)]
@@ -563,6 +565,12 @@ struct CommonSearchArgs {
     exclude_symbol: Vec<String>,
     #[arg(long = "exclude-repo")]
     exclude_repo: Vec<String>,
+    #[arg(
+        long = "exclude-dependency",
+        alias = "exclude-dep",
+        alias = "exclude-deps"
+    )]
+    exclude_dependency: Vec<String>,
 }
 
 fn search_filters_from_args(
@@ -579,6 +587,10 @@ fn search_filters_from_args(
             .map(|value| normalize_extension(value)),
         symbol: args.symbol.clone(),
         repo,
+        dependency: args
+            .dependency
+            .as_ref()
+            .map(|value| normalize_filter(value)),
         test: args.test,
         require_all: args.require_all,
         snippet: snippet_mode_arg(&args.snippet)?,
@@ -597,6 +609,11 @@ fn search_filters_from_args(
             .collect(),
         exclude_symbol: args.exclude_symbol.clone(),
         exclude_repo: args.exclude_repo.clone(),
+        exclude_dependency: args
+            .exclude_dependency
+            .iter()
+            .map(|value| normalize_filter(value))
+            .collect(),
     })
 }
 

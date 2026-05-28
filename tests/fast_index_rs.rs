@@ -8,6 +8,7 @@ use orient::repo_index::{
     MAX_READ_RANGE_LINES, MAX_SEARCH_RESULTS, SearchFilters, SnippetMode, attach_result_context,
     search_repo_fast_filtered, search_repo_fast_filtered_with_timeout,
 };
+use orient::shards::{build_shards, search_shards};
 
 fn write(path: &Path, text: &str) {
     fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -1344,6 +1345,90 @@ fn fast_search_deduplicates_repeated_manifest_hits_by_snippet() {
     assert_eq!(group.canonical_path, "Cargo.toml");
     assert_eq!(group.duplicate_count, 1);
     assert_eq!(group.duplicate_paths, vec!["beta/Cargo.toml"]);
+}
+
+#[test]
+fn dependency_filters_scope_fallback_indexed_and_shard_search() {
+    let workspace = tempfile::tempdir().unwrap();
+    let rust_repo = workspace.path().join("rust-api");
+    let react_repo = workspace.path().join("react-ui");
+    write(
+        &rust_repo.join("Cargo.toml"),
+        "[package]\nname='rust-api'\nversion='0.1.0'\n[dependencies]\nserde='1'\n",
+    );
+    write(
+        &rust_repo.join("src/lib.rs"),
+        "pub fn issue_token() { let token = \"serde backed\"; }\n",
+    );
+    write(
+        &react_repo.join("package.json"),
+        r#"{"dependencies":{"react":"latest"}}"#,
+    );
+    write(
+        &react_repo.join("src/lib.ts"),
+        "export function issueToken() { return 'react backed token'; }\n",
+    );
+
+    let fallback = search_repo_fast_filtered(
+        &rust_repo,
+        "dep:serde issue token",
+        10,
+        &SearchFilters::default(),
+    )
+    .unwrap();
+    assert_eq!(fallback[0].path, "src/lib.rs");
+    assert!(
+        search_repo_fast_filtered(
+            &rust_repo,
+            "dep:react issue token",
+            10,
+            &SearchFilters::default()
+        )
+        .unwrap()
+        .is_empty()
+    );
+
+    let index = FastIndex::build(&rust_repo).unwrap();
+    assert_eq!(
+        index
+            .search_filtered(
+                "dependency:serde issue token",
+                10,
+                &SearchFilters::default()
+            )
+            .unwrap()[0]
+            .path,
+        "src/lib.rs"
+    );
+    assert!(
+        index
+            .search_filtered("-dep:serde issue token", 10, &SearchFilters::default())
+            .unwrap()
+            .is_empty()
+    );
+    let plan = index
+        .query_plan("dep:react issue token", &SearchFilters::default())
+        .unwrap();
+    assert_eq!(plan.strategy, "dependency_filter_mismatch");
+
+    let shard_dir = tempfile::tempdir().unwrap();
+    build_shards(&[rust_repo.clone(), react_repo.clone()], shard_dir.path()).unwrap();
+    let serde_results = search_shards(
+        shard_dir.path(),
+        "dep:serde issue token",
+        10,
+        &SearchFilters::default(),
+    )
+    .unwrap();
+    assert_eq!(serde_results[0].path, "rust-api/src/lib.rs");
+    let react_results = search_shards(
+        shard_dir.path(),
+        "dep:react issue token",
+        10,
+        &SearchFilters::default(),
+    )
+    .unwrap();
+    assert_eq!(react_results[0].path, "react-ui/src/lib.ts");
 }
 
 #[test]

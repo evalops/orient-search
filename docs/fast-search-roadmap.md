@@ -29,7 +29,7 @@ The Ceramic-level insight for this product is: agents already search, so the lev
 Implemented now:
 
 - `orient search`: fast `rg`-backed candidate collection with Rust-side scoring/snippets.
-- Agent-oriented query language for `file:`, `path:`/`dir:`, `lang:`, `ext:`, `symbol:`, `repo:`, `test:`, filter-only discovery queries, separator-normalized exact quoted phrases, negative filters, and default multi-term AND behavior.
+- Agent-oriented query language for `file:`, `path:`/`dir:`, `lang:`, `ext:`, `symbol:`, `repo:`, dependency filters via `dep:`/`dependency:`, `test:`, filter-only discovery queries, separator-normalized exact quoted phrases, negative filters, and default multi-term AND behavior.
 - `orient index`: persistent Rust content-token, path-token, and trigram posting index with a versioned binary file header, atomic same-directory saves, and legacy bincode load support.
 - `orient ensure-index` / `orient refresh-index`: single-repo index bootstrap and incremental refresh that reuse unchanged file metadata/terms, detect same-content renames, and refresh changed files.
 - `orient indexed-search`: indexed query path.

@@ -187,6 +187,7 @@ pub struct SearchFilters {
     pub extension: Option<String>,
     pub symbol: Option<String>,
     pub repo: Option<String>,
+    pub dependency: Option<String>,
     pub test: Option<bool>,
     pub require_all: bool,
     pub snippet: SnippetMode,
@@ -197,6 +198,7 @@ pub struct SearchFilters {
     pub exclude_extension: Vec<String>,
     pub exclude_symbol: Vec<String>,
     pub exclude_repo: Vec<String>,
+    pub exclude_dependency: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -215,6 +217,7 @@ impl Default for SearchFilters {
             extension: None,
             symbol: None,
             repo: None,
+            dependency: None,
             test: None,
             require_all: false,
             snippet: SnippetMode::Medium,
@@ -225,6 +228,7 @@ impl Default for SearchFilters {
             exclude_extension: Vec::new(),
             exclude_symbol: Vec::new(),
             exclude_repo: Vec::new(),
+            exclude_dependency: Vec::new(),
         }
     }
 }
@@ -358,6 +362,9 @@ pub fn search_repo_fast_filtered_with_timeout(
     let query_phrases = query_phrases(&parsed.terms);
     let mut filters = merge_filters(filters.clone(), parsed.filters);
     if !repo_matches(&root, &filters) {
+        return Ok(Vec::new());
+    }
+    if !repo_dependency_filters_match(&root, &filters)? {
         return Ok(Vec::new());
     }
     let query = query_text(&parsed.terms, &filters);
@@ -1499,6 +1506,71 @@ pub(crate) fn dependency_hints_from_manifest_texts<'a>(
     hints
 }
 
+pub(crate) fn dependency_filters_match(hints: &[DependencyHint], filters: &SearchFilters) -> bool {
+    let names = hints
+        .iter()
+        .map(|hint| hint.name.to_ascii_lowercase())
+        .collect::<Vec<_>>();
+    if let Some(wanted) = &filters.dependency {
+        let wanted = wanted.to_ascii_lowercase();
+        if !names.iter().any(|name| name.contains(&wanted)) {
+            return false;
+        }
+    }
+    !filters.exclude_dependency.iter().any(|excluded| {
+        let excluded = excluded.to_ascii_lowercase();
+        names.iter().any(|name| name.contains(&excluded))
+    })
+}
+
+fn repo_dependency_filters_match(root: &Path, filters: &SearchFilters) -> Result<bool> {
+    if filters.dependency.is_none() && filters.exclude_dependency.is_empty() {
+        return Ok(true);
+    }
+    Ok(dependency_filters_match(
+        &dependency_hints_from_live_repo(root)?,
+        filters,
+    ))
+}
+
+fn dependency_hints_from_live_repo(root: &Path) -> Result<Vec<DependencyHint>> {
+    let mut manifests = Vec::new();
+    for entry in WalkBuilder::new(root)
+        .hidden(false)
+        .filter_entry(|entry| !is_ignored(entry.path()))
+        .build()
+    {
+        let entry = entry?;
+        let path = entry.path();
+        let Some(metadata) = regular_file_metadata(path) else {
+            continue;
+        };
+        if metadata.len() > MAX_FILE_BYTES || !is_dependency_manifest_path(path) {
+            continue;
+        }
+        let rel = path
+            .strip_prefix(root)?
+            .to_string_lossy()
+            .replace('\\', "/");
+        let text = fs::read_to_string(path).unwrap_or_default();
+        if !text.contains('\0') {
+            manifests.push((rel, text));
+        }
+    }
+    Ok(dependency_hints_from_manifest_texts(
+        manifests
+            .iter()
+            .map(|(path, text)| (path.as_str(), text.as_str())),
+    ))
+}
+
+fn is_dependency_manifest_path(path: &Path) -> bool {
+    matches!(
+        path.file_name().and_then(|value| value.to_str()),
+        Some("Cargo.toml" | "package.json" | "pyproject.toml" | "go.mod")
+    )
+}
+
 fn dependency_hint(
     name: impl Into<String>,
     kind: impl Into<String>,
@@ -2507,6 +2579,7 @@ pub(crate) fn filter_only_query(filters: &SearchFilters) -> bool {
         || filters.language.is_some()
         || filters.extension.is_some()
         || filters.repo.is_some()
+        || filters.dependency.is_some()
         || filters.test.is_some()
 }
 
@@ -2582,6 +2655,17 @@ pub(crate) fn score_filter_only_path(
         add_filter_signal(
             "repo_filter",
             repo,
+            2.0,
+            explain,
+            &mut score,
+            &mut reasons,
+            &mut signals,
+        );
+    }
+    if let Some(dependency) = &filters.dependency {
+        add_filter_signal(
+            "dependency_filter",
+            dependency,
             2.0,
             explain,
             &mut score,
