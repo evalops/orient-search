@@ -1018,7 +1018,7 @@ fn indexed_related_context_uses_persisted_metadata() {
     );
     write(
         &repo.path().join("tests/auth_test.rs"),
-        "use sample::SessionManager;\n#[test]\nfn issue_token_round_trip() {}\n",
+        "use sample::sessionmanager;\n#[test]\nfn issue_token_round_trip() {}\n",
     );
 
     let index_path = repo.path().join("orient.index");
@@ -1031,7 +1031,8 @@ fn indexed_related_context_uses_persisted_metadata() {
     assert!(
         related_files
             .iter()
-            .any(|file| file.path == "tests/auth_test.rs"),
+            .any(|file| file.path == "tests/auth_test.rs"
+                && file.reason.contains("references symbol SessionManager")),
         "{related_files:?}"
     );
     let test_related_files = loaded.related_files("tests/auth_test.rs", 10);

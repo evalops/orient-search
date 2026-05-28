@@ -29,6 +29,7 @@ const DEFAULT_SYMBOL_READ_CONTEXT_BEFORE: usize = 20;
 const DEFAULT_SYMBOL_READ_LINES: usize = 80;
 const RIPGREP_TIMEOUT: Duration = Duration::from_millis(250);
 const RIPGREP_POLL_INTERVAL: Duration = Duration::from_millis(5);
+const SYMBOL_REFERENCE_LOWERCASE_THRESHOLD: usize = 16;
 const GENERATED_DIRECTORY_SEGMENTS: &[&str] = &[
     "generated",
     "__generated__",
@@ -1899,6 +1900,7 @@ impl RepoIndex {
             .file_stem()
             .map(|value| value.to_string_lossy().to_string())
             .unwrap_or_default();
+        let stem_lower = stem.to_ascii_lowercase();
         let stem_terms = related_stem_terms(&stem);
         let directory = Path::new(&normalized)
             .parent()
@@ -1911,7 +1913,7 @@ impl RepoIndex {
             .map(|file| {
                 file.symbols
                     .iter()
-                    .map(|symbol| symbol.name.clone())
+                    .map(|symbol| (symbol.name.clone(), symbol.name.to_ascii_lowercase()))
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
@@ -1923,10 +1925,10 @@ impl RepoIndex {
             if !Self::related_file_matches_filters(file_path, file, filters) {
                 continue;
             }
-            let lower = file_path.to_lowercase();
+            let lower = file_path.to_ascii_lowercase();
             let mut score = 0.0;
             let mut reasons = Vec::new();
-            if !stem.is_empty() && lower.contains(&stem.to_lowercase()) {
+            if !stem_lower.is_empty() && lower.contains(&stem_lower) {
                 score += 4.0;
                 reasons.push(format!("shares stem {stem}"));
             }
@@ -1948,13 +1950,9 @@ impl RepoIndex {
                 score += 1.0;
                 reasons.push("same directory".to_string());
             }
-            let text_lower = file.text.to_ascii_lowercase();
-            for symbol in &source_symbols {
-                if text_lower.contains(&symbol.to_ascii_lowercase()) {
-                    score += 6.0;
-                    reasons.push(format!("references symbol {symbol}"));
-                    break;
-                }
+            if let Some(symbol) = referenced_symbol_name(&file.text, &source_symbols) {
+                score += 6.0;
+                reasons.push(format!("references symbol {symbol}"));
             }
             if score > 0.0 {
                 related.push(RelatedFile {
@@ -3795,6 +3793,34 @@ pub(crate) fn symbol_matches_related_filters(
         .exclude_symbol_kind
         .iter()
         .any(|excluded| kind.eq_ignore_ascii_case(excluded))
+}
+
+pub(crate) fn contains_ascii_case_insensitive(haystack: &str, needle: &str) -> bool {
+    let needle = needle.as_bytes();
+    if needle.is_empty() || needle.len() > haystack.len() {
+        return false;
+    }
+    haystack
+        .as_bytes()
+        .windows(needle.len())
+        .any(|window| window.eq_ignore_ascii_case(needle))
+}
+
+pub(crate) fn referenced_symbol_name<'a>(
+    text: &str,
+    symbols: &'a [(String, String)],
+) -> Option<&'a str> {
+    if symbols.len() > SYMBOL_REFERENCE_LOWERCASE_THRESHOLD {
+        let text_lower = text.to_ascii_lowercase();
+        return symbols
+            .iter()
+            .find(|(_, symbol_lower)| text_lower.contains(symbol_lower))
+            .map(|(symbol, _)| symbol.as_str());
+    }
+    symbols
+        .iter()
+        .find(|(symbol, _)| contains_ascii_case_insensitive(text, symbol))
+        .map(|(symbol, _)| symbol.as_str())
 }
 
 pub(crate) fn related_stem_terms(stem: &str) -> Vec<String> {

@@ -34,7 +34,7 @@ def verify_token(token: str) -> bool:
 from src.auth import SessionManager, verify_token
 
 def test_issue_token_round_trip():
-    assert verify_token(SessionManager().issue_token("u_123"))
+    assert verify_token(sessionmanager().issue_token("u_123"))
 "#,
     );
     write(
@@ -89,11 +89,13 @@ def test_issue_token_round_trip():
     assert_eq!(search[0].path, "src/auth.py");
     assert!(search[0].snippet.contains("issue_token"));
 
-    let related: Vec<_> = index
-        .related_files("src/auth.py", 10)
-        .into_iter()
-        .map(|item| item.path)
-        .collect();
+    let related = index.related_files("src/auth.py", 10);
+    assert!(
+        related.iter().any(|item| item.path == "tests/test_auth.py"
+            && item.reason.contains("references symbol SessionManager")),
+        "{related:?}"
+    );
+    let related: Vec<_> = related.into_iter().map(|item| item.path).collect();
     assert!(related.contains(&"tests/test_auth.py".to_string()));
     let test_related: Vec<_> = index
         .related_files("tests/test_auth.py", 10)

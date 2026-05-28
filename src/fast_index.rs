@@ -10,12 +10,13 @@ use crate::repo_index::{
     finalize_results, import_hints_from_source_texts, is_entrypoint_path, is_generated_path,
     is_ignored, is_important_file, is_manifest_file, is_test_path, known_commands_from_hints,
     language_for, matches_filters_with_path_metadata, normalize_language_filter, normalize_token,
-    regular_file_metadata, related_query_terms_symbol_and_filters, related_stem_terms,
-    repo_map_seed_paths, repo_matches, result_matches_all_tokens, result_matches_symbol_filters,
-    round4, score_filter_only_path_match, select_repo_brief_import_hints,
-    select_repo_map_top_symbols, source_excluded_content_filters_match,
-    source_import_filters_match, symbol_exact_phrase_bonus, symbol_matches_related_filters,
-    symbol_query_match_score, token_counts, tokenize, unique_query_tokens,
+    referenced_symbol_name, regular_file_metadata, related_query_terms_symbol_and_filters,
+    related_stem_terms, repo_map_seed_paths, repo_matches, result_matches_all_tokens,
+    result_matches_symbol_filters, round4, score_filter_only_path_match,
+    select_repo_brief_import_hints, select_repo_map_top_symbols,
+    source_excluded_content_filters_match, source_import_filters_match, symbol_exact_phrase_bonus,
+    symbol_matches_related_filters, symbol_query_match_score, token_counts, tokenize,
+    unique_query_tokens,
 };
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use anyhow::{Context, Result};
@@ -863,7 +864,7 @@ impl FastIndex {
         let source_symbols = source_file
             .symbols
             .iter()
-            .map(|symbol| symbol.name.clone())
+            .map(|symbol| (symbol.name.clone(), symbol.name.to_ascii_lowercase()))
             .collect::<Vec<_>>();
         let mut related = Vec::new();
 
@@ -901,13 +902,9 @@ impl FastIndex {
                 score += 1.0;
                 reasons.push("same directory".to_string());
             }
-            let content_lower = file.content.to_ascii_lowercase();
-            for symbol in &source_symbols {
-                if content_lower.contains(&symbol.to_ascii_lowercase()) {
-                    score += 6.0;
-                    reasons.push(format!("references symbol {symbol}"));
-                    break;
-                }
+            if let Some(symbol) = referenced_symbol_name(&file.content, &source_symbols) {
+                score += 6.0;
+                reasons.push(format!("references symbol {symbol}"));
             }
 
             if score > 0.0 {
