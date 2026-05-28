@@ -18,6 +18,7 @@ use crate::repo_index::{
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use anyhow::{Context, Result};
 use ignore::WalkBuilder;
+use memmap2::Mmap;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fs;
@@ -319,17 +320,30 @@ impl FastIndex {
     }
 
     pub fn load(path: impl AsRef<Path>) -> Result<Self> {
-        let bytes = fs::read(path.as_ref())
-            .with_context(|| format!("read index {}", path.as_ref().display()))?;
-        let (payload, header_version) = index_payload(&bytes)
-            .with_context(|| format!("parse index header {}", path.as_ref().display()))?;
+        let path = path.as_ref();
+        let file =
+            fs::File::open(path).with_context(|| format!("open index {}", path.display()))?;
+        let metadata = file
+            .metadata()
+            .with_context(|| format!("stat index {}", path.display()))?;
+        if metadata.len() == 0 {
+            return Self::load_index_bytes(&[], path);
+        }
+        let bytes = unsafe { Mmap::map(&file) }
+            .with_context(|| format!("mmap index {}", path.display()))?;
+        Self::load_index_bytes(&bytes, path)
+    }
+
+    fn load_index_bytes(bytes: &[u8], path: &Path) -> Result<Self> {
+        let (payload, header_version) = index_payload(bytes)
+            .with_context(|| format!("parse index header {}", path.display()))?;
         let mut index = match header_version {
             Some(INDEX_VERSION) => bincode::deserialize::<FastIndexDisk>(payload)
-                .with_context(|| format!("parse index {}", path.as_ref().display()))?
+                .with_context(|| format!("parse index {}", path.display()))?
                 .into_index()
-                .with_context(|| format!("decode index {}", path.as_ref().display()))?,
+                .with_context(|| format!("decode index {}", path.display()))?,
             Some(LEGACY_RAW_INDEX_VERSION) | None => load_raw_index(payload)
-                .with_context(|| format!("parse index {}", path.as_ref().display()))?,
+                .with_context(|| format!("parse index {}", path.display()))?,
             Some(version) => anyhow::bail!("unsupported index version {}", version),
         };
         index.normalize_loaded();

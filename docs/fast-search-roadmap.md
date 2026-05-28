@@ -30,7 +30,7 @@ Implemented now:
 
 - `orient search`: fast `rg`-backed candidate collection with Rust-side scoring/snippets.
 - Agent-oriented query language for `file:`, `path:`/`dir:`, `lang:`, `ext:`, `symbol:`, `kind:`/`symbol_kind:`, `repo:`, dependency filters via `dep:`/`dependency:`, import/module filters, `test:`, filter-only discovery queries, separator-normalized exact quoted phrases, negative filters, and default multi-term AND behavior.
-- `orient index`: persistent Rust content-token, path-token, and trigram posting index with a versioned binary file header, delta-varint-compressed posting maps on disk, atomic same-directory saves, and legacy raw bincode load support.
+- `orient index`: persistent Rust content-token, path-token, and trigram posting index with a versioned binary file header, mmap-backed load path, delta-varint-compressed posting maps on disk, atomic same-directory saves, and legacy raw bincode load support.
 - `orient ensure-index` / `orient refresh-index`: single-repo index bootstrap and incremental refresh that reuse unchanged file metadata/terms, detect same-content renames, and refresh changed files.
 - `orient indexed-search`: indexed query path.
 - `orient discover-repos`: bounded local repo discovery for broad workspaces and repeated worktree layouts, with git checkout boundaries by default and an explicit nested-manifest opt-in.

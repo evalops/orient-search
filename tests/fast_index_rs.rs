@@ -1584,6 +1584,17 @@ fn loading_corrupt_index_returns_error() {
 }
 
 #[test]
+fn loading_empty_index_returns_error_without_mmap_failure() {
+    let repo = tempfile::tempdir().unwrap();
+    let path = repo.path().join("empty.index");
+    fs::write(&path, b"").unwrap();
+
+    let error = FastIndex::load(&path).unwrap_err().to_string();
+    assert!(error.contains("parse index"), "{error}");
+    assert!(!error.contains("mmap index"), "{error}");
+}
+
+#[test]
 fn fallback_search_matches_rg_for_golden_corpus() {
     if Command::new("rg").arg("--version").output().is_err() {
         return;
