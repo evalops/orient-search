@@ -1219,6 +1219,7 @@ fn search_repo_ripgrep(
 
     let mut scored: HashMap<String, SearchResult> = HashMap::new();
     let mut path_filter_cache = HashMap::<String, Option<String>>::new();
+    let mut content_filter_cache = HashMap::<String, bool>::new();
     let max_matches = (limit.max(1) * 300).clamp(1_000, 8_000);
     let mut match_count = 0usize;
     let deadline = Instant::now() + timeout;
@@ -1277,11 +1278,8 @@ fn search_repo_ripgrep(
         let Some(path_lower) = path_lower else {
             continue;
         };
-        if content_filters_active(filters) {
-            let text = fs::read_to_string(root.join(&path)).unwrap_or_default();
-            if text.contains('\0') || !source_content_filters_match(&path, &text, filters) {
-                continue;
-            }
+        if !source_content_filters_match_cached(root, &path, filters, &mut content_filter_cache) {
+            continue;
         }
         let Some(text) = data
             .get("lines")
@@ -2585,6 +2583,21 @@ pub(crate) fn source_content_filters_match(
 ) -> bool {
     source_import_filters_match(path, text, filters)
         && source_symbol_kind_filters_match(path, text, filters)
+}
+
+fn source_content_filters_match_cached(
+    root: &Path,
+    path: &str,
+    filters: &SearchFilters,
+    cache: &mut HashMap<String, bool>,
+) -> bool {
+    if !content_filters_active(filters) {
+        return true;
+    }
+    *cache.entry(path.to_string()).or_insert_with(|| {
+        let text = fs::read_to_string(root.join(path)).unwrap_or_default();
+        !text.contains('\0') && source_content_filters_match(path, &text, filters)
+    })
 }
 
 pub(crate) fn source_import_filters_match(path: &str, text: &str, filters: &SearchFilters) -> bool {
@@ -5514,6 +5527,49 @@ mod tests {
         for path in handwritten_paths {
             assert!(!is_generated_path(path), "{path} should be handwritten");
         }
+    }
+
+    #[test]
+    fn source_content_filter_cache_reuses_per_path_decisions() {
+        let repo = tempfile::tempdir().unwrap();
+        let source = repo.path().join("src/lib.rs");
+        fs::create_dir_all(source.parent().unwrap()).unwrap();
+        fs::write(
+            &source,
+            "use serde::Serialize;\npub fn issue_token() { let token = \"serde\"; }\n",
+        )
+        .unwrap();
+        let filters = SearchFilters {
+            import: Some("serde".to_string()),
+            symbol_kind: Some("function".to_string()),
+            ..SearchFilters::default()
+        };
+        let mut cache = HashMap::new();
+
+        assert!(source_content_filters_match_cached(
+            repo.path(),
+            "src/lib.rs",
+            &filters,
+            &mut cache
+        ));
+        assert_eq!(cache.len(), 1);
+
+        fs::write(&source, "pub struct NotAFunction;\n").unwrap();
+        assert!(source_content_filters_match_cached(
+            repo.path(),
+            "src/lib.rs",
+            &filters,
+            &mut cache
+        ));
+        assert_eq!(cache.len(), 1);
+
+        cache.insert("src/lib.rs".to_string(), false);
+        assert!(!source_content_filters_match_cached(
+            repo.path(),
+            "src/lib.rs",
+            &filters,
+            &mut cache
+        ));
     }
 
     #[test]
