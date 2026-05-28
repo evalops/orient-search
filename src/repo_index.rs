@@ -1055,22 +1055,23 @@ fn add_generated_filter_fd_excludes(command: &mut Command, filters: &SearchFilte
 }
 
 fn add_generated_filter_ripgrep_globs(command: &mut Command, filters: &SearchFilters) {
-    for glob in generated_false_ripgrep_globs(filters) {
+    for glob in generated_ripgrep_globs(filters) {
         command.arg("--iglob").arg(glob);
     }
 }
 
-fn generated_false_ripgrep_globs(filters: &SearchFilters) -> Vec<String> {
-    if filters.generated != Some(false) {
+fn generated_ripgrep_globs(filters: &SearchFilters) -> Vec<String> {
+    let Some(generated) = filters.generated else {
         return Vec::new();
-    }
+    };
+    let prefix = if generated { "" } else { "!" };
     GENERATED_DIRECTORY_SEGMENTS
         .iter()
-        .map(|segment| format!("!**/{segment}/**"))
+        .map(|segment| format!("{prefix}**/{segment}/**"))
         .chain(
             GENERATED_FILE_GLOBS
                 .iter()
-                .map(|glob| format!("!**/{glob}")),
+                .map(|glob| format!("{prefix}**/{glob}")),
         )
         .collect()
 }
@@ -5440,12 +5441,12 @@ mod tests {
     }
 
     #[test]
-    fn generated_false_pushes_conservative_ripgrep_directory_excludes() {
+    fn generated_filters_push_conservative_ripgrep_globs() {
         let filters = SearchFilters {
             generated: Some(false),
             ..SearchFilters::default()
         };
-        let globs = generated_false_ripgrep_globs(&filters);
+        let globs = generated_ripgrep_globs(&filters);
 
         assert!(globs.contains(&"!**/generated/**".to_string()));
         assert!(globs.contains(&"!**/__generated__/**".to_string()));
@@ -5454,11 +5455,17 @@ mod tests {
         assert!(globs.contains(&"!**/*.g.dart".to_string()));
         assert!(globs.contains(&"!**/*_gen.*".to_string()));
         assert!(globs.iter().all(|glob| glob.starts_with("!**/")));
+
+        let positive = generated_ripgrep_globs(&SearchFilters {
+            generated: Some(true),
+            ..SearchFilters::default()
+        });
+        assert!(positive.contains(&"**/generated/**".to_string()));
+        assert!(positive.contains(&"**/*.pb.rs".to_string()));
+        assert!(positive.contains(&"**/*.g.dart".to_string()));
+        assert!(positive.iter().all(|glob| glob.starts_with("**/")));
         assert_eq!(
-            generated_false_ripgrep_globs(&SearchFilters {
-                generated: Some(true),
-                ..SearchFilters::default()
-            }),
+            generated_ripgrep_globs(&SearchFilters::default()),
             Vec::<String>::new()
         );
     }
