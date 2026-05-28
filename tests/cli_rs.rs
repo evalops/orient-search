@@ -1800,7 +1800,9 @@ fn cli_builds_and_searches_persistent_index() {
         .assert()
         .success()
         .stdout(predicate::str::contains("\"path\":\"src/auth.rs\""))
-        .stdout(predicate::str::contains("\"kind\":\"struct\""));
+        .stdout(predicate::str::contains("\"kind\":\"struct\""))
+        .stdout(predicate::str::contains("\"read_request\""))
+        .stdout(predicate::str::contains("\"tool\":\"read_index_range\""));
 
     let mut index_symbol_batch = Command::cargo_bin("orient").unwrap();
     index_symbol_batch
@@ -1818,7 +1820,9 @@ fn cli_builds_and_searches_persistent_index() {
         .stdout(predicate::str::contains("\"name\":\"SessionManager\""))
         .stdout(predicate::str::contains("\"symbols\":[]"))
         .stdout(predicate::str::contains("\"name\":\"issue_token\""))
-        .stdout(predicate::str::contains("\"kind\":\"function\""));
+        .stdout(predicate::str::contains("\"kind\":\"function\""))
+        .stdout(predicate::str::contains("\"read_request\""))
+        .stdout(predicate::str::contains("\"tool\":\"read_index_range\""));
 
     let mut index_map = Command::cargo_bin("orient").unwrap();
     index_map

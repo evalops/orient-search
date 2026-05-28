@@ -4217,6 +4217,8 @@ fn server_handles_indexed_search_request() {
     assert!(stdout.contains("\"path\":\"tests/auth_test.rs\""));
     assert!(stdout.contains("\"id\":\"find-index-symbol\""));
     assert!(stdout.contains("\"kind\":\"struct\""));
+    assert!(stdout.contains("\"read_request\""));
+    assert!(stdout.contains("\"tool\":\"read_index_range\""));
     assert!(stdout.contains("\"id\":\"find-index-symbol-batch\""));
     assert!(stdout.contains("\"name\":\"SessionManager\""));
     assert!(stdout.contains("\"symbols\":[]"));

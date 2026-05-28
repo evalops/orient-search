@@ -21,6 +21,8 @@ pub const MAX_READ_RANGE_LINES: usize = 1_000;
 pub const MAX_SEARCH_RESULTS: usize = 100;
 const MAX_RESULT_READ_BATCH_RANGES: usize = 64;
 const DEFAULT_RESULT_READ_LINES: usize = 80;
+const DEFAULT_SYMBOL_READ_CONTEXT_BEFORE: usize = 20;
+const DEFAULT_SYMBOL_READ_LINES: usize = 80;
 const RIPGREP_TIMEOUT: Duration = Duration::from_millis(250);
 const RIPGREP_POLL_INTERVAL: Duration = Duration::from_millis(5);
 static TOKEN_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[A-Za-z][A-Za-z0-9_]*").unwrap());
@@ -104,6 +106,14 @@ pub struct ResultToolRequest {
 }
 
 pub type ResultReadRequest = ResultToolRequest;
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SymbolLookupResult {
+    #[serde(flatten)]
+    pub symbol: Symbol,
+    pub read_range: ResultReadRange,
+    pub read_request: ResultToolRequest,
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RankSignal {
@@ -3517,6 +3527,34 @@ pub fn attach_result_read_requests(
     }
 }
 
+pub fn symbol_lookup_results(
+    symbols: Vec<Symbol>,
+    tool: &str,
+    base_arguments: serde_json::Map<String, serde_json::Value>,
+) -> Vec<SymbolLookupResult> {
+    symbols
+        .into_iter()
+        .map(|symbol| {
+            let read_range = symbol_read_range(&symbol);
+            let mut arguments = base_arguments.clone();
+            arguments.insert(
+                "path".to_string(),
+                serde_json::json!(read_range.path.clone()),
+            );
+            arguments.insert("start".to_string(), serde_json::json!(read_range.start));
+            arguments.insert("lines".to_string(), serde_json::json!(read_range.lines));
+            SymbolLookupResult {
+                symbol,
+                read_range,
+                read_request: ResultReadRequest {
+                    tool: tool.to_string(),
+                    arguments: serde_json::Value::Object(arguments),
+                },
+            }
+        })
+        .collect()
+}
+
 pub fn result_read_batch_request(
     results: &[SearchResult],
     tool: &str,
@@ -3617,6 +3655,17 @@ fn result_read_range(result: &SearchResult) -> ResultReadRange {
         path: result.path.clone(),
         start: context_start_line(result, DEFAULT_RESULT_READ_LINES),
         lines: DEFAULT_RESULT_READ_LINES,
+    }
+}
+
+fn symbol_read_range(symbol: &Symbol) -> ResultReadRange {
+    ResultReadRange {
+        path: symbol.path.clone(),
+        start: symbol
+            .line
+            .saturating_sub(DEFAULT_SYMBOL_READ_CONTEXT_BEFORE)
+            .max(1),
+        lines: DEFAULT_SYMBOL_READ_LINES,
     }
 }
 

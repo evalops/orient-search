@@ -6,9 +6,10 @@ use crate::query::{merge_filters, normalize_symbol_kind, parse_query, query_text
 use crate::repo_index::{
     MAX_ATTACHED_CONTEXT_LINES, MAX_READ_RANGE_LINES, MAX_SEARCH_RESULTS, QueryPlan,
     QueryPlanFilter, RepoIndexer, ResultToolRequest, SearchFilters, SearchResult, SnippetMode,
-    Symbol, attach_result_context, attach_result_read_requests, attach_result_related_requests,
-    attach_result_related_symbol_requests, finalize_results, normalize_token, read_file_range,
-    result_read_batch_request, search_repo_fast_filtered,
+    Symbol, SymbolLookupResult, attach_result_context, attach_result_read_requests,
+    attach_result_related_requests, attach_result_related_symbol_requests, finalize_results,
+    normalize_token, read_file_range, result_read_batch_request, search_repo_fast_filtered,
+    symbol_lookup_results,
 };
 use crate::shards::{
     ShardEntry, ShardManifest, ShardQueryPlan, ShardRepoMap, ShardSearchScope, build_shards,
@@ -88,7 +89,7 @@ struct ShardQueryPlanBatchResult {
 #[derive(Debug, Serialize)]
 struct SymbolBatchResult {
     name: String,
-    symbols: Vec<Symbol>,
+    symbols: Vec<SymbolLookupResult>,
 }
 
 pub fn serve_jsonl(reader: impl BufRead, mut writer: impl Write) -> Result<()> {
@@ -2094,12 +2095,17 @@ impl ToolRuntime {
                 let index_dir = self.shard_dir_arg_or_single_cached(&request.arguments)?;
                 let name = string_arg(&request.arguments, "name")?;
                 let limit = positive_usize_arg(&request.arguments, "limit", 10)?;
-                Ok(serde_json::to_value(self.find_shard_symbol_cached(
+                let symbols = self.find_shard_symbol_cached(
                     &index_dir,
                     &name,
                     limit,
                     &search_filters(&request.arguments, true)?,
-                )?)?)
+                )?;
+                Ok(serde_json::to_value(symbol_lookup_results(
+                    symbols,
+                    "read_shard_range",
+                    read_request_args("index_dir", &index_dir),
+                ))?)
             }
             "find_shard_symbol_batch" => {
                 let index_dir = self.shard_dir_arg_or_single_cached(&request.arguments)?;
@@ -2110,6 +2116,11 @@ impl ToolRuntime {
                 for name in names {
                     let symbols =
                         self.find_shard_symbol_cached(&index_dir, &name, limit, &filters)?;
+                    let symbols = symbol_lookup_results(
+                        symbols,
+                        "read_shard_range",
+                        read_request_args("index_dir", &index_dir),
+                    );
                     batch.push(SymbolBatchResult { name, symbols });
                 }
                 Ok(serde_json::to_value(batch)?)
@@ -2119,21 +2130,28 @@ impl ToolRuntime {
                 let name = string_arg(&request.arguments, "name")?;
                 let limit = positive_usize_arg(&request.arguments, "limit", 10)?;
                 let filters = search_filters(&request.arguments, false)?;
-                let index = RepoIndexer::new(repo).build()?;
-                Ok(serde_json::to_value(
-                    index.find_symbol_filtered(&name, limit, &filters),
-                )?)
+                let index = RepoIndexer::new(&repo).build()?;
+                let symbols = index.find_symbol_filtered(&name, limit, &filters);
+                Ok(serde_json::to_value(symbol_lookup_results(
+                    symbols,
+                    "read_range",
+                    read_request_args("repo", &repo),
+                ))?)
             }
             "find_symbol_batch" => {
                 let repo = path_arg(&request.arguments, "repo")?;
                 let names = string_array_arg(&request.arguments, "names")?;
                 let limit = positive_usize_arg(&request.arguments, "limit", 10)?;
                 let filters = search_filters(&request.arguments, false)?;
-                let index = RepoIndexer::new(repo).build()?;
+                let index = RepoIndexer::new(&repo).build()?;
                 let batch = names
                     .into_iter()
                     .map(|name| SymbolBatchResult {
-                        symbols: index.find_symbol_filtered(&name, limit, &filters),
+                        symbols: symbol_lookup_results(
+                            index.find_symbol_filtered(&name, limit, &filters),
+                            "read_range",
+                            read_request_args("repo", &repo),
+                        ),
                         name,
                     })
                     .collect::<Vec<_>>();
@@ -2144,21 +2162,28 @@ impl ToolRuntime {
                 let name = string_arg(&request.arguments, "name")?;
                 let limit = positive_usize_arg(&request.arguments, "limit", 10)?;
                 let filters = search_filters(&request.arguments, true)?;
-                let index = self.cached_index(index_path)?;
-                Ok(serde_json::to_value(
-                    index.find_symbol_filtered(&name, limit, &filters),
-                )?)
+                let index = self.cached_index(index_path.clone())?;
+                let symbols = index.find_symbol_filtered(&name, limit, &filters);
+                Ok(serde_json::to_value(symbol_lookup_results(
+                    symbols,
+                    "read_index_range",
+                    read_request_args("index", &index_path),
+                ))?)
             }
             "find_index_symbol_batch" => {
                 let index_path = self.index_path_arg_or_single_cached(&request.arguments)?;
                 let names = string_array_arg(&request.arguments, "names")?;
                 let limit = positive_usize_arg(&request.arguments, "limit", 10)?;
                 let filters = search_filters(&request.arguments, true)?;
-                let index = self.cached_index(index_path)?;
+                let index = self.cached_index(index_path.clone())?;
                 let batch = names
                     .into_iter()
                     .map(|name| SymbolBatchResult {
-                        symbols: index.find_symbol_filtered(&name, limit, &filters),
+                        symbols: symbol_lookup_results(
+                            index.find_symbol_filtered(&name, limit, &filters),
+                            "read_index_range",
+                            read_request_args("index", &index_path),
+                        ),
                         name,
                     })
                     .collect::<Vec<_>>();
