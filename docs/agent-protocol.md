@@ -65,6 +65,7 @@ Search results include:
 - `line_range`: displayed snippet bounds.
 - `match_lines`: exact hit lines when available.
 - `read_range`: a ready-to-pass `{path,start,lines}` follow-up range.
+- `read_request`: a ready-to-send JSON-lines request body with the correct read tool and target arguments for the search surface.
 - `context`: optional attached file context when `context_lines` is set.
 - `explanation` and `query_plan` when `explain` is set.
 
@@ -78,7 +79,7 @@ For most agents, the handoff is:
 
 1. Call search.
 2. Collect one or more `read_range` objects from results.
-3. Pass one object or an array of objects directly to the matching batch read tool.
+3. Pass one object or an array of objects directly to the matching batch read tool, or send a result's `read_request` when the wrapper wants a single ready-made follow-up call.
 
 Read-range tools accept `/` or `\` separators in repo-relative paths and reject parent-directory escapes after separator normalization. Shard range and related-context tools accept exact shard-prefixed paths from search hits, such as `platform/src/auth.rs`, and also accept unqualified paths like `src/auth.rs` when they resolve to exactly one shard. Ambiguous unqualified paths fail with a prompt to use `<repo>/<path>`.
 

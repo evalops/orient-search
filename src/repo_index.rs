@@ -81,6 +81,8 @@ pub struct SearchResult {
     pub context: Option<FileRange>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub read_range: Option<ResultReadRange>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub read_request: Option<ResultReadRequest>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -88,6 +90,12 @@ pub struct ResultReadRange {
     pub path: String,
     pub start: usize,
     pub lines: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ResultReadRequest {
+    pub tool: String,
+    pub arguments: serde_json::Value,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1323,6 +1331,7 @@ fn merge_match_result(
             duplicate_group: None,
             context: None,
             read_range: None,
+            read_request: None,
         });
 }
 
@@ -1469,6 +1478,7 @@ impl RepoIndex {
                     duplicate_group: None,
                     context: None,
                     read_range: None,
+                    read_request: None,
                 });
             }
         }
@@ -2936,6 +2946,7 @@ fn score_text_file(
         duplicate_group: None,
         context: None,
         read_range: None,
+        read_request: None,
     })
 }
 
@@ -3371,6 +3382,29 @@ pub(crate) fn round4(value: f64) -> f64 {
 
 pub fn capped_search_limit(limit: usize) -> usize {
     limit.min(MAX_SEARCH_RESULTS)
+}
+
+pub fn attach_result_read_requests(
+    results: &mut [SearchResult],
+    tool: &str,
+    base_arguments: serde_json::Map<String, serde_json::Value>,
+) {
+    for result in results {
+        let Some(read_range) = &result.read_range else {
+            continue;
+        };
+        let mut arguments = base_arguments.clone();
+        arguments.insert(
+            "path".to_string(),
+            serde_json::json!(read_range.path.clone()),
+        );
+        arguments.insert("start".to_string(), serde_json::json!(read_range.start));
+        arguments.insert("lines".to_string(), serde_json::json!(read_range.lines));
+        result.read_request = Some(ResultReadRequest {
+            tool: tool.to_string(),
+            arguments: serde_json::Value::Object(arguments),
+        });
+    }
 }
 
 pub(crate) fn finalize_results(mut results: Vec<SearchResult>, limit: usize) -> Vec<SearchResult> {
@@ -3858,6 +3892,7 @@ pub(crate) fn filter_only_search_result(
         duplicate_group: None,
         context: None,
         read_range: None,
+        read_request: None,
     }
 }
 

@@ -5,8 +5,9 @@ use crate::fast_index::{FastIndex, RefreshStats};
 use crate::query::{merge_filters, parse_query, query_text};
 use crate::repo_index::{
     MAX_ATTACHED_CONTEXT_LINES, MAX_READ_RANGE_LINES, MAX_SEARCH_RESULTS, QueryPlan, RepoIndexer,
-    SearchFilters, SearchResult, SnippetMode, Symbol, attach_result_context, finalize_results,
-    normalize_token, read_file_range, search_repo_fast_filtered,
+    SearchFilters, SearchResult, SnippetMode, Symbol, attach_result_context,
+    attach_result_read_requests, finalize_results, normalize_token, read_file_range,
+    search_repo_fast_filtered,
 };
 use crate::shards::{
     ShardEntry, ShardManifest, ShardQueryPlan, ShardRepoMap, ShardSearchScope, build_shards,
@@ -1113,6 +1114,12 @@ fn is_live_path_tool(tool_name: &str) -> bool {
     )
 }
 
+fn read_request_args<T: Serialize>(name: &str, value: T) -> Map<String, Value> {
+    let mut arguments = Map::new();
+    arguments.insert(name.to_string(), json!(value));
+    arguments
+}
+
 impl ToolRuntime {
     fn dispatch_result(&self, request: &ToolRequest) -> Result<Value> {
         match request.tool.as_str() {
@@ -1207,6 +1214,11 @@ impl ToolRuntime {
                 attach_result_context(&mut results, context_lines, |path, start, lines| {
                     read_file_range(&repo, path, start, lines)
                 })?;
+                attach_result_read_requests(
+                    &mut results,
+                    "read_range",
+                    read_request_args("repo", &repo),
+                );
                 Ok(serde_json::to_value(results)?)
             }
             "search_batch" => {
@@ -1221,6 +1233,11 @@ impl ToolRuntime {
                     attach_result_context(&mut results, context_lines, |path, start, lines| {
                         read_file_range(&repo, path, start, lines)
                     })?;
+                    attach_result_read_requests(
+                        &mut results,
+                        "read_range",
+                        read_request_args("repo", &repo),
+                    );
                     batch.push(SearchBatchResult { query, results });
                 }
                 Ok(serde_json::to_value(batch)?)
@@ -1252,7 +1269,8 @@ impl ToolRuntime {
                 let limit = search_limit_arg(&request.arguments)?;
                 let context_lines = context_lines_arg(&request.arguments)?;
                 let refresh_if_stale = bool_arg(&request.arguments, "refresh_if_stale");
-                let index = self.cached_index_maybe_refresh(index_path, refresh_if_stale)?;
+                let index =
+                    self.cached_index_maybe_refresh(index_path.clone(), refresh_if_stale)?;
                 let mut results = index.search_filtered(
                     &query,
                     limit,
@@ -1261,6 +1279,11 @@ impl ToolRuntime {
                 attach_result_context(&mut results, context_lines, |path, start, lines| {
                     index.read_range(path, start, lines)
                 })?;
+                attach_result_read_requests(
+                    &mut results,
+                    "read_index_range",
+                    read_request_args("index", &index_path),
+                );
                 Ok(serde_json::to_value(results)?)
             }
             "indexed_search_batch" => {
@@ -1269,7 +1292,8 @@ impl ToolRuntime {
                 let limit = search_limit_arg(&request.arguments)?;
                 let context_lines = context_lines_arg(&request.arguments)?;
                 let refresh_if_stale = bool_arg(&request.arguments, "refresh_if_stale");
-                let index = self.cached_index_maybe_refresh(index_path, refresh_if_stale)?;
+                let index =
+                    self.cached_index_maybe_refresh(index_path.clone(), refresh_if_stale)?;
                 let filters = search_filters(&request.arguments, true)?;
                 let mut batch = Vec::new();
                 for query in queries {
@@ -1277,6 +1301,11 @@ impl ToolRuntime {
                     attach_result_context(&mut results, context_lines, |path, start, lines| {
                         index.read_range(path, start, lines)
                     })?;
+                    attach_result_read_requests(
+                        &mut results,
+                        "read_index_range",
+                        read_request_args("index", &index_path),
+                    );
                     batch.push(SearchBatchResult { query, results });
                 }
                 Ok(serde_json::to_value(batch)?)
@@ -1903,6 +1932,11 @@ impl ToolRuntime {
         attach_result_context(&mut results, context_lines, |path, start, lines| {
             self.read_shard_range_cached(index_dir, path, start, lines)
         })?;
+        attach_result_read_requests(
+            &mut results,
+            "read_shard_range",
+            read_request_args("index_dir", index_dir),
+        );
         Ok(results)
     }
 

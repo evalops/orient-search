@@ -1603,6 +1603,7 @@ impl FastIndex {
             duplicate_group: None,
             context: None,
             read_range: None,
+            read_request: None,
         })
     }
 }
