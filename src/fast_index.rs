@@ -1266,9 +1266,14 @@ impl FastIndex {
             .map(|(trigram, postings)| (trigram.as_str(), postings.as_slice()))
             .collect::<Vec<_>>();
         let query_name = query_tokens.join("");
+        let active_filters =
+            query_plan_filters_for_candidates(&filters, &self.files, &candidate_ids);
+        let filtered_candidate_ids =
+            indexed_filter_candidate_ids(&self.files, candidate_ids, &filters);
+        let filtered_candidate_count = filtered_candidate_ids.len();
         let candidate_cap = indexed_candidate_cap(limit);
-        let (candidate_ids, candidate_cap_hit) = cap_candidate_ids(
-            candidate_ids,
+        let (filtered_candidate_ids, candidate_cap_hit) = cap_candidate_ids(
+            filtered_candidate_ids,
             candidate_cap,
             &self.files,
             &query_name,
@@ -1277,17 +1282,6 @@ impl FastIndex {
             &path_lists,
             &trigram_lists,
         );
-        let active_filters =
-            query_plan_filters_for_candidates(&filters, &self.files, &candidate_ids);
-        let filtered_candidate_ids = candidate_ids
-            .into_iter()
-            .filter(|file_id| {
-                self.files
-                    .get(*file_id as usize)
-                    .is_some_and(|file| indexed_file_matches_filters(file, &filters))
-            })
-            .collect::<Vec<_>>();
-        let filtered_candidate_count = filtered_candidate_ids.len();
         let results = filtered_candidate_ids
             .into_iter()
             .filter_map(|file_id| {
@@ -1599,9 +1593,14 @@ impl FastIndex {
             .map(|(trigram, postings)| (trigram.as_str(), postings.as_slice()))
             .collect::<Vec<_>>();
         let query_name = query_tokens.join("");
+        let active_filters =
+            query_plan_filters_for_candidates(&filters, &self.files, &candidate_ids);
+        let filtered_candidate_ids =
+            indexed_filter_candidate_ids(&self.files, candidate_ids, &filters);
+        let filtered_candidate_count = filtered_candidate_ids.len();
         let candidate_cap = MAX_INDEX_CANDIDATES_TO_SCORE;
-        let (candidate_ids, candidate_cap_hit) = cap_candidate_ids(
-            candidate_ids,
+        let (filtered_candidate_ids, candidate_cap_hit) = cap_candidate_ids(
+            filtered_candidate_ids,
             candidate_cap,
             &self.files,
             &query_name,
@@ -1610,17 +1609,6 @@ impl FastIndex {
             &path_lists,
             &trigram_lists,
         );
-        let active_filters =
-            query_plan_filters_for_candidates(&filters, &self.files, &candidate_ids);
-        let filtered_candidate_ids = candidate_ids
-            .into_iter()
-            .filter(|file_id| {
-                self.files
-                    .get(*file_id as usize)
-                    .is_some_and(|file| indexed_file_matches_filters(file, &filters))
-            })
-            .collect::<Vec<_>>();
-        let filtered_candidate_count = filtered_candidate_ids.len();
         let mut results = filtered_candidate_ids
             .into_iter()
             .filter_map(|file_id| {
@@ -2336,6 +2324,21 @@ fn indexed_path_matches_plan_filter(file: &IndexedPath, filter: &QueryPlanFilter
         _ => true,
     };
     matches != filter.negated
+}
+
+fn indexed_filter_candidate_ids(
+    files: &[IndexedPath],
+    candidate_ids: Vec<u32>,
+    filters: &SearchFilters,
+) -> Vec<u32> {
+    candidate_ids
+        .into_iter()
+        .filter(|file_id| {
+            files
+                .get(*file_id as usize)
+                .is_some_and(|file| indexed_file_matches_filters(file, filters))
+        })
+        .collect()
 }
 
 fn indexed_apply_phrase_matches(

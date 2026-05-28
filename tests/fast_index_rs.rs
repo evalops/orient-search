@@ -1989,6 +1989,48 @@ fn indexed_search_caps_broad_candidates_after_rank_aware_prefilter() {
 }
 
 #[test]
+fn indexed_search_filters_candidates_before_cap() {
+    let repo = tempfile::tempdir().unwrap();
+    for index in 0..1100 {
+        write(
+            &repo.path().join(format!("src/file_{index:04}.rs")),
+            "pub fn broad_match() { let _ = \"commonneedle\"; }\n",
+        );
+    }
+    write(
+        &repo.path().join("zzz_scope/target.rs"),
+        "pub fn scoped_target() { let _ = \"commonneedle\"; }\n",
+    );
+
+    let index = FastIndex::build(repo.path()).unwrap();
+    let results = index
+        .search_filtered(
+            "commonneedle path:zzz_scope",
+            1,
+            &SearchFilters {
+                explain: true,
+                ..SearchFilters::default()
+            },
+        )
+        .unwrap();
+
+    assert_eq!(result_paths(&results), vec!["zzz_scope/target.rs"]);
+    let plan = results[0].query_plan.as_ref().unwrap();
+    assert_eq!(plan.candidate_count, 1101);
+    assert_eq!(plan.filtered_candidate_count, 1);
+    assert_eq!(plan.scored_candidate_count, 1);
+    assert!(!plan.candidate_cap_hit);
+
+    let query_plan = index
+        .query_plan("commonneedle path:zzz_scope", &SearchFilters::default())
+        .unwrap();
+    assert_eq!(query_plan.candidate_count, 1101);
+    assert_eq!(query_plan.filtered_candidate_count, 1);
+    assert_eq!(query_plan.final_match_count, 1);
+    assert!(!query_plan.candidate_cap_hit);
+}
+
+#[test]
 fn indexed_trigram_planner_unions_single_literal_and_substring_candidates() {
     let repo = tempfile::tempdir().unwrap();
     write(
