@@ -638,15 +638,15 @@ pub fn tool_manifest() -> Value {
         ),
         tool_entry(
             "find_symbol",
-            "Find symbol definitions in a local repository.",
-            &["repo", "name"],
-            SYMBOL_OPTIONAL_ARGS,
+            "Find symbol definitions in a live repo, persistent index, or shard directory.",
+            &["name"],
+            SYMBOL_TARGET_OPTIONAL_ARGS,
         ),
         tool_entry(
             "find_symbol_batch",
-            "Find several symbol definitions in a local repository in one request.",
-            &["repo", "names"],
-            SYMBOL_OPTIONAL_ARGS,
+            "Find several symbol definitions in a live repo, persistent index, or shard directory in one request.",
+            &["names"],
+            SYMBOL_TARGET_OPTIONAL_ARGS,
         ),
         tool_entry(
             "find_index_symbol",
@@ -2686,9 +2686,48 @@ impl ToolRuntime {
                 Ok(serde_json::to_value(batch)?)
             }
             "find_symbol" => {
-                let repo = path_arg(&request.arguments, "repo")?;
                 let name = string_arg(&request.arguments, "name")?;
                 let limit = positive_usize_arg(&request.arguments, "limit", 10)?;
+                if request.arguments.get("index").is_some()
+                    && request.arguments.get("index_dir").is_some()
+                {
+                    return Err(anyhow!(
+                        "find_symbol accepts only one of index or index_dir"
+                    ));
+                }
+                if let Some(index_dir) =
+                    optional_string_arg(&request.arguments, "index_dir").map(PathBuf::from)
+                {
+                    let symbols = self.find_shard_symbol_cached(
+                        &index_dir,
+                        &name,
+                        limit,
+                        &search_filters(&request.arguments, true)?,
+                    )?;
+                    return Ok(serde_json::to_value(symbol_lookup_results(
+                        symbols,
+                        "read_range",
+                        read_request_args("index_dir", &index_dir),
+                    ))?);
+                }
+                if let Some(index_path) =
+                    optional_string_arg(&request.arguments, "index").map(PathBuf::from)
+                {
+                    let filters = search_filters(&request.arguments, true)?;
+                    let index = self.cached_index(index_path.clone())?;
+                    let symbols = index.find_symbol_filtered(&name, limit, &filters);
+                    return Ok(serde_json::to_value(symbol_lookup_results(
+                        symbols,
+                        "read_range",
+                        read_request_args("index", &index_path),
+                    ))?);
+                }
+                let repo = optional_string_arg(&request.arguments, "repo")
+                    .map(PathBuf::from)
+                    .map(Ok)
+                    .unwrap_or_else(|| {
+                        std::env::current_dir().context("resolve current directory for find_symbol")
+                    })?;
                 let filters = search_filters(&request.arguments, false)?;
                 let index = RepoIndexer::new(&repo).build()?;
                 let symbols = index.find_symbol_filtered(&name, limit, &filters);
@@ -2699,9 +2738,75 @@ impl ToolRuntime {
                 ))?)
             }
             "find_symbol_batch" => {
-                let repo = path_arg(&request.arguments, "repo")?;
                 let names = string_array_arg(&request.arguments, "names")?;
                 let limit = positive_usize_arg(&request.arguments, "limit", 10)?;
+                if request.arguments.get("index").is_some()
+                    && request.arguments.get("index_dir").is_some()
+                {
+                    return Err(anyhow!(
+                        "find_symbol_batch accepts only one of index or index_dir"
+                    ));
+                }
+                if let Some(index_dir) =
+                    optional_string_arg(&request.arguments, "index_dir").map(PathBuf::from)
+                {
+                    let filters = search_filters(&request.arguments, true)?;
+                    let mut batch = Vec::new();
+                    for name in names {
+                        let symbols =
+                            self.find_shard_symbol_cached(&index_dir, &name, limit, &filters)?;
+                        let symbols = symbol_lookup_results(
+                            symbols,
+                            "read_range",
+                            read_request_args("index_dir", &index_dir),
+                        );
+                        let read_batch_request = symbol_lookup_read_batch_request(
+                            &symbols,
+                            "read_ranges",
+                            read_request_args("index_dir", &index_dir),
+                        );
+                        batch.push(SymbolBatchResult {
+                            name,
+                            read_batch_request,
+                            symbols,
+                        });
+                    }
+                    return Ok(serde_json::to_value(batch)?);
+                }
+                if let Some(index_path) =
+                    optional_string_arg(&request.arguments, "index").map(PathBuf::from)
+                {
+                    let filters = search_filters(&request.arguments, true)?;
+                    let index = self.cached_index(index_path.clone())?;
+                    let batch = names
+                        .into_iter()
+                        .map(|name| {
+                            let symbols = symbol_lookup_results(
+                                index.find_symbol_filtered(&name, limit, &filters),
+                                "read_range",
+                                read_request_args("index", &index_path),
+                            );
+                            let read_batch_request = symbol_lookup_read_batch_request(
+                                &symbols,
+                                "read_ranges",
+                                read_request_args("index", &index_path),
+                            );
+                            SymbolBatchResult {
+                                name,
+                                read_batch_request,
+                                symbols,
+                            }
+                        })
+                        .collect::<Vec<_>>();
+                    return Ok(serde_json::to_value(batch)?);
+                }
+                let repo = optional_string_arg(&request.arguments, "repo")
+                    .map(PathBuf::from)
+                    .map(Ok)
+                    .unwrap_or_else(|| {
+                        std::env::current_dir()
+                            .context("resolve current directory for find_symbol_batch")
+                    })?;
                 let filters = search_filters(&request.arguments, false)?;
                 let index = RepoIndexer::new(&repo).build()?;
                 let batch = names
@@ -4106,7 +4211,10 @@ const RELATED_TARGET_OPTIONAL_ARGS: &[&str] = &["repo", "index", "index_dir", "l
 const RELATED_SYMBOLS_TARGET_OPTIONAL_ARGS: &[&str] =
     &["repo", "index", "index_dir", "path", "query", "limit"];
 
-const SYMBOL_OPTIONAL_ARGS: &[&str] = &[
+const SYMBOL_TARGET_OPTIONAL_ARGS: &[&str] = &[
+    "repo",
+    "index",
+    "index_dir",
     "limit",
     "path",
     "dir",
@@ -4140,6 +4248,7 @@ const SYMBOL_OPTIONAL_ARGS: &[&str] = &[
     "exclude_symbol_kind",
     "exclude_kind",
     "exclude_type",
+    "exclude_repo",
     "exclude_dependency",
     "exclude_dep",
     "exclude_deps",

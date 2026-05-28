@@ -148,6 +148,14 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         .iter()
         .find(|tool| tool["name"] == "related_symbols")
         .unwrap();
+    let find_symbol = tools
+        .iter()
+        .find(|tool| tool["name"] == "find_symbol")
+        .unwrap();
+    let find_symbol_batch = tools
+        .iter()
+        .find(|tool| tool["name"] == "find_symbol_batch")
+        .unwrap();
 
     assert_eq!(search["required"], serde_json::json!(["repo", "query"]));
     assert_eq!(search_auto["required"], serde_json::json!(["query"]));
@@ -551,6 +559,20 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
     assert_eq!(
         related_symbols["input_schema"]["properties"]["index_dir"]["type"],
         "string"
+    );
+    assert_eq!(find_symbol["required"], serde_json::json!(["name"]));
+    assert_eq!(
+        find_symbol["input_schema"]["properties"]["index"]["type"],
+        "string"
+    );
+    assert_eq!(
+        find_symbol["input_schema"]["properties"]["index_dir"]["type"],
+        "string"
+    );
+    assert_eq!(find_symbol_batch["required"], serde_json::json!(["names"]));
+    assert_eq!(
+        find_symbol_batch["input_schema"]["properties"]["names"]["maxItems"],
+        serde_json::json!(MAX_BATCH_QUERIES)
     );
     assert_eq!(agent_guide_tool["required"], serde_json::json!([]));
     assert_eq!(
@@ -1828,6 +1850,141 @@ fn runtime_related_alias_accepts_live_index_and_shard_targets() {
             .contains("path is required for shard related_symbols"),
         "{:?}",
         missing_shard_path.error
+    );
+}
+
+#[test]
+fn runtime_find_symbol_alias_accepts_live_index_and_shard_targets() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/auth.rs"),
+        "pub struct SessionManager;\npub fn issue_token() {}\n",
+    );
+    write(
+        &repo.path().join("Cargo.toml"),
+        "[package]\nname='sample'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    let index_path = repo.path().join(".orient/index");
+    FastIndex::build(repo.path())
+        .unwrap()
+        .save(&index_path)
+        .unwrap();
+    let shard_dir = repo.path().join(".orient-shards");
+    build_shards(&[repo.path().to_path_buf()], &shard_dir).unwrap();
+
+    let runtime = ToolRuntime::default();
+    let live = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("live-symbol"),
+        tool: "find_symbol".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "name": "SessionManager",
+            "limit": 5
+        }),
+    });
+    assert!(live.error.is_none(), "{:?}", live.error);
+    let live = live.result.unwrap();
+    assert_eq!(live[0]["path"], "src/auth.rs");
+    assert_eq!(live[0]["read_request"]["tool"], "read_range");
+    assert_eq!(
+        live[0]["read_request"]["arguments"]["repo"],
+        serde_json::json!(repo.path())
+    );
+
+    let indexed = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("indexed-symbol"),
+        tool: "find_symbol".to_string(),
+        arguments: serde_json::json!({
+            "index": repo.path().join(".orient/index"),
+            "name": "SessionManager",
+            "limit": 5
+        }),
+    });
+    assert!(indexed.error.is_none(), "{:?}", indexed.error);
+    let indexed = indexed.result.unwrap();
+    assert_eq!(indexed[0]["read_request"]["tool"], "read_range");
+    assert_eq!(
+        indexed[0]["read_request"]["arguments"]["index"],
+        serde_json::json!(index_path)
+    );
+
+    let sharded = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("shard-symbol"),
+        tool: "find_symbol".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": repo.path().join(".orient-shards"),
+            "name": "SessionManager",
+            "limit": 5
+        }),
+    });
+    assert!(sharded.error.is_none(), "{:?}", sharded.error);
+    let sharded = sharded.result.unwrap();
+    assert_eq!(sharded[0]["read_request"]["tool"], "read_range");
+    assert!(
+        sharded[0]["path"]
+            .as_str()
+            .unwrap()
+            .ends_with("src/auth.rs")
+    );
+    assert_eq!(
+        sharded[0]["read_request"]["arguments"]["index_dir"],
+        serde_json::json!(shard_dir)
+    );
+
+    let indexed_batch = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("indexed-symbol-batch"),
+        tool: "find_symbol_batch".to_string(),
+        arguments: serde_json::json!({
+            "index": repo.path().join(".orient/index"),
+            "names": ["SessionManager", "issue_token"],
+            "limit": 5
+        }),
+    });
+    assert!(indexed_batch.error.is_none(), "{:?}", indexed_batch.error);
+    let indexed_batch = indexed_batch.result.unwrap();
+    assert_eq!(
+        indexed_batch[0]["read_batch_request"]["tool"],
+        "read_ranges"
+    );
+    assert_eq!(
+        indexed_batch[0]["read_batch_request"]["arguments"]["index"],
+        serde_json::json!(index_path)
+    );
+
+    let shard_batch = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("shard-symbol-batch"),
+        tool: "find_symbol_batch".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": repo.path().join(".orient-shards"),
+            "names": ["SessionManager"],
+            "limit": 5
+        }),
+    });
+    assert!(shard_batch.error.is_none(), "{:?}", shard_batch.error);
+    let shard_batch = shard_batch.result.unwrap();
+    assert_eq!(shard_batch[0]["read_batch_request"]["tool"], "read_ranges");
+    assert_eq!(
+        shard_batch[0]["read_batch_request"]["arguments"]["index_dir"],
+        serde_json::json!(shard_dir)
+    );
+
+    let conflicted = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("conflicted-symbol"),
+        tool: "find_symbol".to_string(),
+        arguments: serde_json::json!({
+            "index": repo.path().join(".orient/index"),
+            "index_dir": repo.path().join(".orient-shards"),
+            "name": "SessionManager"
+        }),
+    });
+    assert!(
+        conflicted
+            .error
+            .as_ref()
+            .unwrap()
+            .contains("only one of index or index_dir"),
+        "{:?}",
+        conflicted.error
     );
 }
 

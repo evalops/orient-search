@@ -78,6 +78,8 @@ live repos, persisted indexes, and shard directories.
 tests, source counterparts, definitions, and types.
 `repo_map` follows it too, returning live, indexed, or shard orientation from
 one JSON-lines tool.
+`find_symbol` and `find_symbol_batch` also accept `repo`, `index`, or
+`index_dir` for direct definition jumps.
 Repo maps default to `detail:"compact"` for small first-orientation payloads;
 use `detail:"full"` only when an agent needs the full available import/module
 hint set. Their bundled `read_batch_request` defaults to 16 ranges and accepts
