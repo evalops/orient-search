@@ -687,19 +687,19 @@ pub fn tool_manifest() -> Value {
             "related_files",
             "Find nearby source/test files related to a path in a live repo, persistent index, or shard directory.",
             &["path"],
-            RELATED_TARGET_OPTIONAL_ARGS,
+            RELATED_FILES_TARGET_OPTIONAL_ARGS,
         ),
         tool_entry(
             "related_index_files",
             "Find nearby source/test files related to an indexed result path.",
             &["index", "path"],
-            &["limit"],
+            RELATED_INDEX_FILES_OPTIONAL_ARGS,
         ),
         tool_entry(
             "related_shard_files",
             "Find nearby source/test files related to a shard result path or unique shard-relative path.",
             &["index_dir", "path"],
-            &["limit"],
+            RELATED_SHARD_FILES_OPTIONAL_ARGS,
         ),
         tool_entry(
             "related_symbols",
@@ -3049,7 +3049,9 @@ impl ToolRuntime {
                 if let Some(index_dir) =
                     optional_string_arg(&request.arguments, "index_dir").map(PathBuf::from)
                 {
-                    let related = self.related_shard_files_cached(&index_dir, &path, limit)?;
+                    let filters = related_file_filters(&request.arguments, true)?;
+                    let related =
+                        self.related_shard_files_cached(&index_dir, &path, limit, &filters)?;
                     return Ok(serde_json::to_value(related_file_lookup_results(
                         related,
                         "read_range",
@@ -3059,8 +3061,9 @@ impl ToolRuntime {
                 if let Some(index_path) =
                     optional_string_arg(&request.arguments, "index").map(PathBuf::from)
                 {
+                    let filters = related_file_filters(&request.arguments, true)?;
                     let index = self.cached_index(index_path.clone())?;
-                    let related = index.related_files(&path, limit);
+                    let related = index.related_files_filtered(&path, limit, &filters);
                     return Ok(serde_json::to_value(related_file_lookup_results(
                         related,
                         "read_range",
@@ -3074,8 +3077,9 @@ impl ToolRuntime {
                         std::env::current_dir()
                             .context("resolve current directory for related_files")
                     })?;
+                let filters = related_file_filters(&request.arguments, false)?;
                 let index = RepoIndexer::new(&repo).build()?;
-                let related = index.related_files(&path, limit);
+                let related = index.related_files_filtered(&path, limit, &filters);
                 Ok(serde_json::to_value(related_file_lookup_results(
                     related,
                     "read_range",
@@ -3086,8 +3090,9 @@ impl ToolRuntime {
                 let index_path = self.index_path_arg_or_single_cached(&request.arguments)?;
                 let path = string_arg(&request.arguments, "path")?;
                 let limit = positive_usize_arg(&request.arguments, "limit", 10)?;
+                let filters = related_file_filters(&request.arguments, true)?;
                 let index = self.cached_index(index_path.clone())?;
-                let related = index.related_files(&path, limit);
+                let related = index.related_files_filtered(&path, limit, &filters);
                 Ok(serde_json::to_value(related_file_lookup_results(
                     related,
                     "read_index_range",
@@ -3098,7 +3103,9 @@ impl ToolRuntime {
                 let index_dir = self.shard_dir_arg_or_single_cached(&request.arguments)?;
                 let path = string_arg(&request.arguments, "path")?;
                 let limit = positive_usize_arg(&request.arguments, "limit", 10)?;
-                let related = self.related_shard_files_cached(&index_dir, &path, limit)?;
+                let filters = related_file_filters(&request.arguments, true)?;
+                let related =
+                    self.related_shard_files_cached(&index_dir, &path, limit, &filters)?;
                 Ok(serde_json::to_value(related_file_lookup_results(
                     related,
                     "read_shard_range",
@@ -4080,11 +4087,22 @@ impl ToolRuntime {
         index_dir: &std::path::Path,
         path: &str,
         limit: usize,
+        filters: &SearchFilters,
     ) -> Result<Vec<crate::repo_index::RelatedFile>> {
         let resolved = self.resolve_shard_path_cached(index_dir, path)?;
         let index = self.cached_index(index_dir.join(&resolved.index))?;
-        let mut related =
-            index.related_files(&resolved.relative_path, limit.saturating_mul(4).max(10));
+        let mut filters = filters.clone();
+        filters.repo = None;
+        filters.branch = None;
+        filters.origin = None;
+        filters.exclude_repo.clear();
+        filters.exclude_branch.clear();
+        filters.exclude_origin.clear();
+        let mut related = index.related_files_filtered(
+            &resolved.relative_path,
+            limit.saturating_mul(4).max(10),
+            &filters,
+        );
         related.retain(|file| resolved.contains_actual_path(&file.path));
         for file in &mut related {
             file.path = resolved.output_path(&file.path);
@@ -4482,7 +4500,117 @@ const REPO_MAP_TARGET_OPTIONAL_ARGS: &[&str] = &[
     "origin",
 ];
 
-const RELATED_TARGET_OPTIONAL_ARGS: &[&str] = &["repo", "index", "index_dir", "limit"];
+const RELATED_FILES_TARGET_OPTIONAL_ARGS: &[&str] = &[
+    "repo",
+    "index",
+    "index_dir",
+    "limit",
+    "language",
+    "lang",
+    "extension",
+    "ext",
+    "symbol",
+    "symbol_kind",
+    "kind",
+    "type",
+    "dependency",
+    "dep",
+    "deps",
+    "import",
+    "imports",
+    "module",
+    "modules",
+    "use",
+    "uses",
+    "file",
+    "repo_filter",
+    "branch",
+    "origin",
+    "test",
+    "generated",
+    "exclude_file",
+    "exclude_path",
+    "exclude_folder",
+    "exclude_language",
+    "exclude_lang",
+    "exclude_extension",
+    "exclude_ext",
+    "exclude_symbol",
+    "exclude_symbol_kind",
+    "exclude_kind",
+    "exclude_type",
+    "exclude_repo",
+    "exclude_branch",
+    "exclude_origin",
+    "exclude_dependency",
+    "exclude_dep",
+    "exclude_deps",
+    "exclude_import",
+    "exclude_imports",
+    "exclude_module",
+    "exclude_modules",
+    "exclude_use",
+    "exclude_uses",
+    "exclude_content",
+    "exclude_text",
+    "exclude_term",
+];
+
+const RELATED_INDEX_FILES_OPTIONAL_ARGS: &[&str] = &[
+    "limit",
+    "language",
+    "lang",
+    "extension",
+    "ext",
+    "symbol",
+    "symbol_kind",
+    "kind",
+    "type",
+    "dependency",
+    "dep",
+    "deps",
+    "import",
+    "imports",
+    "module",
+    "modules",
+    "use",
+    "uses",
+    "file",
+    "repo",
+    "repo_filter",
+    "branch",
+    "origin",
+    "test",
+    "generated",
+    "exclude_file",
+    "exclude_path",
+    "exclude_folder",
+    "exclude_language",
+    "exclude_lang",
+    "exclude_extension",
+    "exclude_ext",
+    "exclude_symbol",
+    "exclude_symbol_kind",
+    "exclude_kind",
+    "exclude_type",
+    "exclude_repo",
+    "exclude_branch",
+    "exclude_origin",
+    "exclude_dependency",
+    "exclude_dep",
+    "exclude_deps",
+    "exclude_import",
+    "exclude_imports",
+    "exclude_module",
+    "exclude_modules",
+    "exclude_use",
+    "exclude_uses",
+    "exclude_content",
+    "exclude_text",
+    "exclude_term",
+];
+
+const RELATED_SHARD_FILES_OPTIONAL_ARGS: &[&str] = RELATED_INDEX_FILES_OPTIONAL_ARGS;
 
 const RELATED_SYMBOLS_TARGET_OPTIONAL_ARGS: &[&str] = &[
     "repo",
@@ -5656,6 +5784,14 @@ fn related_symbol_filters(arguments: &Value, allow_repo_alias: bool) -> Result<S
     let mut filters = search_filters(arguments, allow_repo_alias)?;
     // In related-symbol tools, `path` names the anchor file. Keep directory scoping in
     // the query string (for example `query:"dir:src kind:struct"`) to avoid ambiguity.
+    filters.path = None;
+    Ok(filters)
+}
+
+fn related_file_filters(arguments: &Value, allow_repo_alias: bool) -> Result<SearchFilters> {
+    let mut filters = search_filters(arguments, allow_repo_alias)?;
+    // In related-file tools, `path` names the anchor file; use exclude_path or other
+    // structured filters to scope which related files can be returned.
     filters.path = None;
     Ok(filters)
 }

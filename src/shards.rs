@@ -907,10 +907,24 @@ pub fn related_shard_files(
     shard_path: &str,
     limit: usize,
 ) -> Result<Vec<RelatedFile>> {
+    related_shard_files_filtered(index_dir, shard_path, limit, &SearchFilters::default())
+}
+
+pub fn related_shard_files_filtered(
+    index_dir: impl AsRef<Path>,
+    shard_path: &str,
+    limit: usize,
+    filters: &SearchFilters,
+) -> Result<Vec<RelatedFile>> {
     let resolved = resolve_shard_path(index_dir.as_ref(), shard_path)?;
     let index = FastIndex::load(index_dir.as_ref().join(&resolved.index))
         .with_context(|| format!("load shard {}", resolved.index))?;
-    let mut related = index.related_files(&resolved.relative_path, limit.saturating_mul(4).max(10));
+    let filters = related_filters_without_shard_selectors(filters);
+    let mut related = index.related_files_filtered(
+        &resolved.relative_path,
+        limit.saturating_mul(4).max(10),
+        &filters,
+    );
     related.retain(|file| resolved.contains_actual_path(&file.path));
     for file in &mut related {
         file.path = resolved.output_path(&file.path);

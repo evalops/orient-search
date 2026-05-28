@@ -1873,12 +1873,26 @@ impl RepoIndex {
     }
 
     pub fn related_files(&self, path: &str, limit: usize) -> Vec<RelatedFile> {
+        self.related_files_filtered(path, limit, &SearchFilters::default())
+    }
+
+    pub fn related_files_filtered(
+        &self,
+        path: &str,
+        limit: usize,
+        filters: &SearchFilters,
+    ) -> Vec<RelatedFile> {
         if limit == 0 {
             return Vec::new();
         }
 
         let normalized = path.trim_start_matches('/').to_string();
         if !self.files.contains_key(&normalized) {
+            return Vec::new();
+        }
+        if !repo_matches(&self.root, filters)
+            || !dependency_filters_match(&self.dependency_hints(), filters)
+        {
             return Vec::new();
         }
         let stem = Path::new(&normalized)
@@ -1904,6 +1918,9 @@ impl RepoIndex {
         let mut related = Vec::new();
         for (file_path, file) in &self.files {
             if file_path == &normalized {
+                continue;
+            }
+            if !Self::related_file_matches_filters(file_path, file, filters) {
                 continue;
             }
             let lower = file_path.to_lowercase();
@@ -2103,6 +2120,31 @@ impl RepoIndex {
         ) && source_import_filters_match(&symbol.path, &file.text, filters)
             && source_excluded_content_filters_match(&file.text, filters)
             && symbol_matches_related_filters(&symbol.name, &symbol.kind, filters)
+    }
+
+    fn related_file_matches_filters(
+        path: &str,
+        file: &IndexedFile,
+        filters: &SearchFilters,
+    ) -> bool {
+        let path_lower = path.to_ascii_lowercase();
+        let file_name_lower = Path::new(path)
+            .file_name()
+            .map(|value| value.to_string_lossy().to_ascii_lowercase())
+            .unwrap_or_default();
+        let extension_lower = Path::new(path)
+            .extension()
+            .map(|value| value.to_string_lossy().to_lowercase());
+        matches_filters_with_path_metadata(
+            &path_lower,
+            &file_name_lower,
+            extension_lower.as_deref(),
+            Some(&file.language),
+            filters,
+        ) && source_import_filters_match(path, &file.text, filters)
+            && source_excluded_content_filters_match(&file.text, filters)
+            && symbol_kind_filters_match(&file.symbols, filters)
+            && file_symbol_filters_match(&file.symbols, filters)
     }
 
     pub fn repo_brief(&self) -> RepoBrief {
@@ -2679,6 +2721,24 @@ pub(crate) fn symbol_kind_filters_match(symbols: &[Symbol], filters: &SearchFilt
     !filters.exclude_symbol_kind.iter().any(|excluded| {
         let excluded = excluded.to_ascii_lowercase();
         kinds.iter().any(|kind| kind == &excluded)
+    })
+}
+
+pub(crate) fn file_symbol_filters_match(symbols: &[Symbol], filters: &SearchFilters) -> bool {
+    if filters.symbol.is_none() && filters.exclude_symbol.is_empty() {
+        return true;
+    }
+    if filters.exclude_symbol.iter().any(|wanted| {
+        symbols
+            .iter()
+            .any(|symbol| symbol_name_matches(symbol, wanted))
+    }) {
+        return false;
+    }
+    filters.symbol.as_ref().is_none_or(|wanted| {
+        symbols
+            .iter()
+            .any(|symbol| symbol_name_matches(symbol, wanted))
     })
 }
 

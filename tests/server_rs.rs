@@ -555,6 +555,10 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         related_files["input_schema"]["properties"]["path"]["description"],
         "Result path for the selected target; use repo/index-relative paths for repo or index targets, and shard-prefixed or unique shard-relative paths for index_dir targets."
     );
+    assert_eq!(
+        related_files["input_schema"]["properties"]["exclude_content"]["oneOf"][1]["items"]["type"],
+        "string"
+    );
     assert_eq!(related_symbols["required"], serde_json::json!([]));
     assert_eq!(
         related_symbols["input_schema"]["properties"]["index"]["type"],
@@ -2958,6 +2962,14 @@ fn runtime_accepts_structured_negative_search_filters() {
         "pub struct GeneratedSessionManager;\npub fn issue_token() {}\n",
     );
     write(
+        &repo.path().join("tests/auth_test.rs"),
+        "use crate::auth::SessionManager;\n#[test]\nfn issue_token_test() {}\n",
+    );
+    write(
+        &repo.path().join("generated/auth_test.rs"),
+        "use crate::auth::GeneratedSessionManager;\n#[test]\nfn issue_token_test() {}\n",
+    );
+    write(
         &repo.path().join("src/view.ts"),
         "import React from 'react';\nexport function renderToken() { return React.createElement('div'); }\n",
     );
@@ -3150,6 +3162,44 @@ fn runtime_accepts_structured_negative_search_filters() {
     assert!(result.contains("src/auth.rs"), "{result}");
     assert!(!result.contains("generated/auth.rs"), "{result}");
     assert!(!result.contains("src/generated_symbol.rs"), "{result}");
+
+    let related_files = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("related-file-filters"),
+        tool: "related_files".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "path": "src/auth.rs",
+            "limit": 10,
+            "test": true,
+            "exclude_content": "GeneratedSessionManager"
+        }),
+    });
+    assert!(related_files.error.is_none(), "{:?}", related_files.error);
+    let result = serde_json::to_string(&related_files.result).unwrap();
+    assert!(result.contains("tests/auth_test.rs"), "{result}");
+    assert!(!result.contains("generated/auth_test.rs"), "{result}");
+    assert!(!result.contains("generated/auth.rs"), "{result}");
+
+    let related_index_files = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("related-index-file-filters"),
+        tool: "related_index_files".to_string(),
+        arguments: serde_json::json!({
+            "index": index_path,
+            "path": "src/auth.rs",
+            "limit": 10,
+            "test": true,
+            "exclude_text": "GeneratedSessionManager"
+        }),
+    });
+    assert!(
+        related_index_files.error.is_none(),
+        "{:?}",
+        related_index_files.error
+    );
+    let result = serde_json::to_string(&related_index_files.result).unwrap();
+    assert!(result.contains("tests/auth_test.rs"), "{result}");
+    assert!(!result.contains("generated/auth_test.rs"), "{result}");
+    assert!(!result.contains("generated/auth.rs"), "{result}");
 }
 
 #[test]

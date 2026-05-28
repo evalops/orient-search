@@ -828,6 +828,15 @@ impl FastIndex {
     }
 
     pub fn related_files(&self, path: &str, limit: usize) -> Vec<RelatedFile> {
+        self.related_files_filtered(path, limit, &SearchFilters::default())
+    }
+
+    pub fn related_files_filtered(
+        &self,
+        path: &str,
+        limit: usize,
+        filters: &SearchFilters,
+    ) -> Vec<RelatedFile> {
         if limit == 0 {
             return Vec::new();
         }
@@ -836,6 +845,9 @@ impl FastIndex {
         let Some(source_file) = self.indexed_file(&normalized) else {
             return Vec::new();
         };
+        if !repo_matches(&self.root, filters) || !self.matches_dependency_filters(filters) {
+            return Vec::new();
+        }
         let stem = Path::new(&normalized)
             .file_stem()
             .map(|value| value.to_string_lossy().to_string())
@@ -857,6 +869,9 @@ impl FastIndex {
 
         for file in &self.files {
             if file.path == normalized {
+                continue;
+            }
+            if !indexed_file_matches_related_file_filters(file, filters) {
                 continue;
             }
             let lower = &file.path_lower;
@@ -2572,6 +2587,28 @@ fn indexed_file_matches_related_symbol_filters(
         filters,
     ) && source_import_filters_match(&file.path, &file.content, filters)
         && source_excluded_content_filters_match(&file.content, filters)
+}
+
+fn indexed_file_matches_related_file_filters(file: &IndexedPath, filters: &SearchFilters) -> bool {
+    indexed_file_matches_related_symbol_filters(file, filters)
+        && indexed_path_matches_symbol_filter_fields(file, filters)
+}
+
+fn indexed_path_matches_symbol_filter_fields(file: &IndexedPath, filters: &SearchFilters) -> bool {
+    if filters.symbol.is_none() && filters.exclude_symbol.is_empty() {
+        return true;
+    }
+    if filters
+        .exclude_symbol
+        .iter()
+        .any(|symbol| indexed_path_matches_symbol_filter(file, symbol))
+    {
+        return false;
+    }
+    filters
+        .symbol
+        .as_deref()
+        .is_none_or(|symbol| indexed_path_matches_symbol_filter(file, symbol))
 }
 
 fn indexed_symbol_matches_related_filters(symbol: &IndexedSymbol, filters: &SearchFilters) -> bool {

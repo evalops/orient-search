@@ -23,7 +23,7 @@ use orient::server::{
 };
 use orient::shards::{
     ShardQueryPlan, build_shards, ensure_shards, find_shard_symbol, read_shard_range,
-    refresh_shards, related_shard_files, related_shard_symbols_filtered, search_shards,
+    refresh_shards, related_shard_files_filtered, related_shard_symbols_filtered, search_shards,
     shard_query_plans, shard_repo_maps, shard_status,
 };
 use serde::{Deserialize, Serialize};
@@ -606,6 +606,8 @@ enum Commands {
         path_arg: Option<String>,
         #[arg(long, default_value_t = 10)]
         limit: usize,
+        #[command(flatten)]
+        filters: RelatedSymbolFilterArgs,
     },
     RelatedIndex {
         #[arg(long)]
@@ -616,6 +618,8 @@ enum Commands {
         path_arg: Option<String>,
         #[arg(long, default_value_t = 10)]
         limit: usize,
+        #[command(flatten)]
+        filters: RelatedSymbolFilterArgs,
     },
     RelatedShard {
         #[arg(long)]
@@ -626,6 +630,8 @@ enum Commands {
         path_arg: Option<String>,
         #[arg(long, default_value_t = 10)]
         limit: usize,
+        #[command(flatten)]
+        filters: RelatedSymbolFilterArgs,
     },
     RelatedSymbols {
         #[arg(long, default_value = ".")]
@@ -957,6 +963,8 @@ struct RelatedSymbolFilterArgs {
         alias = "remote_origin"
     )]
     origin: Option<String>,
+    #[arg(long = "repo-filter")]
+    repo_filter: Option<String>,
     #[arg(long, alias = "dep", alias = "deps")]
     dependency: Option<String>,
     #[arg(
@@ -1136,7 +1144,7 @@ fn related_symbol_filters_from_args(
             .symbol_kind
             .as_ref()
             .map(|value| normalize_symbol_kind(value)),
-        repo,
+        repo: repo.or_else(|| args.repo_filter.clone()),
         branch: args.branch.clone(),
         origin: args.origin.clone(),
         dependency: args
@@ -2997,23 +3005,25 @@ fn run() -> Result<()> {
             path,
             path_arg,
             limit,
+            filters,
         } => {
             let path = cli_single_path(path, path_arg)?;
+            let filters = related_symbol_filters_from_args(&filters, None);
             let (related, base_args) = if let Some(index_dir) = index_dir {
                 (
-                    related_shard_files(&index_dir, &path, limit)?,
+                    related_shard_files_filtered(&index_dir, &path, limit, &filters)?,
                     read_request_args("index_dir", &index_dir),
                 )
             } else if let Some(index_path) = index {
                 let index = FastIndex::load(&index_path)?;
                 (
-                    index.related_files(&path, limit),
+                    index.related_files_filtered(&path, limit, &filters),
                     read_request_args("index", &index_path),
                 )
             } else {
                 let index = RepoIndexer::new(&repo).build()?;
                 (
-                    index.related_files(&path, limit),
+                    index.related_files_filtered(&path, limit, &filters),
                     read_request_args("repo", &repo),
                 )
             };
@@ -3031,11 +3041,13 @@ fn run() -> Result<()> {
             path,
             path_arg,
             limit,
+            filters,
         } => {
             let path = cli_single_path(path, path_arg)?;
             let index_path = index;
+            let filters = related_symbol_filters_from_args(&filters, None);
             let index = FastIndex::load(&index_path)?;
-            let related = index.related_files(&path, limit);
+            let related = index.related_files_filtered(&path, limit, &filters);
             println!(
                 "{}",
                 serde_json::to_string(&related_file_lookup_results(
@@ -3050,9 +3062,11 @@ fn run() -> Result<()> {
             path,
             path_arg,
             limit,
+            filters,
         } => {
             let path = cli_single_path(path, path_arg)?;
-            let related = related_shard_files(&index_dir, &path, limit)?;
+            let filters = related_symbol_filters_from_args(&filters, None);
+            let related = related_shard_files_filtered(&index_dir, &path, limit, &filters)?;
             println!(
                 "{}",
                 serde_json::to_string(&related_file_lookup_results(
