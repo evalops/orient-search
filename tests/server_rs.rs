@@ -385,6 +385,43 @@ fn runtime_rejects_oversized_batches() {
     });
     let error = response.error.unwrap();
     assert!(error.contains("max 64"), "{error}");
+
+    let response = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("empty-ranges"),
+        tool: "open_ranges".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "ranges": []
+        }),
+    });
+    let error = response.error.unwrap();
+    assert!(error.contains("must not be empty"), "{error}");
+
+    let response = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("zero-start"),
+        tool: "open_range".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "path": "src/auth.rs",
+            "start": 0,
+            "lines": 1
+        }),
+    });
+    let error = response.error.unwrap();
+    assert!(error.contains("positive integer"), "{error}");
+
+    let response = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("too-many-lines"),
+        tool: "open_range".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "path": "src/auth.rs",
+            "start": 1,
+            "lines": MAX_READ_RANGE_LINES + 1
+        }),
+    });
+    let error = response.error.unwrap();
+    assert!(error.contains("max 1000"), "{error}");
 }
 
 #[test]

@@ -1697,3 +1697,23 @@ fn normalize_filter(value: &str) -> String {
 fn normalize_extension(value: &str) -> String {
     value.trim_start_matches('.').to_ascii_lowercase()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cli_range_spec_parses_paths_with_colons_from_the_right() {
+        let range = CliRangeSpec::from_str("src/auth:token.rs:12:4").unwrap();
+
+        assert_eq!(range.path, "src/auth:token.rs");
+        assert_eq!(range.start, 12);
+        assert_eq!(range.lines, 4);
+    }
+
+    #[test]
+    fn cli_range_spec_rejects_zero_start_or_lines() {
+        assert!(CliRangeSpec::from_str("src/auth.rs:0:1").is_err());
+        assert!(CliRangeSpec::from_str("src/auth.rs:1:0").is_err());
+    }
+}

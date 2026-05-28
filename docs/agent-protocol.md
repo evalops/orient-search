@@ -89,7 +89,7 @@ target/release/orient read-index-ranges --index /tmp/orient.index --range src/au
 target/release/orient read-shard-ranges --index-dir /tmp/orient-shards --range platform/src/auth.rs:40:80
 ```
 
-Range reads are capped by the manifest `lines.maximum`, and batch range arrays by `ranges.maxItems`, so a mistaken large request cannot dump unbounded file content.
+Range reads follow manifest bounds: `start >= 1`, `1 <= lines <= lines.maximum`, non-empty batch arrays, and `ranges.maxItems`, so a mistaken request cannot dump unbounded file content.
 
 ## Orientation And Repair
 

@@ -986,8 +986,7 @@ impl ToolRuntime {
             "read_range" | "open_range" => {
                 let repo = path_arg(&request.arguments, "repo")?;
                 let path = string_arg(&request.arguments, "path")?;
-                let start = usize_arg(&request.arguments, "start").unwrap_or(1);
-                let lines = usize_arg(&request.arguments, "lines").unwrap_or(80);
+                let (start, lines) = read_window_args(&request.arguments)?;
                 Ok(serde_json::to_value(read_file_range(
                     repo, &path, start, lines,
                 )?)?)
@@ -1104,8 +1103,7 @@ impl ToolRuntime {
             "read_index_range" | "open_index_range" => {
                 let index_path = self.index_path_arg_or_single_cached(&request.arguments)?;
                 let path = string_arg(&request.arguments, "path")?;
-                let start = usize_arg(&request.arguments, "start").unwrap_or(1);
-                let lines = usize_arg(&request.arguments, "lines").unwrap_or(80);
+                let (start, lines) = read_window_args(&request.arguments)?;
                 let index = self.cached_index(index_path)?;
                 Ok(serde_json::to_value(
                     index.read_range(&path, start, lines)?,
@@ -1222,8 +1220,7 @@ impl ToolRuntime {
             "read_shard_range" | "open_shard_range" => {
                 let index_dir = self.shard_dir_arg_or_single_cached(&request.arguments)?;
                 let path = string_arg(&request.arguments, "path")?;
-                let start = usize_arg(&request.arguments, "start").unwrap_or(1);
-                let lines = usize_arg(&request.arguments, "lines").unwrap_or(80);
+                let (start, lines) = read_window_args(&request.arguments)?;
                 Ok(serde_json::to_value(self.read_shard_range_cached(
                     &index_dir, &path, start, lines,
                 )?)?)
@@ -2258,6 +2255,28 @@ fn bool_arg(arguments: &Value, name: &str) -> bool {
         .unwrap_or(false)
 }
 
+fn read_window_args(arguments: &Value) -> Result<(usize, usize)> {
+    let start = usize_arg(arguments, "start").unwrap_or(1);
+    let lines = usize_arg(arguments, "lines").unwrap_or(80);
+    validate_read_window(start, lines)?;
+    Ok((start, lines))
+}
+
+fn validate_read_window(start: usize, lines: usize) -> Result<()> {
+    if start == 0 {
+        return Err(anyhow!("range start must be a positive integer"));
+    }
+    if lines == 0 {
+        return Err(anyhow!("range lines must be a positive integer"));
+    }
+    if lines > MAX_READ_RANGE_LINES {
+        return Err(anyhow!(
+            "range lines has {lines}, max {MAX_READ_RANGE_LINES}"
+        ));
+    }
+    Ok(())
+}
+
 fn string_array_arg(arguments: &Value, name: &str) -> Result<Vec<String>> {
     let Some(value) = arguments.get(name) else {
         return Err(anyhow!("missing string array argument: {name}"));
@@ -2312,6 +2331,9 @@ fn range_args(arguments: &Value) -> Result<Vec<RangeArg>> {
         .get("ranges")
         .and_then(Value::as_array)
         .ok_or_else(|| anyhow!("missing ranges array argument"))?;
+    if values.is_empty() {
+        return Err(anyhow!("argument ranges must not be empty"));
+    }
     if values.len() > MAX_BATCH_RANGES {
         return Err(anyhow!(
             "argument ranges has {} items, max {}",
@@ -2328,6 +2350,7 @@ fn range_args(arguments: &Value) -> Result<Vec<RangeArg>> {
             .ok_or_else(|| anyhow!("range entry must include string path"))?;
         let start = value.get("start").and_then(Value::as_u64).unwrap_or(1) as usize;
         let lines = value.get("lines").and_then(Value::as_u64).unwrap_or(80) as usize;
+        validate_read_window(start, lines)?;
         ranges.push(RangeArg { path, start, lines });
     }
     Ok(ranges)
