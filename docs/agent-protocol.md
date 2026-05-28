@@ -73,6 +73,8 @@ For most agents, the handoff is:
 2. Collect one or more `read_range` objects from results.
 3. Pass them directly to the matching batch read tool.
 
+`open_range`, `open_index_range`, and `open_shard_range` are aliases for agents that phrase context fetches as opening a file range.
+
 Examples:
 
 ```json

@@ -279,8 +279,10 @@ fn server_reports_tool_manifest_for_agent_wrappers() {
     assert!(stdout.contains("\"type\":\"range[]\""));
     assert!(stdout.contains("exclude_path"));
     assert!(stdout.contains("exclude_symbol"));
+    assert!(stdout.contains("open_range"));
     assert!(stdout.contains("read_ranges"));
     assert!(stdout.contains("search_batch"));
+    assert!(stdout.contains("open_index_range"));
     assert!(stdout.contains("read_index_ranges"));
     assert!(stdout.contains("indexed_search_batch"));
     assert!(stdout.contains("read_shard_ranges"));
@@ -294,6 +296,7 @@ fn server_reports_tool_manifest_for_agent_wrappers() {
     assert!(stdout.contains("find_index_symbol"));
     assert!(stdout.contains("related_index_files"));
     assert!(stdout.contains("related_index_symbols"));
+    assert!(stdout.contains("open_shard_range"));
     assert!(stdout.contains("read_shard_range"));
     assert!(stdout.contains("related_shard_files"));
     assert!(stdout.contains("related_shard_symbols"));
@@ -3217,7 +3220,7 @@ fn server_handles_repo_map_and_read_range_requests() {
     });
     let range_request = serde_json::json!({
         "id": "range",
-        "tool": "read_range",
+        "tool": "open_range",
         "arguments": {
             "repo": repo.path(),
             "path": "src/auth.rs",
@@ -3227,7 +3230,7 @@ fn server_handles_repo_map_and_read_range_requests() {
     });
     let ranges_request = serde_json::json!({
         "id": "ranges",
-        "tool": "read_ranges",
+        "tool": "open_ranges",
         "arguments": {
             "repo": repo.path(),
             "ranges": [

@@ -351,8 +351,20 @@ pub fn tool_manifest() -> Value {
             &["start", "lines"],
         ),
         tool_entry(
+            "open_range",
+            "Alias for read_range for agents that phrase context fetches as opening a file range.",
+            &["repo", "path"],
+            &["start", "lines"],
+        ),
+        tool_entry(
             "read_ranges",
             "Read several bounded line ranges from repository-relative paths in one request.",
+            &["repo", "ranges"],
+            &[],
+        ),
+        tool_entry(
+            "open_ranges",
+            "Alias for read_ranges for agents that phrase context fetches as opening file ranges.",
             &["repo", "ranges"],
             &[],
         ),
@@ -399,8 +411,20 @@ pub fn tool_manifest() -> Value {
             &["start", "lines"],
         ),
         tool_entry(
+            "open_index_range",
+            "Alias for read_index_range for agents that phrase context fetches as opening a file range.",
+            &["index", "path"],
+            &["start", "lines"],
+        ),
+        tool_entry(
             "read_index_ranges",
             "Read several bounded line ranges from persistent index result paths in one request.",
+            &["index", "ranges"],
+            &[],
+        ),
+        tool_entry(
+            "open_index_ranges",
+            "Alias for read_index_ranges for agents that phrase context fetches as opening file ranges.",
             &["index", "ranges"],
             &[],
         ),
@@ -459,8 +483,20 @@ pub fn tool_manifest() -> Value {
             &["start", "lines"],
         ),
         tool_entry(
+            "open_shard_range",
+            "Alias for read_shard_range for agents that phrase context fetches as opening a file range.",
+            &["index_dir", "path"],
+            &["start", "lines"],
+        ),
+        tool_entry(
             "read_shard_ranges",
             "Read several bounded line ranges from repo-prefixed shard result paths in one request.",
+            &["index_dir", "ranges"],
+            &[],
+        ),
+        tool_entry(
+            "open_shard_ranges",
+            "Alias for read_shard_ranges for agents that phrase context fetches as opening file ranges.",
             &["index_dir", "ranges"],
             &[],
         ),
@@ -731,6 +767,8 @@ fn daemon_default_kind(tool_name: &str) -> Option<DaemonDefaultKind> {
         | "index_status"
         | "read_index_range"
         | "read_index_ranges"
+        | "open_index_range"
+        | "open_index_ranges"
         | "find_index_symbol"
         | "related_index_files"
         | "related_index_symbols" => Some(DaemonDefaultKind::Index),
@@ -742,6 +780,8 @@ fn daemon_default_kind(tool_name: &str) -> Option<DaemonDefaultKind> {
         | "shard_query_plan_batch"
         | "read_shard_range"
         | "read_shard_ranges"
+        | "open_shard_range"
+        | "open_shard_ranges"
         | "shard_repo_map"
         | "find_shard_symbol"
         | "related_shard_files"
@@ -943,7 +983,7 @@ impl ToolRuntime {
                     index.repo_map(symbol_limit, test_limit),
                 )?)
             }
-            "read_range" => {
+            "read_range" | "open_range" => {
                 let repo = path_arg(&request.arguments, "repo")?;
                 let path = string_arg(&request.arguments, "path")?;
                 let start = usize_arg(&request.arguments, "start").unwrap_or(1);
@@ -952,7 +992,7 @@ impl ToolRuntime {
                     repo, &path, start, lines,
                 )?)?)
             }
-            "read_ranges" => {
+            "read_ranges" | "open_ranges" => {
                 let repo = path_arg(&request.arguments, "repo")?;
                 let ranges = range_args(&request.arguments)?;
                 let mut results = Vec::new();
@@ -1061,7 +1101,7 @@ impl ToolRuntime {
                 let index = self.cached_index(index_path)?;
                 Ok(serde_json::to_value(index.freshness()?)?)
             }
-            "read_index_range" => {
+            "read_index_range" | "open_index_range" => {
                 let index_path = self.index_path_arg_or_single_cached(&request.arguments)?;
                 let path = string_arg(&request.arguments, "path")?;
                 let start = usize_arg(&request.arguments, "start").unwrap_or(1);
@@ -1071,7 +1111,7 @@ impl ToolRuntime {
                     index.read_range(&path, start, lines)?,
                 )?)
             }
-            "read_index_ranges" => {
+            "read_index_ranges" | "open_index_ranges" => {
                 let index_path = self.index_path_arg_or_single_cached(&request.arguments)?;
                 let ranges = range_args(&request.arguments)?;
                 let index = self.cached_index(index_path)?;
@@ -1179,7 +1219,7 @@ impl ToolRuntime {
                 }
                 Ok(serde_json::to_value(batch)?)
             }
-            "read_shard_range" => {
+            "read_shard_range" | "open_shard_range" => {
                 let index_dir = self.shard_dir_arg_or_single_cached(&request.arguments)?;
                 let path = string_arg(&request.arguments, "path")?;
                 let start = usize_arg(&request.arguments, "start").unwrap_or(1);
@@ -1188,7 +1228,7 @@ impl ToolRuntime {
                     &index_dir, &path, start, lines,
                 )?)?)
             }
-            "read_shard_ranges" => {
+            "read_shard_ranges" | "open_shard_ranges" => {
                 let index_dir = self.shard_dir_arg_or_single_cached(&request.arguments)?;
                 let ranges = range_args(&request.arguments)?;
                 let mut results = Vec::new();
@@ -1332,7 +1372,9 @@ impl ToolRuntime {
                 "repo_map",
                 "indexed_repo_map",
                 "read_range",
+                "open_range",
                 "read_ranges",
+                "open_ranges",
                 "search_code",
                 "search_batch",
                 "indexed_search_code",
@@ -1340,7 +1382,9 @@ impl ToolRuntime {
                 "indexed_query_plan",
                 "indexed_query_plan_batch",
                 "read_index_range",
+                "open_index_range",
                 "read_index_ranges",
+                "open_index_ranges",
                 "index_shards",
                 "ensure_shards",
                 "refresh_shards",
@@ -1350,7 +1394,9 @@ impl ToolRuntime {
                 "shard_query_plan",
                 "shard_query_plan_batch",
                 "read_shard_range",
+                "open_shard_range",
                 "read_shard_ranges",
+                "open_shard_ranges",
                 "shard_repo_map",
                 "find_shard_symbol",
                 "find_symbol",

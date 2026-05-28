@@ -168,6 +168,7 @@ enum Commands {
         #[arg(long)]
         refresh_if_stale: bool,
     },
+    #[command(alias = "open-shard-range")]
     ReadShardRange {
         #[arg(long)]
         index_dir: PathBuf,
@@ -177,6 +178,7 @@ enum Commands {
         #[arg(long, default_value_t = 80)]
         lines: usize,
     },
+    #[command(alias = "open-shard-ranges")]
     ReadShardRanges {
         #[arg(long)]
         index_dir: PathBuf,
@@ -250,6 +252,7 @@ enum Commands {
         #[arg(long)]
         refresh_if_stale: bool,
     },
+    #[command(alias = "open-range")]
     ReadRange {
         #[arg(long, default_value = ".")]
         repo: PathBuf,
@@ -259,6 +262,7 @@ enum Commands {
         #[arg(long, default_value_t = 80)]
         lines: usize,
     },
+    #[command(alias = "open-ranges")]
     ReadRanges {
         #[arg(long, default_value = ".")]
         repo: PathBuf,
@@ -328,6 +332,7 @@ enum Commands {
         #[arg(long)]
         refresh_if_stale: bool,
     },
+    #[command(alias = "open-index-range")]
     ReadIndexRange {
         #[arg(long)]
         index: PathBuf,
@@ -337,6 +342,7 @@ enum Commands {
         #[arg(long, default_value_t = 80)]
         lines: usize,
     },
+    #[command(alias = "open-index-ranges")]
     ReadIndexRanges {
         #[arg(long)]
         index: PathBuf,

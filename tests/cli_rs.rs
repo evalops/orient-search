@@ -72,11 +72,14 @@ fn cli_outputs_tool_manifest() {
         .stdout(predicate::str::contains("warm_shards"))
         .stdout(predicate::str::contains("single_warmed_index"))
         .stdout(predicate::str::contains("single_warmed_shard_dir"))
+        .stdout(predicate::str::contains("open_range"))
         .stdout(predicate::str::contains("read_ranges"))
+        .stdout(predicate::str::contains("open_index_range"))
         .stdout(predicate::str::contains("search_batch"))
         .stdout(predicate::str::contains("read_index_ranges"))
         .stdout(predicate::str::contains("indexed_search_batch"))
         .stdout(predicate::str::contains("indexed_query_plan_batch"))
+        .stdout(predicate::str::contains("open_shard_range"))
         .stdout(predicate::str::contains("read_shard_ranges"))
         .stdout(predicate::str::contains("search_shards_batch"))
         .stdout(predicate::str::contains("shard_query_plan_batch"))
@@ -649,7 +652,7 @@ fn cli_outputs_repo_map_and_reads_ranges() {
     let mut read_range = Command::cargo_bin("orient").unwrap();
     read_range
         .args([
-            "read-range",
+            "open-range",
             "--repo",
             repo.path().to_str().unwrap(),
             "src/auth.rs",
