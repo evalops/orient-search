@@ -447,7 +447,9 @@ fn cli_indexes_shards_from_discovered_root() {
         ])
         .assert()
         .success()
-        .stdout(predicate::str::contains("\"shards\":2"));
+        .stdout(predicate::str::contains("\"shards\":2"))
+        .stdout(predicate::str::contains("\"posting_entries\""))
+        .stdout(predicate::str::contains("\"compressed_posting_bytes\""));
 
     let mut search = Command::cargo_bin("orient").unwrap();
     search
@@ -836,7 +838,10 @@ fn cli_search_surfaces_accept_structured_filters() {
             index_path.to_str().unwrap(),
         ])
         .assert()
-        .success();
+        .success()
+        .stdout(predicate::str::contains("\"source_bytes\""))
+        .stdout(predicate::str::contains("\"posting_entries\""))
+        .stdout(predicate::str::contains("\"compressed_posting_bytes\""));
 
     let mut indexed = Command::cargo_bin("orient").unwrap();
     indexed

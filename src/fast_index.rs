@@ -113,9 +113,12 @@ pub struct IndexStats {
     pub version: u32,
     pub root: PathBuf,
     pub files: usize,
+    pub source_bytes: u64,
     pub terms: usize,
     pub path_terms: usize,
     pub trigrams: usize,
+    pub posting_entries: usize,
+    pub compressed_posting_bytes: usize,
     pub symbols: usize,
 }
 
@@ -124,9 +127,12 @@ pub struct RefreshStats {
     pub version: u32,
     pub root: PathBuf,
     pub files: usize,
+    pub source_bytes: u64,
     pub terms: usize,
     pub path_terms: usize,
     pub trigrams: usize,
+    pub posting_entries: usize,
+    pub compressed_posting_bytes: usize,
     pub symbols: usize,
     pub reused_files: usize,
     pub renamed_files: usize,
@@ -337,9 +343,16 @@ impl FastIndex {
             version: self.version,
             root: self.root.clone(),
             files: self.files.len(),
+            source_bytes: indexed_source_bytes(&self.files),
             terms: self.postings.len(),
             path_terms: self.path_postings.len(),
             trigrams: self.trigram_postings.len(),
+            posting_entries: total_posting_entries(&self.postings)
+                + total_posting_entries(&self.path_postings)
+                + total_posting_entries(&self.trigram_postings),
+            compressed_posting_bytes: total_compressed_posting_bytes(&self.postings)
+                + total_compressed_posting_bytes(&self.path_postings)
+                + total_compressed_posting_bytes(&self.trigram_postings),
             symbols: self.files.iter().map(|file| file.symbols.len()).sum(),
         }
     }
@@ -360,9 +373,16 @@ impl FastIndex {
             version: self.version,
             root: self.root.clone(),
             files: self.files.len(),
+            source_bytes: indexed_source_bytes(&self.files),
             terms: self.postings.len(),
             path_terms: self.path_postings.len(),
             trigrams: self.trigram_postings.len(),
+            posting_entries: total_posting_entries(&self.postings)
+                + total_posting_entries(&self.path_postings)
+                + total_posting_entries(&self.trigram_postings),
+            compressed_posting_bytes: total_compressed_posting_bytes(&self.postings)
+                + total_compressed_posting_bytes(&self.path_postings)
+                + total_compressed_posting_bytes(&self.trigram_postings),
             symbols: self.files.iter().map(|file| file.symbols.len()).sum(),
             reused_files: outcome.reused_files,
             renamed_files: outcome.renamed_files,
@@ -1581,6 +1601,21 @@ fn compress_posting_map(
         .iter()
         .map(|(term, postings)| (term.clone(), compress_postings(postings)))
         .collect()
+}
+
+fn indexed_source_bytes(files: &[IndexedPath]) -> u64 {
+    files.iter().map(|file| file.size).sum()
+}
+
+fn total_posting_entries(postings: &HashMap<String, Vec<Posting>>) -> usize {
+    postings.values().map(Vec::len).sum()
+}
+
+fn total_compressed_posting_bytes(postings: &HashMap<String, Vec<Posting>>) -> usize {
+    postings
+        .values()
+        .map(|postings| compress_postings(postings).bytes.len())
+        .sum()
 }
 
 fn decompress_posting_map(

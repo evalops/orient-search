@@ -49,9 +49,12 @@ pub struct ShardBuildStats {
     pub output_dir: PathBuf,
     pub shards: usize,
     pub files: usize,
+    pub source_bytes: u64,
     pub terms: usize,
     pub path_terms: usize,
     pub trigrams: usize,
+    pub posting_entries: usize,
+    pub compressed_posting_bytes: usize,
     pub symbols: usize,
 }
 
@@ -61,9 +64,12 @@ pub struct ShardRefreshStats {
     pub output_dir: PathBuf,
     pub shards: usize,
     pub files: usize,
+    pub source_bytes: u64,
     pub terms: usize,
     pub path_terms: usize,
     pub trigrams: usize,
+    pub posting_entries: usize,
+    pub compressed_posting_bytes: usize,
     pub symbols: usize,
     pub removed_shards: usize,
     pub reused_files: usize,
@@ -81,9 +87,12 @@ pub struct ShardEnsureStats {
     pub added_shards: usize,
     pub removed_shards: usize,
     pub files: usize,
+    pub source_bytes: u64,
     pub terms: usize,
     pub path_terms: usize,
     pub trigrams: usize,
+    pub posting_entries: usize,
+    pub compressed_posting_bytes: usize,
     pub symbols: usize,
     pub reused_files: usize,
     pub renamed_files: usize,
@@ -145,9 +154,12 @@ pub fn build_shards(repos: &[PathBuf], output_dir: impl AsRef<Path>) -> Result<S
         output_dir: output_dir.to_path_buf(),
         shards: 0,
         files: 0,
+        source_bytes: 0,
         terms: 0,
         path_terms: 0,
         trigrams: 0,
+        posting_entries: 0,
+        compressed_posting_bytes: 0,
         symbols: 0,
     };
 
@@ -192,9 +204,12 @@ pub fn ensure_shards(repos: &[PathBuf], output_dir: impl AsRef<Path>) -> Result<
             added_shards: 0,
             removed_shards: stats.removed_shards,
             files: stats.files,
+            source_bytes: stats.source_bytes,
             terms: stats.terms,
             path_terms: stats.path_terms,
             trigrams: stats.trigrams,
+            posting_entries: stats.posting_entries,
+            compressed_posting_bytes: stats.compressed_posting_bytes,
             symbols: stats.symbols,
             reused_files: stats.reused_files,
             renamed_files: stats.renamed_files,
@@ -219,9 +234,12 @@ pub fn ensure_shards(repos: &[PathBuf], output_dir: impl AsRef<Path>) -> Result<
         added_shards: stats.shards,
         removed_shards: 0,
         files: stats.files,
+        source_bytes: stats.source_bytes,
         terms: stats.terms,
         path_terms: stats.path_terms,
         trigrams: stats.trigrams,
+        posting_entries: stats.posting_entries,
+        compressed_posting_bytes: stats.compressed_posting_bytes,
         symbols: stats.symbols,
         reused_files: 0,
         renamed_files: 0,
@@ -238,9 +256,12 @@ pub fn refresh_shards(index_dir: impl AsRef<Path>) -> Result<ShardRefreshStats> 
         output_dir: index_dir.to_path_buf(),
         shards: manifest.shards.len(),
         files: 0,
+        source_bytes: 0,
         terms: 0,
         path_terms: 0,
         trigrams: 0,
+        posting_entries: 0,
+        compressed_posting_bytes: 0,
         symbols: 0,
         removed_shards: 0,
         reused_files: 0,
@@ -1332,25 +1353,34 @@ fn git_metadata_matches(git: &RepoGitMetadata, filter: &str) -> bool {
 
 fn add_stats(total: &mut ShardBuildStats, stats: &IndexStats) {
     total.files += stats.files;
+    total.source_bytes += stats.source_bytes;
     total.terms += stats.terms;
     total.path_terms += stats.path_terms;
     total.trigrams += stats.trigrams;
+    total.posting_entries += stats.posting_entries;
+    total.compressed_posting_bytes += stats.compressed_posting_bytes;
     total.symbols += stats.symbols;
 }
 
 fn add_index_stats(total: &mut ShardRefreshStats, stats: &IndexStats) {
     total.files += stats.files;
+    total.source_bytes += stats.source_bytes;
     total.terms += stats.terms;
     total.path_terms += stats.path_terms;
     total.trigrams += stats.trigrams;
+    total.posting_entries += stats.posting_entries;
+    total.compressed_posting_bytes += stats.compressed_posting_bytes;
     total.symbols += stats.symbols;
 }
 
 fn add_ensure_stats(total: &mut ShardEnsureStats, stats: &IndexStats) {
     total.files += stats.files;
+    total.source_bytes += stats.source_bytes;
     total.terms += stats.terms;
     total.path_terms += stats.path_terms;
     total.trigrams += stats.trigrams;
+    total.posting_entries += stats.posting_entries;
+    total.compressed_posting_bytes += stats.compressed_posting_bytes;
     total.symbols += stats.symbols;
     total.refreshed_files += stats.files;
 }

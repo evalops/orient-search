@@ -1625,9 +1625,12 @@ impl ToolRuntime {
                                 "root": stats.root.to_string_lossy(),
                                 "version": stats.version,
                                 "files": stats.files,
+                                "source_bytes": stats.source_bytes,
                                 "terms": stats.terms,
                                 "path_terms": stats.path_terms,
                                 "trigrams": stats.trigrams,
+                                "posting_entries": stats.posting_entries,
+                                "compressed_posting_bytes": stats.compressed_posting_bytes,
                                 "symbols": stats.symbols
                             })
                         })
