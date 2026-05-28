@@ -1466,6 +1466,68 @@ fn runtime_batches_searches_and_query_plans_against_repo_index_and_shards() {
 }
 
 #[test]
+fn retry_requests_preserve_boolean_test_filters() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/auth.rs"),
+        "pub struct SessionManager;\npub fn issue_token() {}\n",
+    );
+    write(
+        &repo.path().join("tests/auth_test.rs"),
+        "use app::SessionManager;\n#[test]\nfn session_manager_round_trip() {}\n",
+    );
+    let runtime = ToolRuntime::default();
+
+    let plan = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("plan"),
+        tool: "search_plan".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "query": "SessionManager missingterm test:true",
+            "require_all": true
+        }),
+    });
+    assert!(plan.error.is_none(), "{:?}", plan.error);
+    let plan = plan.result.as_ref().unwrap();
+    assert_eq!(
+        plan["retry_requests"][0]["arguments"]["test"],
+        serde_json::json!(true)
+    );
+
+    let retry = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("retry"),
+        tool: plan["retry_requests"][0]["tool"]
+            .as_str()
+            .unwrap()
+            .to_string(),
+        arguments: plan["retry_requests"][0]["arguments"].clone(),
+    });
+    assert!(retry.error.is_none(), "{:?}", retry.error);
+    let retry_result = serde_json::to_string(&retry.result).unwrap();
+    assert!(
+        retry_result.contains("tests/auth_test.rs"),
+        "{retry_result}"
+    );
+    assert!(!retry_result.contains("src/auth.rs"), "{retry_result}");
+
+    let source_plan = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("source-plan"),
+        tool: "search_plan".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "query": "SessionManager missingterm test:false",
+            "require_all": true
+        }),
+    });
+    assert!(source_plan.error.is_none(), "{:?}", source_plan.error);
+    let source_plan = source_plan.result.as_ref().unwrap();
+    assert_eq!(
+        source_plan["retry_requests"][0]["arguments"]["test"],
+        serde_json::json!(false)
+    );
+}
+
+#[test]
 fn runtime_accepts_structured_negative_search_filters() {
     let repo = tempfile::tempdir().unwrap();
     write(

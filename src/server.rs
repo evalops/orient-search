@@ -4,9 +4,9 @@ use crate::discover::{
 use crate::fast_index::{FastIndex, RefreshStats};
 use crate::query::{merge_filters, normalize_symbol_kind, parse_query, query_text};
 use crate::repo_index::{
-    MAX_ATTACHED_CONTEXT_LINES, MAX_READ_RANGE_LINES, MAX_SEARCH_RESULTS, QueryPlan, RepoIndexer,
-    ResultToolRequest, SearchFilters, SearchResult, SnippetMode, Symbol, attach_result_context,
-    attach_result_read_requests, attach_result_related_requests,
+    MAX_ATTACHED_CONTEXT_LINES, MAX_READ_RANGE_LINES, MAX_SEARCH_RESULTS, QueryPlan,
+    QueryPlanFilter, RepoIndexer, ResultToolRequest, SearchFilters, SearchResult, SnippetMode,
+    Symbol, attach_result_context, attach_result_read_requests, attach_result_related_requests,
     attach_result_related_symbol_requests, finalize_results, normalize_token, read_file_range,
     result_read_batch_request, search_repo_fast_filtered,
 };
@@ -1511,7 +1511,7 @@ fn add_plan_filter_args(
             if filter.field == "repo" && target_name == "repo" {
                 continue;
             }
-            arguments.insert(filter.field.clone(), json!(filter.value));
+            arguments.insert(filter.field.clone(), plan_filter_argument_value(filter));
             continue;
         }
         let key = format!("exclude_{}", filter.field);
@@ -1519,6 +1519,16 @@ fn add_plan_filter_args(
     }
     for (name, values) in negated {
         arguments.insert(name, json!(values));
+    }
+}
+
+fn plan_filter_argument_value(filter: &QueryPlanFilter) -> Value {
+    match filter.field.as_str() {
+        "test" => json!(matches!(
+            filter.value.to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "y"
+        )),
+        _ => json!(filter.value),
     }
 }
 
