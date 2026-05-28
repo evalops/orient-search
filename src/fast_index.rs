@@ -2142,7 +2142,11 @@ fn indexed_query_plan(
         require_all,
         query_tokens: query_tokens.to_vec(),
         query_phrases: query_phrases.to_vec(),
-        query_trigrams: query_trigrams.to_vec(),
+        query_trigrams: if use_trigrams {
+            query_trigrams.to_vec()
+        } else {
+            Vec::new()
+        },
         active_filters,
         planned_postings,
         missing_terms: missing_terms.to_vec(),

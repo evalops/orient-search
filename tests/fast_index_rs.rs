@@ -1194,6 +1194,7 @@ fn indexed_query_plan_dedupes_identifier_tokens() {
         plan.query_tokens,
         vec!["shard", "status", "jobs", "ordered", "items"]
     );
+    assert!(plan.query_trigrams.is_empty());
     assert_eq!(
         plan.planned_postings
             .iter()
@@ -1245,6 +1246,17 @@ fn indexed_search_uses_trigram_postings_for_substring_queries() {
     assert_eq!(results[0].path, "src/auth.rs");
     assert!(results[0].reason.contains("trigrams"));
     assert!(!results.iter().any(|result| result.path == "src/billing.rs"));
+
+    let plan = index
+        .query_plan("essionman", &SearchFilters::default())
+        .unwrap();
+    assert_eq!(plan.strategy, "token_or_trigram_union");
+    assert!(!plan.query_trigrams.is_empty());
+    assert!(
+        plan.planned_postings
+            .iter()
+            .any(|posting| posting.kind == "trigram")
+    );
 }
 
 #[test]
