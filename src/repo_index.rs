@@ -1596,12 +1596,8 @@ impl RepoIndex {
                 return Vec::new();
             }
         }
-        let query_tokens = query
-            .map(tokenize)
-            .unwrap_or_default()
-            .into_iter()
-            .collect::<HashSet<_>>();
-        let query_symbol = query.map(normalize_token).unwrap_or_default();
+        let (query_terms, query_symbol) = related_query_terms_and_symbol(query);
+        let query_tokens = query_terms.into_iter().collect::<HashSet<_>>();
         let path_stem = normalized_path
             .as_deref()
             .and_then(|path| Path::new(path).file_stem())
@@ -3167,6 +3163,19 @@ pub(crate) fn unique_query_tokens(text: &str) -> Vec<String> {
 
 pub(crate) fn normalize_token(text: &str) -> String {
     tokenize(text).join("")
+}
+
+pub(crate) fn related_query_terms_and_symbol(query: Option<&str>) -> (Vec<String>, String) {
+    let Some(query) = query else {
+        return (Vec::new(), String::new());
+    };
+    let parsed = parse_query(query);
+    let text = query_text(&parsed.terms, &parsed.filters);
+    let mut tokens = tokenize(&text);
+    tokens.sort();
+    tokens.dedup();
+    let symbol = normalize_token(&text);
+    (tokens, symbol)
 }
 
 pub(crate) fn related_stem_terms(stem: &str) -> Vec<String> {

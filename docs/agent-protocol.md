@@ -82,7 +82,7 @@ Search results include:
 - `read_range`: a ready-to-pass `{path,start,lines}` follow-up range.
 - `read_request`: a ready-to-send JSON-lines request body with the correct read tool and target arguments for the search surface.
 - `related_request`: a ready-to-send JSON-lines request body for nearby source/test files using the matching live, indexed, or shard related-file tool.
-- `related_symbols_request`: a ready-to-send JSON-lines request body for nearby definitions/types using the matching live, indexed, or shard related-symbol tool. Search-generated requests include the original `query` so related-symbol ranking can preserve the same intent.
+- `related_symbols_request`: a ready-to-send JSON-lines request body for nearby definitions/types using the matching live, indexed, or shard related-symbol tool. Search-generated requests include the original search-language `query`; related-symbol ranking parses it the same way search does, so filters such as `repo:` and `path:` scope the request without becoming noisy symbol terms.
 - `context`: optional attached file context when `context_lines` is set.
 - `explanation` and `query_plan` when `explain` is set.
 

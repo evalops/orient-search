@@ -643,19 +643,19 @@ pub fn tool_manifest() -> Value {
         ),
         tool_entry(
             "related_symbols",
-            "Find symbols related to a path and optional query.",
+            "Find symbols related to a path and optional search-language query.",
             &["repo"],
             &["path", "query", "limit"],
         ),
         tool_entry(
             "related_index_symbols",
-            "Find symbols related to an indexed path and optional query.",
+            "Find symbols related to an indexed path and optional search-language query.",
             &["index"],
             &["path", "query", "limit"],
         ),
         tool_entry(
             "related_shard_symbols",
-            "Find symbols related to a shard result path or unique shard-relative path and optional query.",
+            "Find symbols related to a shard result path or unique shard-relative path and optional search-language query.",
             &["index_dir", "path"],
             &["query", "limit"],
         ),

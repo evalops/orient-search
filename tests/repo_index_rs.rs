@@ -97,6 +97,21 @@ def test_issue_token_round_trip():
             .is_empty()
     );
 
+    write(
+        &temp.path().join("src/billing.rs"),
+        "pub fn repo_lookup_total() {}\npub fn invoice_total() {}\n",
+    );
+    let billing_index = RepoIndexer::new(temp.path()).build().unwrap();
+    let filter_query_symbols =
+        billing_index.related_symbols(Some("src/billing.rs"), Some("repo:sample invoice total"), 5);
+    assert_eq!(filter_query_symbols[0].symbol.name, "invoice_total");
+    assert!(
+        filter_query_symbols[0]
+            .reason
+            .contains("exact query symbol"),
+        "{filter_query_symbols:?}"
+    );
+
     let brief = index.repo_brief();
     assert_eq!(brief.language_counts.get("python"), Some(&2));
     assert!(brief.known_commands.contains(&"pytest".to_string()));

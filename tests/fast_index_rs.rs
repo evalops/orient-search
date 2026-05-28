@@ -983,6 +983,21 @@ fn indexed_related_context_uses_persisted_metadata() {
             .any(|symbol| symbol.symbol.name == "issue_token"),
         "{fuzzy_query_symbols:?}"
     );
+
+    write(
+        &repo.path().join("src/billing.rs"),
+        "pub fn repo_lookup_total() {}\npub fn invoice_total() {}\n",
+    );
+    let billing_index = FastIndex::build(repo.path()).unwrap();
+    let filter_query_symbols =
+        billing_index.related_symbols(Some("src/billing.rs"), Some("repo:sample invoice total"), 5);
+    assert_eq!(filter_query_symbols[0].symbol.name, "invoice_total");
+    assert!(
+        filter_query_symbols[0]
+            .reason
+            .contains("exact query symbol"),
+        "{filter_query_symbols:?}"
+    );
 }
 
 #[test]
