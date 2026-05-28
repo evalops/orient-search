@@ -49,6 +49,8 @@ pub struct FastIndex {
     pub symbol_postings: HashMap<String, Vec<Posting>>,
     #[serde(default)]
     pub symbol_kind_postings: HashMap<String, Vec<Posting>>,
+    #[serde(skip)]
+    path_ids: HashMap<String, u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -314,6 +316,7 @@ impl FastIndex {
         let trigram_postings = rebuild_postings(&files, |file| &file.trigrams);
         let symbol_postings = rebuild_symbol_postings(&files);
         let symbol_kind_postings = rebuild_symbol_kind_postings(&files);
+        let path_ids = rebuild_path_ids(&files);
         Ok(Self {
             version: INDEX_VERSION,
             root,
@@ -323,6 +326,7 @@ impl FastIndex {
             trigram_postings,
             symbol_postings,
             symbol_kind_postings,
+            path_ids,
         })
         .map(|index| RefreshOutcome {
             index,
@@ -419,6 +423,7 @@ impl FastIndex {
         } else {
             normalize_posting_map(&mut self.symbol_kind_postings);
         }
+        self.path_ids = rebuild_path_ids(&self.files);
     }
 
     pub fn refresh_stats(&self, outcome: &RefreshOutcome) -> RefreshStats {
@@ -722,6 +727,13 @@ impl FastIndex {
         dependency_filters_match(&dependency_hints_from_indexed_files(&self.files), filters)
     }
 
+    fn indexed_file(&self, path: &str) -> Option<&IndexedPath> {
+        self.path_ids
+            .get(path)
+            .and_then(|file_id| self.files.get(*file_id as usize))
+            .filter(|file| file.path == path)
+    }
+
     pub fn find_symbol(&self, name: &str, limit: usize) -> Vec<Symbol> {
         let needle = normalize_token(name);
         if needle.is_empty() || limit == 0 {
@@ -775,9 +787,7 @@ impl FastIndex {
     ) -> Result<FileRange> {
         let normalized = normalize_index_relative_path(path)?;
         let file = self
-            .files
-            .iter()
-            .find(|file| file.path == normalized)
+            .indexed_file(&normalized)
             .ok_or_else(|| anyhow::anyhow!("path is not present in index: {normalized}"))?;
         Ok(indexed_file_range(file, start_line, line_count))
     }
@@ -788,9 +798,9 @@ impl FastIndex {
         }
 
         let normalized = path.trim_start_matches('/').to_string();
-        if !self.files.iter().any(|file| file.path == normalized) {
+        let Some(source_file) = self.indexed_file(&normalized) else {
             return Vec::new();
-        }
+        };
         let stem = Path::new(&normalized)
             .file_stem()
             .map(|value| value.to_string_lossy().to_string())
@@ -803,17 +813,11 @@ impl FastIndex {
             .unwrap_or_default();
         let normalized_lower = normalized.to_ascii_lowercase();
         let source_is_test = is_test_path(&normalized_lower);
-        let source_symbols = self
-            .files
+        let source_symbols = source_file
+            .symbols
             .iter()
-            .find(|file| file.path == normalized)
-            .map(|file| {
-                file.symbols
-                    .iter()
-                    .map(|symbol| symbol.name.clone())
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
+            .map(|symbol| symbol.name.clone())
+            .collect::<Vec<_>>();
         let mut related = Vec::new();
 
         for file in &self.files {
@@ -887,7 +891,7 @@ impl FastIndex {
 
         let normalized_path = path.map(|value| value.trim_start_matches('/').to_string());
         if let Some(path) = &normalized_path {
-            if !self.files.iter().any(|file| &file.path == path) {
+            if self.indexed_file(path).is_none() {
                 return Vec::new();
             }
         }
@@ -1835,6 +1839,7 @@ impl FastIndexDisk {
             trigram_postings: decompress_posting_map(self.trigram_postings)?,
             symbol_postings: decompress_posting_map(self.symbol_postings)?,
             symbol_kind_postings: decompress_posting_map(self.symbol_kind_postings)?,
+            path_ids: HashMap::new(),
         })
     }
 }
@@ -3258,6 +3263,14 @@ fn rebuild_postings(
         values.sort_unstable_by_key(|posting| posting.file_id);
     }
     postings
+}
+
+fn rebuild_path_ids(files: &[IndexedPath]) -> HashMap<String, u32> {
+    files
+        .iter()
+        .enumerate()
+        .map(|(file_id, file)| (file.path.clone(), file_id as u32))
+        .collect()
 }
 
 fn rebuild_symbol_postings(files: &[IndexedPath]) -> HashMap<String, Vec<Posting>> {
