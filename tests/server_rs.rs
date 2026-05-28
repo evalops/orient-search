@@ -1904,7 +1904,7 @@ fn runtime_accepts_structured_negative_search_filters() {
             "dir": "src",
             "symbol_kind": "function",
             "require_all": true,
-            "exclude_path": ["generated"]
+            "exclude_folder": ["generated"]
         }),
     });
     assert!(fallback.error.is_none(), "{:?}", fallback.error);
@@ -1920,6 +1920,8 @@ fn runtime_accepts_structured_negative_search_filters() {
             "repo": repo.path(),
             "query": "React",
             "limit": 10,
+            "folder": "src",
+            "filename": "view.ts",
             "lang": "typescript",
             "ext": "ts",
             "type": "functions",

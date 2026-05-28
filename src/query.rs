@@ -93,8 +93,8 @@ fn apply_filter(filters: &mut SearchFilters, token: &str, negated: bool) -> bool
     }
 
     match (negated, key.as_str()) {
-        (false, "file") => filters.file = Some(value),
-        (false, "path" | "dir" | "directory") => filters.path = Some(value),
+        (false, "file" | "filename" | "file_name" | "basename") => filters.file = Some(value),
+        (false, "path" | "dir" | "directory" | "folder") => filters.path = Some(value),
         (false, "lang" | "language") => filters.language = Some(value.to_ascii_lowercase()),
         (false, "ext" | "extension") => {
             filters.extension = Some(value.trim_start_matches('.').to_ascii_lowercase())
@@ -121,8 +121,8 @@ fn apply_filter(filters: &mut SearchFilters, token: &str, negated: bool) -> bool
             Some(value) => filters.test = Some(value),
             None => return false,
         },
-        (true, "file") => filters.exclude_file.push(value),
-        (true, "path" | "dir" | "directory") => filters.exclude_path.push(value),
+        (true, "file" | "filename" | "file_name" | "basename") => filters.exclude_file.push(value),
+        (true, "path" | "dir" | "directory" | "folder") => filters.exclude_path.push(value),
         (true, "lang" | "language") => filters.exclude_language.push(value.to_ascii_lowercase()),
         (true, "ext" | "extension") => filters
             .exclude_extension
@@ -377,6 +377,19 @@ mod tests {
         assert_eq!(parsed.filters.exclude_symbol_kind, vec!["class"]);
         assert_eq!(parsed.filters.exclude_import, vec!["legacy"]);
         assert_eq!(parsed.filters.symbol.as_deref(), Some("Runtime"));
+    }
+
+    #[test]
+    fn parses_agent_friendly_file_and_path_aliases() {
+        let parsed = parse_query(
+            "folder:src directory:services filename:auth.rs -file_name:generated.rs -folder:vendor token",
+        );
+
+        assert_eq!(parsed.terms, vec!["token"]);
+        assert_eq!(parsed.filters.path.as_deref(), Some("services"));
+        assert_eq!(parsed.filters.file.as_deref(), Some("auth.rs"));
+        assert_eq!(parsed.filters.exclude_file, vec!["generated.rs"]);
+        assert_eq!(parsed.filters.exclude_path, vec!["vendor"]);
     }
 
     #[test]

@@ -1271,7 +1271,10 @@ fn argument_description(tool_name: &str, name: &str) -> &'static str {
             "Repository-relative result path, such as src/lib.rs."
         }
         "path" => "Path substring filter or result path, depending on the tool.",
-        "dir" => "Alias for path when filtering search results to a directory or path substring.",
+        "dir" | "directory" | "folder" => {
+            "Alias for path when filtering search results to a directory or path substring."
+        }
+        "filename" | "file_name" => "Alias for file when filtering by basename.",
         "ranges" if is_shard_range_tool(tool_name) => {
             "A {path,start,lines} object or array of them; path may be shard-prefixed or a unique unqualified shard-relative path."
         }
@@ -1566,8 +1569,8 @@ fn retry_relaxed_filter_field(kind: &str) -> Option<&'static str> {
 fn retry_source_arg_matches_filter(name: &str, field: Option<&str>) -> bool {
     matches!(
         (field, name),
-        (Some("file"), "file")
-            | (Some("path"), "path" | "dir" | "directory")
+        (Some("file"), "file" | "filename" | "file_name")
+            | (Some("path"), "path" | "dir" | "directory" | "folder")
             | (Some("language"), "language" | "lang")
             | (Some("extension"), "extension" | "ext")
             | (Some("test"), "test" | "tests")
@@ -4177,7 +4180,7 @@ fn symbol_kind_list_arg_any(arguments: &Value, names: &[&str]) -> Result<Vec<Str
 
 fn search_filters(arguments: &Value, allow_repo_alias: bool) -> Result<SearchFilters> {
     Ok(SearchFilters {
-        path: optional_string_arg_any(arguments, &["path", "dir"]),
+        path: optional_string_arg_any(arguments, &["path", "dir", "directory", "folder"]),
         language: optional_string_arg_any(arguments, &["language", "lang"]),
         extension: optional_string_arg_any(arguments, &["extension", "ext"]),
         symbol: optional_string_arg(arguments, "symbol"),
@@ -4189,7 +4192,7 @@ fn search_filters(arguments: &Value, allow_repo_alias: bool) -> Result<SearchFil
             &["import", "imports", "module", "modules", "use", "uses"],
         )
         .map(|value| value.to_ascii_lowercase()),
-        file: optional_string_arg(arguments, "file"),
+        file: optional_string_arg_any(arguments, &["file", "filename", "file_name"]),
         repo: if allow_repo_alias {
             optional_string_arg_any(arguments, &["repo", "repo_filter"])
         } else {
@@ -4206,8 +4209,19 @@ fn search_filters(arguments: &Value, allow_repo_alias: bool) -> Result<SearchFil
             .unwrap_or(false),
         require_all: bool_arg(arguments, "require_all") && !bool_arg(arguments, "any_terms"),
         match_any: bool_arg(arguments, "any_terms"),
-        exclude_file: optional_string_list_arg(arguments, "exclude_file")?,
-        exclude_path: optional_string_list_arg(arguments, "exclude_path")?,
+        exclude_file: optional_string_list_arg_any(
+            arguments,
+            &["exclude_file", "exclude_filename", "exclude_file_name"],
+        )?,
+        exclude_path: optional_string_list_arg_any(
+            arguments,
+            &[
+                "exclude_path",
+                "exclude_dir",
+                "exclude_directory",
+                "exclude_folder",
+            ],
+        )?,
         exclude_language: normalized_string_list_arg_any(
             arguments,
             &["exclude_language", "exclude_lang"],

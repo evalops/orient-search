@@ -1203,6 +1203,22 @@ fn cli_searches_symbols_and_related_files() {
         .stdout(predicate::str::contains("\"context\""))
         .stdout(predicate::str::contains("\"total_lines\""));
 
+    let mut alias_search = Command::cargo_bin("orient").unwrap();
+    alias_search
+        .args([
+            "search",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "issue token",
+            "--folder",
+            "src",
+            "--filename",
+            "auth.rs",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("src/auth.rs"));
+
     let mut any_terms = Command::cargo_bin("orient").unwrap();
     any_terms
         .args([

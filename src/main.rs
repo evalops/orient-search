@@ -706,13 +706,13 @@ enum Commands {
 
 #[derive(Debug, Clone, Args)]
 struct CommonSearchArgs {
-    #[arg(long, alias = "dir")]
+    #[arg(long, alias = "dir", alias = "directory", alias = "folder")]
     path: Option<String>,
     #[arg(long, alias = "lang")]
     language: Option<String>,
     #[arg(long, alias = "ext")]
     extension: Option<String>,
-    #[arg(long)]
+    #[arg(long, alias = "filename", alias = "file-name", alias = "file_name")]
     file: Option<String>,
     #[arg(long)]
     symbol: Option<String>,
@@ -744,9 +744,19 @@ struct CommonSearchArgs {
     snippet: String,
     #[arg(long)]
     explain: bool,
-    #[arg(long = "exclude-file")]
+    #[arg(
+        long = "exclude-file",
+        alias = "exclude-filename",
+        alias = "exclude-file-name",
+        alias = "exclude_file_name"
+    )]
     exclude_file: Vec<String>,
-    #[arg(long = "exclude-path")]
+    #[arg(
+        long = "exclude-path",
+        alias = "exclude-dir",
+        alias = "exclude-directory",
+        alias = "exclude-folder"
+    )]
     exclude_path: Vec<String>,
     #[arg(
         long = "exclude-language",
