@@ -11,8 +11,11 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::process;
 use std::thread;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 const SHARD_MANIFEST_VERSION: u32 = 1;
 
@@ -1069,11 +1072,56 @@ pub(crate) fn filters_for_shard_scope(
 }
 
 fn save_manifest(index_dir: &Path, manifest: &ShardManifest) -> Result<()> {
-    fs::write(
-        index_dir.join("manifest.json"),
-        serde_json::to_vec_pretty(manifest)?,
-    )
-    .with_context(|| format!("write shard manifest {}", index_dir.display()))
+    let manifest_path = index_dir.join("manifest.json");
+    let bytes = serde_json::to_vec_pretty(manifest)?;
+    atomic_write(&manifest_path, &bytes)
+        .with_context(|| format!("write shard manifest {}", index_dir.display()))
+}
+
+fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
+    let tmp_path = temporary_manifest_path(path);
+    let result = (|| -> Result<()> {
+        let mut file = fs::File::create(&tmp_path)
+            .with_context(|| format!("create temp manifest {}", tmp_path.display()))?;
+        file.write_all(bytes)
+            .with_context(|| format!("write temp manifest {}", tmp_path.display()))?;
+        file.sync_all()
+            .with_context(|| format!("sync temp manifest {}", tmp_path.display()))?;
+        drop(file);
+        fs::rename(&tmp_path, path)
+            .with_context(|| format!("replace manifest {}", path.display()))?;
+        if let Some(parent) = path.parent() {
+            if let Ok(parent_dir) = fs::File::open(parent) {
+                let _ = parent_dir.sync_all();
+            }
+        }
+        Ok(())
+    })();
+
+    if result.is_err() {
+        let _ = fs::remove_file(&tmp_path);
+    }
+    result
+}
+
+fn temporary_manifest_path(path: &Path) -> PathBuf {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let file_name = path
+        .file_name()
+        .map(|value| value.to_string_lossy())
+        .unwrap_or_else(|| "manifest.json".into());
+    parent.join(format!(
+        ".{file_name}.tmp-{}-{}",
+        process::id(),
+        current_nanos()
+    ))
+}
+
+fn current_nanos() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default()
 }
 
 fn shard_aliases(root: &Path, base_name: &str) -> Result<Vec<ShardAlias>> {

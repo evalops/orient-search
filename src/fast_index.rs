@@ -1545,6 +1545,11 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
             .with_context(|| format!("sync temp index {}", tmp_path.display()))?;
         drop(file);
         fs::rename(&tmp_path, path).with_context(|| format!("replace index {}", path.display()))?;
+        if let Some(parent) = path.parent() {
+            if let Ok(parent_dir) = fs::File::open(parent) {
+                let _ = parent_dir.sync_all();
+            }
+        }
         Ok(())
     })();
 

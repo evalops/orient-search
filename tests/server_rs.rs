@@ -11,6 +11,7 @@ use orient::repo_index::{MAX_ATTACHED_CONTEXT_LINES, MAX_READ_RANGE_LINES, MAX_S
 use orient::server::{
     MAX_BATCH_QUERIES, MAX_BATCH_RANGES, ToolRequest, ToolRuntime, mcp_tool_manifest, tool_manifest,
 };
+use orient::shards::{build_shards, refresh_shards};
 
 fn write(path: &Path, text: &str) {
     fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -1823,6 +1824,38 @@ fn runtime_warms_shards_by_tool_request() {
         result["warmed_shards"]["repos"][0]["aliases"][0],
         result["warmed_shards"]["repos"][0]["name"]
     );
+}
+
+#[test]
+fn shard_manifest_save_replaces_existing_file_without_leaving_temp_files() {
+    let workspace = tempfile::tempdir().unwrap();
+    let repo = workspace.path().join("billing");
+    write(
+        &repo.join("src/lib.rs"),
+        "pub fn invoice_total() -> usize { 42 }\n",
+    );
+    write(
+        &repo.join("Cargo.toml"),
+        "[package]\nname='billing'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    let shard_dir = tempfile::tempdir().unwrap();
+    build_shards(&[repo.clone()], shard_dir.path()).unwrap();
+    let manifest_path = shard_dir.path().join("manifest.json");
+    let original_manifest = fs::read_to_string(&manifest_path).unwrap();
+    assert!(original_manifest.contains("\"shards\""));
+
+    fs::remove_dir_all(&repo).unwrap();
+    let refreshed = refresh_shards(shard_dir.path()).unwrap();
+    assert_eq!(refreshed.removed_shards, 1);
+    let updated_manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
+    assert_eq!(updated_manifest["shards"], serde_json::json!([]));
+    let temp_files = fs::read_dir(shard_dir.path())
+        .unwrap()
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.file_name().to_string_lossy().contains(".tmp-"))
+        .collect::<Vec<_>>();
+    assert!(temp_files.is_empty(), "{temp_files:?}");
 }
 
 #[test]
