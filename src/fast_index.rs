@@ -3754,17 +3754,11 @@ fn cap_candidate_ids(
             ),
         })
         .collect::<Vec<_>>();
-    ranked.sort_by(|left, right| {
-        right
-            .score
-            .partial_cmp(&left.score)
-            .unwrap_or(Ordering::Equal)
-            .then_with(|| {
-                candidate_path(files, left.file_id).cmp(candidate_path(files, right.file_id))
-            })
-            .then_with(|| left.file_id.cmp(&right.file_id))
+    ranked.select_nth_unstable_by(candidate_cap, |left, right| {
+        compare_candidate_cap_rank(left, right, files)
     });
     ranked.truncate(candidate_cap);
+    ranked.sort_by(|left, right| compare_candidate_cap_rank(left, right, files));
     let ids = ranked.into_iter().map(|rank| rank.file_id).collect();
     (ids, cap_hit)
 }
@@ -3773,6 +3767,19 @@ fn cap_candidate_ids(
 struct CandidateCapRank {
     file_id: u32,
     score: f64,
+}
+
+fn compare_candidate_cap_rank(
+    left: &CandidateCapRank,
+    right: &CandidateCapRank,
+    files: &[IndexedPath],
+) -> Ordering {
+    right
+        .score
+        .partial_cmp(&left.score)
+        .unwrap_or(Ordering::Equal)
+        .then_with(|| candidate_path(files, left.file_id).cmp(candidate_path(files, right.file_id)))
+        .then_with(|| left.file_id.cmp(&right.file_id))
 }
 
 fn candidate_rank_score(
