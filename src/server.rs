@@ -457,9 +457,9 @@ pub fn tool_manifest() -> Value {
         ),
         tool_entry(
             "search_plan",
-            "Alias for search_query_plan for CLI-style JSON-lines clients.",
-            &["repo", "query"],
-            PLAN_OPTIONAL_ARGS,
+            "Return a query plan for a live repo, persistent index, or shard directory using the same target flags as search.",
+            &["query"],
+            PLAN_TARGET_OPTIONAL_ARGS,
         ),
         tool_entry(
             "search_query_plan_batch",
@@ -469,9 +469,9 @@ pub fn tool_manifest() -> Value {
         ),
         tool_entry(
             "search_plan_batch",
-            "Alias for search_query_plan_batch for CLI-style JSON-lines clients.",
-            &["repo", "queries"],
-            PLAN_OPTIONAL_ARGS,
+            "Return query plans for several searches against one live repo, persistent index, or shard directory.",
+            &["queries"],
+            PLAN_TARGET_OPTIONAL_ARGS,
         ),
         tool_entry(
             "indexed_search_code",
@@ -1638,10 +1638,19 @@ fn attach_shard_retry_requests(
     index_dir: &Path,
     source_arguments: &Value,
 ) {
+    attach_shard_retry_requests_with_tool(plans, "search_shards", index_dir, source_arguments);
+}
+
+fn attach_shard_retry_requests_with_tool(
+    plans: &mut [ShardQueryPlan],
+    search_tool: &str,
+    index_dir: &Path,
+    source_arguments: &Value,
+) {
     for shard_plan in plans {
         shard_plan.plan = attach_retry_requests(
             shard_plan.plan.clone(),
-            "search_shards",
+            search_tool,
             "index_dir",
             index_dir,
             source_arguments,
@@ -2038,7 +2047,7 @@ impl ToolRuntime {
                 }
                 Ok(serde_json::to_value(batch)?)
             }
-            "search_query_plan" | "search_plan" => {
+            "search_query_plan" => {
                 let repo = path_arg(&request.arguments, "repo")?;
                 let query = string_arg(&request.arguments, "query")?;
                 let index = FastIndex::build(repo)?;
@@ -2051,7 +2060,67 @@ impl ToolRuntime {
                     &request.arguments,
                 ))?)
             }
-            "search_query_plan_batch" | "search_plan_batch" => {
+            "search_plan" => {
+                let query = string_arg(&request.arguments, "query")?;
+                if request.arguments.get("index").is_some()
+                    && request.arguments.get("index_dir").is_some()
+                {
+                    return Err(anyhow!(
+                        "search_plan accepts only one of index or index_dir"
+                    ));
+                }
+                if let Some(index_dir) =
+                    optional_string_arg(&request.arguments, "index_dir").map(PathBuf::from)
+                {
+                    if bool_arg(&request.arguments, "refresh_if_stale") {
+                        self.refresh_shards_if_stale(&index_dir)?;
+                    }
+                    let mut plans = self.shard_query_plans_cached(
+                        &index_dir,
+                        &query,
+                        &search_filters(&request.arguments, true)?,
+                    )?;
+                    attach_shard_retry_requests_with_tool(
+                        &mut plans,
+                        "search",
+                        &index_dir,
+                        &request.arguments,
+                    );
+                    return Ok(serde_json::to_value(plans)?);
+                }
+                if let Some(index_path) =
+                    optional_string_arg(&request.arguments, "index").map(PathBuf::from)
+                {
+                    let refresh_if_stale = bool_arg(&request.arguments, "refresh_if_stale");
+                    let index =
+                        self.cached_index_maybe_refresh(index_path.clone(), refresh_if_stale)?;
+                    let plan =
+                        index.query_plan(&query, &search_filters(&request.arguments, true)?)?;
+                    return Ok(serde_json::to_value(attach_retry_requests(
+                        plan,
+                        "search",
+                        "index",
+                        index_path,
+                        &request.arguments,
+                    ))?);
+                }
+                let repo = optional_string_arg(&request.arguments, "repo")
+                    .map(PathBuf::from)
+                    .map(Ok)
+                    .unwrap_or_else(|| {
+                        std::env::current_dir().context("resolve current directory for search_plan")
+                    })?;
+                let index = FastIndex::build(repo)?;
+                let plan = index.query_plan(&query, &search_filters(&request.arguments, false)?)?;
+                Ok(serde_json::to_value(attach_retry_requests(
+                    plan,
+                    "search",
+                    "repo",
+                    &index.root,
+                    &request.arguments,
+                ))?)
+            }
+            "search_query_plan_batch" => {
                 let repo = path_arg(&request.arguments, "repo")?;
                 let queries = string_array_arg(&request.arguments, "queries")?;
                 let index = FastIndex::build(repo)?;
@@ -2061,6 +2130,78 @@ impl ToolRuntime {
                     let plan = attach_retry_requests(
                         index.query_plan(&query, &filters)?,
                         "search_code",
+                        "repo",
+                        &index.root,
+                        &request.arguments,
+                    );
+                    batch.push(QueryPlanBatchResult { query, plan });
+                }
+                Ok(serde_json::to_value(batch)?)
+            }
+            "search_plan_batch" => {
+                let queries = string_array_arg(&request.arguments, "queries")?;
+                if request.arguments.get("index").is_some()
+                    && request.arguments.get("index_dir").is_some()
+                {
+                    return Err(anyhow!(
+                        "search_plan_batch accepts only one of index or index_dir"
+                    ));
+                }
+                if let Some(index_dir) =
+                    optional_string_arg(&request.arguments, "index_dir").map(PathBuf::from)
+                {
+                    if bool_arg(&request.arguments, "refresh_if_stale") {
+                        self.refresh_shards_if_stale(&index_dir)?;
+                    }
+                    let filters = search_filters(&request.arguments, true)?;
+                    let mut batch = Vec::new();
+                    for query in queries {
+                        let mut plans =
+                            self.shard_query_plans_cached(&index_dir, &query, &filters)?;
+                        attach_shard_retry_requests_with_tool(
+                            &mut plans,
+                            "search",
+                            &index_dir,
+                            &request.arguments,
+                        );
+                        batch.push(ShardQueryPlanBatchResult { query, plans });
+                    }
+                    return Ok(serde_json::to_value(batch)?);
+                }
+                if let Some(index_path) =
+                    optional_string_arg(&request.arguments, "index").map(PathBuf::from)
+                {
+                    let refresh_if_stale = bool_arg(&request.arguments, "refresh_if_stale");
+                    let index =
+                        self.cached_index_maybe_refresh(index_path.clone(), refresh_if_stale)?;
+                    let filters = search_filters(&request.arguments, true)?;
+                    let mut batch = Vec::new();
+                    for query in queries {
+                        let plan = attach_retry_requests(
+                            index.query_plan(&query, &filters)?,
+                            "search",
+                            "index",
+                            &index_path,
+                            &request.arguments,
+                        );
+                        batch.push(QueryPlanBatchResult { query, plan });
+                    }
+                    return Ok(serde_json::to_value(batch)?);
+                }
+                let repo = optional_string_arg(&request.arguments, "repo")
+                    .map(PathBuf::from)
+                    .map(Ok)
+                    .unwrap_or_else(|| {
+                        std::env::current_dir()
+                            .context("resolve current directory for search_plan_batch")
+                    })?;
+                let index = FastIndex::build(repo)?;
+                let filters = search_filters(&request.arguments, false)?;
+                let mut batch = Vec::new();
+                for query in queries {
+                    let plan = attach_retry_requests(
+                        index.query_plan(&query, &filters)?,
+                        "search",
                         "repo",
                         &index.root,
                         &request.arguments,
@@ -3940,6 +4081,57 @@ const PLAN_OPTIONAL_ARGS: &[&str] = &[
     "test",
     "require_all",
     "any_terms",
+    "exclude_file",
+    "exclude_path",
+    "exclude_language",
+    "exclude_lang",
+    "exclude_extension",
+    "exclude_ext",
+    "exclude_symbol",
+    "exclude_symbol_kind",
+    "exclude_kind",
+    "exclude_type",
+    "exclude_repo",
+    "exclude_dependency",
+    "exclude_dep",
+    "exclude_deps",
+    "exclude_import",
+    "exclude_imports",
+    "exclude_module",
+    "exclude_modules",
+    "exclude_use",
+    "exclude_uses",
+];
+
+const PLAN_TARGET_OPTIONAL_ARGS: &[&str] = &[
+    "repo",
+    "index",
+    "index_dir",
+    "path",
+    "dir",
+    "language",
+    "lang",
+    "extension",
+    "ext",
+    "symbol",
+    "symbol_kind",
+    "kind",
+    "type",
+    "dependency",
+    "dep",
+    "deps",
+    "import",
+    "imports",
+    "module",
+    "modules",
+    "use",
+    "uses",
+    "file",
+    "repo_filter",
+    "test",
+    "require_all",
+    "any_terms",
+    "refresh_if_stale",
     "exclude_file",
     "exclude_path",
     "exclude_language",
