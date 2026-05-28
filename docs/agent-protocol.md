@@ -66,7 +66,9 @@ Structured JSON arguments accept the same common aliases for wrapper authors:
 `lang`/`language`, `ext`/`extension`, `kind`/`type`/`symbol_kind`,
 `dep`/`deps`/`dependency`, and `module`/`import`/`use`, plus matching
 `exclude_*` aliases such as `exclude_lang`, `exclude_ext`, `exclude_kind`,
-`exclude_dep`, and `exclude_module`.
+`exclude_dep`, and `exclude_module`. Symbol-kind values normalize common
+singular/plural forms such as `function`/`functions`, `class`/`classes`, and
+`interface`/`interfaces`.
 
 Search results include:
 

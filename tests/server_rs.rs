@@ -1372,6 +1372,10 @@ fn runtime_accepts_structured_negative_search_filters() {
         &repo.path().join("src/view.ts"),
         "import React from 'react';\nexport function renderToken() { return React.createElement('div'); }\n",
     );
+    write(
+        &repo.path().join("src/view_class.ts"),
+        "import React from 'react';\nexport class TokenView {}\n",
+    );
     let index_path = repo.path().join(".orient/index");
     FastIndex::build(repo.path())
         .unwrap()
@@ -1403,22 +1407,21 @@ fn runtime_accepts_structured_negative_search_filters() {
         tool: "search".to_string(),
         arguments: serde_json::json!({
             "repo": repo.path(),
-            "query": "render token",
+            "query": "React",
             "limit": 10,
             "lang": "typescript",
             "ext": "ts",
-            "kind": "function",
-            "module": "react",
+            "type": "functions",
             "require_all": true,
             "exclude_lang": "rust",
             "exclude_ext": "rs",
-            "exclude_kind": "class",
-            "exclude_module": "legacy"
+            "exclude_type": "classes"
         }),
     });
     assert!(alias_filters.error.is_none(), "{:?}", alias_filters.error);
     let result = serde_json::to_string(&alias_filters.result).unwrap();
     assert!(result.contains("src/view.ts"), "{result}");
+    assert!(!result.contains("src/view_class.ts"), "{result}");
     assert!(!result.contains("src/auth.rs"), "{result}");
 
     let indexed = runtime.dispatch(ToolRequest {

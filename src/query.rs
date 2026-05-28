@@ -161,9 +161,9 @@ fn test_filter_from_is_value(value: &str) -> Option<bool> {
     }
 }
 
-fn normalize_symbol_kind(value: &str) -> String {
+pub(crate) fn normalize_symbol_kind(value: &str) -> String {
     match value.trim().to_ascii_lowercase().as_str() {
-        "func" | "method" => "function".to_string(),
+        "func" | "function" | "functions" | "method" | "methods" => "function".to_string(),
         "consts" | "constant" | "constants" => "const".to_string(),
         "vars" | "variable" | "variables" => "var".to_string(),
         "classes" => "class".to_string(),
@@ -384,6 +384,9 @@ mod tests {
         let parsed = parse_query("type:function route request");
         assert_eq!(parsed.terms, vec!["route", "request"]);
         assert_eq!(parsed.filters.symbol_kind.as_deref(), Some("function"));
+
+        let plural = parse_query("type:functions route request");
+        assert_eq!(plural.filters.symbol_kind.as_deref(), Some("function"));
 
         let alias = parse_query("symbol_type:struct SessionManager");
         assert_eq!(alias.filters.symbol_kind.as_deref(), Some("struct"));

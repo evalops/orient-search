@@ -2,7 +2,7 @@ use crate::discover::{
     DiscoverOptions, DiscoverySelectionSummary, discover_repos, discovery_selection_summary,
 };
 use crate::fast_index::{FastIndex, RefreshStats};
-use crate::query::{merge_filters, parse_query, query_text};
+use crate::query::{merge_filters, normalize_symbol_kind, parse_query, query_text};
 use crate::repo_index::{
     MAX_ATTACHED_CONTEXT_LINES, MAX_READ_RANGE_LINES, MAX_SEARCH_RESULTS, QueryPlan, RepoIndexer,
     ResultToolRequest, SearchFilters, SearchResult, SnippetMode, Symbol, attach_result_context,
@@ -3720,14 +3720,24 @@ fn normalized_string_list_arg_any(arguments: &Value, names: &[&str]) -> Result<V
         .collect())
 }
 
+fn symbol_kind_arg_any(arguments: &Value, names: &[&str]) -> Option<String> {
+    optional_string_arg_any(arguments, names).map(|value| normalize_symbol_kind(&value))
+}
+
+fn symbol_kind_list_arg_any(arguments: &Value, names: &[&str]) -> Result<Vec<String>> {
+    Ok(optional_string_list_arg_any(arguments, names)?
+        .into_iter()
+        .map(|value| normalize_symbol_kind(&value))
+        .collect())
+}
+
 fn search_filters(arguments: &Value, allow_repo_alias: bool) -> Result<SearchFilters> {
     Ok(SearchFilters {
         path: optional_string_arg_any(arguments, &["path", "dir"]),
         language: optional_string_arg_any(arguments, &["language", "lang"]),
         extension: optional_string_arg_any(arguments, &["extension", "ext"]),
         symbol: optional_string_arg(arguments, "symbol"),
-        symbol_kind: optional_string_arg_any(arguments, &["symbol_kind", "kind", "type"])
-            .map(|value| value.to_ascii_lowercase()),
+        symbol_kind: symbol_kind_arg_any(arguments, &["symbol_kind", "kind", "type"]),
         dependency: optional_string_arg_any(arguments, &["dependency", "dep", "deps"])
             .map(|value| value.to_ascii_lowercase()),
         import: optional_string_arg_any(
@@ -3763,7 +3773,7 @@ fn search_filters(arguments: &Value, allow_repo_alias: bool) -> Result<SearchFil
             &["exclude_extension", "exclude_ext"],
         )?,
         exclude_symbol: optional_string_list_arg(arguments, "exclude_symbol")?,
-        exclude_symbol_kind: normalized_string_list_arg_any(
+        exclude_symbol_kind: symbol_kind_list_arg_any(
             arguments,
             &["exclude_symbol_kind", "exclude_kind", "exclude_type"],
         )?,
