@@ -323,6 +323,10 @@ enum Commands {
     ReadRange {
         #[arg(long, default_value = ".")]
         repo: PathBuf,
+        #[arg(long, conflicts_with = "index_dir")]
+        index: Option<PathBuf>,
+        #[arg(long, conflicts_with = "index")]
+        index_dir: Option<PathBuf>,
         #[arg(value_name = "PATH", required_unless_present = "path_arg")]
         path: Option<String>,
         #[arg(long = "path", value_name = "PATH", conflicts_with = "path")]
@@ -336,6 +340,10 @@ enum Commands {
     ReadRanges {
         #[arg(long, default_value = ".")]
         repo: PathBuf,
+        #[arg(long, conflicts_with = "index_dir")]
+        index: Option<PathBuf>,
+        #[arg(long, conflicts_with = "index")]
+        index_dir: Option<PathBuf>,
         #[arg(long = "range", value_name = "PATH:START:LINES")]
         ranges: Vec<CliRangeSpec>,
         paths: Vec<String>,
@@ -1612,32 +1620,56 @@ fn run() -> Result<()> {
         }
         Commands::ReadRange {
             repo,
+            index,
+            index_dir,
             path,
             path_arg,
             start,
             lines,
         } => {
             let path = cli_single_path(path, path_arg)?;
-            println!(
-                "{}",
-                serde_json::to_string(&read_file_range(repo, &path, start, lines)?)?
-            );
+            let range = if let Some(index_dir) = index_dir {
+                read_shard_range(&index_dir, &path, start, lines)?
+            } else if let Some(index_path) = index {
+                FastIndex::load(index_path)?.read_range(&path, start, lines)?
+            } else {
+                read_file_range(repo, &path, start, lines)?
+            };
+            println!("{}", serde_json::to_string(&range)?);
         }
         Commands::ReadRanges {
             repo,
+            index,
+            index_dir,
             ranges,
             paths,
             start,
             lines,
         } => {
             let mut results = Vec::new();
-            for range in cli_ranges(paths, ranges, start, lines)? {
-                results.push(read_file_range(
-                    &repo,
-                    &range.path,
-                    range.start,
-                    range.lines,
-                )?);
+            if let Some(index_dir) = index_dir {
+                for range in cli_ranges(paths, ranges, start, lines)? {
+                    results.push(read_shard_range(
+                        &index_dir,
+                        &range.path,
+                        range.start,
+                        range.lines,
+                    )?);
+                }
+            } else if let Some(index_path) = index {
+                let index = FastIndex::load(index_path)?;
+                for range in cli_ranges(paths, ranges, start, lines)? {
+                    results.push(index.read_range(&range.path, range.start, range.lines)?);
+                }
+            } else {
+                for range in cli_ranges(paths, ranges, start, lines)? {
+                    results.push(read_file_range(
+                        &repo,
+                        &range.path,
+                        range.start,
+                        range.lines,
+                    )?);
+                }
             }
             println!("{}", serde_json::to_string(&results)?);
         }

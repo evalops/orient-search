@@ -2019,10 +2019,46 @@ fn cli_builds_and_searches_persistent_index() {
         .stdout(predicate::str::contains("\"path\":\"src/auth.rs\""))
         .stdout(predicate::str::contains("issue_token"));
 
+    let mut generic_read_index_range = Command::cargo_bin("orient").unwrap();
+    generic_read_index_range
+        .args([
+            "read-range",
+            "--index",
+            index_path.to_str().unwrap(),
+            "--path",
+            "./src/auth.rs",
+            "--start",
+            "3",
+            "--lines",
+            "3",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"path\":\"src/auth.rs\""))
+        .stdout(predicate::str::contains("issue_token"));
+
     let mut read_index_ranges = Command::cargo_bin("orient").unwrap();
     read_index_ranges
         .args([
             "read-index-ranges",
+            "--index",
+            index_path.to_str().unwrap(),
+            "--range",
+            "src/auth.rs:5:1",
+            "--range",
+            "tests/auth_test.rs:3:1",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"path\":\"src/auth.rs\""))
+        .stdout(predicate::str::contains("issue_token"))
+        .stdout(predicate::str::contains("\"path\":\"tests/auth_test.rs\""))
+        .stdout(predicate::str::contains("issue_token_round_trip"));
+
+    let mut generic_read_index_ranges = Command::cargo_bin("orient").unwrap();
+    generic_read_index_ranges
+        .args([
+            "read-ranges",
             "--index",
             index_path.to_str().unwrap(),
             "--range",
@@ -2315,6 +2351,26 @@ fn cli_builds_and_searches_shard_directory() {
     )))
     .stdout(predicate::str::contains("invoice_total"));
 
+    let mut generic_read = Command::cargo_bin("orient").unwrap();
+    generic_read
+        .args([
+            "read-range",
+            "--index-dir",
+            shard_dir.path().to_str().unwrap(),
+            "--path",
+            &format!("{billing_name}/./src/billing.rs"),
+            "--start",
+            "1",
+            "--lines",
+            "1",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(&format!(
+            "\"path\":\"{billing_name}/src/billing.rs\""
+        )))
+        .stdout(predicate::str::contains("invoice_total"));
+
     let mut read_unqualified = Command::cargo_bin("orient").unwrap();
     read_unqualified
         .args([
@@ -2327,6 +2383,22 @@ fn cli_builds_and_searches_shard_directory() {
             "1",
             "--lines",
             "1",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(&format!(
+            "\"path\":\"{billing_name}/src/billing.rs\""
+        )))
+        .stdout(predicate::str::contains("invoice_total"));
+
+    let mut generic_read_ranges = Command::cargo_bin("orient").unwrap();
+    generic_read_ranges
+        .args([
+            "read-ranges",
+            "--index-dir",
+            shard_dir.path().to_str().unwrap(),
+            "--range",
+            &format!("{billing_name}/src/billing.rs:1:1"),
         ])
         .assert()
         .success()

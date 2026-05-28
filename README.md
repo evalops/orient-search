@@ -72,8 +72,9 @@ They also return a `repo_map_request` for quick orientation on the chosen
 search surface and a `read_batch_request` when results can be opened in one
 bounded batch read.
 `read_range` and `read_ranges` accept the same `repo`, `index`, or `index_dir`
-target style as `search`, so simple adapters do not need separate read tools for
-live repos, persisted indexes, and shard directories.
+target style as `search`, and the CLI mirrors that with `read-range --repo`,
+`read-range --index`, or `read-range --index-dir`. Simple adapters do not need
+separate read tools for live repos, persisted indexes, and shard directories.
 `related_files` and `related_symbols` follow the same target style for nearby
 tests, source counterparts, definitions, and types.
 `repo_map` follows it too, returning live, indexed, or shard orientation from
