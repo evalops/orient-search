@@ -177,7 +177,10 @@ enum Commands {
     ReadShardRange {
         #[arg(long)]
         index_dir: PathBuf,
-        path: String,
+        #[arg(value_name = "PATH", required_unless_present = "path_arg")]
+        path: Option<String>,
+        #[arg(long = "path", value_name = "PATH", conflicts_with = "path")]
+        path_arg: Option<String>,
         #[arg(long, default_value_t = 1)]
         start: usize,
         #[arg(long, default_value_t = 80)]
@@ -261,7 +264,10 @@ enum Commands {
     ReadRange {
         #[arg(long, default_value = ".")]
         repo: PathBuf,
-        path: String,
+        #[arg(value_name = "PATH", required_unless_present = "path_arg")]
+        path: Option<String>,
+        #[arg(long = "path", value_name = "PATH", conflicts_with = "path")]
+        path_arg: Option<String>,
         #[arg(long, default_value_t = 1)]
         start: usize,
         #[arg(long, default_value_t = 80)]
@@ -341,7 +347,10 @@ enum Commands {
     ReadIndexRange {
         #[arg(long)]
         index: PathBuf,
-        path: String,
+        #[arg(value_name = "PATH", required_unless_present = "path_arg")]
+        path: Option<String>,
+        #[arg(long = "path", value_name = "PATH", conflicts_with = "path")]
+        path_arg: Option<String>,
         #[arg(long, default_value_t = 1)]
         start: usize,
         #[arg(long, default_value_t = 80)]
@@ -867,9 +876,11 @@ fn main() -> Result<()> {
         Commands::ReadShardRange {
             index_dir,
             path,
+            path_arg,
             start,
             lines,
         } => {
+            let path = cli_single_path(path, path_arg)?;
             println!(
                 "{}",
                 serde_json::to_string(&read_shard_range(index_dir, &path, start, lines)?)?
@@ -992,9 +1003,11 @@ fn main() -> Result<()> {
         Commands::ReadRange {
             repo,
             path,
+            path_arg,
             start,
             lines,
         } => {
+            let path = cli_single_path(path, path_arg)?;
             println!(
                 "{}",
                 serde_json::to_string(&read_file_range(repo, &path, start, lines)?)?
@@ -1095,9 +1108,11 @@ fn main() -> Result<()> {
         Commands::ReadIndexRange {
             index,
             path,
+            path_arg,
             start,
             lines,
         } => {
+            let path = cli_single_path(path, path_arg)?;
             let index = FastIndex::load(index)?;
             println!(
                 "{}",
@@ -1612,6 +1627,12 @@ fn cli_ranges(
         );
     }
     Ok(ranges)
+}
+
+fn cli_single_path(path: Option<String>, path_arg: Option<String>) -> Result<String> {
+    path.or(path_arg)
+        .filter(|path| !path.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("provide a path or --path PATH"))
 }
 
 fn cli_batch_queries(queries: Vec<String>) -> Result<Vec<String>> {

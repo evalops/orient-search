@@ -677,6 +677,24 @@ fn cli_outputs_repo_map_and_reads_ranges() {
         .stdout(predicate::str::contains("\"start_line\":3"))
         .stdout(predicate::str::contains("issue_token"));
 
+    let mut named_read_range = Command::cargo_bin("orient").unwrap();
+    named_read_range
+        .args([
+            "read-range",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--path",
+            "src/auth.rs",
+            "--start",
+            "3",
+            "--lines",
+            "3",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"start_line\":3"))
+        .stdout(predicate::str::contains("issue_token"));
+
     let mut read_ranges = Command::cargo_bin("orient").unwrap();
     read_ranges
         .args([
@@ -1402,6 +1420,7 @@ fn cli_builds_and_searches_persistent_index() {
             "read-index-range",
             "--index",
             index_path.to_str().unwrap(),
+            "--path",
             "./src/auth.rs",
             "--start",
             "3",
@@ -1656,6 +1675,7 @@ fn cli_builds_and_searches_shard_directory() {
         "read-shard-range",
         "--index-dir",
         shard_dir.path().to_str().unwrap(),
+        "--path",
         &format!("{billing_name}/./src/billing.rs"),
         "--start",
         "1",
