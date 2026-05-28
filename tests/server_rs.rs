@@ -3815,6 +3815,37 @@ fn tcp_daemon_serves_json_lines_requests() {
     assert!(response.contains("\"cached_indexes\":0"));
 }
 
+#[test]
+fn tcp_daemon_status_cli_reports_runtime_cache() {
+    let binary = assert_cmd::cargo::cargo_bin("orient");
+    let mut child = Command::new(&binary)
+        .args(["serve-tcp", "--addr", "127.0.0.1:0"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let stdout = child.stdout.take().unwrap();
+    let mut startup_reader = BufReader::new(stdout);
+    let mut startup = String::new();
+    startup_reader.read_line(&mut startup).unwrap();
+    let startup_json: serde_json::Value = serde_json::from_str(&startup).unwrap();
+    let addr = startup_json["addr"].as_str().unwrap();
+
+    let output = Command::new(binary)
+        .args(["daemon-status", "--addr", addr])
+        .output()
+        .unwrap();
+
+    child.kill().unwrap();
+    let _ = child.wait();
+
+    assert!(output.status.success(), "{output:?}");
+    let status: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(status["cached_indexes"], serde_json::json!(0));
+    assert_eq!(status["cached_shard_manifests"], serde_json::json!(0));
+    assert!(status.get("id").is_none(), "{status}");
+}
+
 #[cfg(unix)]
 #[test]
 fn unix_daemon_serves_json_lines_requests() {
@@ -3892,6 +3923,37 @@ fn unix_client_forwards_json_lines_requests() {
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.contains("\"id\":\"status\""), "{stdout}");
     assert!(stdout.contains("\"cached_indexes\":0"), "{stdout}");
+}
+
+#[cfg(unix)]
+#[test]
+fn unix_daemon_status_cli_reports_runtime_cache() {
+    let socket_dir = tempfile::tempdir().unwrap();
+    let socket = socket_dir.path().join("orient.sock");
+    let binary = assert_cmd::cargo::cargo_bin("orient");
+    let mut child = Command::new(&binary)
+        .args(["serve-unix", "--socket", socket.to_str().unwrap()])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let stdout = child.stdout.take().unwrap();
+    let mut startup_reader = BufReader::new(stdout);
+    let mut startup = String::new();
+    startup_reader.read_line(&mut startup).unwrap();
+
+    let output = Command::new(binary)
+        .args(["daemon-status", "--socket", socket.to_str().unwrap()])
+        .output()
+        .unwrap();
+
+    child.kill().unwrap();
+    let _ = child.wait();
+
+    assert!(output.status.success(), "{output:?}");
+    let status: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(status["cached_indexes"], serde_json::json!(0));
+    assert_eq!(status["cached_shard_manifests"], serde_json::json!(0));
 }
 
 #[cfg(unix)]

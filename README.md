@@ -23,6 +23,7 @@ Agents can talk JSON-lines over TCP, Unix sockets, or stdio:
 ```bash
 orient agent-instructions --index-dir /tmp/orient-shards
 orient agent-guide --index-dir /tmp/orient-shards
+orient daemon-status --addr 127.0.0.1:8796
 orient client-jsonl --addr 127.0.0.1:8796
 ```
 

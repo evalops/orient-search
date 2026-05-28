@@ -644,6 +644,12 @@ enum Commands {
         #[arg(long, default_value = "127.0.0.1:8796")]
         addr: String,
     },
+    DaemonStatus {
+        #[arg(long)]
+        socket: Option<PathBuf>,
+        #[arg(long)]
+        addr: Option<String>,
+    },
     ServeJsonl,
     ServeTcp {
         #[arg(long, default_value = "127.0.0.1:8796")]
@@ -2475,6 +2481,14 @@ fn run() -> Result<()> {
                 )
             );
         }
+        Commands::DaemonStatus { socket, addr } => {
+            let status = if let Some(socket) = socket {
+                daemon_status_unix(&socket)?
+            } else {
+                daemon_status_tcp(addr.as_deref().unwrap_or("127.0.0.1:8796"))?
+            };
+            println!("{}", serde_json::to_string(&status)?);
+        }
         Commands::ServeJsonl => {
             let stdin = io::stdin();
             let stdout = io::stdout();
@@ -2614,6 +2628,45 @@ fn client_jsonl_tcp(addr: &str) -> Result<()> {
 #[cfg(unix)]
 fn client_jsonl_unix(socket: &Path) -> Result<()> {
     client_jsonl_stream(UnixStream::connect(socket)?)
+}
+
+fn daemon_status_tcp(addr: &str) -> Result<Value> {
+    daemon_status_stream(TcpStream::connect(addr)?)
+}
+
+#[cfg(unix)]
+fn daemon_status_unix(socket: &Path) -> Result<Value> {
+    daemon_status_stream(UnixStream::connect(socket)?)
+}
+
+#[cfg(not(unix))]
+fn daemon_status_unix(_socket: &Path) -> Result<Value> {
+    bail!("unix sockets are not supported on this platform")
+}
+
+fn daemon_status_stream(stream: impl Read + Write) -> Result<Value> {
+    let mut reader = BufReader::new(stream);
+    let request = serde_json::json!({
+        "id": "status",
+        "tool": "daemon_status",
+        "arguments": {}
+    });
+    writeln!(reader.get_mut(), "{request}")?;
+    reader.get_mut().flush()?;
+
+    let mut response = String::new();
+    reader.read_line(&mut response)?;
+    if response.is_empty() {
+        bail!("daemon closed connection without a response");
+    }
+    let response: Value = serde_json::from_str(&response)?;
+    if let Some(error) = response.get("error").and_then(Value::as_str) {
+        bail!("{error}");
+    }
+    response
+        .get("result")
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("daemon response did not include result"))
 }
 
 fn client_jsonl_stream(stream: impl Read + Write) -> Result<()> {

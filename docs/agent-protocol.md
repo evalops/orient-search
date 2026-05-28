@@ -10,8 +10,10 @@ Run either a one-shot stdio server or a shared TCP daemon:
 target/release/orient serve-jsonl
 target/release/orient serve-tcp --addr 127.0.0.1:8796 --index-dir /tmp/orient-shards
 target/release/orient serve-tcp --addr 127.0.0.1:8796 --ensure-shards-dir /tmp/orient-shards --repo /path/to/repo-a --repo /path/to/repo-b
+target/release/orient daemon-status --addr 127.0.0.1:8796
 target/release/orient client-jsonl --addr 127.0.0.1:8796
 target/release/orient serve-unix --socket /tmp/orient.sock --index-dir /tmp/orient-shards
+target/release/orient daemon-status --socket /tmp/orient.sock
 target/release/orient client-jsonl --socket /tmp/orient.sock
 ```
 
@@ -43,7 +45,7 @@ For many repos:
 {"id":"guide","tool":"agent_guide","arguments":{"index_dir":"/tmp/orient-shards"}}
 ```
 
-`daemon_status` reports warmed index and shard details so multiple local agents can confirm they share the intended codebase set. When exactly one index or shard directory is warmed, indexed and shard tools marked with `daemon_default.source` may omit `index` or `index_dir`; if zero or multiple targets are warmed, pass the path explicitly. `search_auto` and `search_auto_batch` can also run without a target: explicit `index_dir`, `index`, or `repo` wins first, then one warmed daemon target, then the daemon process current directory as a live repo. Orient does not expose session analytics.
+`daemon_status`, or the direct CLI wrapper `orient daemon-status`, reports warmed index and shard details so multiple local agents can confirm they share the intended codebase set. When exactly one index or shard directory is warmed, indexed and shard tools marked with `daemon_default.source` may omit `index` or `index_dir`; if zero or multiple targets are warmed, pass the path explicitly. `search_auto` and `search_auto_batch` can also run without a target: explicit `index_dir`, `index`, or `repo` wins first, then one warmed daemon target, then the daemon process current directory as a live repo. Orient does not expose session analytics.
 
 Use `index_status` or `shard_status` when live files may have changed since indexing. They report added, changed, and deleted files so an agent can call `refresh_index` or `refresh_shards` before trusting indexed results. `indexed_search_code` and `search_shards` also accept `refresh_if_stale:true` for a one-call freshness check and refresh before search. Index, shard, and daemon status outputs include footprint counters such as `source_bytes`, `posting_entries`, and `compressed_posting_bytes`.
 
