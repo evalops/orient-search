@@ -1685,6 +1685,47 @@ fn fast_search_deduplicates_repeated_manifest_hits_by_snippet() {
 }
 
 #[test]
+fn shard_search_prefixes_duplicate_group_paths() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("one/src/auth.rs"),
+        "pub fn issue_token() { let token = \"session\"; }\n",
+    );
+    write(
+        &repo.path().join("two/src/auth.rs"),
+        "pub fn issue_token() { let token = \"session\"; }\n",
+    );
+
+    let shard_dir = tempfile::tempdir().unwrap();
+    build_shards(&[repo.path().to_path_buf()], shard_dir.path()).unwrap();
+    let shard_name = repo.path().file_name().unwrap().to_string_lossy();
+    let results = search_shards(
+        shard_dir.path(),
+        "issue token session",
+        10,
+        &SearchFilters {
+            require_all: true,
+            ..SearchFilters::default()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].path, format!("{shard_name}/one/src/auth.rs"));
+    assert_eq!(
+        results[0].read_range.as_ref().unwrap().path,
+        format!("{shard_name}/one/src/auth.rs")
+    );
+    let group = results[0].duplicate_group.as_ref().unwrap();
+    assert_eq!(group.canonical_path, "src/auth.rs");
+    assert_eq!(group.duplicate_count, 1);
+    assert_eq!(
+        group.duplicate_paths,
+        vec![format!("{shard_name}/two/src/auth.rs")]
+    );
+}
+
+#[test]
 fn dependency_filters_scope_fallback_indexed_and_shard_search() {
     let workspace = tempfile::tempdir().unwrap();
     let rust_repo = workspace.path().join("rust-api");

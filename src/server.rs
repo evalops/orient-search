@@ -1928,7 +1928,7 @@ impl ToolRuntime {
                             continue;
                         }
                     }
-                    result.path = scoped_output_path(scope, &result.path);
+                    prefix_search_result_paths(&mut result, scope);
                     result.reason = format!("shard:{}; {}", scope.output_prefix, result.reason);
                     results.push(result);
                 }
@@ -2140,6 +2140,23 @@ fn scoped_output_path(scope: &crate::shards::ShardSearchScope, path: &str) -> St
         scope.output_prefix.clone()
     } else {
         format!("{}/{}", scope.output_prefix, trimmed)
+    }
+}
+
+fn prefix_search_result_paths(result: &mut SearchResult, scope: &crate::shards::ShardSearchScope) {
+    result.path = scoped_output_path(scope, &result.path);
+    if let Some(read_range) = &mut result.read_range {
+        read_range.path = scoped_output_path(scope, &read_range.path);
+    }
+    if let Some(context) = &mut result.context {
+        context.path = scoped_output_path(scope, &context.path);
+    }
+    if let Some(group) = &mut result.duplicate_group {
+        for path in &mut group.duplicate_paths {
+            *path = scoped_output_path(scope, path);
+        }
+        group.duplicate_paths.sort();
+        group.duplicate_paths.dedup();
     }
 }
 
