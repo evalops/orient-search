@@ -1045,6 +1045,9 @@ fn cli_outputs_repo_map_and_reads_ranges() {
         .stdout(predicate::str::contains("\"related_symbols\""))
         .stdout(predicate::str::contains("\"read_batch_request\""))
         .stdout(predicate::str::contains("\"tool\":\"read_ranges\""))
+        .stdout(predicate::str::contains(
+            "\"cli\":\"orient read-ranges --repo",
+        ))
         .stdout(predicate::str::contains("src/auth.rs"))
         .stdout(predicate::str::contains("tests/auth_test.rs"))
         .stdout(predicate::str::contains("SessionManager"));
@@ -2146,12 +2149,7 @@ fn cli_builds_and_searches_persistent_index() {
             "read-index-range",
             "--index",
             index_path.to_str().unwrap(),
-            "--path",
-            "./src/auth.rs",
-            "--start",
-            "3",
-            "--lines",
-            "3",
+            "./src/auth.rs:3:3",
         ])
         .assert()
         .success()
@@ -2644,12 +2642,7 @@ fn cli_builds_and_searches_shard_directory() {
         "read-shard-range",
         "--index-dir",
         shard_dir.path().to_str().unwrap(),
-        "--path",
-        &format!("{billing_name}/./src/billing.rs"),
-        "--start",
-        "1",
-        "--lines",
-        "1",
+        &format!("{billing_name}/./src/billing.rs:1:1"),
     ])
     .assert()
     .success()

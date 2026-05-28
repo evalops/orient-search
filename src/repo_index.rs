@@ -106,9 +106,23 @@ pub struct ResultReadRange {
 pub struct ResultToolRequest {
     pub tool: String,
     pub arguments: serde_json::Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cli: Option<String>,
 }
 
 pub type ResultReadRequest = ResultToolRequest;
+
+impl ResultToolRequest {
+    pub fn new(tool: impl Into<String>, arguments: serde_json::Value) -> Self {
+        let tool = tool.into();
+        let cli = read_cli_command_for_request(&tool, &arguments);
+        Self {
+            tool,
+            arguments,
+            cli,
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RelatedFileLookupResult {
@@ -3863,10 +3877,10 @@ pub fn attach_result_read_requests(
         );
         arguments.insert("start".to_string(), serde_json::json!(read_range.start));
         arguments.insert("lines".to_string(), serde_json::json!(read_range.lines));
-        result.read_request = Some(ResultReadRequest {
-            tool: tool.to_string(),
-            arguments: serde_json::Value::Object(arguments),
-        });
+        result.read_request = Some(ResultReadRequest::new(
+            tool.to_string(),
+            serde_json::Value::Object(arguments),
+        ));
     }
 }
 
@@ -3982,10 +3996,7 @@ fn read_request_from_range(
     );
     arguments.insert("start".to_string(), serde_json::json!(read_range.start));
     arguments.insert("lines".to_string(), serde_json::json!(read_range.lines));
-    ResultReadRequest {
-        tool: tool.to_string(),
-        arguments: serde_json::Value::Object(arguments),
-    }
+    ResultReadRequest::new(tool.to_string(), serde_json::Value::Object(arguments))
 }
 
 fn read_batch_request_from_ranges(
@@ -4022,10 +4033,10 @@ fn read_batch_request_from_ranges_with_limit(
         return None;
     }
     base_arguments.insert("ranges".to_string(), serde_json::Value::Array(ranges));
-    Some(ResultToolRequest {
-        tool: tool.to_string(),
-        arguments: serde_json::Value::Object(base_arguments),
-    })
+    Some(ResultToolRequest::new(
+        tool.to_string(),
+        serde_json::Value::Object(base_arguments),
+    ))
 }
 
 pub fn result_read_batch_request(
@@ -4052,6 +4063,7 @@ pub fn attach_result_related_requests(
         result.related_request = Some(ResultToolRequest {
             tool: tool.to_string(),
             arguments: serde_json::Value::Object(arguments),
+            cli: None,
         });
     }
 }
@@ -4071,8 +4083,67 @@ pub fn attach_result_related_symbol_requests(
         result.related_symbols_request = Some(ResultToolRequest {
             tool: tool.to_string(),
             arguments: serde_json::Value::Object(arguments),
+            cli: None,
         });
     }
+}
+
+fn read_cli_command_for_request(tool: &str, arguments: &serde_json::Value) -> Option<String> {
+    let args = arguments.as_object()?;
+    let subcommand = match tool {
+        "read_range" | "open_range" => "read-range",
+        "read_ranges" | "open_ranges" => "read-ranges",
+        "read_index_range" | "open_index_range" => "read-index-range",
+        "read_index_ranges" | "open_index_ranges" => "read-index-ranges",
+        "read_shard_range" | "open_shard_range" => "read-shard-range",
+        "read_shard_ranges" | "open_shard_ranges" => "read-shard-ranges",
+        _ => return None,
+    };
+    let mut parts = vec!["orient".to_string(), subcommand.to_string()];
+    append_read_target_cli_args(&mut parts, args);
+    if let Some(ranges) = args.get("ranges").and_then(|value| value.as_array()) {
+        for range in ranges {
+            let range = range.as_object()?;
+            parts.push(compact_range_arg(range)?);
+        }
+    } else {
+        parts.push(compact_range_arg(args)?);
+    }
+    Some(parts.join(" "))
+}
+
+fn append_read_target_cli_args(
+    parts: &mut Vec<String>,
+    args: &serde_json::Map<String, serde_json::Value>,
+) {
+    for (name, flag) in [
+        ("repo", "--repo"),
+        ("index", "--index"),
+        ("index_dir", "--index-dir"),
+    ] {
+        if let Some(value) = args.get(name).and_then(|value| value.as_str()) {
+            parts.push(flag.to_string());
+            parts.push(shell_quote(value));
+        }
+    }
+}
+
+fn compact_range_arg(args: &serde_json::Map<String, serde_json::Value>) -> Option<String> {
+    let path = args.get("path")?.as_str()?;
+    let start = args.get("start")?.as_u64()?;
+    let lines = args.get("lines")?.as_u64()?;
+    Some(shell_quote(&format!("{path}:{start}:{lines}")))
+}
+
+fn shell_quote(value: &str) -> String {
+    if !value.is_empty()
+        && value
+            .bytes()
+            .all(|byte| matches!(byte, b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'_' | b'-' | b'.' | b'/' | b':' | b'@' | b'%' | b'+' | b'=' | b','))
+    {
+        return value.to_string();
+    }
+    format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 pub(crate) fn finalize_results(mut results: Vec<SearchResult>, limit: usize) -> Vec<SearchResult> {
@@ -4756,4 +4827,48 @@ fn normalized_snippet_signature(snippet: &str) -> String {
         .chars()
         .take(320)
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn read_tool_requests_include_shell_safe_cli_hints() {
+        let request = ResultToolRequest::new(
+            "read_range",
+            serde_json::json!({
+                "repo": "/tmp/my repo",
+                "path": "src/it'll work.rs",
+                "start": 3,
+                "lines": 4
+            }),
+        );
+
+        assert_eq!(
+            request.cli.as_deref(),
+            Some("orient read-range --repo '/tmp/my repo' 'src/it'\\''ll work.rs:3:4'")
+        );
+    }
+
+    #[test]
+    fn batch_read_tool_requests_use_compact_ranges() {
+        let request = ResultToolRequest::new(
+            "read_index_ranges",
+            serde_json::json!({
+                "index": "/tmp/orient.index",
+                "ranges": [
+                    {"path": "src/lib.rs", "start": 1, "lines": 80},
+                    {"path": "tests/auth test.rs", "start": 3, "lines": 4}
+                ]
+            }),
+        );
+
+        assert_eq!(
+            request.cli.as_deref(),
+            Some(
+                "orient read-index-ranges --index /tmp/orient.index src/lib.rs:1:80 'tests/auth test.rs:3:4'"
+            )
+        );
+    }
 }

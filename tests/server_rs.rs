@@ -1192,7 +1192,25 @@ fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
         "issue_token"
     );
     assert_eq!(live["results"][0]["read_request"]["tool"], "read_range");
+    assert!(
+        live["results"][0]["read_request"]["cli"]
+            .as_str()
+            .unwrap()
+            .contains("orient read-range --repo")
+    );
+    assert!(
+        live["results"][0]["read_request"]["cli"]
+            .as_str()
+            .unwrap()
+            .contains("src/auth.rs:")
+    );
     assert_eq!(live["read_batch_request"]["tool"], "read_ranges");
+    assert!(
+        live["read_batch_request"]["cli"]
+            .as_str()
+            .unwrap()
+            .contains("orient read-ranges --repo")
+    );
     assert_eq!(
         live["read_batch_request"]["arguments"]["ranges"][0]["path"],
         "src/auth.rs"

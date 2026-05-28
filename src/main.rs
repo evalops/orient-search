@@ -1085,6 +1085,7 @@ fn cli_retry_requests<T: Serialize>(
         requests.push(ResultToolRequest {
             tool: search_tool.to_string(),
             arguments: Value::Object(arguments),
+            cli: None,
         });
     }
     requests
@@ -1447,10 +1448,15 @@ fn run() -> Result<()> {
             start,
             lines,
         } => {
-            let path = cli_single_path(path, path_arg)?;
+            let range = cli_single_range(path, path_arg, start, lines)?;
             println!(
                 "{}",
-                serde_json::to_string(&read_shard_range(index_dir, &path, start, lines)?)?
+                serde_json::to_string(&read_shard_range(
+                    index_dir,
+                    &range.path,
+                    range.start,
+                    range.lines
+                )?)?
             );
         }
         Commands::ReadShardRanges {
@@ -2494,11 +2500,11 @@ fn run() -> Result<()> {
             start,
             lines,
         } => {
-            let path = cli_single_path(path, path_arg)?;
+            let range = cli_single_range(path, path_arg, start, lines)?;
             let index = FastIndex::load(index)?;
             println!(
                 "{}",
-                serde_json::to_string(&index.read_range(&path, start, lines)?)?
+                serde_json::to_string(&index.read_range(&range.path, range.start, range.lines)?)?
             );
         }
         Commands::ReadIndexRanges {

@@ -1444,6 +1444,7 @@ fn auto_query_plan_request<T: Serialize>(
     ResultToolRequest {
         tool: tool.to_string(),
         arguments: Value::Object(arguments),
+        cli: None,
     }
 }
 
@@ -1489,6 +1490,7 @@ fn auto_repo_map_request<T: Serialize>(
     ResultToolRequest {
         tool: tool.to_string(),
         arguments: Value::Object(arguments),
+        cli: None,
     }
 }
 
@@ -1565,6 +1567,7 @@ fn retry_search_requests<T: Serialize>(
         requests.push(ResultToolRequest {
             tool: search_tool.to_string(),
             arguments: Value::Object(arguments),
+            cli: None,
         });
     }
     requests

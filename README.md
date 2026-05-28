@@ -77,6 +77,8 @@ bounded batch read.
 target style as `search`, and the CLI mirrors that with `read-range --repo`,
 `read-range --index`, or `read-range --index-dir`. Simple adapters do not need
 separate read tools for live repos, persisted indexes, and shard directories.
+Generated `read_request` and `read_batch_request` objects include a `cli` hint
+with the equivalent bounded `orient read-*` command for terminal-native agents.
 CLI range reads also accept compact `path:start:lines` positional ranges, e.g.
 `orient read-range --index /tmp/repo.index src/lib.rs:40:80`.
 `related_files` and `related_symbols` follow the same target style for nearby
