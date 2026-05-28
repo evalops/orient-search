@@ -29,6 +29,12 @@ static SYMBOL_RE: LazyLock<Regex> = LazyLock::new(|| {
 static PYTHON_SYMBOL_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^\s*(class|def|async\s+def)\s+([A-Za-z_][A-Za-z0-9_]*)").unwrap()
 });
+static GO_FUNC_SYMBOL_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^\s*func\s+(?:\([^)]*\)\s*)?([A-Za-z_][A-Za-z0-9_]*)\s*\(").unwrap()
+});
+static GO_TYPE_SYMBOL_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^\s*type\s+([A-Za-z_][A-Za-z0-9_]*)\s+(struct|interface)\b").unwrap()
+});
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Symbol {
@@ -2269,6 +2275,9 @@ pub(crate) fn extract_symbols(path: &str, text: &str, language: &str) -> Vec<Sym
     if language == "python" {
         return extract_python_symbols(path, text);
     }
+    if language == "go" {
+        return extract_go_symbols(path, text);
+    }
     text.lines()
         .enumerate()
         .filter_map(|(index, line)| {
@@ -2285,6 +2294,29 @@ pub(crate) fn extract_symbols(path: &str, text: &str, language: &str) -> Vec<Sym
             Some(Symbol {
                 name: capture.get(1)?.as_str().to_string(),
                 kind: kind.to_string(),
+                path: path.to_string(),
+                line: index + 1,
+            })
+        })
+        .collect()
+}
+
+fn extract_go_symbols(path: &str, text: &str) -> Vec<Symbol> {
+    text.lines()
+        .enumerate()
+        .filter_map(|(index, line)| {
+            if let Some(capture) = GO_FUNC_SYMBOL_RE.captures(line) {
+                return Some(Symbol {
+                    name: capture.get(1)?.as_str().to_string(),
+                    kind: "function".to_string(),
+                    path: path.to_string(),
+                    line: index + 1,
+                });
+            }
+            let capture = GO_TYPE_SYMBOL_RE.captures(line)?;
+            Some(Symbol {
+                name: capture.get(1)?.as_str().to_string(),
+                kind: capture.get(2)?.as_str().to_string(),
                 path: path.to_string(),
                 line: index + 1,
             })

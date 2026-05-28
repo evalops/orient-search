@@ -195,6 +195,50 @@ fn fallback_symbol_filter_finds_deep_private_definition_after_broad_hits() {
 }
 
 #[test]
+fn go_symbols_work_across_live_fallback_and_persistent_indexes() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("server.go"),
+        r#"
+package server
+
+type Server struct {}
+
+func NewServer() *Server {
+    return &Server{}
+}
+
+func (s *Server) ServeHTTP() {}
+"#,
+    );
+
+    let live = RepoIndexer::new(repo.path()).build().unwrap();
+    let live_symbols = live.find_symbol("ServeHTTP", 10);
+    assert_eq!(live_symbols[0].path, "server.go");
+    assert_eq!(live_symbols[0].kind, "function");
+    assert_eq!(live_symbols[0].line, 10);
+    assert!(live.find_symbol("Server", 10).iter().any(|symbol| {
+        symbol.name == "Server" && symbol.kind == "struct" && symbol.path == "server.go"
+    }));
+
+    let fallback =
+        search_repo_fast_filtered(repo.path(), "symbol:ServeHTTP", 5, &Default::default()).unwrap();
+    assert_eq!(fallback[0].path, "server.go");
+    assert!(fallback[0].reason.contains("symbol:ServeHTTP"));
+    assert!(fallback[0].snippet.contains("ServeHTTP"));
+
+    let indexed = FastIndex::build(repo.path()).unwrap();
+    let indexed_symbols = indexed.find_symbol("ServeHTTP", 10);
+    assert_eq!(indexed_symbols[0].path, "server.go");
+    assert_eq!(indexed_symbols[0].kind, "function");
+    let indexed_results = indexed
+        .search_filtered("symbol:ServeHTTP", 5, &Default::default())
+        .unwrap();
+    assert_eq!(indexed_results[0].path, "server.go");
+    assert!(indexed_results[0].reason.contains("symbol:ServeHTTP"));
+}
+
+#[test]
 fn read_file_range_rejects_paths_outside_repo() {
     let repo = tempfile::tempdir().unwrap();
     let outside = tempfile::tempdir().unwrap();
