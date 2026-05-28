@@ -659,6 +659,7 @@ fn runtime_accepts_structured_negative_search_filters() {
             "query": "issue token",
             "limit": 10,
             "dir": "src",
+            "symbol_kind": "function",
             "require_all": true,
             "exclude_path": ["generated"]
         }),
@@ -677,9 +678,11 @@ fn runtime_accepts_structured_negative_search_filters() {
             "query": "issue token",
             "limit": 10,
             "dir": "src",
+            "symbol_kind": "function",
             "require_all": true,
             "exclude_path": ["generated"],
-            "exclude_symbol": "GeneratedSessionManager"
+            "exclude_symbol": "GeneratedSessionManager",
+            "exclude_symbol_kind": "enum"
         }),
     });
     assert!(indexed.error.is_none(), "{:?}", indexed.error);

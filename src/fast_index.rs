@@ -9,16 +9,17 @@ use crate::repo_index::{
     dependency_hints_from_manifest_texts, extract_symbols, file_range_from_text, filter_only_query,
     filter_only_search_result, finalize_results, import_hints_from_source_texts,
     is_entrypoint_path, is_ignored, is_important_file, is_manifest_file, is_test_path,
-    known_commands_from_hints, language_for, matches_filters, normalize_token,
+    known_commands_from_hints, language_for, matches_filters_with_path_lower, normalize_token,
     regular_file_metadata, related_stem_terms, repo_map_seed_paths, repo_matches,
     result_matches_all_tokens, result_matches_symbol_filters, round4, score_filter_only_path,
-    source_import_filters_match, symbol_kind_rank, token_counts, tokenize,
+    source_content_filters_match, source_import_filters_match, symbol_kind_rank, token_counts,
+    tokenize,
 };
+use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use anyhow::{Context, Result};
 use ignore::WalkBuilder;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
@@ -45,6 +46,8 @@ pub struct FastIndex {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IndexedPath {
     pub path: String,
+    #[serde(default)]
+    pub path_lower: String,
     pub language: String,
     pub size: u64,
     pub content_hash: u64,
@@ -293,13 +296,14 @@ impl FastIndex {
                 version
             );
         }
-        let index = bincode::deserialize::<Self>(payload)
+        let mut index = bincode::deserialize::<Self>(payload)
             .with_context(|| format!("parse index {}", path.as_ref().display()))?;
         anyhow::ensure!(
             index.version == INDEX_VERSION,
             "unsupported index version {}",
             index.version
         );
+        index.normalize_loaded();
         Ok(index)
     }
 
@@ -325,6 +329,14 @@ impl FastIndex {
             path_terms: self.path_postings.len(),
             trigrams: self.trigram_postings.len(),
             symbols: self.files.iter().map(|file| file.symbols.len()).sum(),
+        }
+    }
+
+    fn normalize_loaded(&mut self) {
+        for file in &mut self.files {
+            if file.path_lower.is_empty() {
+                file.path_lower = file.path.to_ascii_lowercase();
+            }
         }
     }
 
@@ -473,7 +485,7 @@ impl FastIndex {
         let mut test_files = self
             .files
             .iter()
-            .filter(|file| is_test_path(&file.path.to_ascii_lowercase()))
+            .filter(|file| is_test_path(&file.path_lower))
             .map(|file| file.path.clone())
             .collect::<Vec<_>>();
         test_files.sort();
@@ -685,7 +697,8 @@ impl FastIndex {
             .parent()
             .map(|value| value.to_string_lossy().to_string())
             .unwrap_or_default();
-        let source_is_test = is_test_path(&normalized.to_ascii_lowercase());
+        let normalized_lower = normalized.to_ascii_lowercase();
+        let source_is_test = is_test_path(&normalized_lower);
         let source_symbols = self
             .files
             .iter()
@@ -703,7 +716,7 @@ impl FastIndex {
             if file.path == normalized {
                 continue;
             }
-            let lower = file.path.to_ascii_lowercase();
+            let lower = &file.path_lower;
             let mut score = 0.0;
             let mut reasons = Vec::new();
 
@@ -1450,7 +1463,7 @@ impl FastIndex {
         query_plan: Option<&QueryPlan>,
     ) -> Option<SearchResult> {
         let file = self.files.get(file_id as usize)?;
-        let path_lower = file.path.to_lowercase();
+        let path_lower = &file.path_lower;
         let query_name = query_tokens.join("");
         let mut score = 0.0;
         let mut reasons = Vec::new();
@@ -1660,6 +1673,9 @@ fn query_plan_filters(filters: &SearchFilters) -> Vec<QueryPlanFilter> {
     if let Some(value) = &filters.symbol {
         active.push(plan_filter("symbol", value, false));
     }
+    if let Some(value) = &filters.symbol_kind {
+        active.push(plan_filter("symbol_kind", value, false));
+    }
     if let Some(value) = &filters.repo {
         active.push(plan_filter("repo", value, false));
     }
@@ -1686,6 +1702,9 @@ fn query_plan_filters(filters: &SearchFilters) -> Vec<QueryPlanFilter> {
     }
     for value in &filters.exclude_symbol {
         active.push(plan_filter("symbol", value, true));
+    }
+    for value in &filters.exclude_symbol_kind {
+        active.push(plan_filter("symbol_kind", value, true));
     }
     for value in &filters.exclude_repo {
         active.push(plan_filter("repo", value, true));
@@ -1743,10 +1762,7 @@ fn indexed_path_matches_plan_filter(file: &IndexedPath, filter: &QueryPlanFilter
                     .contains(&filter.value.to_ascii_lowercase())
             })
             .unwrap_or(false),
-        "path" => file
-            .path
-            .to_ascii_lowercase()
-            .contains(&filter.value.to_ascii_lowercase()),
+        "path" => file.path_lower.contains(&filter.value.to_ascii_lowercase()),
         "language" => file.language == filter.value.trim().to_ascii_lowercase(),
         "extension" => std::path::Path::new(&file.path)
             .extension()
@@ -1760,13 +1776,14 @@ fn indexed_path_matches_plan_filter(file: &IndexedPath, filter: &QueryPlanFilter
                         .to_ascii_lowercase()
             }),
         "symbol" => indexed_path_matches_symbol_filter(file, &filter.value),
+        "symbol_kind" => indexed_path_matches_symbol_kind_filter(file, &filter.value),
         "import" => indexed_path_matches_import_filter(file, &filter.value),
         "test" => {
             let wanted = matches!(
                 filter.value.to_ascii_lowercase().as_str(),
                 "1" | "true" | "yes" | "y"
             );
-            is_test_path(&file.path.to_ascii_lowercase()) == wanted
+            is_test_path(&file.path_lower) == wanted
         }
         _ => true,
     };
@@ -1774,8 +1791,9 @@ fn indexed_path_matches_plan_filter(file: &IndexedPath, filter: &QueryPlanFilter
 }
 
 fn indexed_file_matches_filters(file: &IndexedPath, filters: &SearchFilters) -> bool {
-    matches_filters(&file.path, filters)
-        && source_import_filters_match(&file.path, &file.content, filters)
+    matches_filters_with_path_lower(&file.path, &file.path_lower, filters)
+        && indexed_path_matches_symbol_kind_filters(file, filters)
+        && source_content_filters_match(&file.path, &file.content, filters)
 }
 
 fn indexed_path_matches_symbol_filter(file: &IndexedPath, wanted: &str) -> bool {
@@ -1793,6 +1811,36 @@ fn indexed_path_matches_import_filter(file: &IndexedPath, wanted: &str) -> bool 
         &file.content,
         &SearchFilters {
             import: Some(wanted.to_string()),
+            ..SearchFilters::default()
+        },
+    )
+}
+
+fn indexed_path_matches_symbol_kind_filters(file: &IndexedPath, filters: &SearchFilters) -> bool {
+    if filters.symbol_kind.is_none() && filters.exclude_symbol_kind.is_empty() {
+        return true;
+    }
+    if let Some(wanted) = &filters.symbol_kind {
+        if !file
+            .symbols
+            .iter()
+            .any(|symbol| symbol.kind.eq_ignore_ascii_case(wanted))
+        {
+            return false;
+        }
+    }
+    !filters.exclude_symbol_kind.iter().any(|excluded| {
+        file.symbols
+            .iter()
+            .any(|symbol| symbol.kind.eq_ignore_ascii_case(excluded))
+    })
+}
+
+fn indexed_path_matches_symbol_kind_filter(file: &IndexedPath, wanted: &str) -> bool {
+    indexed_path_matches_symbol_kind_filters(
+        file,
+        &SearchFilters {
+            symbol_kind: Some(wanted.to_ascii_lowercase()),
             ..SearchFilters::default()
         },
     )
@@ -2107,6 +2155,7 @@ fn index_file(
 
     Some(IndexedPath {
         path: rel.to_string(),
+        path_lower: rel.to_ascii_lowercase(),
         language,
         size,
         content_hash,
@@ -2128,6 +2177,7 @@ fn retarget_indexed_file(
     text: &str,
 ) -> IndexedPath {
     previous.path = candidate.rel.clone();
+    previous.path_lower = candidate.rel.to_ascii_lowercase();
     previous.language = candidate.language.clone();
     previous.size = candidate.size;
     previous.content_hash = content_hash(text.as_bytes());
@@ -2420,7 +2470,7 @@ fn candidate_rank_score(
     let Some(file) = files.get(file_id as usize) else {
         return 0.0;
     };
-    let path_lower = file.path.to_ascii_lowercase();
+    let path_lower = &file.path_lower;
     let query_name = query_tokens.join("");
     let mut score = 0.0;
     for (token, postings) in posting_maps {

@@ -1,9 +1,10 @@
 //! Bounded local repository discovery for shard setup.
 
 use crate::repo_index::{is_ignored, is_manifest_file};
+use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::VecDeque;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};

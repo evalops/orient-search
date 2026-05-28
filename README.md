@@ -12,6 +12,6 @@ target/release/orient index-shards --repo /path/to/repo --output-dir /tmp/orient
 target/release/orient serve-tcp --addr 127.0.0.1:8796 --index-dir /tmp/orient-shards
 ```
 
-Filters: `repo:`, `path:`/`dir:`, `file:`, `lang:`, `ext:`, `symbol:`, `dep:`, `import:`, `test:`, `-path:docs`, quoted phrases.
+Filters: `repo:`, `path:`/`dir:`, `file:`, `lang:`, `ext:`, `symbol:`, `kind:`, `dep:`, `import:`, `test:`, `-path:docs`, quoted phrases.
 
 More: [Agent protocol](docs/agent-protocol.md), [Fast search roadmap](docs/fast-search-roadmap.md).

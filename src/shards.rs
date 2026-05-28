@@ -7,9 +7,9 @@ use crate::repo_index::{
     CommandHint, FileRange, QueryPlan, RelatedFile, RelatedSymbol, RepoMap, SearchFilters,
     SearchResult, Symbol, finalize_results, is_manifest_file, language_for, normalize_token,
 };
+use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};

@@ -1379,7 +1379,7 @@ fn dependency_filters_scope_fallback_indexed_and_shard_search() {
 
     let fallback = search_repo_fast_filtered(
         &rust_repo,
-        "dep:serde import:serde issue token",
+        "dep:serde import:serde kind:function issue token",
         10,
         &SearchFilters::default(),
     )
@@ -1388,7 +1388,7 @@ fn dependency_filters_scope_fallback_indexed_and_shard_search() {
     assert!(
         search_repo_fast_filtered(
             &rust_repo,
-            "import:react issue token",
+            "import:react kind:function issue token",
             10,
             &SearchFilters::default()
         )
@@ -1407,6 +1407,12 @@ fn dependency_filters_scope_fallback_indexed_and_shard_search() {
             .unwrap()[0]
             .path,
         "src/lib.rs"
+    );
+    assert!(
+        index
+            .search_filtered("kind:enum issue token", 10, &SearchFilters::default())
+            .unwrap()
+            .is_empty()
     );
     assert!(
         index

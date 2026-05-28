@@ -13,10 +13,10 @@ use crate::shards::{
     ensure_shards, filter_repo_map_by_prefix, filters_for_shard_scope, load_manifest,
     refresh_shards, resolve_shard_read_path, shard_search_scopes, shard_status,
 };
+use ahash::AHashMap as HashMap;
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
-use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
@@ -660,8 +660,15 @@ fn input_schema(tool_name: &str, required: &[&str], optional: &[&str]) -> Value 
 fn argument_schema(tool_name: &str, name: &str) -> Value {
     let mut schema = Map::new();
     match name {
-        "exclude_file" | "exclude_path" | "exclude_language" | "exclude_extension"
-        | "exclude_symbol" | "exclude_repo" | "exclude_dependency" | "exclude_import" => {
+        "exclude_file"
+        | "exclude_path"
+        | "exclude_language"
+        | "exclude_extension"
+        | "exclude_symbol"
+        | "exclude_symbol_kind"
+        | "exclude_repo"
+        | "exclude_dependency"
+        | "exclude_import" => {
             schema.insert(
                 "oneOf".to_string(),
                 json!([
@@ -890,6 +897,9 @@ fn argument_description(name: &str) -> &'static str {
         "language" => "Detected language filter, such as rust, python, or typescript.",
         "extension" => "File extension filter with or without a leading dot.",
         "symbol" => "Symbol name to require or boost.",
+        "symbol_kind" => {
+            "Symbol kind to require, such as function, class, struct, enum, or method."
+        }
         "dependency" => "Dependency name substring used as a repo-level search filter.",
         "import" => "Imported module substring used as a file-level search filter.",
         "file" => "File basename substring filter.",
@@ -906,6 +916,7 @@ fn argument_description(name: &str) -> &'static str {
         "exclude_language" => "Language or list of languages to exclude.",
         "exclude_extension" => "Extension or list of extensions to exclude.",
         "exclude_symbol" => "Symbol name or list of symbols to exclude.",
+        "exclude_symbol_kind" => "Symbol kind or list of kinds to exclude.",
         "exclude_repo" => "Repository name substring or list of substrings to exclude.",
         "exclude_dependency" => "Dependency name or list of dependency substrings to exclude.",
         "exclude_import" => "Imported module or list of module substrings to exclude.",
@@ -2176,6 +2187,7 @@ const SEARCH_OPTIONAL_ARGS: &[&str] = &[
     "language",
     "extension",
     "symbol",
+    "symbol_kind",
     "dependency",
     "import",
     "file",
@@ -2190,6 +2202,7 @@ const SEARCH_OPTIONAL_ARGS: &[&str] = &[
     "exclude_language",
     "exclude_extension",
     "exclude_symbol",
+    "exclude_symbol_kind",
     "exclude_repo",
     "exclude_dependency",
     "exclude_import",
@@ -2202,6 +2215,7 @@ const SEARCH_INDEX_OPTIONAL_ARGS: &[&str] = &[
     "language",
     "extension",
     "symbol",
+    "symbol_kind",
     "dependency",
     "import",
     "file",
@@ -2218,6 +2232,7 @@ const SEARCH_INDEX_OPTIONAL_ARGS: &[&str] = &[
     "exclude_language",
     "exclude_extension",
     "exclude_symbol",
+    "exclude_symbol_kind",
     "exclude_repo",
     "exclude_dependency",
     "exclude_import",
@@ -2229,6 +2244,7 @@ const PLAN_INDEX_OPTIONAL_ARGS: &[&str] = &[
     "language",
     "extension",
     "symbol",
+    "symbol_kind",
     "dependency",
     "import",
     "file",
@@ -2242,6 +2258,7 @@ const PLAN_INDEX_OPTIONAL_ARGS: &[&str] = &[
     "exclude_language",
     "exclude_extension",
     "exclude_symbol",
+    "exclude_symbol_kind",
     "exclude_repo",
     "exclude_dependency",
     "exclude_import",
@@ -2597,6 +2614,8 @@ fn search_filters(arguments: &Value, allow_repo_alias: bool) -> Result<SearchFil
         language: optional_string_arg(arguments, "language"),
         extension: optional_string_arg(arguments, "extension"),
         symbol: optional_string_arg(arguments, "symbol"),
+        symbol_kind: optional_string_arg(arguments, "symbol_kind")
+            .map(|value| value.to_ascii_lowercase()),
         dependency: optional_string_arg(arguments, "dependency")
             .map(|value| value.to_ascii_lowercase()),
         import: optional_string_arg(arguments, "import").map(|value| value.to_ascii_lowercase()),
@@ -2624,6 +2643,7 @@ fn search_filters(arguments: &Value, allow_repo_alias: bool) -> Result<SearchFil
         exclude_language: normalized_string_list_arg(arguments, "exclude_language")?,
         exclude_extension: normalized_string_list_arg(arguments, "exclude_extension")?,
         exclude_symbol: optional_string_list_arg(arguments, "exclude_symbol")?,
+        exclude_symbol_kind: normalized_string_list_arg(arguments, "exclude_symbol_kind")?,
         exclude_repo: optional_string_list_arg(arguments, "exclude_repo")?,
         exclude_dependency: normalized_string_list_arg(arguments, "exclude_dependency")?,
         exclude_import: normalized_string_list_arg(arguments, "exclude_import")?,

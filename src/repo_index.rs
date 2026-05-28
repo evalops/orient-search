@@ -1,12 +1,12 @@
 //! Repo orientation index.
 
 use crate::query::{merge_filters, normalize_phrase_text, parse_query, query_phrases, query_text};
+use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use anyhow::Result;
 use ignore::WalkBuilder;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -186,6 +186,7 @@ pub struct SearchFilters {
     pub language: Option<String>,
     pub extension: Option<String>,
     pub symbol: Option<String>,
+    pub symbol_kind: Option<String>,
     pub repo: Option<String>,
     pub dependency: Option<String>,
     pub import: Option<String>,
@@ -198,6 +199,7 @@ pub struct SearchFilters {
     pub exclude_language: Vec<String>,
     pub exclude_extension: Vec<String>,
     pub exclude_symbol: Vec<String>,
+    pub exclude_symbol_kind: Vec<String>,
     pub exclude_repo: Vec<String>,
     pub exclude_dependency: Vec<String>,
     pub exclude_import: Vec<String>,
@@ -218,6 +220,7 @@ impl Default for SearchFilters {
             language: None,
             extension: None,
             symbol: None,
+            symbol_kind: None,
             repo: None,
             dependency: None,
             import: None,
@@ -230,6 +233,7 @@ impl Default for SearchFilters {
             exclude_language: Vec::new(),
             exclude_extension: Vec::new(),
             exclude_symbol: Vec::new(),
+            exclude_symbol_kind: Vec::new(),
             exclude_repo: Vec::new(),
             exclude_dependency: Vec::new(),
             exclude_import: Vec::new(),
@@ -439,9 +443,9 @@ fn search_repo_filter_only(
         if !matches_filters(&rel, filters) {
             continue;
         }
-        if import_filters_active(filters) {
+        if content_filters_active(filters) {
             let text = fs::read_to_string(path).unwrap_or_default();
-            if text.contains('\0') || !source_import_filters_match(&rel, &text, filters) {
+            if text.contains('\0') || !source_content_filters_match(&rel, &text, filters) {
                 continue;
             }
         }
@@ -469,7 +473,7 @@ fn search_repo_filter_only(
         if text.contains('\0') {
             continue;
         }
-        if !source_import_filters_match(&path, &text, filters) {
+        if !source_content_filters_match(&path, &text, filters) {
             continue;
         }
         results.push(filter_only_search_result(
@@ -603,9 +607,9 @@ fn search_repo_ripgrep(
         {
             continue;
         }
-        if import_filters_active(filters) {
+        if content_filters_active(filters) {
             let text = fs::read_to_string(root.join(&path)).unwrap_or_default();
-            if text.contains('\0') || !source_import_filters_match(&path, &text, filters) {
+            if text.contains('\0') || !source_content_filters_match(&path, &text, filters) {
                 continue;
             }
         }
@@ -681,7 +685,7 @@ fn search_repo_streaming(
             .strip_prefix(&root)?
             .to_string_lossy()
             .replace('\\', "/");
-        if !matches_filters(&rel, filters) || !source_import_filters_match(&rel, &text, filters) {
+        if !matches_filters(&rel, filters) || !source_content_filters_match(&rel, &text, filters) {
             continue;
         }
         if let Some(result) = score_text_file(
@@ -1607,12 +1611,60 @@ pub(crate) fn import_filters_active(filters: &SearchFilters) -> bool {
     filters.import.is_some() || !filters.exclude_import.is_empty()
 }
 
+pub(crate) fn symbol_kind_filters_active(filters: &SearchFilters) -> bool {
+    filters.symbol_kind.is_some() || !filters.exclude_symbol_kind.is_empty()
+}
+
+pub(crate) fn content_filters_active(filters: &SearchFilters) -> bool {
+    import_filters_active(filters) || symbol_kind_filters_active(filters)
+}
+
+pub(crate) fn source_content_filters_match(
+    path: &str,
+    text: &str,
+    filters: &SearchFilters,
+) -> bool {
+    source_import_filters_match(path, text, filters)
+        && source_symbol_kind_filters_match(path, text, filters)
+}
+
 pub(crate) fn source_import_filters_match(path: &str, text: &str, filters: &SearchFilters) -> bool {
     if !import_filters_active(filters) {
         return true;
     }
     let hints = import_hints_from_source_texts([(path, text)]);
     import_filters_match(&hints, filters)
+}
+
+pub(crate) fn source_symbol_kind_filters_match(
+    path: &str,
+    text: &str,
+    filters: &SearchFilters,
+) -> bool {
+    if !symbol_kind_filters_active(filters) {
+        return true;
+    }
+    let Some(language) = language_for(Path::new(path)) else {
+        return false;
+    };
+    symbol_kind_filters_match(&extract_symbols(path, text, &language), filters)
+}
+
+pub(crate) fn symbol_kind_filters_match(symbols: &[Symbol], filters: &SearchFilters) -> bool {
+    let kinds = symbols
+        .iter()
+        .map(|symbol| symbol.kind.to_ascii_lowercase())
+        .collect::<Vec<_>>();
+    if let Some(wanted) = &filters.symbol_kind {
+        let wanted = wanted.to_ascii_lowercase();
+        if !kinds.iter().any(|kind| kind == &wanted) {
+            return false;
+        }
+    }
+    !filters.exclude_symbol_kind.iter().any(|excluded| {
+        let excluded = excluded.to_ascii_lowercase();
+        kinds.iter().any(|kind| kind == &excluded)
+    })
 }
 
 fn import_filters_match(hints: &[ImportHint], filters: &SearchFilters) -> bool {
@@ -2728,6 +2780,14 @@ fn line_range_from_snippet(snippet: &str) -> Option<ResultLineRange> {
 
 pub(crate) fn matches_filters(path: &str, filters: &SearchFilters) -> bool {
     let path_lower = path.to_ascii_lowercase();
+    matches_filters_with_path_lower(path, &path_lower, filters)
+}
+
+pub(crate) fn matches_filters_with_path_lower(
+    path: &str,
+    path_lower: &str,
+    filters: &SearchFilters,
+) -> bool {
     if let Some(file_filter) = &filters.file {
         let Some(file_name) = Path::new(path)
             .file_name()
@@ -2819,6 +2879,7 @@ pub(crate) fn filter_only_query(filters: &SearchFilters) -> bool {
         || filters.path.is_some()
         || filters.language.is_some()
         || filters.extension.is_some()
+        || filters.symbol_kind.is_some()
         || filters.repo.is_some()
         || filters.dependency.is_some()
         || filters.import.is_some()
@@ -2909,6 +2970,17 @@ pub(crate) fn score_filter_only_path(
             "dependency_filter",
             dependency,
             2.0,
+            explain,
+            &mut score,
+            &mut reasons,
+            &mut signals,
+        );
+    }
+    if let Some(kind) = &filters.symbol_kind {
+        add_filter_signal(
+            "symbol_kind_filter",
+            kind,
+            3.0,
             explain,
             &mut score,
             &mut reasons,

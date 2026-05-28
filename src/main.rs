@@ -543,6 +543,8 @@ struct CommonSearchArgs {
     file: Option<String>,
     #[arg(long)]
     symbol: Option<String>,
+    #[arg(long = "kind", alias = "symbol-kind", alias = "symbol_kind")]
+    symbol_kind: Option<String>,
     #[arg(long, alias = "dep", alias = "deps")]
     dependency: Option<String>,
     #[arg(long, alias = "module", alias = "uses")]
@@ -565,6 +567,12 @@ struct CommonSearchArgs {
     exclude_extension: Vec<String>,
     #[arg(long = "exclude-symbol")]
     exclude_symbol: Vec<String>,
+    #[arg(
+        long = "exclude-kind",
+        alias = "exclude-symbol-kind",
+        alias = "exclude_symbol_kind"
+    )]
+    exclude_symbol_kind: Vec<String>,
     #[arg(long = "exclude-repo")]
     exclude_repo: Vec<String>,
     #[arg(
@@ -594,6 +602,10 @@ fn search_filters_from_args(
             .as_ref()
             .map(|value| normalize_extension(value)),
         symbol: args.symbol.clone(),
+        symbol_kind: args
+            .symbol_kind
+            .as_ref()
+            .map(|value| normalize_filter(value)),
         repo,
         dependency: args
             .dependency
@@ -617,6 +629,11 @@ fn search_filters_from_args(
             .map(|value| normalize_extension(value))
             .collect(),
         exclude_symbol: args.exclude_symbol.clone(),
+        exclude_symbol_kind: args
+            .exclude_symbol_kind
+            .iter()
+            .map(|value| normalize_filter(value))
+            .collect(),
         exclude_repo: args.exclude_repo.clone(),
         exclude_dependency: args
             .exclude_dependency

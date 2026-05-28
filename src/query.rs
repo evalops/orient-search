@@ -52,6 +52,9 @@ fn apply_filter(filters: &mut SearchFilters, token: &str, negated: bool) -> bool
             filters.extension = Some(value.trim_start_matches('.').to_ascii_lowercase())
         }
         (false, "symbol") => filters.symbol = Some(value),
+        (false, "kind" | "symbol_kind" | "symbol-kind") => {
+            filters.symbol_kind = Some(value.to_ascii_lowercase())
+        }
         (false, "repo") => filters.repo = Some(value),
         (false, "dep" | "deps" | "dependency" | "dependencies") => {
             filters.dependency = Some(value.to_ascii_lowercase())
@@ -67,6 +70,9 @@ fn apply_filter(filters: &mut SearchFilters, token: &str, negated: bool) -> bool
             .exclude_extension
             .push(value.trim_start_matches('.').to_ascii_lowercase()),
         (true, "symbol") => filters.exclude_symbol.push(value),
+        (true, "kind" | "symbol_kind" | "symbol-kind") => {
+            filters.exclude_symbol_kind.push(value.to_ascii_lowercase())
+        }
         (true, "repo") => filters.exclude_repo.push(value),
         (true, "dep" | "deps" | "dependency" | "dependencies") => {
             filters.exclude_dependency.push(value.to_ascii_lowercase())
@@ -184,6 +190,9 @@ pub fn merge_filters(mut base: SearchFilters, parsed: SearchFilters) -> SearchFi
     if parsed.symbol.is_some() {
         base.symbol = parsed.symbol;
     }
+    if parsed.symbol_kind.is_some() {
+        base.symbol_kind = parsed.symbol_kind;
+    }
     if parsed.repo.is_some() {
         base.repo = parsed.repo;
     }
@@ -202,6 +211,7 @@ pub fn merge_filters(mut base: SearchFilters, parsed: SearchFilters) -> SearchFi
     base.exclude_language.extend(parsed.exclude_language);
     base.exclude_extension.extend(parsed.exclude_extension);
     base.exclude_symbol.extend(parsed.exclude_symbol);
+    base.exclude_symbol_kind.extend(parsed.exclude_symbol_kind);
     base.exclude_repo.extend(parsed.exclude_repo);
     base.exclude_dependency.extend(parsed.exclude_dependency);
     base.exclude_import.extend(parsed.exclude_import);
@@ -244,12 +254,14 @@ mod tests {
     #[test]
     fn parses_dependency_filters() {
         let parsed = parse_query(
-            "dep:serde dependency:tokio import:crate::server -module:legacy symbol:Runtime",
+            "dep:serde dependency:tokio import:crate::server kind:function -kind:class -module:legacy symbol:Runtime",
         );
 
         assert_eq!(parsed.terms, Vec::<String>::new());
         assert_eq!(parsed.filters.dependency.as_deref(), Some("tokio"));
         assert_eq!(parsed.filters.import.as_deref(), Some("crate::server"));
+        assert_eq!(parsed.filters.symbol_kind.as_deref(), Some("function"));
+        assert_eq!(parsed.filters.exclude_symbol_kind, vec!["class"]);
         assert_eq!(parsed.filters.exclude_import, vec!["legacy"]);
         assert_eq!(parsed.filters.symbol.as_deref(), Some("Runtime"));
     }

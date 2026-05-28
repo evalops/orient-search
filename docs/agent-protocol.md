@@ -53,7 +53,7 @@ Use the fastest surface that matches your setup:
 - `search_shards` for a multi-repo shard directory.
 - `search_batch`, `indexed_search_batch`, or `search_shards_batch` when an agent wants to try several query formulations in one round trip. CLI equivalents are `search-batch`, `indexed-search-batch`, and `search-shards-batch`.
 
-Query strings support filters such as `repo:platform`, `path:src/auth` or `dir:src/auth`, `file:auth.rs`, `lang:rust`, `ext:rs`, `symbol:SessionManager`, `dep:react`, `import:crate::auth`, `test:false`, negative filters like `-path:docs`, `-dep:legacy`, or `-import:old_api`, and quoted phrases like `"issue token"`. Multi-token queries use AND behavior when appropriate.
+Query strings support filters such as `repo:platform`, `path:src/auth` or `dir:src/auth`, `file:auth.rs`, `lang:rust`, `ext:rs`, `symbol:SessionManager`, `kind:function`, `dep:react`, `import:crate::auth`, `test:false`, negative filters like `-path:docs`, `-kind:class`, `-dep:legacy`, or `-import:old_api`, and quoted phrases like `"issue token"`. Multi-token queries use AND behavior when appropriate.
 
 Search results include:
 
