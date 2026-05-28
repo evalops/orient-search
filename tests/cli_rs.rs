@@ -2088,6 +2088,25 @@ fn cli_builds_and_searches_persistent_index() {
         .stdout(predicate::str::contains("\"read_request\""))
         .stdout(predicate::str::contains("\"tool\":\"read_index_range\""));
 
+    let mut generic_index_symbol = Command::cargo_bin("orient").unwrap();
+    generic_index_symbol
+        .args([
+            "symbol",
+            "--index",
+            index_path.to_str().unwrap(),
+            "SessionManager",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"path\":\"src/auth.rs\""))
+        .stdout(predicate::str::contains("\"kind\":\"struct\""))
+        .stdout(predicate::str::contains("\"read_request\""))
+        .stdout(predicate::str::contains("\"tool\":\"read_range\""))
+        .stdout(predicate::str::contains(&format!(
+            "\"index\":\"{}\"",
+            index_path.display()
+        )));
+
     let mut index_symbol_batch = Command::cargo_bin("orient").unwrap();
     index_symbol_batch
         .args([
@@ -2109,6 +2128,28 @@ fn cli_builds_and_searches_persistent_index() {
         .stdout(predicate::str::contains("\"tool\":\"read_index_range\""))
         .stdout(predicate::str::contains("\"read_batch_request\""))
         .stdout(predicate::str::contains("\"tool\":\"read_index_ranges\""));
+
+    let mut generic_index_symbol_batch = Command::cargo_bin("orient").unwrap();
+    generic_index_symbol_batch
+        .args([
+            "symbol-batch",
+            "--index",
+            index_path.to_str().unwrap(),
+            "SessionManager",
+            "issue_token",
+            "--kind",
+            "function",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"name\":\"SessionManager\""))
+        .stdout(predicate::str::contains("\"symbols\":[]"))
+        .stdout(predicate::str::contains("\"name\":\"issue_token\""))
+        .stdout(predicate::str::contains("\"kind\":\"function\""))
+        .stdout(predicate::str::contains("\"read_request\""))
+        .stdout(predicate::str::contains("\"tool\":\"read_range\""))
+        .stdout(predicate::str::contains("\"read_batch_request\""))
+        .stdout(predicate::str::contains("\"tool\":\"read_ranges\""));
 
     let mut index_map = Command::cargo_bin("orient").unwrap();
     index_map
@@ -2297,6 +2338,43 @@ fn cli_builds_and_searches_shard_directory() {
             "\"path\":\"{billing_name}/src/billing.rs\""
         )))
         .stdout(predicate::str::contains("\"name\":\"invoice_total\""));
+
+    let mut generic_shard_symbol = Command::cargo_bin("orient").unwrap();
+    generic_shard_symbol
+        .args([
+            "symbol",
+            "--index-dir",
+            shard_dir.path().to_str().unwrap(),
+            "invoice total",
+            "--repo-filter",
+            &billing_name.to_ascii_uppercase(),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(&format!(
+            "\"path\":\"{billing_name}/src/billing.rs\""
+        )))
+        .stdout(predicate::str::contains("\"name\":\"invoice_total\""))
+        .stdout(predicate::str::contains("\"tool\":\"read_range\""));
+
+    let mut generic_shard_symbol_batch = Command::cargo_bin("orient").unwrap();
+    generic_shard_symbol_batch
+        .args([
+            "symbol-batch",
+            "--index-dir",
+            shard_dir.path().to_str().unwrap(),
+            "invoice total",
+            "--repo-filter",
+            &billing_name.to_ascii_uppercase(),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"name\":\"invoice total\""))
+        .stdout(predicate::str::contains("\"read_batch_request\""))
+        .stdout(predicate::str::contains("\"tool\":\"read_ranges\""))
+        .stdout(predicate::str::contains(&format!(
+            "\"path\":\"{billing_name}/src/billing.rs\""
+        )));
 
     let mut shard_map = Command::cargo_bin("orient").unwrap();
     shard_map

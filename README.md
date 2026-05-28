@@ -80,7 +80,8 @@ tests, source counterparts, definitions, and types.
 `repo_map` follows it too, returning live, indexed, or shard orientation from
 one JSON-lines tool.
 `find_symbol` and `find_symbol_batch` also accept `repo`, `index`, or
-`index_dir` for direct definition jumps.
+`index_dir` for direct definition jumps; the CLI mirrors this as `symbol --repo`,
+`symbol --index`, or `symbol --index-dir`.
 Repo maps default to `detail:"compact"` for small first-orientation payloads;
 use `detail:"full"` only when an agent needs the full available import/module
 hint set. Their bundled `read_batch_request` defaults to 16 ranges and accepts

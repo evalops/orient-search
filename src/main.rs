@@ -490,19 +490,31 @@ enum Commands {
     Symbol {
         #[arg(long, default_value = ".")]
         repo: PathBuf,
+        #[arg(long, conflicts_with = "index_dir")]
+        index: Option<PathBuf>,
+        #[arg(long, conflicts_with = "index")]
+        index_dir: Option<PathBuf>,
         name: String,
         #[arg(long, default_value_t = 10)]
         limit: usize,
+        #[arg(long = "repo-filter")]
+        repo_filter: Option<String>,
         #[command(flatten)]
         filters: CommonSearchArgs,
     },
     SymbolBatch {
         #[arg(long, default_value = ".")]
         repo: PathBuf,
+        #[arg(long, conflicts_with = "index_dir")]
+        index: Option<PathBuf>,
+        #[arg(long, conflicts_with = "index")]
+        index_dir: Option<PathBuf>,
         #[arg(required = true)]
         names: Vec<String>,
         #[arg(long, default_value_t = 10)]
         limit: usize,
+        #[arg(long = "repo-filter")]
+        repo_filter: Option<String>,
         #[command(flatten)]
         filters: CommonSearchArgs,
     },
@@ -2280,50 +2292,114 @@ fn run() -> Result<()> {
         }
         Commands::Symbol {
             repo,
+            index,
+            index_dir,
             name,
             limit,
+            repo_filter,
             filters,
         } => {
-            let filters = search_filters_from_args(&filters, None)?;
-            let index = RepoIndexer::new(&repo).build()?;
-            let symbols = index.find_symbol_filtered(&name, limit, &filters);
+            let filters = search_filters_from_args(&filters, repo_filter)?;
+            let (symbols, base_args) = if let Some(index_dir) = index_dir {
+                (
+                    find_shard_symbol(&index_dir, &name, limit, &filters)?,
+                    read_request_args("index_dir", &index_dir),
+                )
+            } else if let Some(index_path) = index {
+                let index = FastIndex::load(&index_path)?;
+                (
+                    index.find_symbol_filtered(&name, limit, &filters),
+                    read_request_args("index", &index_path),
+                )
+            } else {
+                let index = RepoIndexer::new(&repo).build()?;
+                (
+                    index.find_symbol_filtered(&name, limit, &filters),
+                    read_request_args("repo", &repo),
+                )
+            };
             println!(
                 "{}",
-                serde_json::to_string(&symbol_lookup_results(
-                    symbols,
-                    "read_range",
-                    read_request_args("repo", &repo)
-                ))?
+                serde_json::to_string(&symbol_lookup_results(symbols, "read_range", base_args))?
             );
         }
         Commands::SymbolBatch {
             repo,
+            index,
+            index_dir,
             names,
             limit,
+            repo_filter,
             filters,
         } => {
-            let filters = search_filters_from_args(&filters, None)?;
-            let index = RepoIndexer::new(&repo).build()?;
-            let batch = cli_batch_queries(names)?
-                .into_iter()
-                .map(|name| {
+            let filters = search_filters_from_args(&filters, repo_filter)?;
+            let names = cli_batch_queries(names)?;
+            let batch = if let Some(index_dir) = index_dir {
+                let mut batch = Vec::new();
+                for name in names {
+                    let symbols = find_shard_symbol(&index_dir, &name, limit, &filters)?;
                     let symbols = symbol_lookup_results(
-                        index.find_symbol_filtered(&name, limit, &filters),
+                        symbols,
                         "read_range",
-                        read_request_args("repo", &repo),
+                        read_request_args("index_dir", &index_dir),
                     );
                     let read_batch_request = symbol_lookup_read_batch_request(
                         &symbols,
                         "read_ranges",
-                        read_request_args("repo", &repo),
+                        read_request_args("index_dir", &index_dir),
                     );
-                    SymbolBatchResult {
+                    batch.push(SymbolBatchResult {
                         name,
                         read_batch_request,
                         symbols,
-                    }
-                })
-                .collect::<Vec<_>>();
+                    });
+                }
+                batch
+            } else if let Some(index_path) = index {
+                let index = FastIndex::load(&index_path)?;
+                names
+                    .into_iter()
+                    .map(|name| {
+                        let symbols = symbol_lookup_results(
+                            index.find_symbol_filtered(&name, limit, &filters),
+                            "read_range",
+                            read_request_args("index", &index_path),
+                        );
+                        let read_batch_request = symbol_lookup_read_batch_request(
+                            &symbols,
+                            "read_ranges",
+                            read_request_args("index", &index_path),
+                        );
+                        SymbolBatchResult {
+                            name,
+                            read_batch_request,
+                            symbols,
+                        }
+                    })
+                    .collect::<Vec<_>>()
+            } else {
+                let index = RepoIndexer::new(&repo).build()?;
+                names
+                    .into_iter()
+                    .map(|name| {
+                        let symbols = symbol_lookup_results(
+                            index.find_symbol_filtered(&name, limit, &filters),
+                            "read_range",
+                            read_request_args("repo", &repo),
+                        );
+                        let read_batch_request = symbol_lookup_read_batch_request(
+                            &symbols,
+                            "read_ranges",
+                            read_request_args("repo", &repo),
+                        );
+                        SymbolBatchResult {
+                            name,
+                            read_batch_request,
+                            symbols,
+                        }
+                    })
+                    .collect::<Vec<_>>()
+            };
             println!("{}", serde_json::to_string(&batch)?);
         }
         Commands::IndexSymbol {
