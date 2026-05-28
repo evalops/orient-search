@@ -46,6 +46,7 @@ Implemented now:
 - Search snippet modes: `short`, `medium`, `block`, and `symbol`.
 - Search results include structured `line_range` metadata, exact `match_lines` from indexed token-to-line tables when available, a compact `read_range` hint, plus ready-to-send `read_request`, `related_request`, and `related_symbols_request` follow-up tools for live, indexed, or shard searches.
 - `search_auto` and `search_auto_batch` return a top-level `query_plan_request` for the chosen live, indexed, or shard surface, so agents can recover from empty/noisy auto searches without re-deriving the target.
+- `search_auto` and `search_auto_batch` also return a top-level `repo_map_request` for the chosen live, indexed, or shard surface, so agents can orient around entrypoints, tests, commands, and symbols after weak search results.
 - Search requests can attach bounded line-numbered `context` ranges with `context_lines` / `--context-lines`, letting agents search and inspect edit context in one fallback, indexed, or shard round trip.
 - Persistent indexes store bounded source snapshots and line-offset tables, so indexed snippets, `read-index-range`, `read-index-ranges`, and shard range reads can return context directly from the saved index even when the live workspace file is unavailable.
 - Path, file, repo, extension, language, and symbol filters match case-insensitively across fallback, indexed, and shard search surfaces.

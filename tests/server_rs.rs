@@ -669,6 +669,10 @@ fn runtime_serves_agent_guide_for_json_lines_wrappers() {
     );
     assert_eq!(
         guide["result_followups"][1],
+        "Use search_auto.repo_map_request or a search_auto_batch item repo_map_request when the agent needs entrypoints, tests, commands, or top symbols for the chosen surface."
+    );
+    assert_eq!(
+        guide["result_followups"][2],
         "Use result.read_request for one bounded file range."
     );
 }
@@ -695,6 +699,11 @@ fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
     let live = live.result.unwrap();
     assert_eq!(live["surface"], "fallback");
     assert_eq!(live["query_plan_request"]["tool"], "search_query_plan");
+    assert_eq!(live["repo_map_request"]["tool"], "repo_map");
+    assert_eq!(
+        live["repo_map_request"]["arguments"]["repo"],
+        serde_json::json!(repo.path())
+    );
     assert_eq!(
         live["query_plan_request"]["arguments"]["query"],
         "issue_token"
@@ -724,10 +733,19 @@ fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
     let indexed = indexed.result.unwrap();
     assert_eq!(indexed["surface"], "indexed");
     assert_eq!(indexed["query_plan_request"]["tool"], "indexed_query_plan");
+    assert_eq!(indexed["repo_map_request"]["tool"], "indexed_repo_map");
     assert_eq!(
         indexed["results"][0]["read_request"]["tool"],
         "read_index_range"
     );
+    let map_request = indexed["repo_map_request"].clone();
+    let map = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("map"),
+        tool: map_request["tool"].as_str().unwrap().to_string(),
+        arguments: map_request["arguments"].clone(),
+    });
+    assert!(map.error.is_none(), "{:?}", map.error);
+    assert!(map.result.unwrap()["brief"]["manifest_files"].is_array());
 }
 
 #[test]
@@ -763,6 +781,7 @@ fn runtime_search_auto_batch_uses_single_warmed_index() {
     assert_eq!(batch[0]["query"], "issue_token");
     assert_eq!(batch[0]["surface"], "indexed");
     assert_eq!(batch[0]["query_plan_request"]["tool"], "indexed_query_plan");
+    assert_eq!(batch[0]["repo_map_request"]["tool"], "indexed_repo_map");
     assert_eq!(
         batch[0]["results"][0]["read_request"]["tool"],
         "read_index_range"

@@ -57,6 +57,7 @@ struct SearchAutoResult {
     surface: String,
     target: String,
     query_plan_request: ResultToolRequest,
+    repo_map_request: ResultToolRequest,
     results: Vec<SearchResult>,
 }
 
@@ -788,6 +789,7 @@ pub fn agent_guide(
         },
         "result_followups": [
             "Use search_auto.query_plan_request or a search_auto_batch item query_plan_request when results are empty or noisy.",
+            "Use search_auto.repo_map_request or a search_auto_batch item repo_map_request when the agent needs entrypoints, tests, commands, or top symbols for the chosen surface.",
             "Use result.read_request for one bounded file range.",
             "Batch several result.read_range objects with read_ranges, read_index_ranges, or read_shard_ranges.",
             "Use result.related_request for source/test siblings.",
@@ -1323,6 +1325,27 @@ fn auto_query_plan_passthrough_arg(name: &str, target_name: &str) -> bool {
         return false;
     }
     true
+}
+
+fn auto_repo_map_request<T: Serialize>(
+    tool: &str,
+    target_name: &str,
+    target_value: T,
+    source_arguments: &Value,
+) -> ResultToolRequest {
+    let mut arguments = Map::new();
+    arguments.insert(target_name.to_string(), json!(target_value));
+    if tool == "shard_repo_map" {
+        if let Some(source) = source_arguments.as_object() {
+            if let Some(repo) = source.get("repo").or_else(|| source.get("repo_filter")) {
+                arguments.insert("repo".to_string(), repo.clone());
+            }
+        }
+    }
+    ResultToolRequest {
+        tool: tool.to_string(),
+        arguments: Value::Object(arguments),
+    }
 }
 
 impl ToolRuntime {
@@ -2019,6 +2042,7 @@ impl ToolRuntime {
                     arguments,
                     query,
                 ),
+                repo_map_request: auto_repo_map_request("repo_map", "repo", &repo, arguments),
                 results,
             });
         }
@@ -2056,6 +2080,12 @@ impl ToolRuntime {
                 &index_dir,
                 arguments,
                 query,
+            ),
+            repo_map_request: auto_repo_map_request(
+                "shard_repo_map",
+                "index_dir",
+                &index_dir,
+                arguments,
             ),
             results,
         })
@@ -2100,6 +2130,12 @@ impl ToolRuntime {
                 &index_path,
                 arguments,
                 query,
+            ),
+            repo_map_request: auto_repo_map_request(
+                "indexed_repo_map",
+                "index",
+                &index_path,
+                arguments,
             ),
             results,
         })

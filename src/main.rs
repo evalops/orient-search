@@ -1296,6 +1296,10 @@ fn run() -> Result<()> {
                             "tool": "shard_query_plan",
                             "arguments": {"index_dir": index_dir, "query": query}
                         },
+                        "repo_map_request": {
+                            "tool": "shard_repo_map",
+                            "arguments": {"index_dir": index_dir}
+                        },
                         "results": results
                     }))?
                 );
@@ -1331,6 +1335,10 @@ fn run() -> Result<()> {
                             "tool": "indexed_query_plan",
                             "arguments": {"index": index_path, "query": query}
                         },
+                        "repo_map_request": {
+                            "tool": "indexed_repo_map",
+                            "arguments": {"index": index_path}
+                        },
                         "results": results
                     }))?
                 );
@@ -1364,6 +1372,10 @@ fn run() -> Result<()> {
                         "query_plan_request": {
                             "tool": "search_query_plan",
                             "arguments": {"repo": repo, "query": query}
+                        },
+                        "repo_map_request": {
+                            "tool": "repo_map",
+                            "arguments": {"repo": repo}
                         },
                         "results": results
                     }))?
@@ -1418,6 +1430,10 @@ fn run() -> Result<()> {
                             "tool": "shard_query_plan",
                             "arguments": {"index_dir": index_dir, "query": query}
                         },
+                        "repo_map_request": {
+                            "tool": "shard_repo_map",
+                            "arguments": {"index_dir": index_dir}
+                        },
                         "results": results
                     }));
                 }
@@ -1452,6 +1468,10 @@ fn run() -> Result<()> {
                             "tool": "indexed_query_plan",
                             "arguments": {"index": index_path, "query": query}
                         },
+                        "repo_map_request": {
+                            "tool": "indexed_repo_map",
+                            "arguments": {"index": index_path}
+                        },
                         "results": results
                     }));
                 }
@@ -1484,6 +1504,10 @@ fn run() -> Result<()> {
                         "query_plan_request": {
                             "tool": "search_query_plan",
                             "arguments": {"repo": repo, "query": query}
+                        },
+                        "repo_map_request": {
+                            "tool": "repo_map",
+                            "arguments": {"repo": repo}
                         },
                         "results": results
                     }));
