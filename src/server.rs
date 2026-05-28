@@ -427,9 +427,9 @@ pub fn tool_manifest() -> Value {
         ),
         tool_entry(
             "search",
-            "Alias for search_code for CLI-style JSON-lines clients.",
-            &["repo", "query"],
-            SEARCH_OPTIONAL_ARGS,
+            "Search a live repo, persistent index, or shard directory using the same plain result shape.",
+            &["query"],
+            SEARCH_TARGET_OPTIONAL_ARGS,
         ),
         tool_entry(
             "search_auto",
@@ -1758,11 +1758,99 @@ impl ToolRuntime {
                 }
                 Ok(serde_json::to_value(results)?)
             }
-            "search_code" | "search" => {
+            "search_code" => {
                 let repo = path_arg(&request.arguments, "repo")?;
                 let query = string_arg(&request.arguments, "query")?;
                 let limit = search_limit_arg(&request.arguments)?;
                 let context_lines = context_lines_arg(&request.arguments)?;
+                let mut results = search_repo_fast_filtered(
+                    &repo,
+                    &query,
+                    limit,
+                    &search_filters(&request.arguments, false)?,
+                )?;
+                attach_result_context(&mut results, context_lines, |path, start, lines| {
+                    read_file_range(&repo, path, start, lines)
+                })?;
+                attach_result_read_requests(
+                    &mut results,
+                    "read_range",
+                    read_request_args("repo", &repo),
+                );
+                attach_result_related_requests(
+                    &mut results,
+                    "related_files",
+                    read_request_args("repo", &repo),
+                );
+                attach_result_related_symbol_requests(
+                    &mut results,
+                    "related_symbols",
+                    Some(&query),
+                    read_request_args("repo", &repo),
+                );
+                Ok(serde_json::to_value(results)?)
+            }
+            "search" => {
+                let query = string_arg(&request.arguments, "query")?;
+                let limit = search_limit_arg(&request.arguments)?;
+                let context_lines = context_lines_arg(&request.arguments)?;
+                if request.arguments.get("index").is_some()
+                    && request.arguments.get("index_dir").is_some()
+                {
+                    return Err(anyhow!("search accepts only one of index or index_dir"));
+                }
+                if let Some(index_dir) =
+                    optional_string_arg(&request.arguments, "index_dir").map(PathBuf::from)
+                {
+                    if bool_arg(&request.arguments, "refresh_if_stale") {
+                        self.refresh_shards_if_stale(&index_dir)?;
+                    }
+                    return Ok(serde_json::to_value(self.search_shards_cached(
+                        &index_dir,
+                        &query,
+                        limit,
+                        &search_filters(&request.arguments, true)?,
+                        context_lines,
+                    )?)?);
+                }
+                if let Some(index_path) =
+                    optional_string_arg(&request.arguments, "index").map(PathBuf::from)
+                {
+                    let refresh_if_stale = bool_arg(&request.arguments, "refresh_if_stale");
+                    let index =
+                        self.cached_index_maybe_refresh(index_path.clone(), refresh_if_stale)?;
+                    let mut results = index.search_filtered(
+                        &query,
+                        limit,
+                        &search_filters(&request.arguments, true)?,
+                    )?;
+                    attach_result_context(&mut results, context_lines, |path, start, lines| {
+                        index.read_range(path, start, lines)
+                    })?;
+                    attach_result_read_requests(
+                        &mut results,
+                        "read_index_range",
+                        read_request_args("index", &index_path),
+                    );
+                    attach_result_related_requests(
+                        &mut results,
+                        "related_index_files",
+                        read_request_args("index", &index_path),
+                    );
+                    attach_result_related_symbol_requests(
+                        &mut results,
+                        "related_index_symbols",
+                        Some(&query),
+                        read_request_args("index", &index_path),
+                    );
+                    return Ok(serde_json::to_value(results)?);
+                }
+                let repo = optional_string_arg(&request.arguments, "repo")
+                    .map(PathBuf::from)
+                    .map(Ok)
+                    .unwrap_or_else(|| {
+                        std::env::current_dir().context("resolve current directory for search")
+                    })?;
                 let mut results = search_repo_fast_filtered(
                     &repo,
                     &query,
@@ -3465,6 +3553,61 @@ const SEARCH_OPTIONAL_ARGS: &[&str] = &[
     "require_all",
     "any_terms",
     "context_lines",
+    "exclude_file",
+    "exclude_path",
+    "exclude_language",
+    "exclude_lang",
+    "exclude_extension",
+    "exclude_ext",
+    "exclude_symbol",
+    "exclude_symbol_kind",
+    "exclude_kind",
+    "exclude_type",
+    "exclude_repo",
+    "exclude_dependency",
+    "exclude_dep",
+    "exclude_deps",
+    "exclude_import",
+    "exclude_imports",
+    "exclude_module",
+    "exclude_modules",
+    "exclude_use",
+    "exclude_uses",
+];
+
+const SEARCH_TARGET_OPTIONAL_ARGS: &[&str] = &[
+    "repo",
+    "index",
+    "index_dir",
+    "limit",
+    "path",
+    "dir",
+    "language",
+    "lang",
+    "extension",
+    "ext",
+    "symbol",
+    "symbol_kind",
+    "kind",
+    "type",
+    "dependency",
+    "dep",
+    "deps",
+    "import",
+    "imports",
+    "module",
+    "modules",
+    "use",
+    "uses",
+    "file",
+    "repo_filter",
+    "test",
+    "snippet",
+    "explain",
+    "require_all",
+    "any_terms",
+    "context_lines",
+    "refresh_if_stale",
     "exclude_file",
     "exclude_path",
     "exclude_language",

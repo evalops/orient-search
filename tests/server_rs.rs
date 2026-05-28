@@ -250,9 +250,18 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         .iter()
         .find(|tool| tool["name"] == "shard_plan")
         .unwrap();
+    assert_eq!(search_alias["required"], serde_json::json!(["query"]));
     assert_eq!(
-        search_alias["required"],
-        serde_json::json!(["repo", "query"])
+        search_alias["input_schema"]["properties"]["index"]["type"],
+        "string"
+    );
+    assert_eq!(
+        search_alias["input_schema"]["properties"]["index_dir"]["type"],
+        "string"
+    );
+    assert_eq!(
+        search_alias["input_schema"]["properties"]["refresh_if_stale"]["default"],
+        false
     );
     assert_eq!(
         search_alias["input_schema"]["properties"]["limit"]["maximum"],
@@ -1188,6 +1197,98 @@ fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
     });
     assert!(map.error.is_none(), "{:?}", map.error);
     assert!(map.result.unwrap()["brief"]["manifest_files"].is_array());
+}
+
+#[test]
+fn runtime_search_alias_accepts_live_index_and_shard_targets() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/auth.rs"),
+        "pub struct SessionManager;\npub fn issue_token() {}\n",
+    );
+    write(
+        &repo.path().join("Cargo.toml"),
+        "[package]\nname='sample'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    let index_path = repo.path().join(".orient/index");
+    FastIndex::build(repo.path())
+        .unwrap()
+        .save(&index_path)
+        .unwrap();
+    let shard_dir = repo.path().join(".orient-shards");
+    build_shards(&[repo.path().to_path_buf()], &shard_dir).unwrap();
+
+    let runtime = ToolRuntime::default();
+    let live = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("live"),
+        tool: "search".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "query": "issue token",
+            "limit": 3,
+            "require_all": true
+        }),
+    });
+    assert!(live.error.is_none(), "{:?}", live.error);
+    let live = live.result.unwrap();
+    assert_eq!(live[0]["path"], "src/auth.rs");
+    assert_eq!(live[0]["read_request"]["tool"], "read_range");
+
+    let indexed = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("indexed"),
+        tool: "search".to_string(),
+        arguments: serde_json::json!({
+            "index": index_path,
+            "query": "issue token",
+            "limit": 3,
+            "require_all": true
+        }),
+    });
+    assert!(indexed.error.is_none(), "{:?}", indexed.error);
+    let indexed = indexed.result.unwrap();
+    assert_eq!(indexed[0]["path"], "src/auth.rs");
+    assert_eq!(indexed[0]["read_request"]["tool"], "read_index_range");
+    assert_eq!(indexed[0]["related_request"]["tool"], "related_index_files");
+
+    let sharded = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("sharded"),
+        tool: "search".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": shard_dir,
+            "query": "issue token",
+            "limit": 3,
+            "require_all": true
+        }),
+    });
+    assert!(sharded.error.is_none(), "{:?}", sharded.error);
+    let sharded = sharded.result.unwrap();
+    assert!(
+        sharded[0]["path"]
+            .as_str()
+            .unwrap()
+            .ends_with("src/auth.rs")
+    );
+    assert_eq!(sharded[0]["read_request"]["tool"], "read_shard_range");
+    assert_eq!(sharded[0]["related_request"]["tool"], "related_shard_files");
+
+    let conflicted = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("conflicted"),
+        tool: "search".to_string(),
+        arguments: serde_json::json!({
+            "index": repo.path().join(".orient/index"),
+            "index_dir": repo.path().join(".orient-shards"),
+            "query": "issue token"
+        }),
+    });
+    assert!(
+        conflicted
+            .error
+            .as_ref()
+            .unwrap()
+            .contains("only one of index or index_dir"),
+        "{:?}",
+        conflicted.error
+    );
 }
 
 #[test]
