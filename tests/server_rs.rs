@@ -779,6 +779,27 @@ fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
     });
     assert!(ensure.error.is_none(), "{:?}", ensure.error);
 
+    let explicit_live_after_warm = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("explicit-live-after-warm"),
+        tool: "search_auto".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "query": "issue_token",
+            "limit": 5
+        }),
+    });
+    assert!(
+        explicit_live_after_warm.error.is_none(),
+        "{:?}",
+        explicit_live_after_warm.error
+    );
+    let explicit_live_after_warm = explicit_live_after_warm.result.unwrap();
+    assert_eq!(explicit_live_after_warm["surface"], "fallback");
+    assert_eq!(
+        explicit_live_after_warm["query_plan_request"]["tool"],
+        "search_query_plan"
+    );
+
     let indexed = runtime.dispatch(ToolRequest {
         id: serde_json::json!("indexed"),
         tool: "search_auto".to_string(),
@@ -881,6 +902,27 @@ fn runtime_search_auto_batch_uses_single_warmed_index() {
     assert_eq!(
         empty_batch[0]["query_plan_result"]["retry_requests"][0]["tool"],
         "indexed_search_code"
+    );
+
+    let explicit_live_batch = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("explicit-live-batch"),
+        tool: "search_auto_batch".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "queries": ["issue_token"],
+            "limit": 5
+        }),
+    });
+    assert!(
+        explicit_live_batch.error.is_none(),
+        "{:?}",
+        explicit_live_batch.error
+    );
+    let explicit_live_batch = explicit_live_batch.result.unwrap();
+    assert_eq!(explicit_live_batch[0]["surface"], "fallback");
+    assert_eq!(
+        explicit_live_batch[0]["query_plan_request"]["tool"],
+        "search_query_plan"
     );
 }
 
@@ -3691,6 +3733,7 @@ fn server_handles_json_lines_tool_request() {
     let binary = assert_cmd::cargo::cargo_bin("orient");
     let mut child = Command::new(binary)
         .arg("serve-jsonl")
+        .current_dir(repo.path())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
@@ -3709,7 +3752,16 @@ fn server_handles_json_lines_tool_request() {
             "context_lines": 3
         }
     });
+    let auto_request = serde_json::json!({
+        "id": 2,
+        "tool": "search_auto",
+        "arguments": {
+            "query": "issue_token",
+            "limit": 3
+        }
+    });
     writeln!(child.stdin.as_mut().unwrap(), "{request}").unwrap();
+    writeln!(child.stdin.as_mut().unwrap(), "{auto_request}").unwrap();
     drop(child.stdin.take());
 
     let output = child.wait_with_output().unwrap();
@@ -3722,6 +3774,9 @@ fn server_handles_json_lines_tool_request() {
     assert!(stdout.contains("\"read_range\""));
     assert!(stdout.contains("\"lines\":80"));
     assert!(stdout.contains("symbol_exact"));
+    assert!(stdout.contains("\"id\":2"));
+    assert!(stdout.contains("\"surface\":\"fallback\""));
+    assert!(stdout.contains("\"tool\":\"search_query_plan\""));
 }
 
 #[test]

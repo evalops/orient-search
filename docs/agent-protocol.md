@@ -42,7 +42,7 @@ For many repos:
 {"id":"guide","tool":"agent_guide","arguments":{"index_dir":"/tmp/orient-shards"}}
 ```
 
-`daemon_status` reports warmed index and shard details so multiple local agents can confirm they share the intended codebase set. When exactly one index or shard directory is warmed, indexed and shard tools marked with `daemon_default.source` may omit `index` or `index_dir`; if zero or multiple targets are warmed, pass the path explicitly. Orient does not expose session analytics.
+`daemon_status` reports warmed index and shard details so multiple local agents can confirm they share the intended codebase set. When exactly one index or shard directory is warmed, indexed and shard tools marked with `daemon_default.source` may omit `index` or `index_dir`; if zero or multiple targets are warmed, pass the path explicitly. `search_auto` and `search_auto_batch` can also run without a target: explicit `index_dir`, `index`, or `repo` wins first, then one warmed daemon target, then the daemon process current directory as a live repo. Orient does not expose session analytics.
 
 Use `index_status` or `shard_status` when live files may have changed since indexing. They report added, changed, and deleted files so an agent can call `refresh_index` or `refresh_shards` before trusting indexed results. `indexed_search_code` and `search_shards` also accept `refresh_if_stale:true` for a one-call freshness check and refresh before search. Index, shard, and daemon status outputs include footprint counters such as `source_bytes`, `posting_entries`, and `compressed_posting_bytes`.
 
@@ -50,7 +50,7 @@ Use `index_status` or `shard_status` when live files may have changed since inde
 
 Use the fastest surface that matches your setup:
 
-- `search_auto` when a daemon has exactly one warmed shard directory or index, or when the request supplies `index_dir`, `index`, or a live `repo`. It returns `{query,surface,target,query_plan_request,repo_map_request,results}` and keeps result follow-up requests aligned with the chosen surface.
+- `search_auto` when a daemon has exactly one warmed shard directory or index, when the request supplies `index_dir`, `index`, or a live `repo`, or when the daemon was started from the desired repo directory. It returns `{query,surface,target,query_plan_request,repo_map_request,results}` and keeps result follow-up requests aligned with the chosen surface.
 - `search_code` for a live repo without a prebuilt index.
 - `indexed_search_code` for one persistent repo index.
 - `search_shards` for a multi-repo shard directory.

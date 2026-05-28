@@ -16,7 +16,7 @@ use crate::shards::{
     refresh_shards, resolve_shard_path_from_manifest, shard_search_scopes, shard_status,
 };
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use std::io::{BufRead, BufReader, Read, Write};
@@ -2161,6 +2161,9 @@ impl ToolRuntime {
                 refresh_if_stale,
             );
         }
+        if let Some(repo) = optional_string_arg(arguments, "repo").map(PathBuf::from) {
+            return self.search_auto_live(repo, arguments, query, limit, context_lines);
+        }
         if let Ok(index_dir) = self.single_cached_shard_manifest_path() {
             return self.search_auto_shards(
                 index_dir,
@@ -2181,62 +2184,65 @@ impl ToolRuntime {
                 refresh_if_stale,
             );
         }
-        if let Some(repo) = optional_string_arg(arguments, "repo").map(PathBuf::from) {
-            let filters = search_filters(arguments, false)?;
-            let mut results = search_repo_fast_filtered(&repo, query, limit, &filters)?;
-            attach_result_context(&mut results, context_lines, |path, start, lines| {
-                read_file_range(&repo, path, start, lines)
-            })?;
-            attach_result_read_requests(
-                &mut results,
-                "read_range",
-                read_request_args("repo", &repo),
-            );
-            attach_result_related_requests(
-                &mut results,
-                "related_files",
-                read_request_args("repo", &repo),
-            );
-            attach_result_related_symbol_requests(
-                &mut results,
-                "related_symbols",
-                read_request_args("repo", &repo),
-            );
-            return Ok(SearchAutoResult {
-                query: query.to_string(),
-                surface: "fallback".to_string(),
-                target: repo.to_string_lossy().to_string(),
-                query_plan_request: auto_query_plan_request(
-                    "search_query_plan",
+        let repo = std::env::current_dir().context("resolve current directory for search_auto")?;
+        self.search_auto_live(repo, arguments, query, limit, context_lines)
+    }
+
+    fn search_auto_live(
+        &self,
+        repo: PathBuf,
+        arguments: &Value,
+        query: &str,
+        limit: usize,
+        context_lines: usize,
+    ) -> Result<SearchAutoResult> {
+        let filters = search_filters(arguments, false)?;
+        let mut results = search_repo_fast_filtered(&repo, query, limit, &filters)?;
+        attach_result_context(&mut results, context_lines, |path, start, lines| {
+            read_file_range(&repo, path, start, lines)
+        })?;
+        attach_result_read_requests(&mut results, "read_range", read_request_args("repo", &repo));
+        attach_result_related_requests(
+            &mut results,
+            "related_files",
+            read_request_args("repo", &repo),
+        );
+        attach_result_related_symbol_requests(
+            &mut results,
+            "related_symbols",
+            read_request_args("repo", &repo),
+        );
+        Ok(SearchAutoResult {
+            query: query.to_string(),
+            surface: "fallback".to_string(),
+            target: repo.to_string_lossy().to_string(),
+            query_plan_request: auto_query_plan_request(
+                "search_query_plan",
+                "repo",
+                &repo,
+                arguments,
+                query,
+            ),
+            query_plan_result: if results.is_empty() {
+                let index = FastIndex::build(&repo)?;
+                Some(serde_json::to_value(attach_retry_requests(
+                    index.query_plan(query, &filters)?,
+                    "search_code",
                     "repo",
-                    &repo,
+                    &index.root,
                     arguments,
-                    query,
-                ),
-                query_plan_result: if results.is_empty() {
-                    let index = FastIndex::build(&repo)?;
-                    Some(serde_json::to_value(attach_retry_requests(
-                        index.query_plan(query, &filters)?,
-                        "search_code",
-                        "repo",
-                        &index.root,
-                        arguments,
-                    ))?)
-                } else {
-                    None
-                },
-                repo_map_request: auto_repo_map_request("repo_map", "repo", &repo, arguments),
-                read_batch_request: result_read_batch_request(
-                    &results,
-                    "read_ranges",
-                    read_request_args("repo", &repo),
-                ),
-                results,
-            });
-        }
-        Err(anyhow!(
-            "search_auto needs index_dir, index, repo, or exactly one warmed shard/index target"
-        ))
+                ))?)
+            } else {
+                None
+            },
+            repo_map_request: auto_repo_map_request("repo_map", "repo", &repo, arguments),
+            read_batch_request: result_read_batch_request(
+                &results,
+                "read_ranges",
+                read_request_args("repo", &repo),
+            ),
+            results,
+        })
     }
 
     fn search_auto_shards(

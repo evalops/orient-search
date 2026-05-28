@@ -48,6 +48,8 @@ for copyable Codex, Claude Code, and Amp instructions.
 Once a daemon has exactly one shard directory or index warmed, `search_auto`
 lets wrappers search that target with just a query. The CLI form defaults to
 the current directory when no `--index-dir`, `--index`, or `--repo` is supplied.
+The JSON-lines form uses the same live-repo fallback from the daemon process
+current directory after explicit and warmed targets.
 Use `search_auto_batch` when an agent wants to try several query formulations in
 one daemon round trip.
 Both return a `query_plan_request` for noisy result sets and inline

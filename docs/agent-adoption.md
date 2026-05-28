@@ -51,6 +51,9 @@ For one-shot CLI use from inside a repo, start with
 `orient search-auto "query"` or `orient search-auto-batch "query one" "query two"`.
 Pass `--index`, `--index-dir`, or `--repo` only when the current directory is
 not the desired live search target.
+The JSON-lines `search_auto` tools use the same target priority: explicit
+`index_dir`, `index`, or `repo`; then one warmed daemon target; then the daemon
+process current directory as a live repo.
 
 ## Copyable Requests
 
