@@ -497,7 +497,7 @@ enum Commands {
 
 #[derive(Debug, Clone, Args)]
 struct CommonSearchArgs {
-    #[arg(long)]
+    #[arg(long, alias = "dir")]
     path: Option<String>,
     #[arg(long)]
     language: Option<String>,

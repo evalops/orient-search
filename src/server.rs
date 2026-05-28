@@ -837,6 +837,7 @@ fn argument_description(name: &str) -> &'static str {
         "query" => "Agent query string with filters, quoted phrases, and normal search terms.",
         "queries" => "Agent query strings to run as one batch against the same search target.",
         "path" => "Repository-relative, index-relative, or shard-prefixed result path.",
+        "dir" => "Alias for path when filtering search results to a directory or path substring.",
         "ranges" => "Array of {path,start,lines} objects for batch range reads.",
         "limit" => "Maximum number of results to return.",
         "language" => "Detected language filter, such as rust, python, or typescript.",
@@ -2109,6 +2110,7 @@ fn prefix_repo_map_paths(
 const SEARCH_OPTIONAL_ARGS: &[&str] = &[
     "limit",
     "path",
+    "dir",
     "language",
     "extension",
     "symbol",
@@ -2130,6 +2132,7 @@ const SEARCH_OPTIONAL_ARGS: &[&str] = &[
 const SEARCH_INDEX_OPTIONAL_ARGS: &[&str] = &[
     "limit",
     "path",
+    "dir",
     "language",
     "extension",
     "symbol",
@@ -2152,6 +2155,7 @@ const SEARCH_INDEX_OPTIONAL_ARGS: &[&str] = &[
 
 const PLAN_INDEX_OPTIONAL_ARGS: &[&str] = &[
     "path",
+    "dir",
     "language",
     "extension",
     "symbol",
@@ -2403,7 +2407,7 @@ fn normalized_string_list_arg(arguments: &Value, name: &str) -> Result<Vec<Strin
 
 fn search_filters(arguments: &Value, allow_repo_alias: bool) -> Result<SearchFilters> {
     Ok(SearchFilters {
-        path: optional_string_arg(arguments, "path"),
+        path: optional_string_arg_any(arguments, &["path", "dir"]),
         language: optional_string_arg(arguments, "language"),
         extension: optional_string_arg(arguments, "extension"),
         symbol: optional_string_arg(arguments, "symbol"),

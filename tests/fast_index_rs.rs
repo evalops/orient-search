@@ -609,7 +609,7 @@ fn query_language_filters_fallback_and_indexed_search() {
         "SessionManager issue token docs.\n",
     );
 
-    let query = r#"symbol:sessionmanager lang:Rust ext:.RS path:SRC -path:DOCS "issue token""#;
+    let query = r#"symbol:sessionmanager lang:Rust ext:.RS dir:SRC -dir:DOCS "issue token""#;
     let fallback =
         search_repo_fast_filtered(repo.path(), query, 10, &SearchFilters::default()).unwrap();
     assert_eq!(fallback.len(), 1);

@@ -46,7 +46,7 @@ fn apply_filter(filters: &mut SearchFilters, token: &str, negated: bool) -> bool
 
     match (negated, key.as_str()) {
         (false, "file") => filters.file = Some(value),
-        (false, "path") => filters.path = Some(value),
+        (false, "path" | "dir" | "directory") => filters.path = Some(value),
         (false, "lang" | "language") => filters.language = Some(value.to_ascii_lowercase()),
         (false, "ext" | "extension") => {
             filters.extension = Some(value.trim_start_matches('.').to_ascii_lowercase())
@@ -55,7 +55,7 @@ fn apply_filter(filters: &mut SearchFilters, token: &str, negated: bool) -> bool
         (false, "repo") => filters.repo = Some(value),
         (false, "test" | "tests") => filters.test = Some(parse_boolish(&value).unwrap_or(true)),
         (true, "file") => filters.exclude_file.push(value),
-        (true, "path") => filters.exclude_path.push(value),
+        (true, "path" | "dir" | "directory") => filters.exclude_path.push(value),
         (true, "lang" | "language") => filters.exclude_language.push(value.to_ascii_lowercase()),
         (true, "ext" | "extension") => filters
             .exclude_extension
@@ -195,7 +195,7 @@ mod tests {
     #[test]
     fn parses_terms_quotes_filters_and_negatives() {
         let parsed =
-            parse_query(r#"symbol:SessionManager lang:rust -path:docs "issue token" test:false"#);
+            parse_query(r#"symbol:SessionManager lang:rust -dir:docs "issue token" test:false"#);
 
         assert_eq!(parsed.terms, vec!["issue token"]);
         assert_eq!(parsed.filters.symbol.as_deref(), Some("SessionManager"));

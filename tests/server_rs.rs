@@ -538,6 +538,7 @@ fn runtime_accepts_structured_negative_search_filters() {
             "repo": repo.path(),
             "query": "issue token",
             "limit": 10,
+            "dir": "src",
             "require_all": true,
             "exclude_path": ["generated"]
         }),
@@ -555,6 +556,7 @@ fn runtime_accepts_structured_negative_search_filters() {
             "index": index_path,
             "query": "issue token",
             "limit": 10,
+            "dir": "src",
             "require_all": true,
             "exclude_path": ["generated"],
             "exclude_symbol": "GeneratedSessionManager"
