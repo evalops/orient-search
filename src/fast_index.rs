@@ -2228,6 +2228,13 @@ fn query_plan_repair_hints(
             None,
         ));
     }
+    if require_all && query_tokens.len() > 1 && candidate_count == 0 && missing_terms.is_empty() {
+        hints.push(repair_hint(
+            "try_any_terms",
+            "Each term has postings, but no file contains all terms. Retry with mode:any for broad orientation, then refine with file/path/symbol filters.",
+            suggested_any_terms_query(query_tokens),
+        ));
+    }
     if candidate_count > 0 && filtered_candidate_count == 0 {
         hints.push(repair_hint(
             "relax_filters",
@@ -2245,15 +2252,19 @@ fn query_plan_repair_hints(
     if scored_candidate_count > 0 && final_match_count == 0 && require_all {
         hints.push(repair_hint(
             "relax_and",
-            "Candidates scored, but final AND or symbol checks rejected them. Try fewer terms or remove --require-all.",
-            suggested_token_query(query_tokens),
+            "Candidates scored, but final AND or symbol checks rejected them. Retry with mode:any or fewer terms.",
+            suggested_any_terms_query(query_tokens).or_else(|| suggested_token_query(query_tokens)),
         ));
     }
     if hints.is_empty() {
         hints.push(repair_hint(
             "broaden_query",
             "No final matches were produced. Try fewer terms, looser filters, or inspect planned_postings for the rarest surviving term.",
-            suggested_token_query(query_tokens),
+            if require_all && query_tokens.len() > 1 {
+                suggested_any_terms_query(query_tokens)
+            } else {
+                suggested_token_query(query_tokens)
+            },
         ));
     }
     hints
@@ -2301,6 +2312,10 @@ fn relaxed_query_without_terms(
 
 fn suggested_token_query(query_tokens: &[String]) -> Option<String> {
     suggested_query_from_tokens(query_tokens)
+}
+
+fn suggested_any_terms_query(query_tokens: &[String]) -> Option<String> {
+    suggested_query_from_tokens(query_tokens).map(|query| format!("mode:any {query}"))
 }
 
 fn suggested_query_from_tokens(query_tokens: &[String]) -> Option<String> {

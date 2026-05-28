@@ -744,6 +744,39 @@ fn indexed_query_plan_reports_missing_terms_without_results() {
 }
 
 #[test]
+fn indexed_query_plan_suggests_any_terms_for_strict_and_misses() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/alpha.rs"),
+        "pub fn alpha_only() {}\n",
+    );
+    write(&repo.path().join("src/beta.rs"), "pub fn beta_only() {}\n");
+
+    let index = FastIndex::build(repo.path()).unwrap();
+    let plan = index
+        .query_plan("alpha beta", &SearchFilters::default())
+        .unwrap();
+
+    assert_eq!(plan.strategy, "posting_intersection");
+    assert!(plan.require_all);
+    assert_eq!(plan.missing_terms, Vec::<String>::new());
+    assert_eq!(plan.candidate_count, 0);
+    assert_eq!(plan.final_match_count, 0);
+    assert!(plan.repair_hints.iter().any(|hint| {
+        hint.kind == "try_any_terms"
+            && hint.suggested_query.as_deref() == Some("mode:any alpha beta")
+            && hint.message.contains("no file contains all terms")
+    }));
+
+    let relaxed = index
+        .query_plan("mode:any alpha beta", &SearchFilters::default())
+        .unwrap();
+    assert_eq!(relaxed.strategy, "posting_union");
+    assert!(!relaxed.require_all);
+    assert!(relaxed.final_match_count >= 2);
+}
+
+#[test]
 fn indexed_query_plan_counts_filter_and_phrase_rejections() {
     let repo = tempfile::tempdir().unwrap();
     write(
