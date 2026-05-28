@@ -1144,7 +1144,10 @@ impl FastIndex {
         if query_tokens.len() > 1 && !filters.match_any {
             filters.require_all = true;
         }
-        let exact_symbol_query = planned_symbol_query_name(&parsed.terms, &filters);
+        let allow_implicit_symbol_score =
+            !parsed.explicit_content_terms || filters.symbol.is_some();
+        let exact_symbol_query =
+            planned_symbol_query_name(&parsed.terms, &filters, parsed.explicit_content_terms);
 
         let mut token_postings = query_tokens
             .iter()
@@ -1296,6 +1299,7 @@ impl FastIndex {
                     filters.snippet,
                     filters.explain,
                     filters.symbol.as_deref(),
+                    allow_implicit_symbol_score,
                     None,
                 )
             })
@@ -1399,7 +1403,10 @@ impl FastIndex {
         if query_tokens.len() > 1 && !filters.match_any {
             filters.require_all = true;
         }
-        let exact_symbol_query = planned_symbol_query_name(&parsed.terms, &filters);
+        let allow_implicit_symbol_score =
+            !parsed.explicit_content_terms || filters.symbol.is_some();
+        let exact_symbol_query =
+            planned_symbol_query_name(&parsed.terms, &filters, parsed.explicit_content_terms);
         if query_tokens.is_empty() && query_trigrams.is_empty() {
             if filter_only_query(&filters) {
                 let candidate_ids = filter_only_candidate_ids(&symbol_kind_postings);
@@ -1623,6 +1630,7 @@ impl FastIndex {
                     filters.snippet,
                     false,
                     filters.symbol.as_deref(),
+                    allow_implicit_symbol_score,
                     None,
                 )
             })
@@ -1731,6 +1739,7 @@ impl FastIndex {
         snippet_mode: SnippetMode,
         explain: bool,
         symbol_filter: Option<&str>,
+        allow_implicit_symbol_score: bool,
         query_plan: Option<&QueryPlan>,
     ) -> Option<SearchResult> {
         let file = self.files.get(file_id as usize)?;
@@ -1794,16 +1803,18 @@ impl FastIndex {
             score += trigram_score;
             reasons.push(format!("trigrams:{trigram_hits}"));
         }
-        for symbol in &file.symbols {
-            if let Some((kind, amount)) = symbol_query_match_score(
-                &symbol.normalized,
-                &symbol.tokens,
-                query_tokens,
-                &query_name,
-            ) {
-                score += amount;
-                reasons.push(format!("symbol:{}", symbol.name));
-                signals.push(rank_signal(kind, &symbol.name, amount));
+        if allow_implicit_symbol_score {
+            for symbol in &file.symbols {
+                if let Some((kind, amount)) = symbol_query_match_score(
+                    &symbol.normalized,
+                    &symbol.tokens,
+                    query_tokens,
+                    &query_name,
+                ) {
+                    score += amount;
+                    reasons.push(format!("symbol:{}", symbol.name));
+                    signals.push(rank_signal(kind, &symbol.name, amount));
+                }
             }
         }
         if score == 0.0 {
@@ -2982,7 +2993,14 @@ fn exact_symbol_query_name(
     (normalized.len() >= 3).then_some(normalized)
 }
 
-fn planned_symbol_query_name(terms: &[String], filters: &SearchFilters) -> Option<String> {
+fn planned_symbol_query_name(
+    terms: &[String],
+    filters: &SearchFilters,
+    explicit_content_terms: bool,
+) -> Option<String> {
+    if filters.symbol.is_none() && explicit_content_terms {
+        return None;
+    }
     if filters.symbol.is_none() && !language_scope_can_contain_symbols(filters.language.as_deref())
     {
         return None;

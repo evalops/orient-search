@@ -1877,6 +1877,33 @@ fn indexed_search_uses_symbol_postings_for_identifier_queries() {
         plan
     );
 
+    let content_results = index
+        .search_filtered(
+            "content:agent_instructions",
+            10,
+            &SearchFilters {
+                explain: true,
+                ..SearchFilters::default()
+            },
+        )
+        .unwrap();
+    let content_paths = result_paths(&content_results);
+    assert!(content_paths.iter().any(|path| path.ends_with(".md")));
+    let content_plan = content_results[0].query_plan.as_ref().unwrap();
+    assert!(
+        content_plan.candidate_count > 10,
+        "content: should keep prose candidates instead of symbol-narrowing: {:?}",
+        content_plan
+    );
+    assert!(
+        !content_plan
+            .planned_postings
+            .iter()
+            .any(|posting| posting.kind == "symbol" && posting.value == "agentinstructions"),
+        "{:?}",
+        content_plan.planned_postings
+    );
+
     let filtered = index
         .search_filtered(
             "symbol:agent_instructions",

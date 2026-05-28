@@ -6,11 +6,13 @@ use crate::repo_index::{
 pub struct ParsedQuery {
     pub terms: Vec<String>,
     pub filters: SearchFilters,
+    pub explicit_content_terms: bool,
 }
 
 pub fn parse_query(input: &str) -> ParsedQuery {
     let mut terms = Vec::new();
     let mut filters = SearchFilters::default();
+    let mut explicit_content_terms = false;
 
     for token in split_query(input) {
         let (negated, token) = token
@@ -19,6 +21,7 @@ pub fn parse_query(input: &str) -> ParsedQuery {
             .unwrap_or((false, token));
         if let Some(term) = content_term(&token, negated) {
             terms.push(term);
+            explicit_content_terms = true;
             continue;
         }
         if apply_match_mode(&mut filters, &token, negated)
@@ -35,7 +38,11 @@ pub fn parse_query(input: &str) -> ParsedQuery {
         filters.require_all = true;
     }
 
-    ParsedQuery { terms, filters }
+    ParsedQuery {
+        terms,
+        filters,
+        explicit_content_terms,
+    }
 }
 
 fn content_term(token: &str, negated: bool) -> Option<String> {
@@ -445,13 +452,16 @@ mod tests {
             parsed.terms,
             vec!["database connection refused", "gateway", "SessionManager"]
         );
+        assert!(parsed.explicit_content_terms);
         assert!(parsed.filters.file.is_none());
 
         let mode = parse_query("terms:any content:roadmap compression");
         assert!(mode.filters.match_any);
+        assert!(mode.explicit_content_terms);
         assert_eq!(mode.terms, vec!["roadmap", "compression"]);
 
         let negated = parse_query("-content:generated issue token");
+        assert!(!negated.explicit_content_terms);
         assert_eq!(negated.terms, vec!["issue", "token"]);
     }
 
