@@ -350,6 +350,9 @@ impl FastIndex {
                 file.path_lower = file.path.to_ascii_lowercase();
             }
         }
+        normalize_posting_map(&mut self.postings);
+        normalize_posting_map(&mut self.path_postings);
+        normalize_posting_map(&mut self.trigram_postings);
     }
 
     pub fn refresh_stats(&self, outcome: &RefreshOutcome) -> RefreshStats {
@@ -1617,6 +1620,10 @@ impl CompressedPostingList {
             let delta = decode_var_u32(&self.bytes, &mut offset)?;
             let count = decode_var_u32(&self.bytes, &mut offset)?;
             anyhow::ensure!(count <= u16::MAX as u32, "posting count is too large");
+            anyhow::ensure!(
+                index == 0 || delta > 0,
+                "compressed posting list is not strictly increasing"
+            );
             let file_id = if index == 0 {
                 delta
             } else {
@@ -1660,6 +1667,81 @@ fn decode_var_u32(bytes: &[u8], offset: &mut usize) -> Result<u32> {
         }
         shift += 7;
         anyhow::ensure!(shift < 32, "varint is too large");
+    }
+}
+
+fn normalize_posting_map(postings: &mut HashMap<String, Vec<Posting>>) {
+    for values in postings.values_mut() {
+        values.sort_unstable_by_key(|posting| posting.file_id);
+        let mut normalized: Vec<Posting> = Vec::with_capacity(values.len());
+        for posting in values.drain(..) {
+            if let Some(previous) = normalized.last_mut() {
+                if previous.file_id == posting.file_id {
+                    previous.count = previous.count.max(posting.count);
+                    continue;
+                }
+            }
+            normalized.push(posting);
+        }
+        *values = normalized;
+    }
+}
+
+#[cfg(test)]
+mod compressed_posting_tests {
+    use super::*;
+
+    #[test]
+    fn compressed_postings_round_trip_delta_varints() {
+        let postings = vec![
+            Posting {
+                file_id: 3,
+                count: 1,
+            },
+            Posting {
+                file_id: 130,
+                count: 7,
+            },
+            Posting {
+                file_id: 16_384,
+                count: 42,
+            },
+        ];
+
+        assert_eq!(compress_postings(&postings).decompress().unwrap(), postings);
+    }
+
+    #[test]
+    fn compressed_postings_reject_truncated_varints() {
+        let list = CompressedPostingList {
+            postings: 1,
+            bytes: vec![0x80],
+        };
+
+        let error = list.decompress().unwrap_err().to_string();
+        assert!(error.contains("truncated varint"), "{error}");
+    }
+
+    #[test]
+    fn compressed_postings_reject_trailing_bytes() {
+        let list = CompressedPostingList {
+            postings: 1,
+            bytes: vec![1, 1, 0],
+        };
+
+        let error = list.decompress().unwrap_err().to_string();
+        assert!(error.contains("trailing bytes"), "{error}");
+    }
+
+    #[test]
+    fn compressed_postings_reject_non_increasing_file_ids() {
+        let list = CompressedPostingList {
+            postings: 2,
+            bytes: vec![1, 1, 0, 1],
+        };
+
+        let error = list.decompress().unwrap_err().to_string();
+        assert!(error.contains("strictly increasing"), "{error}");
     }
 }
 

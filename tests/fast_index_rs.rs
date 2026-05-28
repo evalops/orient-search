@@ -253,6 +253,34 @@ fn saved_indexes_compress_large_posting_lists_on_disk() {
 }
 
 #[test]
+fn legacy_raw_indexes_normalize_posting_order_on_load() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/a.rs"),
+        "pub fn shared_token() { let shared = true; }\n",
+    );
+    write(
+        &repo.path().join("src/b.rs"),
+        "pub fn shared_token() { let shared = true; }\n",
+    );
+    let mut index = FastIndex::build(repo.path()).unwrap();
+    index.version = 9;
+    index.postings.get_mut("shared").unwrap().reverse();
+
+    let legacy_path = repo.path().join(".orient/unsorted-legacy.index");
+    fs::create_dir_all(legacy_path.parent().unwrap()).unwrap();
+    fs::write(&legacy_path, bincode::serialize(&index).unwrap()).unwrap();
+    let loaded = FastIndex::load(&legacy_path).unwrap();
+    let shared = loaded.postings.get("shared").unwrap();
+    assert!(
+        shared
+            .windows(2)
+            .all(|pair| pair[0].file_id < pair[1].file_id)
+    );
+    assert_eq!(loaded.search("shared token", 10).unwrap().len(), 2);
+}
+
+#[test]
 fn indexed_posting_lists_are_sorted_for_direct_lookup() {
     let repo = tempfile::tempdir().unwrap();
     write(
