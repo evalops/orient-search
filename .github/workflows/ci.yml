@@ -18,6 +18,14 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install search tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ripgrep fd-find
+          if ! command -v fd >/dev/null 2>&1 && command -v fdfind >/dev/null 2>&1; then
+            sudo ln -s "$(command -v fdfind)" /usr/local/bin/fd
+          fi
+
       - name: Check formatting
         run: cargo fmt --check
 
