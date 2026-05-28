@@ -2757,12 +2757,18 @@ fn runtime_reuses_cached_shard_index_after_initial_load() {
         }),
     });
     assert!(related.error.is_none(), "{:?}", related.error);
+    let related_result = serde_json::to_string(&related.result).unwrap();
     assert!(
-        serde_json::to_string(&related.result)
-            .unwrap()
-            .contains(&format!("{shard_name}/tests/billing_test.rs")),
-        "{:?}",
-        related.result
+        related_result.contains(&format!("{shard_name}/tests/billing_test.rs")),
+        "{related_result}"
+    );
+    assert!(
+        related_result.contains("\"read_request\""),
+        "{related_result}"
+    );
+    assert!(
+        related_result.contains("\"tool\":\"read_shard_range\""),
+        "{related_result}"
     );
 
     let related_symbols = runtime.dispatch(ToolRequest {
@@ -3338,6 +3344,8 @@ fn runtime_filters_shard_search_by_nested_repo_alias() {
     let result = serde_json::to_string(&related.result).unwrap();
     assert!(result.contains("billing/tests/billing_test.rs"), "{result}");
     assert!(!result.contains("auth/src/auth.rs"), "{result}");
+    assert!(result.contains("\"read_request\""), "{result}");
+    assert!(result.contains("\"tool\":\"read_shard_range\""), "{result}");
 
     let related_symbols = runtime.dispatch(ToolRequest {
         id: serde_json::json!("related-symbols"),
@@ -4242,6 +4250,8 @@ fn server_handles_indexed_search_request() {
     assert!(stdout.contains("tests/auth_test.rs"));
     assert!(stdout.contains("\"id\":\"related-index-files\""));
     assert!(stdout.contains("tests/auth_test.rs"));
+    assert!(stdout.contains("\"read_request\""));
+    assert!(stdout.contains("\"tool\":\"read_index_range\""));
     assert!(stdout.contains("\"id\":\"related-index-symbols\""));
     assert!(stdout.contains("SessionManager"));
     assert!(stdout.contains("\"id\":\"indexed-query-plan\""));
@@ -4419,6 +4429,8 @@ fn server_handles_shard_index_search_and_read_requests() {
     assert!(stdout.contains("\"path\":\"billing/tests/billing_test.rs\""));
     assert!(stdout.contains("\"id\":\"related-shard-files\""));
     assert!(stdout.contains("billing/tests/billing_test.rs"));
+    assert!(stdout.contains("\"read_request\""));
+    assert!(stdout.contains("\"tool\":\"read_shard_range\""));
     assert!(stdout.contains("\"id\":\"related-shard-symbols\""));
     assert!(stdout.contains("\"path\":\"billing/src/billing.rs\""));
     assert!(stdout.contains("\"id\":\"shard-query-plan\""));

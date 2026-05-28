@@ -8,8 +8,8 @@ use crate::repo_index::{
     QueryPlanFilter, RepoIndexer, ResultToolRequest, SearchFilters, SearchResult, SnippetMode,
     Symbol, SymbolLookupResult, attach_result_context, attach_result_read_requests,
     attach_result_related_requests, attach_result_related_symbol_requests, finalize_results,
-    normalize_token, read_file_range, related_symbol_lookup_results, result_read_batch_request,
-    search_repo_fast_filtered, symbol_lookup_results,
+    normalize_token, read_file_range, related_file_lookup_results, related_symbol_lookup_results,
+    result_read_batch_request, search_repo_fast_filtered, symbol_lookup_results,
 };
 use crate::shards::{
     ShardEntry, ShardManifest, ShardQueryPlan, ShardRepoMap, ShardSearchScope, build_shards,
@@ -2193,23 +2193,36 @@ impl ToolRuntime {
                 let repo = path_arg(&request.arguments, "repo")?;
                 let path = string_arg(&request.arguments, "path")?;
                 let limit = positive_usize_arg(&request.arguments, "limit", 10)?;
-                let index = RepoIndexer::new(repo).build()?;
-                Ok(serde_json::to_value(index.related_files(&path, limit))?)
+                let index = RepoIndexer::new(&repo).build()?;
+                let related = index.related_files(&path, limit);
+                Ok(serde_json::to_value(related_file_lookup_results(
+                    related,
+                    "read_range",
+                    read_request_args("repo", &repo),
+                ))?)
             }
             "related_index_files" => {
                 let index_path = self.index_path_arg_or_single_cached(&request.arguments)?;
                 let path = string_arg(&request.arguments, "path")?;
                 let limit = positive_usize_arg(&request.arguments, "limit", 10)?;
-                let index = self.cached_index(index_path)?;
-                Ok(serde_json::to_value(index.related_files(&path, limit))?)
+                let index = self.cached_index(index_path.clone())?;
+                let related = index.related_files(&path, limit);
+                Ok(serde_json::to_value(related_file_lookup_results(
+                    related,
+                    "read_index_range",
+                    read_request_args("index", &index_path),
+                ))?)
             }
             "related_shard_files" => {
                 let index_dir = self.shard_dir_arg_or_single_cached(&request.arguments)?;
                 let path = string_arg(&request.arguments, "path")?;
                 let limit = positive_usize_arg(&request.arguments, "limit", 10)?;
-                Ok(serde_json::to_value(
-                    self.related_shard_files_cached(&index_dir, &path, limit)?,
-                )?)
+                let related = self.related_shard_files_cached(&index_dir, &path, limit)?;
+                Ok(serde_json::to_value(related_file_lookup_results(
+                    related,
+                    "read_shard_range",
+                    read_request_args("index_dir", &index_dir),
+                ))?)
             }
             "related_symbols" => {
                 let repo = path_arg(&request.arguments, "repo")?;

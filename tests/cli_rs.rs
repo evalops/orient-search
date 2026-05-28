@@ -932,7 +932,9 @@ fn cli_outputs_repo_map_and_reads_ranges() {
         ])
         .assert()
         .success()
-        .stdout(predicate::str::contains("tests/auth_test.rs"));
+        .stdout(predicate::str::contains("tests/auth_test.rs"))
+        .stdout(predicate::str::contains("\"read_request\""))
+        .stdout(predicate::str::contains("\"tool\":\"read_range\""));
 
     let mut read_range = Command::cargo_bin("orient").unwrap();
     read_range
@@ -1856,7 +1858,9 @@ fn cli_builds_and_searches_persistent_index() {
         ])
         .assert()
         .success()
-        .stdout(predicate::str::contains("tests/auth_test.rs"));
+        .stdout(predicate::str::contains("tests/auth_test.rs"))
+        .stdout(predicate::str::contains("\"read_request\""))
+        .stdout(predicate::str::contains("\"tool\":\"read_index_range\""));
 
     let mut related_index_symbols = Command::cargo_bin("orient").unwrap();
     related_index_symbols
@@ -2094,7 +2098,9 @@ fn cli_builds_and_searches_shard_directory() {
         .success()
         .stdout(predicate::str::contains(&format!(
             "{billing_name}/src/legacy.rs"
-        )));
+        )))
+        .stdout(predicate::str::contains("\"read_request\""))
+        .stdout(predicate::str::contains("\"tool\":\"read_shard_range\""));
 
     let mut ambiguous_read = Command::cargo_bin("orient").unwrap();
     ambiguous_read
@@ -2433,7 +2439,9 @@ fn cli_filters_shard_search_by_nested_repo_alias() {
         .assert()
         .success()
         .stdout(predicate::str::contains("billing/tests/billing_test.rs"))
-        .stdout(predicate::str::contains("auth/src/auth.rs").not());
+        .stdout(predicate::str::contains("auth/src/auth.rs").not())
+        .stdout(predicate::str::contains("\"read_request\""))
+        .stdout(predicate::str::contains("\"tool\":\"read_shard_range\""));
 
     let mut related_symbols = Command::cargo_bin("orient").unwrap();
     related_symbols

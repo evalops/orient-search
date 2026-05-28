@@ -21,6 +21,7 @@ pub const MAX_READ_RANGE_LINES: usize = 1_000;
 pub const MAX_SEARCH_RESULTS: usize = 100;
 const MAX_RESULT_READ_BATCH_RANGES: usize = 64;
 const DEFAULT_RESULT_READ_LINES: usize = 80;
+const DEFAULT_RELATED_FILE_READ_LINES: usize = 80;
 const DEFAULT_SYMBOL_READ_CONTEXT_BEFORE: usize = 20;
 const DEFAULT_SYMBOL_READ_LINES: usize = 80;
 const RIPGREP_TIMEOUT: Duration = Duration::from_millis(250);
@@ -106,6 +107,15 @@ pub struct ResultToolRequest {
 }
 
 pub type ResultReadRequest = ResultToolRequest;
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RelatedFileLookupResult {
+    pub path: String,
+    pub reason: String,
+    pub score: f64,
+    pub read_range: ResultReadRange,
+    pub read_request: ResultToolRequest,
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SymbolLookupResult {
@@ -3555,6 +3565,27 @@ pub fn symbol_lookup_results(
         .collect()
 }
 
+pub fn related_file_lookup_results(
+    related: Vec<RelatedFile>,
+    tool: &str,
+    base_arguments: serde_json::Map<String, serde_json::Value>,
+) -> Vec<RelatedFileLookupResult> {
+    related
+        .into_iter()
+        .map(|related| {
+            let read_range = related_file_read_range(&related);
+            let read_request = read_request_from_range(tool, &base_arguments, &read_range);
+            RelatedFileLookupResult {
+                path: related.path,
+                reason: related.reason,
+                score: related.score,
+                read_range,
+                read_request,
+            }
+        })
+        .collect()
+}
+
 pub fn related_symbol_lookup_results(
     related: Vec<RelatedSymbol>,
     tool: &str,
@@ -3694,6 +3725,14 @@ fn result_read_range(result: &SearchResult) -> ResultReadRange {
         path: result.path.clone(),
         start: context_start_line(result, DEFAULT_RESULT_READ_LINES),
         lines: DEFAULT_RESULT_READ_LINES,
+    }
+}
+
+fn related_file_read_range(related: &RelatedFile) -> ResultReadRange {
+    ResultReadRange {
+        path: related.path.clone(),
+        start: 1,
+        lines: DEFAULT_RELATED_FILE_READ_LINES,
     }
 }
 

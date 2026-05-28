@@ -94,9 +94,9 @@ simple JSON-lines over stdio, TCP, or Unix sockets.
 3. Use `read_batch_request` for top ranges, or result-level `read_request`
    objects for one bounded file read.
 4. Use `related_request` and `related_symbols_request` before opening random
-   neighboring files. Search-generated `related_symbols_request` objects carry
-   the originating query, and related-symbol results carry their own
-   `read_request` objects so agents can open definition context directly.
+   neighboring files. Related-file and related-symbol results carry their own
+   `read_request` objects; search-generated `related_symbols_request` objects
+   also carry the originating query so agents can follow them directly.
 5. For empty automatic searches, inspect `query_plan_result`; otherwise use
    `query_plan_request` when results are noisy or suspicious, then follow any
    returned `retry_requests`.
