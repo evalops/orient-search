@@ -997,6 +997,48 @@ fn runtime_batches_searches_and_query_plans_against_repo_index_and_shards() {
     assert!(result.contains("\"missing_terms\""), "{result}");
     assert!(result.contains("missingterm"), "{result}");
     assert!(result.contains("drop_missing_terms"), "{result}");
+    let live_plan_result = live_plan.result.as_ref().unwrap();
+    assert_eq!(live_plan_result["retry_requests"][0]["tool"], "search_code");
+    assert_eq!(
+        live_plan_result["retry_requests"][0]["arguments"]["query"],
+        "session manager"
+    );
+    let retry = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("live-retry"),
+        tool: live_plan_result["retry_requests"][0]["tool"]
+            .as_str()
+            .unwrap()
+            .to_string(),
+        arguments: live_plan_result["retry_requests"][0]["arguments"].clone(),
+    });
+    assert!(retry.error.is_none(), "{:?}", retry.error);
+    let retry_result = serde_json::to_string(&retry.result).unwrap();
+    assert!(retry_result.contains("src/auth.rs"), "{retry_result}");
+
+    let relax_filter_plan = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("relax-filter-plan"),
+        tool: "search_plan".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "query": "SessionManager path:not-real",
+            "require_all": true
+        }),
+    });
+    assert!(
+        relax_filter_plan.error.is_none(),
+        "{:?}",
+        relax_filter_plan.error
+    );
+    let relax_result = relax_filter_plan.result.as_ref().unwrap();
+    assert_eq!(
+        relax_result["repair_hints"][0]["kind"],
+        serde_json::json!("relax_filters")
+    );
+    assert!(relax_result["retry_requests"][0]["arguments"]["path"].is_null());
+    assert_eq!(
+        relax_result["retry_requests"][0]["arguments"]["query"],
+        "session manager"
+    );
 
     let live_plan_batch = runtime.dispatch(ToolRequest {
         id: serde_json::json!("live-plan-batch"),
@@ -1064,6 +1106,15 @@ fn runtime_batches_searches_and_query_plans_against_repo_index_and_shards() {
     let result = serde_json::to_string(&indexed_plan_alias.result).unwrap();
     assert!(result.contains("missingterm"), "{result}");
     assert!(result.contains("drop_missing_terms"), "{result}");
+    let indexed_plan_result = indexed_plan_alias.result.as_ref().unwrap();
+    assert_eq!(
+        indexed_plan_result["retry_requests"][0]["tool"],
+        "indexed_search_code"
+    );
+    assert_eq!(
+        indexed_plan_result["retry_requests"][0]["arguments"]["query"],
+        "session manager"
+    );
 
     let shard_dir = tempfile::tempdir().unwrap();
     let build = runtime.dispatch(ToolRequest {
@@ -1131,6 +1182,15 @@ fn runtime_batches_searches_and_query_plans_against_repo_index_and_shards() {
     );
     let result = serde_json::to_string(&shard_plan_alias.result).unwrap();
     assert!(result.contains("missingterm"), "{result}");
+    let shard_plan_result = shard_plan_alias.result.as_ref().unwrap();
+    assert_eq!(
+        shard_plan_result[0]["plan"]["retry_requests"][0]["tool"],
+        "search_shards"
+    );
+    assert_eq!(
+        shard_plan_result[0]["plan"]["retry_requests"][0]["arguments"]["query"],
+        "session manager"
+    );
 }
 
 #[test]

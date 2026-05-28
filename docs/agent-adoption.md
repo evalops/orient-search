@@ -39,7 +39,8 @@ Send JSON-lines requests through:
 
 Start with `agent_guide` or `tool_manifest` once, then use `search_auto`.
 Follow returned `read_request`, `related_request`, `related_symbols_request`,
-`query_plan_request`, and `repo_map_request` objects directly.
+`query_plan_request`, `repo_map_request`, and query-plan `retry_requests`
+objects directly.
 Use `refresh_if_stale:true` for indexed or shard searches when live files may
 have changed.
 If Orient is unavailable or returns no useful plan, fall back to normal shell
@@ -78,6 +79,7 @@ simple JSON-lines over stdio, TCP, or Unix sockets.
 3. Use result-level `read_request` objects for bounded file reads.
 4. Use `related_request` and `related_symbols_request` before opening random
    neighboring files.
-5. Use `query_plan_request` when results are empty, noisy, or suspicious.
+5. Use `query_plan_request` when results are empty, noisy, or suspicious, then
+   follow any returned `retry_requests`.
 6. Use `repo_map_request` when the agent needs entrypoints, tests, commands, or
    top symbols for the chosen search surface.

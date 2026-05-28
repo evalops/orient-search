@@ -117,7 +117,7 @@ pub struct ResultLineRange {
     pub end_line: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct QueryPlan {
     pub strategy: String,
     pub require_all: bool,
@@ -147,6 +147,8 @@ pub struct QueryPlan {
     pub final_match_count: usize,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub repair_hints: Vec<QueryPlanRepairHint>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub retry_requests: Vec<ResultToolRequest>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

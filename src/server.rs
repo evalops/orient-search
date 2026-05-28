@@ -15,7 +15,7 @@ use crate::shards::{
     ensure_shards, filter_repo_map_by_prefix, filters_for_shard_scope, load_manifest,
     refresh_shards, resolve_shard_path_from_manifest, shard_search_scopes, shard_status,
 };
-use ahash::AHashMap as HashMap;
+use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
@@ -1348,6 +1348,117 @@ fn auto_repo_map_request<T: Serialize>(
     }
 }
 
+fn attach_retry_requests<T: Serialize>(
+    mut plan: QueryPlan,
+    search_tool: &str,
+    target_name: &str,
+    target_value: T,
+    source_arguments: &Value,
+) -> QueryPlan {
+    plan.retry_requests = retry_search_requests(
+        &plan,
+        search_tool,
+        target_name,
+        target_value,
+        source_arguments,
+    );
+    plan
+}
+
+fn retry_search_requests<T: Serialize>(
+    plan: &QueryPlan,
+    search_tool: &str,
+    target_name: &str,
+    target_value: T,
+    source_arguments: &Value,
+) -> Vec<ResultToolRequest> {
+    let mut requests = Vec::new();
+    let mut seen_queries = HashSet::new();
+    for hint in &plan.repair_hints {
+        let Some(query) = hint.suggested_query.as_ref() else {
+            continue;
+        };
+        if !seen_queries.insert(query.clone()) {
+            continue;
+        }
+        let mut arguments = Map::new();
+        if hint.kind == "relax_filters" {
+            if let Some(source) = source_arguments.as_object() {
+                if let Some(refresh) = source.get("refresh_if_stale") {
+                    arguments.insert("refresh_if_stale".to_string(), refresh.clone());
+                }
+            }
+        } else if let Some(source) = source_arguments.as_object() {
+            for (name, value) in source {
+                if retry_search_passthrough_arg(name, target_name) {
+                    arguments.insert(name.clone(), value.clone());
+                }
+            }
+        }
+        if hint.kind != "relax_filters" {
+            add_plan_filter_args(&mut arguments, plan, target_name);
+        }
+        arguments.insert(target_name.to_string(), json!(target_value));
+        arguments.insert("query".to_string(), json!(query));
+        arguments.insert("explain".to_string(), json!(true));
+        requests.push(ResultToolRequest {
+            tool: search_tool.to_string(),
+            arguments: Value::Object(arguments),
+        });
+    }
+    requests
+}
+
+fn retry_search_passthrough_arg(name: &str, target_name: &str) -> bool {
+    if matches!(
+        name,
+        "query" | "queries" | "limit" | "context_lines" | "snippet" | "explain"
+    ) {
+        return false;
+    }
+    if name == target_name {
+        return false;
+    }
+    if matches!(target_name, "index" | "index_dir") && matches!(name, "index" | "index_dir") {
+        return false;
+    }
+    true
+}
+
+fn add_plan_filter_args(arguments: &mut Map<String, Value>, plan: &QueryPlan, target_name: &str) {
+    let mut negated: HashMap<String, Vec<String>> = HashMap::default();
+    for filter in &plan.active_filters {
+        if !filter.negated {
+            if filter.field == "repo" && target_name == "repo" {
+                continue;
+            }
+            arguments.insert(filter.field.clone(), json!(filter.value));
+            continue;
+        }
+        let key = format!("exclude_{}", filter.field);
+        negated.entry(key).or_default().push(filter.value.clone());
+    }
+    for (name, values) in negated {
+        arguments.insert(name, json!(values));
+    }
+}
+
+fn attach_shard_retry_requests(
+    plans: &mut [ShardQueryPlan],
+    index_dir: &Path,
+    source_arguments: &Value,
+) {
+    for shard_plan in plans {
+        shard_plan.plan = attach_retry_requests(
+            shard_plan.plan.clone(),
+            "search_shards",
+            "index_dir",
+            index_dir,
+            source_arguments,
+        );
+    }
+}
+
 impl ToolRuntime {
     fn dispatch_result(&self, request: &ToolRequest) -> Result<Value> {
         match request.tool.as_str() {
@@ -1531,10 +1642,14 @@ impl ToolRuntime {
                 let repo = path_arg(&request.arguments, "repo")?;
                 let query = string_arg(&request.arguments, "query")?;
                 let index = FastIndex::build(repo)?;
-                Ok(serde_json::to_value(index.query_plan(
-                    &query,
-                    &search_filters(&request.arguments, false)?,
-                )?)?)
+                let plan = index.query_plan(&query, &search_filters(&request.arguments, false)?)?;
+                Ok(serde_json::to_value(attach_retry_requests(
+                    plan,
+                    "search_code",
+                    "repo",
+                    &index.root,
+                    &request.arguments,
+                ))?)
             }
             "search_query_plan_batch" | "search_plan_batch" => {
                 let repo = path_arg(&request.arguments, "repo")?;
@@ -1543,7 +1658,13 @@ impl ToolRuntime {
                 let filters = search_filters(&request.arguments, false)?;
                 let mut batch = Vec::new();
                 for query in queries {
-                    let plan = index.query_plan(&query, &filters)?;
+                    let plan = attach_retry_requests(
+                        index.query_plan(&query, &filters)?,
+                        "search_code",
+                        "repo",
+                        &index.root,
+                        &request.arguments,
+                    );
                     batch.push(QueryPlanBatchResult { query, plan });
                 }
                 Ok(serde_json::to_value(batch)?)
@@ -1619,21 +1740,33 @@ impl ToolRuntime {
                 let index_path = self.index_path_arg_or_single_cached(&request.arguments)?;
                 let query = string_arg(&request.arguments, "query")?;
                 let refresh_if_stale = bool_arg(&request.arguments, "refresh_if_stale");
-                let index = self.cached_index_maybe_refresh(index_path, refresh_if_stale)?;
-                Ok(serde_json::to_value(index.query_plan(
-                    &query,
-                    &search_filters(&request.arguments, true)?,
-                )?)?)
+                let index =
+                    self.cached_index_maybe_refresh(index_path.clone(), refresh_if_stale)?;
+                let plan = index.query_plan(&query, &search_filters(&request.arguments, true)?)?;
+                Ok(serde_json::to_value(attach_retry_requests(
+                    plan,
+                    "indexed_search_code",
+                    "index",
+                    index_path,
+                    &request.arguments,
+                ))?)
             }
             "indexed_query_plan_batch" => {
                 let index_path = self.index_path_arg_or_single_cached(&request.arguments)?;
                 let queries = string_array_arg(&request.arguments, "queries")?;
                 let refresh_if_stale = bool_arg(&request.arguments, "refresh_if_stale");
-                let index = self.cached_index_maybe_refresh(index_path, refresh_if_stale)?;
+                let index =
+                    self.cached_index_maybe_refresh(index_path.clone(), refresh_if_stale)?;
                 let filters = search_filters(&request.arguments, true)?;
                 let mut batch = Vec::new();
                 for query in queries {
-                    let plan = index.query_plan(&query, &filters)?;
+                    let plan = attach_retry_requests(
+                        index.query_plan(&query, &filters)?,
+                        "indexed_search_code",
+                        "index",
+                        &index_path,
+                        &request.arguments,
+                    );
                     batch.push(IndexedQueryPlanBatchResult { query, plan });
                 }
                 Ok(serde_json::to_value(batch)?)
@@ -1740,11 +1873,13 @@ impl ToolRuntime {
                 if bool_arg(&request.arguments, "refresh_if_stale") {
                     self.refresh_shards_if_stale(&index_dir)?;
                 }
-                Ok(serde_json::to_value(self.shard_query_plans_cached(
+                let mut plans = self.shard_query_plans_cached(
                     &index_dir,
                     &query,
                     &search_filters(&request.arguments, true)?,
-                )?)?)
+                )?;
+                attach_shard_retry_requests(&mut plans, &index_dir, &request.arguments);
+                Ok(serde_json::to_value(plans)?)
             }
             "shard_query_plan_batch" => {
                 let index_dir = self.shard_dir_arg_or_single_cached(&request.arguments)?;
@@ -1755,7 +1890,8 @@ impl ToolRuntime {
                 let filters = search_filters(&request.arguments, true)?;
                 let mut batch = Vec::new();
                 for query in queries {
-                    let plans = self.shard_query_plans_cached(&index_dir, &query, &filters)?;
+                    let mut plans = self.shard_query_plans_cached(&index_dir, &query, &filters)?;
+                    attach_shard_retry_requests(&mut plans, &index_dir, &request.arguments);
                     batch.push(ShardQueryPlanBatchResult { query, plans });
                 }
                 Ok(serde_json::to_value(batch)?)

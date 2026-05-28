@@ -1,3 +1,4 @@
+use ahash::AHashSet as HashSet;
 use anyhow::{Result, bail};
 use clap::{Args, Parser, Subcommand};
 use orient::discover::{
@@ -5,8 +6,8 @@ use orient::discover::{
 };
 use orient::fast_index::{FastIndex, RefreshStats};
 use orient::repo_index::{
-    QueryPlan, RepoIndexer, SearchFilters, SearchResult, SnippetMode, attach_result_context,
-    attach_result_read_requests, attach_result_related_requests,
+    QueryPlan, RepoIndexer, ResultToolRequest, SearchFilters, SearchResult, SnippetMode,
+    attach_result_context, attach_result_read_requests, attach_result_related_requests,
     attach_result_related_symbol_requests, read_file_range, search_repo_fast_filtered,
 };
 use orient::server::{
@@ -828,6 +829,137 @@ fn read_request_args<T: Serialize>(name: &str, value: T) -> Map<String, Value> {
     arguments
 }
 
+fn attach_cli_retry_requests<T: Serialize>(
+    mut plan: QueryPlan,
+    search_tool: &str,
+    target_name: &str,
+    target_value: T,
+    filters: &SearchFilters,
+) -> QueryPlan {
+    plan.retry_requests =
+        cli_retry_requests(&plan, search_tool, target_name, target_value, filters);
+    plan
+}
+
+fn cli_retry_requests<T: Serialize>(
+    plan: &QueryPlan,
+    search_tool: &str,
+    target_name: &str,
+    target_value: T,
+    filters: &SearchFilters,
+) -> Vec<ResultToolRequest> {
+    let mut requests = Vec::new();
+    let mut seen_queries = HashSet::new();
+    for hint in &plan.repair_hints {
+        let Some(query) = hint.suggested_query.as_ref() else {
+            continue;
+        };
+        if !seen_queries.insert(query.clone()) {
+            continue;
+        }
+        let mut arguments = Map::new();
+        if hint.kind != "relax_filters" {
+            add_filter_retry_args(&mut arguments, filters, target_name);
+            add_plan_filter_retry_args(&mut arguments, plan, target_name);
+        }
+        arguments.insert(target_name.to_string(), serde_json::json!(target_value));
+        arguments.insert("query".to_string(), serde_json::json!(query));
+        arguments.insert("explain".to_string(), serde_json::json!(true));
+        requests.push(ResultToolRequest {
+            tool: search_tool.to_string(),
+            arguments: Value::Object(arguments),
+        });
+    }
+    requests
+}
+
+fn add_filter_retry_args(
+    arguments: &mut Map<String, Value>,
+    filters: &SearchFilters,
+    target_name: &str,
+) {
+    insert_string_arg(arguments, "file", filters.file.as_ref());
+    insert_string_arg(arguments, "path", filters.path.as_ref());
+    insert_string_arg(arguments, "language", filters.language.as_ref());
+    insert_string_arg(arguments, "extension", filters.extension.as_ref());
+    insert_string_arg(arguments, "symbol", filters.symbol.as_ref());
+    insert_string_arg(arguments, "symbol_kind", filters.symbol_kind.as_ref());
+    if target_name != "repo" {
+        insert_string_arg(arguments, "repo", filters.repo.as_ref());
+    }
+    insert_string_arg(arguments, "dependency", filters.dependency.as_ref());
+    insert_string_arg(arguments, "import", filters.import.as_ref());
+    if let Some(test) = filters.test {
+        arguments.insert("test".to_string(), serde_json::json!(test));
+    }
+    insert_string_array_arg(arguments, "exclude_file", &filters.exclude_file);
+    insert_string_array_arg(arguments, "exclude_path", &filters.exclude_path);
+    insert_string_array_arg(arguments, "exclude_language", &filters.exclude_language);
+    insert_string_array_arg(arguments, "exclude_extension", &filters.exclude_extension);
+    insert_string_array_arg(arguments, "exclude_symbol", &filters.exclude_symbol);
+    insert_string_array_arg(
+        arguments,
+        "exclude_symbol_kind",
+        &filters.exclude_symbol_kind,
+    );
+    insert_string_array_arg(arguments, "exclude_repo", &filters.exclude_repo);
+    insert_string_array_arg(arguments, "exclude_dependency", &filters.exclude_dependency);
+    insert_string_array_arg(arguments, "exclude_import", &filters.exclude_import);
+}
+
+fn insert_string_arg(arguments: &mut Map<String, Value>, name: &str, value: Option<&String>) {
+    if let Some(value) = value {
+        arguments.insert(name.to_string(), serde_json::json!(value));
+    }
+}
+
+fn insert_string_array_arg(arguments: &mut Map<String, Value>, name: &str, values: &[String]) {
+    if !values.is_empty() {
+        arguments.insert(name.to_string(), serde_json::json!(values));
+    }
+}
+
+fn add_plan_filter_retry_args(
+    arguments: &mut Map<String, Value>,
+    plan: &QueryPlan,
+    target_name: &str,
+) {
+    let mut negated: Map<String, Value> = Map::new();
+    for filter in &plan.active_filters {
+        if !filter.negated {
+            if filter.field == "repo" && target_name == "repo" {
+                continue;
+            }
+            arguments.insert(filter.field.clone(), serde_json::json!(filter.value));
+            continue;
+        }
+        let key = format!("exclude_{}", filter.field);
+        let entry = negated
+            .entry(key)
+            .or_insert_with(|| Value::Array(Vec::new()));
+        if let Value::Array(values) = entry {
+            values.push(serde_json::json!(filter.value));
+        }
+    }
+    arguments.extend(negated);
+}
+
+fn attach_cli_shard_retry_requests(
+    plans: &mut [ShardQueryPlan],
+    index_dir: &Path,
+    filters: &SearchFilters,
+) {
+    for shard_plan in plans {
+        shard_plan.plan = attach_cli_retry_requests(
+            shard_plan.plan.clone(),
+            "search_shards",
+            "index_dir",
+            index_dir,
+            filters,
+        );
+    }
+}
+
 fn run() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
@@ -1005,14 +1137,10 @@ fn run() -> Result<()> {
             if refresh_if_stale && shard_status(&index_dir)?.stale {
                 refresh_shards(&index_dir)?;
             }
-            println!(
-                "{}",
-                serde_json::to_string(&shard_query_plans(
-                    &index_dir,
-                    &query,
-                    &search_filters_from_args(&filters, repo)?,
-                )?)?
-            );
+            let filters = search_filters_from_args(&filters, repo)?;
+            let mut plans = shard_query_plans(&index_dir, &query, &filters)?;
+            attach_cli_shard_retry_requests(&mut plans, &index_dir, &filters);
+            println!("{}", serde_json::to_string(&plans)?);
         }
         Commands::ShardPlanBatch {
             index_dir,
@@ -1028,7 +1156,8 @@ fn run() -> Result<()> {
             let filters = search_filters_from_args(&filters, repo)?;
             let mut batch = Vec::new();
             for query in queries {
-                let plans = shard_query_plans(&index_dir, &query, &filters)?;
+                let mut plans = shard_query_plans(&index_dir, &query, &filters)?;
+                attach_cli_shard_retry_requests(&mut plans, &index_dir, &filters);
                 batch.push(ShardQueryPlanBatchResult { query, plans });
             }
             println!("{}", serde_json::to_string(&batch)?);
@@ -1135,13 +1264,17 @@ fn run() -> Result<()> {
             filters,
             refresh_if_stale,
         } => {
-            let index = load_index_for_search(index, refresh_if_stale)?;
-            println!(
-                "{}",
-                serde_json::to_string(
-                    &index.query_plan(&query, &search_filters_from_args(&filters, repo_filter)?,)?
-                )?
+            let index_path = index;
+            let index = load_index_for_search(index_path.clone(), refresh_if_stale)?;
+            let filters = search_filters_from_args(&filters, repo_filter)?;
+            let plan = attach_cli_retry_requests(
+                index.query_plan(&query, &filters)?,
+                "indexed_search_code",
+                "index",
+                &index_path,
+                &filters,
             );
+            println!("{}", serde_json::to_string(&plan)?);
         }
         Commands::IndexPlanBatch {
             index,
@@ -1151,11 +1284,18 @@ fn run() -> Result<()> {
             refresh_if_stale,
         } => {
             let queries = cli_batch_queries(queries)?;
-            let index = load_index_for_search(index, refresh_if_stale)?;
+            let index_path = index;
+            let index = load_index_for_search(index_path.clone(), refresh_if_stale)?;
             let filters = search_filters_from_args(&filters, repo_filter)?;
             let mut batch = Vec::new();
             for query in queries {
-                let plan = index.query_plan(&query, &filters)?;
+                let plan = attach_cli_retry_requests(
+                    index.query_plan(&query, &filters)?,
+                    "indexed_search_code",
+                    "index",
+                    &index_path,
+                    &filters,
+                );
                 batch.push(IndexedQueryPlanBatchResult { query, plan });
             }
             println!("{}", serde_json::to_string(&batch)?);
@@ -1167,12 +1307,15 @@ fn run() -> Result<()> {
             filters,
         } => {
             let index = FastIndex::build(repo)?;
-            println!(
-                "{}",
-                serde_json::to_string(
-                    &index.query_plan(&query, &search_filters_from_args(&filters, repo_filter)?,)?
-                )?
+            let filters = search_filters_from_args(&filters, repo_filter)?;
+            let plan = attach_cli_retry_requests(
+                index.query_plan(&query, &filters)?,
+                "search_code",
+                "repo",
+                &index.root,
+                &filters,
             );
+            println!("{}", serde_json::to_string(&plan)?);
         }
         Commands::SearchPlanBatch {
             repo,
@@ -1185,7 +1328,13 @@ fn run() -> Result<()> {
             let filters = search_filters_from_args(&filters, repo_filter)?;
             let mut batch = Vec::new();
             for query in queries {
-                let plan = index.query_plan(&query, &filters)?;
+                let plan = attach_cli_retry_requests(
+                    index.query_plan(&query, &filters)?,
+                    "search_code",
+                    "repo",
+                    &index.root,
+                    &filters,
+                );
                 batch.push(QueryPlanBatchResult { query, plan });
             }
             println!("{}", serde_json::to_string(&batch)?);

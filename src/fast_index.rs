@@ -1193,6 +1193,7 @@ impl FastIndex {
                     "The repo: filter does not match this index root. Relax repo: or choose a matching shard/index.",
                     None,
                 )],
+                retry_requests: Vec::new(),
             });
         }
         if !self.matches_dependency_filters(&filters) {
@@ -1217,6 +1218,7 @@ impl FastIndex {
                     "The dependency filter does not match this index. Relax dep: or choose a matching shard/index.",
                     None,
                 )],
+                retry_requests: Vec::new(),
             });
         }
         let query = query_text(&parsed.terms, &filters);
@@ -1252,6 +1254,7 @@ impl FastIndex {
                     scored_candidate_count: candidate_count,
                     final_match_count: candidate_count,
                     repair_hints: filter_scan_repair_hints(candidate_count),
+                    retry_requests: Vec::new(),
                 });
             }
             return Ok(QueryPlan {
@@ -1275,6 +1278,7 @@ impl FastIndex {
                     "Add a content term, quoted literal, symbol:, or positive file/path/lang/ext/test filter.",
                     None,
                 )],
+                retry_requests: Vec::new(),
             });
         }
 
@@ -1479,6 +1483,7 @@ impl FastIndex {
                 scored_candidate_count: candidate_count,
                 final_match_count: candidate_count,
                 repair_hints: filter_scan_repair_hints(candidate_count),
+                retry_requests: Vec::new(),
             };
             for result in &mut results {
                 result.query_plan = Some(query_plan.clone());
@@ -2190,6 +2195,7 @@ fn indexed_query_plan(
             scored_candidate_count,
             final_match_count,
         ),
+        retry_requests: Vec::new(),
     }
 }
 

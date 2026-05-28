@@ -1203,7 +1203,11 @@ fn cli_search_surfaces_accept_structured_filters() {
         .stdout(predicate::str::contains("\"scored_candidate_count\":0"))
         .stdout(predicate::str::contains("\"final_match_count\":0"))
         .stdout(predicate::str::contains("\"repair_hints\""))
-        .stdout(predicate::str::contains("drop_missing_terms"));
+        .stdout(predicate::str::contains("drop_missing_terms"))
+        .stdout(predicate::str::contains("\"retry_requests\""))
+        .stdout(predicate::str::contains("\"tool\":\"indexed_search_code\""))
+        .stdout(predicate::str::contains("\"query\":\"session manager\""))
+        .stdout(predicate::str::contains("\"path\":\"src\""));
 
     let mut index_plan_batch = Command::cargo_bin("orient").unwrap();
     index_plan_batch
@@ -2217,6 +2221,10 @@ fn cli_filters_shard_search_by_nested_repo_alias() {
         .stdout(predicate::str::contains("\"final_match_count\":0"))
         .stdout(predicate::str::contains("\"repair_hints\""))
         .stdout(predicate::str::contains("drop_missing_terms"))
+        .stdout(predicate::str::contains("\"retry_requests\""))
+        .stdout(predicate::str::contains("\"tool\":\"search_shards\""))
+        .stdout(predicate::str::contains("\"query\":\"invoice\""))
+        .stdout(predicate::str::contains("\"path\":\"billing\""))
         .stdout(predicate::str::contains("\"name\":\"auth\"").not());
 
     let mut shard_symbol = Command::cargo_bin("orient").unwrap();
