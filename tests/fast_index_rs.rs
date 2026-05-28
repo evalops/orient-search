@@ -1195,6 +1195,8 @@ fn indexed_query_plan_dedupes_identifier_tokens() {
         vec!["shard", "status", "jobs", "ordered", "items"]
     );
     assert!(plan.query_trigrams.is_empty());
+    let serialized = serde_json::to_value(&plan).unwrap();
+    assert!(serialized.get("query_trigrams").is_none());
     assert_eq!(
         plan.planned_postings
             .iter()
@@ -1252,6 +1254,8 @@ fn indexed_search_uses_trigram_postings_for_substring_queries() {
         .unwrap();
     assert_eq!(plan.strategy, "token_or_trigram_union");
     assert!(!plan.query_trigrams.is_empty());
+    let serialized = serde_json::to_value(&plan).unwrap();
+    assert!(serialized.get("query_trigrams").is_some());
     assert!(
         plan.planned_postings
             .iter()

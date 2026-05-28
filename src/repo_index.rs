@@ -85,7 +85,9 @@ pub struct QueryPlan {
     pub strategy: String,
     pub require_all: bool,
     pub query_tokens: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub query_phrases: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub query_trigrams: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub active_filters: Vec<QueryPlanFilter>,
