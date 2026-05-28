@@ -101,7 +101,13 @@ fn apply_filter(filters: &mut SearchFilters, token: &str, negated: bool) -> bool
         }
         (false, "symbol") => filters.symbol = Some(value),
         (false, "kind" | "symbol_kind" | "symbol-kind") => {
-            filters.symbol_kind = Some(value.to_ascii_lowercase())
+            filters.symbol_kind = Some(normalize_symbol_kind(&value))
+        }
+        (false, "type" | "symbol_type" | "symbol-type") => {
+            match symbol_kind_from_type_value(&value) {
+                Some(kind) => filters.symbol_kind = Some(kind),
+                None => return false,
+            }
         }
         (false, "repo") => filters.repo = Some(value),
         (false, "dep" | "deps" | "dependency" | "dependencies") => {
@@ -122,9 +128,14 @@ fn apply_filter(filters: &mut SearchFilters, token: &str, negated: bool) -> bool
             .exclude_extension
             .push(value.trim_start_matches('.').to_ascii_lowercase()),
         (true, "symbol") => filters.exclude_symbol.push(value),
-        (true, "kind" | "symbol_kind" | "symbol-kind") => {
-            filters.exclude_symbol_kind.push(value.to_ascii_lowercase())
-        }
+        (true, "kind" | "symbol_kind" | "symbol-kind") => filters
+            .exclude_symbol_kind
+            .push(normalize_symbol_kind(&value)),
+        (true, "type" | "symbol_type" | "symbol-type") => match symbol_kind_from_type_value(&value)
+        {
+            Some(kind) => filters.exclude_symbol_kind.push(kind),
+            None => return false,
+        },
         (true, "repo") => filters.exclude_repo.push(value),
         (true, "dep" | "deps" | "dependency" | "dependencies") => {
             filters.exclude_dependency.push(value.to_ascii_lowercase())
@@ -148,6 +159,39 @@ fn test_filter_from_is_value(value: &str) -> Option<bool> {
         "source" | "src" | "code" | "prod" | "production" => Some(false),
         _ => None,
     }
+}
+
+fn normalize_symbol_kind(value: &str) -> String {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "func" | "method" => "function".to_string(),
+        "consts" | "constant" | "constants" => "const".to_string(),
+        "vars" | "variable" | "variables" => "var".to_string(),
+        "classes" => "class".to_string(),
+        "structs" => "struct".to_string(),
+        "enums" => "enum".to_string(),
+        "interfaces" => "interface".to_string(),
+        "traits" => "trait".to_string(),
+        "types" => "type".to_string(),
+        other => other.to_string(),
+    }
+}
+
+fn symbol_kind_from_type_value(value: &str) -> Option<String> {
+    let kind = normalize_symbol_kind(value);
+    matches!(
+        kind.as_str(),
+        "function"
+            | "class"
+            | "interface"
+            | "struct"
+            | "enum"
+            | "trait"
+            | "type"
+            | "const"
+            | "let"
+            | "var"
+    )
+    .then_some(kind)
 }
 
 fn parse_boolish(value: &str) -> Option<bool> {
@@ -323,7 +367,7 @@ mod tests {
     #[test]
     fn parses_dependency_filters() {
         let parsed = parse_query(
-            "dep:serde dependency:tokio import:crate::server kind:function -kind:class -module:legacy symbol:Runtime",
+            "dep:serde dependency:tokio import:crate::server kind:func -type:classes -module:legacy symbol:Runtime",
         );
 
         assert_eq!(parsed.terms, Vec::<String>::new());
@@ -333,6 +377,23 @@ mod tests {
         assert_eq!(parsed.filters.exclude_symbol_kind, vec!["class"]);
         assert_eq!(parsed.filters.exclude_import, vec!["legacy"]);
         assert_eq!(parsed.filters.symbol.as_deref(), Some("Runtime"));
+    }
+
+    #[test]
+    fn parses_type_aliases_for_known_symbol_kinds() {
+        let parsed = parse_query("type:function route request");
+        assert_eq!(parsed.terms, vec!["route", "request"]);
+        assert_eq!(parsed.filters.symbol_kind.as_deref(), Some("function"));
+
+        let alias = parse_query("symbol_type:struct SessionManager");
+        assert_eq!(alias.filters.symbol_kind.as_deref(), Some("struct"));
+
+        let excluded = parse_query("-symbol-type:interfaces gateway");
+        assert_eq!(excluded.filters.exclude_symbol_kind, vec!["interface"]);
+
+        let unknown = parse_query("type:file gateway");
+        assert_eq!(unknown.terms, vec!["type:file", "gateway"]);
+        assert_eq!(unknown.filters.symbol_kind, None);
     }
 
     #[test]

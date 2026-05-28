@@ -92,6 +92,11 @@ fn golden_cases() -> Vec<GoldenCase> {
             filters: SearchFilters::default(),
         },
         GoldenCase {
+            query: "type:function route request",
+            expected_path: "src/http_gateway.rs",
+            filters: SearchFilters::default(),
+        },
+        GoldenCase {
             query: "file:http_gateway.rs",
             expected_path: "src/http_gateway.rs",
             filters: SearchFilters::default(),
