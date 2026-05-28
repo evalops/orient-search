@@ -206,6 +206,50 @@ fn saved_indexes_have_versioned_header_and_legacy_indexes_still_load() {
         legacy.search("issue token", 10).unwrap()[0].path,
         "src/auth.rs"
     );
+
+    let legacy_header_path = repo.path().join(".orient/legacy-header.index");
+    let mut legacy_index = index.clone();
+    legacy_index.version = 9;
+    let mut legacy_header_bytes = Vec::new();
+    legacy_header_bytes.extend_from_slice(b"ORIENTIDX\0");
+    legacy_header_bytes.extend_from_slice(&9u32.to_le_bytes());
+    legacy_header_bytes.extend_from_slice(&bincode::serialize(&legacy_index).unwrap());
+    fs::write(&legacy_header_path, legacy_header_bytes).unwrap();
+    let legacy_header = FastIndex::load(&legacy_header_path).unwrap();
+    assert_eq!(legacy_header.version, index.version);
+    assert_eq!(
+        legacy_header.search("issue token", 10).unwrap()[0].path,
+        "src/auth.rs"
+    );
+}
+
+#[test]
+fn saved_indexes_compress_large_posting_lists_on_disk() {
+    let repo = tempfile::tempdir().unwrap();
+    for index in 0..160 {
+        write(
+            &repo.path().join(format!("src/file_{index:03}.rs")),
+            "pub fn repeated_symbol() { let common_token = true; }\n",
+        );
+    }
+    let index = FastIndex::build(repo.path()).unwrap();
+    let raw_len = bincode::serialize(&index).unwrap().len() + 14;
+    let index_path = repo.path().join(".orient/compressed.index");
+    index.save(&index_path).unwrap();
+    let compressed_len = fs::read(&index_path).unwrap().len();
+
+    assert!(
+        compressed_len < raw_len,
+        "compressed={compressed_len} raw={raw_len}"
+    );
+    assert_eq!(
+        FastIndex::load(&index_path)
+            .unwrap()
+            .search("common token", 10)
+            .unwrap()
+            .len(),
+        10
+    );
 }
 
 #[test]

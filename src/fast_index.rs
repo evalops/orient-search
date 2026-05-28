@@ -26,7 +26,8 @@ use std::path::{Component, Path, PathBuf};
 use std::process;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const INDEX_VERSION: u32 = 9;
+const INDEX_VERSION: u32 = 10;
+const LEGACY_RAW_INDEX_VERSION: u32 = 9;
 const INDEX_MAGIC: &[u8] = b"ORIENTIDX\0";
 const INDEX_HEADER_LEN: usize = INDEX_MAGIC.len() + std::mem::size_of::<u32>();
 const MAX_FILE_BYTES: u64 = 512_000;
@@ -41,6 +42,22 @@ pub struct FastIndex {
     pub postings: HashMap<String, Vec<Posting>>,
     pub path_postings: HashMap<String, Vec<Posting>>,
     pub trigram_postings: HashMap<String, Vec<Posting>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+struct FastIndexDisk {
+    version: u32,
+    root: PathBuf,
+    files: Vec<IndexedPath>,
+    postings: HashMap<String, CompressedPostingList>,
+    path_postings: HashMap<String, CompressedPostingList>,
+    trigram_postings: HashMap<String, CompressedPostingList>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct CompressedPostingList {
+    postings: u32,
+    bytes: Vec<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -289,20 +306,15 @@ impl FastIndex {
             .with_context(|| format!("read index {}", path.as_ref().display()))?;
         let (payload, header_version) = index_payload(&bytes)
             .with_context(|| format!("parse index header {}", path.as_ref().display()))?;
-        if let Some(version) = header_version {
-            anyhow::ensure!(
-                version == INDEX_VERSION,
-                "unsupported index version {}",
-                version
-            );
-        }
-        let mut index = bincode::deserialize::<Self>(payload)
-            .with_context(|| format!("parse index {}", path.as_ref().display()))?;
-        anyhow::ensure!(
-            index.version == INDEX_VERSION,
-            "unsupported index version {}",
-            index.version
-        );
+        let mut index = match header_version {
+            Some(INDEX_VERSION) => bincode::deserialize::<FastIndexDisk>(payload)
+                .with_context(|| format!("parse index {}", path.as_ref().display()))?
+                .into_index()
+                .with_context(|| format!("decode index {}", path.as_ref().display()))?,
+            Some(LEGACY_RAW_INDEX_VERSION) | None => load_raw_index(payload)
+                .with_context(|| format!("parse index {}", path.as_ref().display()))?,
+            Some(version) => anyhow::bail!("unsupported index version {}", version),
+        };
         index.normalize_loaded();
         Ok(index)
     }
@@ -311,7 +323,7 @@ impl FastIndex {
         if let Some(parent) = path.as_ref().parent() {
             fs::create_dir_all(parent)?;
         }
-        let payload = bincode::serialize(self)?;
+        let payload = bincode::serialize(&FastIndexDisk::from_index(self))?;
         let mut bytes = Vec::with_capacity(INDEX_HEADER_LEN + payload.len());
         bytes.extend_from_slice(INDEX_MAGIC);
         bytes.extend_from_slice(&INDEX_VERSION.to_le_bytes());
@@ -1516,6 +1528,138 @@ impl FastIndex {
             context: None,
             read_range: None,
         })
+    }
+}
+
+impl FastIndexDisk {
+    fn from_index(index: &FastIndex) -> Self {
+        Self {
+            version: INDEX_VERSION,
+            root: index.root.clone(),
+            files: index.files.clone(),
+            postings: compress_posting_map(&index.postings),
+            path_postings: compress_posting_map(&index.path_postings),
+            trigram_postings: compress_posting_map(&index.trigram_postings),
+        }
+    }
+
+    fn into_index(self) -> Result<FastIndex> {
+        anyhow::ensure!(
+            self.version == INDEX_VERSION,
+            "unsupported index version {}",
+            self.version
+        );
+        Ok(FastIndex {
+            version: self.version,
+            root: self.root,
+            files: self.files,
+            postings: decompress_posting_map(self.postings)?,
+            path_postings: decompress_posting_map(self.path_postings)?,
+            trigram_postings: decompress_posting_map(self.trigram_postings)?,
+        })
+    }
+}
+
+fn load_raw_index(payload: &[u8]) -> Result<FastIndex> {
+    let mut index = bincode::deserialize::<FastIndex>(payload)?;
+    anyhow::ensure!(
+        index.version == INDEX_VERSION || index.version == LEGACY_RAW_INDEX_VERSION,
+        "unsupported index version {}",
+        index.version
+    );
+    index.version = INDEX_VERSION;
+    Ok(index)
+}
+
+fn compress_posting_map(
+    postings: &HashMap<String, Vec<Posting>>,
+) -> HashMap<String, CompressedPostingList> {
+    postings
+        .iter()
+        .map(|(term, postings)| (term.clone(), compress_postings(postings)))
+        .collect()
+}
+
+fn decompress_posting_map(
+    postings: HashMap<String, CompressedPostingList>,
+) -> Result<HashMap<String, Vec<Posting>>> {
+    postings
+        .into_iter()
+        .map(|(term, postings)| Ok((term, postings.decompress()?)))
+        .collect()
+}
+
+fn compress_postings(postings: &[Posting]) -> CompressedPostingList {
+    let mut bytes = Vec::with_capacity(postings.len() * 3);
+    let mut previous_file_id = 0u32;
+    for (index, posting) in postings.iter().enumerate() {
+        let delta = if index == 0 {
+            posting.file_id
+        } else {
+            posting.file_id.saturating_sub(previous_file_id)
+        };
+        encode_var_u32(delta, &mut bytes);
+        encode_var_u32(posting.count as u32, &mut bytes);
+        previous_file_id = posting.file_id;
+    }
+    CompressedPostingList {
+        postings: postings.len().min(u32::MAX as usize) as u32,
+        bytes,
+    }
+}
+
+impl CompressedPostingList {
+    fn decompress(self) -> Result<Vec<Posting>> {
+        let mut postings = Vec::with_capacity(self.postings as usize);
+        let mut offset = 0usize;
+        let mut previous_file_id = 0u32;
+        for index in 0..self.postings {
+            let delta = decode_var_u32(&self.bytes, &mut offset)?;
+            let count = decode_var_u32(&self.bytes, &mut offset)?;
+            anyhow::ensure!(count <= u16::MAX as u32, "posting count is too large");
+            let file_id = if index == 0 {
+                delta
+            } else {
+                previous_file_id
+                    .checked_add(delta)
+                    .ok_or_else(|| anyhow::anyhow!("posting file id overflow"))?
+            };
+            postings.push(Posting {
+                file_id,
+                count: count as u16,
+            });
+            previous_file_id = file_id;
+        }
+        anyhow::ensure!(
+            offset == self.bytes.len(),
+            "compressed posting list has trailing bytes"
+        );
+        Ok(postings)
+    }
+}
+
+fn encode_var_u32(mut value: u32, bytes: &mut Vec<u8>) {
+    while value >= 0x80 {
+        bytes.push((value as u8 & 0x7f) | 0x80);
+        value >>= 7;
+    }
+    bytes.push(value as u8);
+}
+
+fn decode_var_u32(bytes: &[u8], offset: &mut usize) -> Result<u32> {
+    let mut value = 0u32;
+    let mut shift = 0u32;
+    loop {
+        let Some(byte) = bytes.get(*offset).copied() else {
+            anyhow::bail!("truncated varint");
+        };
+        *offset += 1;
+        value |= ((byte & 0x7f) as u32) << shift;
+        if byte & 0x80 == 0 {
+            return Ok(value);
+        }
+        shift += 7;
+        anyhow::ensure!(shift < 32, "varint is too large");
     }
 }
 

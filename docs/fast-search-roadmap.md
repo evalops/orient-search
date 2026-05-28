@@ -30,7 +30,7 @@ Implemented now:
 
 - `orient search`: fast `rg`-backed candidate collection with Rust-side scoring/snippets.
 - Agent-oriented query language for `file:`, `path:`/`dir:`, `lang:`, `ext:`, `symbol:`, `kind:`/`symbol_kind:`, `repo:`, dependency filters via `dep:`/`dependency:`, import/module filters, `test:`, filter-only discovery queries, separator-normalized exact quoted phrases, negative filters, and default multi-term AND behavior.
-- `orient index`: persistent Rust content-token, path-token, and trigram posting index with a versioned binary file header, atomic same-directory saves, and legacy bincode load support.
+- `orient index`: persistent Rust content-token, path-token, and trigram posting index with a versioned binary file header, delta-varint-compressed posting maps on disk, atomic same-directory saves, and legacy raw bincode load support.
 - `orient ensure-index` / `orient refresh-index`: single-repo index bootstrap and incremental refresh that reuse unchanged file metadata/terms, detect same-content renames, and refresh changed files.
 - `orient indexed-search`: indexed query path.
 - `orient discover-repos`: bounded local repo discovery for broad workspaces and repeated worktree layouts, with git checkout boundaries by default and an explicit nested-manifest opt-in.
@@ -105,7 +105,7 @@ Search quality definition:
 Engineering definition:
 
 - Persistent index has a versioned on-disk format with a cheap magic/version header before the encoded payload, and writes replace indexes atomically from same-directory temp files.
-- Persistent index stores separate content-token, path-token, and trigram postings.
+- Persistent index stores separate content-token, path-token, and trigram postings, with sorted in-memory posting lists and compact delta-varint posting maps in saved indexes.
 - Multi-repo shard directories store a validated, atomically replaced manifest plus one versioned index per repo, and can refresh those indexes incrementally.
 - Persistent indexed files include line-offset tables, token-to-line tables, and bounded source snapshots for snippet and range retrieval.
 - Incremental refresh covers add/edit/delete and same-content rename detection.
@@ -124,8 +124,8 @@ Zoekt-inspired indexed mode:
 
 - Move from token postings to trigram postings for substring and regex-like queries.
 - Store the index in versioned shards, one shard per repo or repo slice.
-- Use mmap-friendly binary layout rather than JSON once the schema stabilizes.
-- Store compact file metadata, path postings, content postings, and richer line/term offset tables.
+- Keep moving the saved index toward mmap-friendly sections rather than one bincode blob as the schema stabilizes.
+- Store compact file metadata and richer line/term offset tables.
 - Keep snapshot-backed snippet and range reads compact while exploring richer line/term offset tables.
 - Add query planning: choose the rarest required posting lists first, then verify candidates.
 
