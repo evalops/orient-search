@@ -543,18 +543,15 @@ fn search_repo_filter_only(
     let candidate_cap = filter_only_candidate_cap(limit, filters);
     let deadline = Instant::now() + timeout;
     let mut candidates =
-        match filter_only_candidates_from_fd_files(root, filters, candidate_cap, deadline)? {
-            Some(candidates) => candidates,
-            None => {
-                match filter_only_candidates_from_rg_files(root, filters, candidate_cap, deadline)?
-                {
-                    Some(candidates) => candidates,
-                    None => {
-                        filter_only_candidates_from_walk(root, filters, candidate_cap, deadline)?
-                    }
-                }
-            }
-        };
+        filter_only_candidates_from_fd_files(root, filters, candidate_cap, deadline)?
+            .unwrap_or_default();
+    if candidates.is_empty() && Instant::now() < deadline {
+        candidates = filter_only_candidates_from_rg_files(root, filters, candidate_cap, deadline)?
+            .unwrap_or_default();
+    }
+    if candidates.is_empty() && Instant::now() < deadline {
+        candidates = filter_only_candidates_from_walk(root, filters, candidate_cap, deadline)?;
+    }
 
     candidates.sort_by(|(left_path, left), (right_path, right)| {
         right
