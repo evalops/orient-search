@@ -3247,6 +3247,10 @@ fn runtime_filters_shard_search_by_nested_repo_alias() {
         serde_json::json!("billing/src/billing.rs")
     );
     assert_eq!(
+        search_result[0]["related_symbols_request"]["arguments"]["query"],
+        serde_json::json!("repo:billing invoice total")
+    );
+    assert_eq!(
         search_result[0]["related_symbols_request"]["arguments"]["index_dir"],
         serde_json::json!(shard_dir.path())
     );

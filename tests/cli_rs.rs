@@ -1042,6 +1042,7 @@ fn cli_searches_symbols_and_related_files() {
         .stdout(predicate::str::contains("\"tool\":\"related_files\""))
         .stdout(predicate::str::contains("\"related_symbols_request\""))
         .stdout(predicate::str::contains("\"tool\":\"related_symbols\""))
+        .stdout(predicate::str::contains("\"query\":\"issue token\""))
         .stdout(predicate::str::contains("\"lines\":80"))
         .stdout(predicate::str::contains("\"explanation\""))
         .stdout(predicate::str::contains("\"context\""))

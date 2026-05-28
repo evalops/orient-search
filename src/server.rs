@@ -808,7 +808,7 @@ pub fn agent_guide(
             "Use result.read_request for one bounded file range.",
             "Batch several result.read_range objects with read_ranges, read_index_ranges, or read_shard_ranges.",
             "Use result.related_request for source/test siblings.",
-            "Use result.related_symbols_request for nearby definitions and types."
+            "Use result.related_symbols_request for nearby definitions and types; search-generated requests include the original query."
         ],
         "hard_limits": {
             "max_results": MAX_SEARCH_RESULTS,
@@ -1671,6 +1671,7 @@ impl ToolRuntime {
                 attach_result_related_symbol_requests(
                     &mut results,
                     "related_symbols",
+                    Some(&query),
                     read_request_args("repo", &repo),
                 );
                 Ok(serde_json::to_value(results)?)
@@ -1731,6 +1732,7 @@ impl ToolRuntime {
                     attach_result_related_symbol_requests(
                         &mut results,
                         "related_symbols",
+                        Some(&query),
                         read_request_args("repo", &repo),
                     );
                     let read_batch_request = result_read_batch_request(
@@ -1806,6 +1808,7 @@ impl ToolRuntime {
                 attach_result_related_symbol_requests(
                     &mut results,
                     "related_index_symbols",
+                    Some(&query),
                     read_request_args("index", &index_path),
                 );
                 Ok(serde_json::to_value(results)?)
@@ -1838,6 +1841,7 @@ impl ToolRuntime {
                     attach_result_related_symbol_requests(
                         &mut results,
                         "related_index_symbols",
+                        Some(&query),
                         read_request_args("index", &index_path),
                     );
                     let read_batch_request = result_read_batch_request(
@@ -2301,6 +2305,7 @@ impl ToolRuntime {
         attach_result_related_symbol_requests(
             &mut results,
             "related_symbols",
+            Some(query),
             read_request_args("repo", &repo),
         );
         Ok(SearchAutoResult {
@@ -2413,6 +2418,7 @@ impl ToolRuntime {
         attach_result_related_symbol_requests(
             &mut results,
             "related_index_symbols",
+            Some(query),
             read_request_args("index", &index_path),
         );
         Ok(SearchAutoResult {
@@ -2740,6 +2746,7 @@ impl ToolRuntime {
         attach_result_related_symbol_requests(
             &mut results,
             "related_shard_symbols",
+            Some(query),
             read_request_args("index_dir", index_dir),
         );
         Ok(results)

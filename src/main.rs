@@ -1136,6 +1136,7 @@ fn run() -> Result<()> {
             attach_result_related_symbol_requests(
                 &mut results,
                 "related_shard_symbols",
+                Some(&query),
                 read_request_args("index_dir", &index_dir),
             );
             println!("{}", serde_json::to_string(&results)?);
@@ -1173,6 +1174,7 @@ fn run() -> Result<()> {
                 attach_result_related_symbol_requests(
                     &mut results,
                     "related_shard_symbols",
+                    Some(&query),
                     read_request_args("index_dir", &index_dir),
                 );
                 let read_batch_request = result_read_batch_request(
@@ -1457,6 +1459,7 @@ fn run() -> Result<()> {
             attach_result_related_symbol_requests(
                 &mut results,
                 "related_symbols",
+                Some(&query),
                 read_request_args("repo", &repo),
             );
             println!("{}", serde_json::to_string(&results)?);
@@ -1494,6 +1497,7 @@ fn run() -> Result<()> {
                 attach_result_related_symbol_requests(
                     &mut results,
                     "related_shard_symbols",
+                    Some(&query),
                     read_request_args("index_dir", &index_dir),
                 );
                 let query_plan_result = if results.is_empty() {
@@ -1544,6 +1548,7 @@ fn run() -> Result<()> {
                 attach_result_related_symbol_requests(
                     &mut results,
                     "related_index_symbols",
+                    Some(&query),
                     read_request_args("index", &index_path),
                 );
                 let query_plan_result = if results.is_empty() {
@@ -1598,6 +1603,7 @@ fn run() -> Result<()> {
                 attach_result_related_symbol_requests(
                     &mut results,
                     "related_symbols",
+                    Some(&query),
                     read_request_args("repo", &repo),
                 );
                 let query_plan_result = if results.is_empty() {
@@ -1671,6 +1677,7 @@ fn run() -> Result<()> {
                     attach_result_related_symbol_requests(
                         &mut results,
                         "related_shard_symbols",
+                        Some(&query),
                         read_request_args("index_dir", &index_dir),
                     );
                     let query_plan_result = if results.is_empty() {
@@ -1723,6 +1730,7 @@ fn run() -> Result<()> {
                     attach_result_related_symbol_requests(
                         &mut results,
                         "related_index_symbols",
+                        Some(&query),
                         read_request_args("index", &index_path),
                     );
                     let query_plan_result = if results.is_empty() {
@@ -1779,6 +1787,7 @@ fn run() -> Result<()> {
                     attach_result_related_symbol_requests(
                         &mut results,
                         "related_symbols",
+                        Some(&query),
                         read_request_args("repo", &repo),
                     );
                     let query_plan_result = if results.is_empty() {
@@ -1847,6 +1856,7 @@ fn run() -> Result<()> {
                 attach_result_related_symbol_requests(
                     &mut results,
                     "related_symbols",
+                    Some(&query),
                     read_request_args("repo", &repo),
                 );
                 let read_batch_request = result_read_batch_request(
@@ -1891,6 +1901,7 @@ fn run() -> Result<()> {
             attach_result_related_symbol_requests(
                 &mut results,
                 "related_index_symbols",
+                Some(&query),
                 read_request_args("index", &index_path),
             );
             println!("{}", serde_json::to_string(&results)?);
@@ -1927,6 +1938,7 @@ fn run() -> Result<()> {
                 attach_result_related_symbol_requests(
                     &mut results,
                     "related_index_symbols",
+                    Some(&query),
                     read_request_args("index", &index_path),
                 );
                 let read_batch_request = result_read_batch_request(

@@ -3475,10 +3475,14 @@ pub fn attach_result_related_requests(
 pub fn attach_result_related_symbol_requests(
     results: &mut [SearchResult],
     tool: &str,
+    query: Option<&str>,
     base_arguments: serde_json::Map<String, serde_json::Value>,
 ) {
     for result in results {
         let mut arguments = base_arguments.clone();
+        if let Some(query) = query.filter(|query| !query.trim().is_empty()) {
+            arguments.insert("query".to_string(), serde_json::json!(query));
+        }
         arguments.insert("path".to_string(), serde_json::json!(result.path.clone()));
         result.related_symbols_request = Some(ResultToolRequest {
             tool: tool.to_string(),
