@@ -1201,6 +1201,7 @@ fn indexed_query_plan_dedupes_identifier_tokens() {
             .count(),
         1
     );
+    assert!(plan.missing_trigrams.is_empty());
 
     let results = index
         .search_filtered(

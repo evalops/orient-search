@@ -1008,7 +1008,11 @@ impl FastIndex {
             Vec::new()
         };
         let missing_terms = missing_query_terms(&query_tokens, &token_postings, &path_postings);
-        let missing_trigrams = missing_query_trigrams(&query_trigrams, &trigram_postings);
+        let missing_trigrams = if use_trigrams {
+            missing_query_trigrams(&query_trigrams, &trigram_postings)
+        } else {
+            Vec::new()
+        };
         if token_postings.is_empty() && path_postings.is_empty() && trigram_postings.is_empty() {
             return Ok(Vec::new());
         }
@@ -1286,7 +1290,11 @@ impl FastIndex {
             Vec::new()
         };
         let missing_terms = missing_query_terms(&query_tokens, &token_postings, &path_postings);
-        let missing_trigrams = missing_query_trigrams(&query_trigrams, &trigram_postings);
+        let missing_trigrams = if use_trigrams {
+            missing_query_trigrams(&query_trigrams, &trigram_postings)
+        } else {
+            Vec::new()
+        };
         token_postings.sort_by_key(|(_, postings)| postings.len());
         path_postings.sort_by_key(|(_, postings)| postings.len());
         trigram_postings.sort_by_key(|(_, postings)| postings.len());
