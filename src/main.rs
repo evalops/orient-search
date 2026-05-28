@@ -1008,6 +1008,7 @@ fn cli_relaxed_filter_field(kind: &str) -> Option<&'static str> {
         "relax_extension_filter" => Some("extension"),
         "relax_test_filter" => Some("test"),
         "relax_symbol_kind_filter" => Some("symbol_kind"),
+        "relax_dependency_filter" => Some("dependency"),
         "relax_import_filter" => Some("import"),
         _ => None,
     }
@@ -1038,7 +1039,9 @@ fn add_filter_retry_args(
     if target_name != "repo" {
         insert_string_arg(arguments, "repo", filters.repo.as_ref());
     }
-    insert_string_arg(arguments, "dependency", filters.dependency.as_ref());
+    if skip_field != Some("dependency") {
+        insert_string_arg(arguments, "dependency", filters.dependency.as_ref());
+    }
     if skip_field != Some("import") {
         insert_string_arg(arguments, "import", filters.import.as_ref());
     }

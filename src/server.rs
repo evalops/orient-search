@@ -1557,6 +1557,7 @@ fn retry_relaxed_filter_field(kind: &str) -> Option<&'static str> {
         "relax_extension_filter" => Some("extension"),
         "relax_test_filter" => Some("test"),
         "relax_symbol_kind_filter" => Some("symbol_kind"),
+        "relax_dependency_filter" => Some("dependency"),
         "relax_import_filter" => Some("import"),
         _ => None,
     }
@@ -1571,6 +1572,7 @@ fn retry_source_arg_matches_filter(name: &str, field: Option<&str>) -> bool {
             | (Some("extension"), "extension" | "ext")
             | (Some("test"), "test" | "tests")
             | (Some("symbol_kind"), "symbol_kind" | "kind" | "type")
+            | (Some("dependency"), "dependency" | "dep" | "deps")
             | (Some("import"), "import" | "module" | "use")
     )
 }

@@ -1560,6 +1560,50 @@ fn runtime_batches_searches_and_query_plans_against_repo_index_and_shards() {
     );
     assert_eq!(relax_result["retry_requests"].as_array().unwrap().len(), 1);
 
+    let filter_only_plan = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("filter-only-plan"),
+        tool: "search_plan".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "query": "file:not-real.rs lang:rust"
+        }),
+    });
+    assert!(
+        filter_only_plan.error.is_none(),
+        "{:?}",
+        filter_only_plan.error
+    );
+    let filter_only_result = filter_only_plan.result.as_ref().unwrap();
+    assert_eq!(
+        filter_only_result["repair_hints"][0]["kind"],
+        serde_json::json!("relax_file_filter")
+    );
+    assert_eq!(
+        filter_only_result["retry_requests"][0]["arguments"]["query"],
+        ""
+    );
+    assert!(filter_only_result["retry_requests"][0]["arguments"]["file"].is_null());
+    assert_eq!(
+        filter_only_result["retry_requests"][0]["arguments"]["language"],
+        "rust"
+    );
+
+    let filter_only_retry = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("filter-only-retry"),
+        tool: filter_only_result["retry_requests"][0]["tool"]
+            .as_str()
+            .unwrap()
+            .to_string(),
+        arguments: filter_only_result["retry_requests"][0]["arguments"].clone(),
+    });
+    assert!(
+        filter_only_retry.error.is_none(),
+        "{:?}",
+        filter_only_retry.error
+    );
+    let retry_result = serde_json::to_string(&filter_only_retry.result).unwrap();
+    assert!(retry_result.contains("src/auth.rs"), "{retry_result}");
+
     let live_plan_batch = runtime.dispatch(ToolRequest {
         id: serde_json::json!("live-plan-batch"),
         tool: "search_query_plan_batch".to_string(),

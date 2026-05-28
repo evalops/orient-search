@@ -877,6 +877,32 @@ fn indexed_query_plan_reports_missing_terms_without_results() {
         "{:?}",
         kind_typo_plan.repair_hints
     );
+
+    let bad_file_plan = index
+        .query_plan("file:not_real.rs lang:rust", &SearchFilters::default())
+        .unwrap();
+    assert_eq!(bad_file_plan.strategy, "filter_scan");
+    assert_eq!(bad_file_plan.final_match_count, 0);
+    assert_eq!(bad_file_plan.repair_hints[0].kind, "relax_file_filter");
+    assert_eq!(
+        bad_file_plan.repair_hints[0].suggested_query.as_deref(),
+        Some("")
+    );
+    assert!(bad_file_plan.repair_hints.iter().any(|hint| {
+        hint.kind == "relax_language_filter" && hint.suggested_query.as_deref() == Some("")
+    }));
+    assert!(
+        bad_file_plan
+            .repair_hints
+            .iter()
+            .any(|hint| hint.kind == "relax_filters" && hint.suggested_query.is_none())
+    );
+
+    let single_filter_plan = index
+        .query_plan("file:not_real.rs", &SearchFilters::default())
+        .unwrap();
+    assert_eq!(single_filter_plan.repair_hints[0].kind, "relax_file_filter");
+    assert!(single_filter_plan.repair_hints[0].suggested_query.is_none());
 }
 
 #[test]

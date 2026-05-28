@@ -2753,11 +2753,78 @@ fn filter_scan_repair_hints(
             )];
         }
     }
-    vec![repair_hint(
+    let mut hints = filter_scan_specific_repair_hints(filters);
+    hints.push(repair_hint(
         "relax_filters",
         "No files matched the filter-only query. Relax file/path/language/extension/test filters.",
         None,
-    )]
+    ));
+    hints
+}
+
+fn filter_scan_specific_repair_hints(filters: &SearchFilters) -> Vec<QueryPlanRepairHint> {
+    let mut active = Vec::<(&str, &str, String)>::new();
+    if let Some(value) = filters
+        .file
+        .as_ref()
+        .filter(|value| !value.trim().is_empty())
+    {
+        active.push(("file", "file", value.clone()));
+    }
+    if let Some(value) = filters
+        .path
+        .as_ref()
+        .filter(|value| !value.trim().is_empty())
+    {
+        active.push(("path", "path", value.clone()));
+    }
+    if let Some(value) = filters
+        .language
+        .as_ref()
+        .filter(|value| !value.trim().is_empty())
+    {
+        active.push(("language", "lang", value.clone()));
+    }
+    if let Some(value) = filters
+        .extension
+        .as_ref()
+        .filter(|value| !value.trim().is_empty())
+    {
+        active.push(("extension", "ext", value.clone()));
+    }
+    if let Some(value) = filters
+        .dependency
+        .as_ref()
+        .filter(|value| !value.trim().is_empty())
+    {
+        active.push(("dependency", "dep", value.clone()));
+    }
+    if let Some(value) = filters
+        .import
+        .as_ref()
+        .filter(|value| !value.trim().is_empty())
+    {
+        active.push(("import", "import", value.clone()));
+    }
+    if let Some(test) = filters.test {
+        active.push(("test", "test", test.to_string()));
+    }
+
+    active
+        .iter()
+        .map(|(field, label, value)| {
+            let remaining_scope = active
+                .iter()
+                .any(|(other_field, _, _)| other_field != field);
+            repair_hint(
+                format!("relax_{}_filter", field),
+                format!(
+                    "No files matched the {label}:{value} filter-only query. Retry without just that filter before dropping the rest of the scope."
+                ),
+                remaining_scope.then(String::new),
+            )
+        })
+        .collect()
 }
 
 fn available_symbol_kinds(symbol_kind_postings: &HashMap<String, Vec<Posting>>) -> Vec<String> {
