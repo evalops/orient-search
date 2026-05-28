@@ -983,7 +983,9 @@ fn cli_retry_requests<T: Serialize>(
         }
         let mut arguments = Map::new();
         if hint.kind != "relax_filters" {
-            let skip_field = (hint.kind == "replace_symbol_kind_filter").then_some("symbol_kind");
+            let skip_field = (hint.kind == "replace_symbol_kind_filter")
+                .then_some("symbol_kind")
+                .or_else(|| cli_relaxed_filter_field(&hint.kind));
             add_filter_retry_args(&mut arguments, filters, target_name, skip_field);
             add_plan_filter_retry_args(&mut arguments, plan, target_name, skip_field);
         }
@@ -998,16 +1000,37 @@ fn cli_retry_requests<T: Serialize>(
     requests
 }
 
+fn cli_relaxed_filter_field(kind: &str) -> Option<&'static str> {
+    match kind {
+        "relax_file_filter" => Some("file"),
+        "relax_path_filter" => Some("path"),
+        "relax_language_filter" => Some("language"),
+        "relax_extension_filter" => Some("extension"),
+        "relax_test_filter" => Some("test"),
+        "relax_symbol_kind_filter" => Some("symbol_kind"),
+        "relax_import_filter" => Some("import"),
+        _ => None,
+    }
+}
+
 fn add_filter_retry_args(
     arguments: &mut Map<String, Value>,
     filters: &SearchFilters,
     target_name: &str,
     skip_field: Option<&str>,
 ) {
-    insert_string_arg(arguments, "file", filters.file.as_ref());
-    insert_string_arg(arguments, "path", filters.path.as_ref());
-    insert_string_arg(arguments, "language", filters.language.as_ref());
-    insert_string_arg(arguments, "extension", filters.extension.as_ref());
+    if skip_field != Some("file") {
+        insert_string_arg(arguments, "file", filters.file.as_ref());
+    }
+    if skip_field != Some("path") {
+        insert_string_arg(arguments, "path", filters.path.as_ref());
+    }
+    if skip_field != Some("language") {
+        insert_string_arg(arguments, "language", filters.language.as_ref());
+    }
+    if skip_field != Some("extension") {
+        insert_string_arg(arguments, "extension", filters.extension.as_ref());
+    }
     insert_string_arg(arguments, "symbol", filters.symbol.as_ref());
     if skip_field != Some("symbol_kind") {
         insert_string_arg(arguments, "symbol_kind", filters.symbol_kind.as_ref());
@@ -1016,8 +1039,12 @@ fn add_filter_retry_args(
         insert_string_arg(arguments, "repo", filters.repo.as_ref());
     }
     insert_string_arg(arguments, "dependency", filters.dependency.as_ref());
-    insert_string_arg(arguments, "import", filters.import.as_ref());
-    if let Some(test) = filters.test {
+    if skip_field != Some("import") {
+        insert_string_arg(arguments, "import", filters.import.as_ref());
+    }
+    if skip_field != Some("test")
+        && let Some(test) = filters.test
+    {
         arguments.insert("test".to_string(), serde_json::json!(test));
     }
     insert_string_array_arg(arguments, "exclude_file", &filters.exclude_file);

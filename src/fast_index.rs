@@ -2559,6 +2559,21 @@ fn indexed_query_plan(
     });
     planned_postings.truncate(16);
 
+    let repair_hints = query_plan_repair_hints(
+        query_tokens,
+        query_phrases,
+        missing_terms,
+        missing_trigrams,
+        &active_filters,
+        require_all,
+        candidate_count,
+        candidate_cap,
+        candidate_cap_hit,
+        filtered_candidate_count,
+        scored_candidate_count,
+        final_match_count,
+    );
+
     QueryPlan {
         strategy: if use_trigrams && query_tokens.len() == 1 {
             "token_or_trigram_union".to_string()
@@ -2585,19 +2600,7 @@ fn indexed_query_plan(
         filtered_candidate_count,
         scored_candidate_count,
         final_match_count,
-        repair_hints: query_plan_repair_hints(
-            query_tokens,
-            query_phrases,
-            missing_terms,
-            missing_trigrams,
-            require_all,
-            candidate_count,
-            candidate_cap,
-            candidate_cap_hit,
-            filtered_candidate_count,
-            scored_candidate_count,
-            final_match_count,
-        ),
+        repair_hints,
         retry_requests: Vec::new(),
     }
 }
@@ -2607,6 +2610,7 @@ fn query_plan_repair_hints(
     query_phrases: &[String],
     missing_terms: &[String],
     missing_trigrams: &[String],
+    active_filters: &[QueryPlanFilter],
     require_all: bool,
     candidate_count: usize,
     candidate_cap: usize,
@@ -2654,6 +2658,7 @@ fn query_plan_repair_hints(
         ));
     }
     if candidate_count > 0 && filtered_candidate_count == 0 {
+        hints.extend(filter_specific_repair_hints(active_filters, query_tokens));
         hints.push(repair_hint(
             "relax_filters",
             "Posting candidates exist, but file/path/language/extension/test filters rejected all of them.",
@@ -2686,6 +2691,39 @@ fn query_plan_repair_hints(
         ));
     }
     hints
+}
+
+fn filter_specific_repair_hints(
+    active_filters: &[QueryPlanFilter],
+    query_tokens: &[String],
+) -> Vec<QueryPlanRepairHint> {
+    active_filters
+        .iter()
+        .filter(|filter| {
+            !filter.negated
+                && filter.candidate_matches == Some(0)
+                && matches!(
+                    filter.field.as_str(),
+                    "file" | "path" | "language" | "extension" | "test" | "symbol_kind" | "import"
+                )
+        })
+        .map(|filter| {
+            let field_label = match filter.field.as_str() {
+                "language" => "lang",
+                "extension" => "ext",
+                "symbol_kind" => "kind",
+                other => other,
+            };
+            repair_hint(
+                format!("relax_{}_filter", filter.field),
+                format!(
+                    "The {field_label}:{} filter rejected every posting candidate. Retry without just that filter before dropping the rest of the scope.",
+                    filter.value
+                ),
+                suggested_token_query(query_tokens),
+            )
+        })
+        .collect()
 }
 
 fn filter_scan_repair_hints(

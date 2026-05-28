@@ -1506,6 +1506,7 @@ fn retry_search_requests<T: Serialize>(
         }
         let mut arguments = Map::new();
         let replace_symbol_kind = hint.kind == "replace_symbol_kind_filter";
+        let relaxed_field = retry_relaxed_filter_field(&hint.kind);
         if hint.kind == "relax_filters" {
             if let Some(source) = source_arguments.as_object() {
                 for name in ["refresh_if_stale", "require_all", "any_terms"] {
@@ -1519,6 +1520,9 @@ fn retry_search_requests<T: Serialize>(
                 if replace_symbol_kind && matches!(name.as_str(), "symbol_kind" | "kind" | "type") {
                     continue;
                 }
+                if retry_source_arg_matches_filter(name, relaxed_field) {
+                    continue;
+                }
                 if retry_search_passthrough_arg(name, target_name) {
                     arguments.insert(name.clone(), value.clone());
                 }
@@ -1529,7 +1533,9 @@ fn retry_search_requests<T: Serialize>(
                 &mut arguments,
                 plan,
                 target_name,
-                replace_symbol_kind.then_some("symbol_kind"),
+                replace_symbol_kind
+                    .then_some("symbol_kind")
+                    .or(relaxed_field),
             );
         }
         arguments.insert(target_name.to_string(), json!(target_value));
@@ -1541,6 +1547,32 @@ fn retry_search_requests<T: Serialize>(
         });
     }
     requests
+}
+
+fn retry_relaxed_filter_field(kind: &str) -> Option<&'static str> {
+    match kind {
+        "relax_file_filter" => Some("file"),
+        "relax_path_filter" => Some("path"),
+        "relax_language_filter" => Some("language"),
+        "relax_extension_filter" => Some("extension"),
+        "relax_test_filter" => Some("test"),
+        "relax_symbol_kind_filter" => Some("symbol_kind"),
+        "relax_import_filter" => Some("import"),
+        _ => None,
+    }
+}
+
+fn retry_source_arg_matches_filter(name: &str, field: Option<&str>) -> bool {
+    matches!(
+        (field, name),
+        (Some("file"), "file")
+            | (Some("path"), "path" | "dir" | "directory")
+            | (Some("language"), "language" | "lang")
+            | (Some("extension"), "extension" | "ext")
+            | (Some("test"), "test" | "tests")
+            | (Some("symbol_kind"), "symbol_kind" | "kind" | "type")
+            | (Some("import"), "import" | "module" | "use")
+    )
 }
 
 fn retry_search_passthrough_arg(name: &str, target_name: &str) -> bool {

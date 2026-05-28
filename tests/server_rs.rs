@@ -1531,7 +1531,7 @@ fn runtime_batches_searches_and_query_plans_against_repo_index_and_shards() {
         tool: "search_plan".to_string(),
         arguments: serde_json::json!({
             "repo": repo.path(),
-            "query": "SessionManager path:not-real",
+            "query": "SessionManager path:not-real lang:rust",
             "require_all": true
         }),
     });
@@ -1543,13 +1543,22 @@ fn runtime_batches_searches_and_query_plans_against_repo_index_and_shards() {
     let relax_result = relax_filter_plan.result.as_ref().unwrap();
     assert_eq!(
         relax_result["repair_hints"][0]["kind"],
-        serde_json::json!("relax_filters")
+        serde_json::json!("relax_path_filter")
     );
-    assert!(relax_result["retry_requests"][0]["arguments"]["path"].is_null());
     assert_eq!(
         relax_result["retry_requests"][0]["arguments"]["query"],
         "session manager"
     );
+    assert!(relax_result["retry_requests"][0]["arguments"]["path"].is_null());
+    assert_eq!(
+        relax_result["retry_requests"][0]["arguments"]["language"],
+        "rust"
+    );
+    assert_eq!(
+        relax_result["repair_hints"][1]["kind"],
+        serde_json::json!("relax_filters")
+    );
+    assert_eq!(relax_result["retry_requests"].as_array().unwrap().len(), 1);
 
     let live_plan_batch = runtime.dispatch(ToolRequest {
         id: serde_json::json!("live-plan-batch"),
@@ -1790,7 +1799,7 @@ fn relax_filter_retries_preserve_term_match_mode() {
     });
     assert!(plan.error.is_none(), "{:?}", plan.error);
     let plan = plan.result.as_ref().unwrap();
-    assert_eq!(plan["repair_hints"][0]["kind"], "relax_filters");
+    assert_eq!(plan["repair_hints"][0]["kind"], "relax_path_filter");
     assert_eq!(
         plan["retry_requests"][0]["arguments"]["any_terms"],
         serde_json::json!(true)

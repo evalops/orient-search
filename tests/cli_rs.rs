@@ -328,6 +328,24 @@ fn cli_search_auto_selects_live_indexed_and_shard_surfaces() {
         .success()
         .stdout(predicate::str::contains("\"query_plan_result\""))
         .stdout(predicate::str::contains("\"final_match_count\":1"));
+
+    let mut diagnosed_bad_scope = Command::cargo_bin("orient").unwrap();
+    let output = diagnosed_bad_scope
+        .args([
+            "search-auto",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--diagnose",
+            "path:not-real lang:rust issue_token",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let plan = &value["query_plan_result"];
+    assert_eq!(plan["repair_hints"][0]["kind"], "relax_path_filter");
+    assert_eq!(plan["retry_requests"][0]["arguments"]["language"], "rust");
+    assert!(plan["retry_requests"][0]["arguments"]["path"].is_null());
 }
 
 #[test]

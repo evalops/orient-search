@@ -944,6 +944,11 @@ fn indexed_query_plan_counts_filter_and_phrase_rejections() {
         Some(filter_rejected.candidate_count)
     );
     assert!(filter_rejected.repair_hints.iter().any(|hint| {
+        hint.kind == "relax_path_filter"
+            && hint.suggested_query.as_deref() == Some("session manager")
+            && hint.message.contains("path:tests")
+    }));
+    assert!(filter_rejected.repair_hints.iter().any(|hint| {
         hint.kind == "relax_filters" && hint.suggested_query.as_deref() == Some("session manager")
     }));
 
