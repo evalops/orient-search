@@ -1364,6 +1364,31 @@ fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
             .contains("src/auth.rs")
     );
 
+    let git_scope_miss = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("git-scope-miss"),
+        tool: "search_auto".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "query": "branch:not-real-branch issue_token",
+            "limit": 5
+        }),
+    });
+    assert!(git_scope_miss.error.is_none(), "{:?}", git_scope_miss.error);
+    let git_scope_miss = git_scope_miss.result.unwrap();
+    assert_eq!(
+        git_scope_miss["query_plan_result"]["repair_hints"][0]["kind"],
+        "relax_branch_filter"
+    );
+    assert_eq!(
+        git_scope_miss["query_plan_result"]["retry_requests"][0]["arguments"]["query"],
+        "issue_token"
+    );
+    assert!(
+        git_scope_miss["query_plan_result"]["retry_requests"][0]["arguments"]
+            .get("branch")
+            .is_none()
+    );
+
     let index_path = repo.path().join("orient.index");
     let ensure = runtime.dispatch(ToolRequest {
         id: serde_json::json!("ensure"),

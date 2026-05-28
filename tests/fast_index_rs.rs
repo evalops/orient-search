@@ -903,6 +903,19 @@ fn indexed_query_plan_reports_missing_terms_without_results() {
         .unwrap();
     assert_eq!(single_filter_plan.repair_hints[0].kind, "relax_file_filter");
     assert!(single_filter_plan.repair_hints[0].suggested_query.is_none());
+
+    let branch_mismatch = index
+        .query_plan(
+            "branch:not-real-branch SessionManager",
+            &SearchFilters::default(),
+        )
+        .unwrap();
+    assert_eq!(branch_mismatch.strategy, "repo_filter_mismatch");
+    assert_eq!(branch_mismatch.repair_hints[0].kind, "relax_branch_filter");
+    assert_eq!(
+        branch_mismatch.repair_hints[0].suggested_query.as_deref(),
+        Some("SessionManager")
+    );
 }
 
 #[test]

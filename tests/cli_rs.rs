@@ -365,6 +365,27 @@ fn cli_search_auto_selects_live_indexed_and_shard_surfaces() {
     assert_eq!(plan["retry_requests"][0]["arguments"]["query"], "");
     assert_eq!(plan["retry_requests"][0]["arguments"]["language"], "rust");
     assert!(plan["retry_requests"][0]["arguments"]["file"].is_null());
+
+    let mut diagnosed_git_scope = Command::cargo_bin("orient").unwrap();
+    let output = diagnosed_git_scope
+        .args([
+            "search-auto",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--diagnose",
+            "branch:not-real-branch issue_token",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let plan = &value["query_plan_result"];
+    assert_eq!(plan["repair_hints"][0]["kind"], "relax_branch_filter");
+    assert_eq!(
+        plan["retry_requests"][0]["arguments"]["query"],
+        "issue_token"
+    );
+    assert!(plan["retry_requests"][0]["arguments"]["branch"].is_null());
 }
 
 #[test]

@@ -1146,6 +1146,9 @@ fn cli_relaxed_filter_field(kind: &str) -> Option<&'static str> {
         "relax_extension_filter" => Some("extension"),
         "relax_test_filter" => Some("test"),
         "relax_symbol_kind_filter" => Some("symbol_kind"),
+        "relax_repo_filter" => Some("repo"),
+        "relax_branch_filter" => Some("branch"),
+        "relax_origin_filter" => Some("origin"),
         "relax_dependency_filter" => Some("dependency"),
         "relax_import_filter" => Some("import"),
         _ => None,
@@ -1174,8 +1177,14 @@ fn add_filter_retry_args(
     if skip_field != Some("symbol_kind") {
         insert_string_arg(arguments, "symbol_kind", filters.symbol_kind.as_ref());
     }
-    if target_name != "repo" {
+    if target_name != "repo" && skip_field != Some("repo") {
         insert_string_arg(arguments, "repo", filters.repo.as_ref());
+    }
+    if skip_field != Some("branch") {
+        insert_string_arg(arguments, "branch", filters.branch.as_ref());
+    }
+    if skip_field != Some("origin") {
+        insert_string_arg(arguments, "origin", filters.origin.as_ref());
     }
     if skip_field != Some("dependency") {
         insert_string_arg(arguments, "dependency", filters.dependency.as_ref());
@@ -1198,7 +1207,15 @@ fn add_filter_retry_args(
         "exclude_symbol_kind",
         &filters.exclude_symbol_kind,
     );
-    insert_string_array_arg(arguments, "exclude_repo", &filters.exclude_repo);
+    if skip_field != Some("repo") {
+        insert_string_array_arg(arguments, "exclude_repo", &filters.exclude_repo);
+    }
+    if skip_field != Some("branch") {
+        insert_string_array_arg(arguments, "exclude_branch", &filters.exclude_branch);
+    }
+    if skip_field != Some("origin") {
+        insert_string_array_arg(arguments, "exclude_origin", &filters.exclude_origin);
+    }
     insert_string_array_arg(arguments, "exclude_dependency", &filters.exclude_dependency);
     insert_string_array_arg(arguments, "exclude_import", &filters.exclude_import);
 }

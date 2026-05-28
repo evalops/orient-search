@@ -1346,6 +1346,7 @@ impl FastIndex {
         let query_phrases = query_phrases(&parsed.terms);
         let mut filters = merge_filters(filters.clone(), parsed.filters);
         if !repo_matches(&self.root, &filters) {
+            let retry_query = query_text(&parsed.terms, &filters);
             return Ok(QueryPlan {
                 strategy: "repo_filter_mismatch".to_string(),
                 require_all: filters.require_all,
@@ -1362,11 +1363,7 @@ impl FastIndex {
                 filtered_candidate_count: 0,
                 scored_candidate_count: 0,
                 final_match_count: 0,
-                repair_hints: vec![repair_hint(
-                    "repo_filter_mismatch",
-                    "The repo: filter does not match this index root. Relax repo: or choose a matching shard/index.",
-                    None,
-                )],
+                repair_hints: repo_scope_mismatch_repair_hints(&filters, &retry_query),
                 retry_requests: Vec::new(),
             });
         }
@@ -2763,6 +2760,43 @@ fn filter_specific_repair_hints(
             )
         })
         .collect()
+}
+
+fn repo_scope_mismatch_repair_hints(
+    filters: &SearchFilters,
+    suggested_query: &str,
+) -> Vec<QueryPlanRepairHint> {
+    let suggested_query = Some(suggested_query.to_string());
+    let mut hints = Vec::new();
+    if filters.repo.is_some() || !filters.exclude_repo.is_empty() {
+        hints.push(repair_hint(
+            "relax_repo_filter",
+            "The repo: filter does not match this index root. Retry without that repo filter or choose a matching shard/index.",
+            suggested_query.clone(),
+        ));
+    }
+    if filters.branch.is_some() || !filters.exclude_branch.is_empty() {
+        hints.push(repair_hint(
+            "relax_branch_filter",
+            "The branch: filter does not match this index root. Retry without that branch filter or choose a matching checkout.",
+            suggested_query.clone(),
+        ));
+    }
+    if filters.origin.is_some() || !filters.exclude_origin.is_empty() {
+        hints.push(repair_hint(
+            "relax_origin_filter",
+            "The origin: filter does not match this index root. Retry without that origin filter or choose a matching checkout.",
+            suggested_query.clone(),
+        ));
+    }
+    if hints.is_empty() {
+        hints.push(repair_hint(
+            "repo_filter_mismatch",
+            "The repo/git filters do not match this index root. Relax scope filters or choose a matching shard/index.",
+            suggested_query,
+        ));
+    }
+    hints
 }
 
 fn filter_scan_repair_hints(
