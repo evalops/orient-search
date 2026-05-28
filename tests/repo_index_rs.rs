@@ -416,6 +416,9 @@ fn read_file_range_rejects_paths_outside_repo() {
     let range = read_file_range(repo.path(), "src/auth.rs", 1, 10).unwrap();
     assert_eq!(range.start_line, 1);
     assert!(range.text.contains("issue_token"));
+    let backslash_range = read_file_range(repo.path(), "src\\auth.rs", 1, 10).unwrap();
+    assert_eq!(backslash_range.path, "src/auth.rs");
+    assert!(backslash_range.text.contains("issue_token"));
 
     let long_text = (1..=MAX_READ_RANGE_LINES + 10)
         .map(|line| format!("line_{line}\n"))
@@ -434,6 +437,10 @@ fn read_file_range_rejects_paths_outside_repo() {
         .unwrap_err()
         .to_string();
     assert!(error.contains("repo-relative"));
+    let backslash_parent_error = read_file_range(repo.path(), "src\\..\\auth.rs", 1, 1)
+        .unwrap_err()
+        .to_string();
+    assert!(backslash_parent_error.contains("repo-relative"));
 
     let absolute_error = read_file_range(
         repo.path(),

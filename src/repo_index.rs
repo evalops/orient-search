@@ -1525,7 +1525,8 @@ pub fn read_file_range(
     line_count: usize,
 ) -> Result<FileRange> {
     let root = root.as_ref().canonicalize()?;
-    let requested = Path::new(path);
+    let normalized_separators = path.replace('\\', "/");
+    let requested = Path::new(&normalized_separators);
     anyhow::ensure!(
         requested.is_relative()
             && !requested
