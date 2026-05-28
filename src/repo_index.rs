@@ -4356,14 +4356,87 @@ pub fn attach_result_related_requests(
     results: &mut [SearchResult],
     tool: &str,
     base_arguments: serde_json::Map<String, serde_json::Value>,
+    filters: Option<&SearchFilters>,
 ) {
     for result in results {
         let mut arguments = base_arguments.clone();
+        if let Some(filters) = filters {
+            append_related_filter_arguments(&mut arguments, filters);
+        }
         arguments.insert("path".to_string(), serde_json::json!(result.path.clone()));
         result.related_request = Some(ResultToolRequest::new(
             tool.to_string(),
             serde_json::Value::Object(arguments),
         ));
+    }
+}
+
+fn append_related_filter_arguments(
+    arguments: &mut serde_json::Map<String, serde_json::Value>,
+    filters: &SearchFilters,
+) {
+    insert_optional_string(arguments, "file", filters.file.as_deref());
+    insert_optional_string(arguments, "language", filters.language.as_deref());
+    insert_optional_string(arguments, "extension", filters.extension.as_deref());
+    insert_optional_string(arguments, "symbol", filters.symbol.as_deref());
+    insert_optional_string(arguments, "symbol_kind", filters.symbol_kind.as_deref());
+    insert_optional_string(arguments, "repo_filter", filters.repo.as_deref());
+    insert_optional_string(arguments, "branch", filters.branch.as_deref());
+    insert_optional_string(arguments, "origin", filters.origin.as_deref());
+    insert_optional_string(arguments, "dependency", filters.dependency.as_deref());
+    insert_optional_string(arguments, "import", filters.import.as_deref());
+    insert_optional_bool(arguments, "test", filters.test);
+    insert_optional_bool(arguments, "generated", filters.generated);
+    insert_string_array(arguments, "exclude_file", &filters.exclude_file);
+    insert_string_array(arguments, "exclude_path", &filters.exclude_path);
+    insert_string_array(arguments, "exclude_language", &filters.exclude_language);
+    insert_string_array(arguments, "exclude_extension", &filters.exclude_extension);
+    insert_string_array(arguments, "exclude_symbol", &filters.exclude_symbol);
+    insert_string_array(
+        arguments,
+        "exclude_symbol_kind",
+        &filters.exclude_symbol_kind,
+    );
+    insert_string_array(arguments, "exclude_repo", &filters.exclude_repo);
+    insert_string_array(arguments, "exclude_branch", &filters.exclude_branch);
+    insert_string_array(arguments, "exclude_origin", &filters.exclude_origin);
+    insert_string_array(arguments, "exclude_dependency", &filters.exclude_dependency);
+    insert_string_array(arguments, "exclude_import", &filters.exclude_import);
+    insert_string_array(arguments, "exclude_content", &filters.exclude_content);
+}
+
+fn insert_optional_string(
+    arguments: &mut serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    value: Option<&str>,
+) {
+    if let Some(value) = value.filter(|value| !value.trim().is_empty()) {
+        arguments.insert(key.to_string(), serde_json::json!(value));
+    }
+}
+
+fn insert_optional_bool(
+    arguments: &mut serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    value: Option<bool>,
+) {
+    if let Some(value) = value {
+        arguments.insert(key.to_string(), serde_json::json!(value));
+    }
+}
+
+fn insert_string_array(
+    arguments: &mut serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    values: &[String],
+) {
+    let values = values
+        .iter()
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| serde_json::json!(value))
+        .collect::<Vec<_>>();
+    if !values.is_empty() {
+        arguments.insert(key.to_string(), serde_json::Value::Array(values));
     }
 }
 
@@ -4503,7 +4576,38 @@ fn related_cli_command_for_request(
         parts.push("--limit".to_string());
         parts.push(limit.to_string());
     }
+    append_related_filter_cli_args(&mut parts, args);
     Some(parts.join(" "))
+}
+
+fn append_related_filter_cli_args(
+    parts: &mut Vec<String>,
+    args: &serde_json::Map<String, serde_json::Value>,
+) {
+    append_repo_filter_cli_arg(parts, args);
+    append_repeated_string_cli_arg(parts, args, "language", "--language");
+    append_repeated_string_cli_arg(parts, args, "extension", "--extension");
+    append_repeated_string_cli_arg(parts, args, "file", "--file");
+    append_repeated_string_cli_arg(parts, args, "symbol", "--symbol");
+    append_repeated_string_cli_arg(parts, args, "symbol_kind", "--kind");
+    append_repeated_string_cli_arg(parts, args, "branch", "--branch");
+    append_repeated_string_cli_arg(parts, args, "origin", "--origin");
+    append_repeated_string_cli_arg(parts, args, "dependency", "--dependency");
+    append_repeated_string_cli_arg(parts, args, "import", "--import");
+    append_bool_value_cli_arg(parts, args, "test", "--test");
+    append_bool_value_cli_arg(parts, args, "generated", "--generated");
+    append_repeated_string_cli_arg(parts, args, "exclude_file", "--exclude-file");
+    append_repeated_string_cli_arg(parts, args, "exclude_path", "--exclude-path");
+    append_repeated_string_cli_arg(parts, args, "exclude_language", "--exclude-language");
+    append_repeated_string_cli_arg(parts, args, "exclude_extension", "--exclude-extension");
+    append_repeated_string_cli_arg(parts, args, "exclude_symbol", "--exclude-symbol");
+    append_repeated_string_cli_arg(parts, args, "exclude_symbol_kind", "--exclude-kind");
+    append_repeated_string_cli_arg(parts, args, "exclude_repo", "--exclude-repo");
+    append_repeated_string_cli_arg(parts, args, "exclude_branch", "--exclude-branch");
+    append_repeated_string_cli_arg(parts, args, "exclude_origin", "--exclude-origin");
+    append_repeated_string_cli_arg(parts, args, "exclude_dependency", "--exclude-dependency");
+    append_repeated_string_cli_arg(parts, args, "exclude_import", "--exclude-import");
+    append_repeated_string_cli_arg(parts, args, "exclude_content", "--exclude-content");
 }
 
 fn append_search_filter_cli_args(

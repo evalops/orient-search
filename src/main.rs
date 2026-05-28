@@ -1657,6 +1657,7 @@ fn run() -> Result<()> {
                 &mut results,
                 "related_shard_files",
                 read_request_args("index_dir", &index_dir),
+                Some(&filters),
             );
             attach_result_related_symbol_requests(
                 &mut results,
@@ -1695,6 +1696,7 @@ fn run() -> Result<()> {
                     &mut results,
                     "related_shard_files",
                     read_request_args("index_dir", &index_dir),
+                    Some(&filters),
                 );
                 attach_result_related_symbol_requests(
                     &mut results,
@@ -2187,6 +2189,7 @@ fn run() -> Result<()> {
                     &mut results,
                     "related_shard_files",
                     read_request_args("index_dir", &index_dir),
+                    Some(&filters),
                 );
                 attach_result_related_symbol_requests(
                     &mut results,
@@ -2210,6 +2213,7 @@ fn run() -> Result<()> {
                     &mut results,
                     "related_index_files",
                     read_request_args("index", &index_path),
+                    Some(&filters),
                 );
                 attach_result_related_symbol_requests(
                     &mut results,
@@ -2232,6 +2236,7 @@ fn run() -> Result<()> {
                     &mut results,
                     "related_files",
                     read_request_args("repo", &repo),
+                    Some(&filters),
                 );
                 attach_result_related_symbol_requests(
                     &mut results,
@@ -2274,6 +2279,7 @@ fn run() -> Result<()> {
                     &mut results,
                     "related_shard_files",
                     read_request_args("index_dir", &index_dir),
+                    Some(&filters),
                 );
                 attach_result_related_symbol_requests(
                     &mut results,
@@ -2322,6 +2328,7 @@ fn run() -> Result<()> {
                     &mut results,
                     "related_index_files",
                     read_request_args("index", &index_path),
+                    Some(&filters),
                 );
                 attach_result_related_symbol_requests(
                     &mut results,
@@ -2377,6 +2384,7 @@ fn run() -> Result<()> {
                     &mut results,
                     "related_files",
                     read_request_args("repo", &repo),
+                    Some(&filters),
                 );
                 attach_result_related_symbol_requests(
                     &mut results,
@@ -2453,6 +2461,7 @@ fn run() -> Result<()> {
                         &mut results,
                         "related_shard_files",
                         read_request_args("index_dir", &index_dir),
+                        Some(&filters),
                     );
                     attach_result_related_symbol_requests(
                         &mut results,
@@ -2503,6 +2512,7 @@ fn run() -> Result<()> {
                         &mut results,
                         "related_index_files",
                         read_request_args("index", &index_path),
+                        Some(&filters),
                     );
                     attach_result_related_symbol_requests(
                         &mut results,
@@ -2560,6 +2570,7 @@ fn run() -> Result<()> {
                         &mut results,
                         "related_files",
                         read_request_args("repo", &repo),
+                        Some(&filters),
                     );
                     attach_result_related_symbol_requests(
                         &mut results,
@@ -2636,6 +2647,7 @@ fn run() -> Result<()> {
                         &mut results,
                         "related_files",
                         read_request_args("index_dir", &index_dir),
+                        Some(&filters),
                     );
                     attach_result_related_symbol_requests(
                         &mut results,
@@ -2670,6 +2682,7 @@ fn run() -> Result<()> {
                         &mut results,
                         "related_files",
                         read_request_args("index", &index_path),
+                        Some(&filters),
                     );
                     attach_result_related_symbol_requests(
                         &mut results,
@@ -2703,6 +2716,7 @@ fn run() -> Result<()> {
                         &mut results,
                         "related_files",
                         read_request_args("repo", &repo),
+                        Some(&filters),
                     );
                     attach_result_related_symbol_requests(
                         &mut results,
@@ -2749,6 +2763,7 @@ fn run() -> Result<()> {
                 &mut results,
                 "related_index_files",
                 read_request_args("index", &index_path),
+                Some(&filters),
             );
             attach_result_related_symbol_requests(
                 &mut results,
@@ -2786,6 +2801,7 @@ fn run() -> Result<()> {
                     &mut results,
                     "related_index_files",
                     read_request_args("index", &index_path),
+                    Some(&filters),
                 );
                 attach_result_related_symbol_requests(
                     &mut results,

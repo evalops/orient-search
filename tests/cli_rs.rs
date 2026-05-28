@@ -1322,6 +1322,8 @@ fn cli_searches_symbols_and_related_files() {
         .stdout(predicate::str::contains("\"related_request\""))
         .stdout(predicate::str::contains("\"tool\":\"related_files\""))
         .stdout(predicate::str::contains("\"cli\":\"orient related --repo"))
+        .stdout(predicate::str::contains("--language rust"))
+        .stdout(predicate::str::contains("--extension rs"))
         .stdout(predicate::str::contains("\"related_symbols_request\""))
         .stdout(predicate::str::contains("\"tool\":\"related_symbols\""))
         .stdout(predicate::str::contains(
@@ -1468,7 +1470,7 @@ fn cli_search_surfaces_accept_structured_filters() {
         .assert()
         .success()
         .stdout(predicate::str::contains("src/auth.rs"))
-        .stdout(predicate::str::contains("generated").not())
+        .stdout(predicate::str::contains("src/generated.rs").not())
         .stdout(predicate::str::contains("tests/auth_test.rs").not())
         .stdout(predicate::str::contains("docs/auth.md").not());
 
@@ -1532,7 +1534,7 @@ fn cli_search_surfaces_accept_structured_filters() {
         .assert()
         .success()
         .stdout(predicate::str::contains("src/auth.rs"))
-        .stdout(predicate::str::contains("generated").not())
+        .stdout(predicate::str::contains("src/generated.rs").not())
         .stdout(predicate::str::contains("tests/auth_test.rs").not())
         .stdout(predicate::str::contains("docs/auth.md").not());
 
@@ -1782,7 +1784,7 @@ fn cli_search_surfaces_accept_structured_filters() {
         .assert()
         .success()
         .stdout(predicate::str::contains("src/auth.rs"))
-        .stdout(predicate::str::contains("generated").not())
+        .stdout(predicate::str::contains("src/generated.rs").not())
         .stdout(predicate::str::contains("tests/auth_test.rs").not())
         .stdout(predicate::str::contains("docs/auth.md").not());
 

@@ -2050,12 +2050,8 @@ impl ToolRuntime {
                 let query = string_arg(&request.arguments, "query")?;
                 let limit = search_limit_arg(&request.arguments)?;
                 let context_lines = context_lines_arg(&request.arguments)?;
-                let mut results = search_repo_fast_filtered(
-                    &repo,
-                    &query,
-                    limit,
-                    &search_filters(&request.arguments, false)?,
-                )?;
+                let filters = search_filters(&request.arguments, false)?;
+                let mut results = search_repo_fast_filtered(&repo, &query, limit, &filters)?;
                 attach_result_context(&mut results, context_lines, |path, start, lines| {
                     read_file_range(&repo, path, start, lines)
                 })?;
@@ -2068,6 +2064,7 @@ impl ToolRuntime {
                     &mut results,
                     "related_files",
                     read_request_args("repo", &repo),
+                    Some(&filters),
                 );
                 attach_result_related_symbol_requests(
                     &mut results,
@@ -2092,11 +2089,12 @@ impl ToolRuntime {
                     if bool_arg(&request.arguments, "refresh_if_stale") {
                         self.refresh_shards_if_stale(&index_dir)?;
                     }
+                    let filters = search_filters(&request.arguments, true)?;
                     let mut results = self.search_shards_cached(
                         &index_dir,
                         &query,
                         limit,
-                        &search_filters(&request.arguments, true)?,
+                        &filters,
                         context_lines,
                     )?;
                     attach_result_read_requests(
@@ -2108,6 +2106,7 @@ impl ToolRuntime {
                         &mut results,
                         "related_files",
                         read_request_args("index_dir", &index_dir),
+                        Some(&filters),
                     );
                     attach_result_related_symbol_requests(
                         &mut results,
@@ -2123,11 +2122,8 @@ impl ToolRuntime {
                     let refresh_if_stale = bool_arg(&request.arguments, "refresh_if_stale");
                     let index =
                         self.cached_index_maybe_refresh(index_path.clone(), refresh_if_stale)?;
-                    let mut results = index.search_filtered(
-                        &query,
-                        limit,
-                        &search_filters(&request.arguments, true)?,
-                    )?;
+                    let filters = search_filters(&request.arguments, true)?;
+                    let mut results = index.search_filtered(&query, limit, &filters)?;
                     attach_result_context(&mut results, context_lines, |path, start, lines| {
                         index.read_range(path, start, lines)
                     })?;
@@ -2140,6 +2136,7 @@ impl ToolRuntime {
                         &mut results,
                         "related_files",
                         read_request_args("index", &index_path),
+                        Some(&filters),
                     );
                     attach_result_related_symbol_requests(
                         &mut results,
@@ -2155,12 +2152,8 @@ impl ToolRuntime {
                     .unwrap_or_else(|| {
                         std::env::current_dir().context("resolve current directory for search")
                     })?;
-                let mut results = search_repo_fast_filtered(
-                    &repo,
-                    &query,
-                    limit,
-                    &search_filters(&request.arguments, false)?,
-                )?;
+                let filters = search_filters(&request.arguments, false)?;
+                let mut results = search_repo_fast_filtered(&repo, &query, limit, &filters)?;
                 attach_result_context(&mut results, context_lines, |path, start, lines| {
                     read_file_range(&repo, path, start, lines)
                 })?;
@@ -2173,6 +2166,7 @@ impl ToolRuntime {
                     &mut results,
                     "related_files",
                     read_request_args("repo", &repo),
+                    Some(&filters),
                 );
                 attach_result_related_symbol_requests(
                     &mut results,
@@ -2253,6 +2247,7 @@ impl ToolRuntime {
                             &mut results,
                             "related_files",
                             read_request_args("index_dir", &index_dir),
+                            Some(&filters),
                         );
                         attach_result_related_symbol_requests(
                             &mut results,
@@ -2296,6 +2291,7 @@ impl ToolRuntime {
                             &mut results,
                             "related_files",
                             read_request_args("index", &index_path),
+                            Some(&filters),
                         );
                         attach_result_related_symbol_requests(
                             &mut results,
@@ -2338,6 +2334,7 @@ impl ToolRuntime {
                         &mut results,
                         "related_files",
                         read_request_args("repo", &repo),
+                        Some(&filters),
                     );
                     attach_result_related_symbol_requests(
                         &mut results,
@@ -2529,11 +2526,8 @@ impl ToolRuntime {
                 let refresh_if_stale = bool_arg(&request.arguments, "refresh_if_stale");
                 let index =
                     self.cached_index_maybe_refresh(index_path.clone(), refresh_if_stale)?;
-                let mut results = index.search_filtered(
-                    &query,
-                    limit,
-                    &search_filters(&request.arguments, true)?,
-                )?;
+                let filters = search_filters(&request.arguments, true)?;
+                let mut results = index.search_filtered(&query, limit, &filters)?;
                 attach_result_context(&mut results, context_lines, |path, start, lines| {
                     index.read_range(path, start, lines)
                 })?;
@@ -2546,6 +2540,7 @@ impl ToolRuntime {
                     &mut results,
                     "related_index_files",
                     read_request_args("index", &index_path),
+                    Some(&filters),
                 );
                 attach_result_related_symbol_requests(
                     &mut results,
@@ -2579,6 +2574,7 @@ impl ToolRuntime {
                         &mut results,
                         "related_index_files",
                         read_request_args("index", &index_path),
+                        Some(&filters),
                     );
                     attach_result_related_symbol_requests(
                         &mut results,
@@ -3414,6 +3410,7 @@ impl ToolRuntime {
             &mut results,
             "related_files",
             read_request_args("repo", &repo),
+            Some(&filters),
         );
         attach_result_related_symbol_requests(
             &mut results,
@@ -3480,6 +3477,7 @@ impl ToolRuntime {
             &mut results,
             "related_files",
             read_request_args("index_dir", &index_dir),
+            Some(&filters),
         );
         attach_result_related_symbol_requests(
             &mut results,
@@ -3547,6 +3545,7 @@ impl ToolRuntime {
             &mut results,
             "related_files",
             read_request_args("index", &index_path),
+            Some(&filters),
         );
         attach_result_related_symbol_requests(
             &mut results,
@@ -3876,6 +3875,7 @@ impl ToolRuntime {
             &mut results,
             "related_shard_files",
             read_request_args("index_dir", index_dir),
+            Some(&filters),
         );
         attach_result_related_symbol_requests(
             &mut results,

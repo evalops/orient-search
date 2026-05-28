@@ -3022,6 +3022,19 @@ fn runtime_accepts_structured_negative_search_filters() {
     assert!(result.contains("src/auth.rs"), "{result}");
     assert!(!result.contains("generated/auth.rs"), "{result}");
     assert!(!result.contains("src/generated_symbol.rs"), "{result}");
+    let related_args =
+        &fallback_exclude_content.result.as_ref().unwrap()[0]["related_request"]["arguments"];
+    assert_eq!(related_args["path"], serde_json::json!("src/auth.rs"));
+    assert_eq!(
+        related_args["exclude_content"][0],
+        serde_json::json!("GeneratedSessionManager")
+    );
+    assert!(
+        fallback_exclude_content.result.as_ref().unwrap()[0]["related_request"]["cli"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("--exclude-content GeneratedSessionManager")
+    );
 
     let alias_filters = runtime.dispatch(ToolRequest {
         id: serde_json::json!("alias-filters"),
