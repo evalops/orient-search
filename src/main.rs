@@ -963,6 +963,12 @@ fn attach_cli_shard_retry_requests(
     }
 }
 
+fn insert_optional_json_field(object: &mut Value, name: &str, value: Option<Value>) {
+    if let (Value::Object(object), Some(value)) = (object, value) {
+        object.insert(name.to_string(), value);
+    }
+}
+
 fn run() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
@@ -1447,28 +1453,34 @@ fn run() -> Result<()> {
                     "related_shard_symbols",
                     read_request_args("index_dir", &index_dir),
                 );
-                println!(
-                    "{}",
-                    serde_json::to_string(&serde_json::json!({
-                        "query": query,
-                        "surface": "shards",
-                        "target": index_dir,
-                        "query_plan_request": {
-                            "tool": "shard_query_plan",
-                            "arguments": {"index_dir": index_dir, "query": query}
-                        },
-                        "repo_map_request": {
-                            "tool": "shard_repo_map",
-                            "arguments": {"index_dir": index_dir}
-                        },
-                        "read_batch_request": result_read_batch_request(
-                            &results,
-                            "read_shard_ranges",
-                            read_request_args("index_dir", &index_dir)
-                        ),
-                        "results": results
-                    }))?
-                );
+                let query_plan_result = if results.is_empty() {
+                    let mut plans = shard_query_plans(&index_dir, &query, &filters)?;
+                    attach_cli_shard_retry_requests(&mut plans, &index_dir, &filters);
+                    Some(serde_json::to_value(plans)?)
+                } else {
+                    None
+                };
+                let mut output = serde_json::json!({
+                    "query": query,
+                    "surface": "shards",
+                    "target": index_dir,
+                    "query_plan_request": {
+                        "tool": "shard_query_plan",
+                        "arguments": {"index_dir": index_dir, "query": query}
+                    },
+                    "repo_map_request": {
+                        "tool": "shard_repo_map",
+                        "arguments": {"index_dir": index_dir}
+                    },
+                    "read_batch_request": result_read_batch_request(
+                        &results,
+                        "read_shard_ranges",
+                        read_request_args("index_dir", &index_dir)
+                    ),
+                    "results": results
+                });
+                insert_optional_json_field(&mut output, "query_plan_result", query_plan_result);
+                println!("{}", serde_json::to_string(&output)?);
             } else if let Some(index_path) = index {
                 let index = load_index_for_search(index_path.clone(), refresh_if_stale)?;
                 let filters = search_filters_from_args(&filters, repo_filter)?;
@@ -1491,28 +1503,38 @@ fn run() -> Result<()> {
                     "related_index_symbols",
                     read_request_args("index", &index_path),
                 );
-                println!(
-                    "{}",
-                    serde_json::to_string(&serde_json::json!({
-                        "query": query,
-                        "surface": "indexed",
-                        "target": index_path,
-                        "query_plan_request": {
-                            "tool": "indexed_query_plan",
-                            "arguments": {"index": index_path, "query": query}
-                        },
-                        "repo_map_request": {
-                            "tool": "indexed_repo_map",
-                            "arguments": {"index": index_path}
-                        },
-                        "read_batch_request": result_read_batch_request(
-                            &results,
-                            "read_index_ranges",
-                            read_request_args("index", &index_path)
-                        ),
-                        "results": results
-                    }))?
-                );
+                let query_plan_result = if results.is_empty() {
+                    Some(serde_json::to_value(attach_cli_retry_requests(
+                        index.query_plan(&query, &filters)?,
+                        "indexed_search_code",
+                        "index",
+                        &index_path,
+                        &filters,
+                    ))?)
+                } else {
+                    None
+                };
+                let mut output = serde_json::json!({
+                    "query": query,
+                    "surface": "indexed",
+                    "target": index_path,
+                    "query_plan_request": {
+                        "tool": "indexed_query_plan",
+                        "arguments": {"index": index_path, "query": query}
+                    },
+                    "repo_map_request": {
+                        "tool": "indexed_repo_map",
+                        "arguments": {"index": index_path}
+                    },
+                    "read_batch_request": result_read_batch_request(
+                        &results,
+                        "read_index_ranges",
+                        read_request_args("index", &index_path)
+                    ),
+                    "results": results
+                });
+                insert_optional_json_field(&mut output, "query_plan_result", query_plan_result);
+                println!("{}", serde_json::to_string(&output)?);
             } else if let Some(repo) = repo {
                 let filters = search_filters_from_args(&filters, repo_filter)?;
                 let mut results = search_repo_fast_filtered(&repo, &query, limit, &filters)?;
@@ -1534,28 +1556,39 @@ fn run() -> Result<()> {
                     "related_symbols",
                     read_request_args("repo", &repo),
                 );
-                println!(
-                    "{}",
-                    serde_json::to_string(&serde_json::json!({
-                        "query": query,
-                        "surface": "fallback",
-                        "target": repo,
-                        "query_plan_request": {
-                            "tool": "search_query_plan",
-                            "arguments": {"repo": repo, "query": query}
-                        },
-                        "repo_map_request": {
-                            "tool": "repo_map",
-                            "arguments": {"repo": repo}
-                        },
-                        "read_batch_request": result_read_batch_request(
-                            &results,
-                            "read_ranges",
-                            read_request_args("repo", &repo)
-                        ),
-                        "results": results
-                    }))?
-                );
+                let query_plan_result = if results.is_empty() {
+                    let index = FastIndex::build(&repo)?;
+                    Some(serde_json::to_value(attach_cli_retry_requests(
+                        index.query_plan(&query, &filters)?,
+                        "search_code",
+                        "repo",
+                        &index.root,
+                        &filters,
+                    ))?)
+                } else {
+                    None
+                };
+                let mut output = serde_json::json!({
+                    "query": query,
+                    "surface": "fallback",
+                    "target": repo,
+                    "query_plan_request": {
+                        "tool": "search_query_plan",
+                        "arguments": {"repo": repo, "query": query}
+                    },
+                    "repo_map_request": {
+                        "tool": "repo_map",
+                        "arguments": {"repo": repo}
+                    },
+                    "read_batch_request": result_read_batch_request(
+                        &results,
+                        "read_ranges",
+                        read_request_args("repo", &repo)
+                    ),
+                    "results": results
+                });
+                insert_optional_json_field(&mut output, "query_plan_result", query_plan_result);
+                println!("{}", serde_json::to_string(&output)?);
             } else {
                 bail!("search-auto needs --index-dir, --index, or --repo");
             }
@@ -1598,7 +1631,14 @@ fn run() -> Result<()> {
                         "related_shard_symbols",
                         read_request_args("index_dir", &index_dir),
                     );
-                    batch.push(serde_json::json!({
+                    let query_plan_result = if results.is_empty() {
+                        let mut plans = shard_query_plans(&index_dir, &query, &filters)?;
+                        attach_cli_shard_retry_requests(&mut plans, &index_dir, &filters);
+                        Some(serde_json::to_value(plans)?)
+                    } else {
+                        None
+                    };
+                    let mut item = serde_json::json!({
                         "query": query,
                         "surface": "shards",
                         "target": index_dir,
@@ -1616,7 +1656,9 @@ fn run() -> Result<()> {
                             read_request_args("index_dir", &index_dir)
                         ),
                         "results": results
-                    }));
+                    });
+                    insert_optional_json_field(&mut item, "query_plan_result", query_plan_result);
+                    batch.push(item);
                 }
             } else if let Some(index_path) = index {
                 let index = load_index_for_search(index_path.clone(), refresh_if_stale)?;
@@ -1641,7 +1683,18 @@ fn run() -> Result<()> {
                         "related_index_symbols",
                         read_request_args("index", &index_path),
                     );
-                    batch.push(serde_json::json!({
+                    let query_plan_result = if results.is_empty() {
+                        Some(serde_json::to_value(attach_cli_retry_requests(
+                            index.query_plan(&query, &filters)?,
+                            "indexed_search_code",
+                            "index",
+                            &index_path,
+                            &filters,
+                        ))?)
+                    } else {
+                        None
+                    };
+                    let mut item = serde_json::json!({
                         "query": query,
                         "surface": "indexed",
                         "target": index_path,
@@ -1659,7 +1712,9 @@ fn run() -> Result<()> {
                             read_request_args("index", &index_path)
                         ),
                         "results": results
-                    }));
+                    });
+                    insert_optional_json_field(&mut item, "query_plan_result", query_plan_result);
+                    batch.push(item);
                 }
             } else if let Some(repo) = repo {
                 let filters = search_filters_from_args(&filters, repo_filter)?;
@@ -1683,7 +1738,19 @@ fn run() -> Result<()> {
                         "related_symbols",
                         read_request_args("repo", &repo),
                     );
-                    batch.push(serde_json::json!({
+                    let query_plan_result = if results.is_empty() {
+                        let index = FastIndex::build(&repo)?;
+                        Some(serde_json::to_value(attach_cli_retry_requests(
+                            index.query_plan(&query, &filters)?,
+                            "search_code",
+                            "repo",
+                            &index.root,
+                            &filters,
+                        ))?)
+                    } else {
+                        None
+                    };
+                    let mut item = serde_json::json!({
                         "query": query,
                         "surface": "fallback",
                         "target": repo,
@@ -1701,7 +1768,9 @@ fn run() -> Result<()> {
                             read_request_args("repo", &repo)
                         ),
                         "results": results
-                    }));
+                    });
+                    insert_optional_json_field(&mut item, "query_plan_result", query_plan_result);
+                    batch.push(item);
                 }
             } else {
                 bail!("search-auto-batch needs --index-dir, --index, or --repo");

@@ -663,22 +663,21 @@ fn runtime_serves_agent_guide_for_json_lines_wrappers() {
         guide["request_templates"]["shard_repo_map"]["arguments"]["index_dir"],
         "/tmp/orient-shards"
     );
-    assert_eq!(
-        guide["result_followups"][0],
-        "Use search_auto.query_plan_request or a search_auto_batch item query_plan_request when results are empty or noisy."
-    );
-    assert_eq!(
-        guide["result_followups"][1],
-        "Use search_auto.repo_map_request or a search_auto_batch item repo_map_request when the agent needs entrypoints, tests, commands, or top symbols for the chosen surface."
-    );
-    assert_eq!(
-        guide["result_followups"][2],
-        "Use search_auto.read_batch_request, a search_auto_batch item read_batch_request, or a search batch item read_batch_request to read top ranges in one call."
-    );
-    assert_eq!(
-        guide["result_followups"][3],
-        "Use result.read_request for one bounded file range."
-    );
+    let followups = guide["result_followups"].as_array().unwrap();
+    for expected in [
+        "Use search_auto.query_plan_result or a search_auto_batch item query_plan_result immediately when an automatic search is empty.",
+        "Use search_auto.query_plan_request or a search_auto_batch item query_plan_request when results are empty or noisy.",
+        "Use search_auto.repo_map_request or a search_auto_batch item repo_map_request when the agent needs entrypoints, tests, commands, or top symbols for the chosen surface.",
+        "Use search_auto.read_batch_request, a search_auto_batch item read_batch_request, or a search batch item read_batch_request to read top ranges in one call.",
+        "Use result.read_request for one bounded file range.",
+    ] {
+        assert!(
+            followups
+                .iter()
+                .any(|followup| followup.as_str() == Some(expected)),
+            "missing follow-up: {expected}"
+        );
+    }
 }
 
 #[test]
@@ -734,6 +733,41 @@ fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
             .contains("issue_token")
     );
 
+    let empty_live = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("empty-live"),
+        tool: "search_auto".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "query": "issue_token definitely_missing",
+            "limit": 5
+        }),
+    });
+    assert!(empty_live.error.is_none(), "{:?}", empty_live.error);
+    let empty_live = empty_live.result.unwrap();
+    assert!(empty_live["results"].as_array().unwrap().is_empty());
+    assert_eq!(
+        empty_live["query_plan_result"]["repair_hints"][0]["kind"],
+        "drop_missing_terms"
+    );
+    assert_eq!(
+        empty_live["query_plan_result"]["retry_requests"][0]["tool"],
+        "search_code"
+    );
+    let retry = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("empty-live-retry"),
+        tool: empty_live["query_plan_result"]["retry_requests"][0]["tool"]
+            .as_str()
+            .unwrap()
+            .to_string(),
+        arguments: empty_live["query_plan_result"]["retry_requests"][0]["arguments"].clone(),
+    });
+    assert!(retry.error.is_none(), "{:?}", retry.error);
+    assert!(
+        serde_json::to_string(&retry.result)
+            .unwrap()
+            .contains("src/auth.rs")
+    );
+
     let index_path = repo.path().join("orient.index");
     let ensure = runtime.dispatch(ToolRequest {
         id: serde_json::json!("ensure"),
@@ -763,6 +797,23 @@ fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
         "read_index_range"
     );
     assert_eq!(indexed["read_batch_request"]["tool"], "read_index_ranges");
+
+    let empty_indexed = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("empty-indexed"),
+        tool: "search_auto".to_string(),
+        arguments: serde_json::json!({
+            "query": "issue_token definitely_missing",
+            "limit": 5
+        }),
+    });
+    assert!(empty_indexed.error.is_none(), "{:?}", empty_indexed.error);
+    let empty_indexed = empty_indexed.result.unwrap();
+    assert_eq!(empty_indexed["surface"], "indexed");
+    assert!(empty_indexed["results"].as_array().unwrap().is_empty());
+    assert_eq!(
+        empty_indexed["query_plan_result"]["retry_requests"][0]["tool"],
+        "indexed_search_code"
+    );
     let map_request = indexed["repo_map_request"].clone();
     let map = runtime.dispatch(ToolRequest {
         id: serde_json::json!("map"),
@@ -815,6 +866,22 @@ fn runtime_search_auto_batch_uses_single_warmed_index() {
     assert!(batch[0]["read_batch_request"]["arguments"]["ranges"].is_array());
     assert_eq!(batch[1]["query"], "SessionManager");
     assert_eq!(batch[1]["surface"], "indexed");
+
+    let empty_batch = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("empty-batch"),
+        tool: "search_auto_batch".to_string(),
+        arguments: serde_json::json!({
+            "queries": ["issue_token definitely_missing"],
+            "limit": 5
+        }),
+    });
+    assert!(empty_batch.error.is_none(), "{:?}", empty_batch.error);
+    let empty_batch = empty_batch.result.unwrap();
+    assert!(empty_batch[0]["results"].as_array().unwrap().is_empty());
+    assert_eq!(
+        empty_batch[0]["query_plan_result"]["retry_requests"][0]["tool"],
+        "indexed_search_code"
+    );
 }
 
 #[test]

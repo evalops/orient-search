@@ -59,6 +59,8 @@ struct SearchAutoResult {
     surface: String,
     target: String,
     query_plan_request: ResultToolRequest,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    query_plan_result: Option<Value>,
     repo_map_request: ResultToolRequest,
     #[serde(skip_serializing_if = "Option::is_none")]
     read_batch_request: Option<ResultToolRequest>,
@@ -792,6 +794,7 @@ pub fn agent_guide(
             }
         },
         "result_followups": [
+            "Use search_auto.query_plan_result or a search_auto_batch item query_plan_result immediately when an automatic search is empty.",
             "Use search_auto.query_plan_request or a search_auto_batch item query_plan_request when results are empty or noisy.",
             "Use search_auto.repo_map_request or a search_auto_batch item repo_map_request when the agent needs entrypoints, tests, commands, or top symbols for the chosen surface.",
             "Use search_auto.read_batch_request, a search_auto_batch item read_batch_request, or a search batch item read_batch_request to read top ranges in one call.",
@@ -2179,8 +2182,8 @@ impl ToolRuntime {
             );
         }
         if let Some(repo) = optional_string_arg(arguments, "repo").map(PathBuf::from) {
-            let mut results =
-                search_repo_fast_filtered(&repo, query, limit, &search_filters(arguments, false)?)?;
+            let filters = search_filters(arguments, false)?;
+            let mut results = search_repo_fast_filtered(&repo, query, limit, &filters)?;
             attach_result_context(&mut results, context_lines, |path, start, lines| {
                 read_file_range(&repo, path, start, lines)
             })?;
@@ -2210,6 +2213,18 @@ impl ToolRuntime {
                     arguments,
                     query,
                 ),
+                query_plan_result: if results.is_empty() {
+                    let index = FastIndex::build(&repo)?;
+                    Some(serde_json::to_value(attach_retry_requests(
+                        index.query_plan(query, &filters)?,
+                        "search_code",
+                        "repo",
+                        &index.root,
+                        arguments,
+                    ))?)
+                } else {
+                    None
+                },
                 repo_map_request: auto_repo_map_request("repo_map", "repo", &repo, arguments),
                 read_batch_request: result_read_batch_request(
                     &results,
@@ -2236,13 +2251,16 @@ impl ToolRuntime {
         if refresh_if_stale {
             self.refresh_shards_if_stale(&index_dir)?;
         }
-        let results = self.search_shards_cached(
-            &index_dir,
-            query,
-            limit,
-            &search_filters(arguments, true)?,
-            context_lines,
-        )?;
+        let filters = search_filters(arguments, true)?;
+        let results =
+            self.search_shards_cached(&index_dir, query, limit, &filters, context_lines)?;
+        let query_plan_result = if results.is_empty() {
+            let mut plans = self.shard_query_plans_cached(&index_dir, query, &filters)?;
+            attach_shard_retry_requests(&mut plans, &index_dir, arguments);
+            Some(serde_json::to_value(plans)?)
+        } else {
+            None
+        };
         Ok(SearchAutoResult {
             query: query.to_string(),
             surface: "shards".to_string(),
@@ -2254,6 +2272,7 @@ impl ToolRuntime {
                 arguments,
                 query,
             ),
+            query_plan_result,
             repo_map_request: auto_repo_map_request(
                 "shard_repo_map",
                 "index_dir",
@@ -2279,7 +2298,8 @@ impl ToolRuntime {
         refresh_if_stale: bool,
     ) -> Result<SearchAutoResult> {
         let index = self.cached_index_maybe_refresh(index_path.clone(), refresh_if_stale)?;
-        let mut results = index.search_filtered(query, limit, &search_filters(arguments, true)?)?;
+        let filters = search_filters(arguments, true)?;
+        let mut results = index.search_filtered(query, limit, &filters)?;
         attach_result_context(&mut results, context_lines, |path, start, lines| {
             index.read_range(path, start, lines)
         })?;
@@ -2309,6 +2329,17 @@ impl ToolRuntime {
                 arguments,
                 query,
             ),
+            query_plan_result: if results.is_empty() {
+                Some(serde_json::to_value(attach_retry_requests(
+                    index.query_plan(query, &filters)?,
+                    "indexed_search_code",
+                    "index",
+                    &index_path,
+                    arguments,
+                ))?)
+            } else {
+                None
+            },
             repo_map_request: auto_repo_map_request(
                 "indexed_repo_map",
                 "index",

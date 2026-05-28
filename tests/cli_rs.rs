@@ -254,6 +254,20 @@ fn cli_search_auto_selects_live_indexed_and_shard_surfaces() {
         .stdout(predicate::str::contains("\"tool\":\"shard_repo_map\""))
         .stdout(predicate::str::contains("\"tool\":\"read_shard_ranges\""))
         .stdout(predicate::str::contains("\"tool\":\"read_shard_range\""));
+
+    let mut empty_live = Command::cargo_bin("orient").unwrap();
+    empty_live
+        .args([
+            "search-auto",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "issue_token definitely_missing",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"query_plan_result\""))
+        .stdout(predicate::str::contains("drop_missing_terms"))
+        .stdout(predicate::str::contains("\"tool\":\"search_code\""));
 }
 
 #[test]
@@ -291,6 +305,19 @@ fn cli_search_auto_batch_returns_query_surfaces() {
         .stdout(predicate::str::contains("\"tool\":\"indexed_repo_map\""))
         .stdout(predicate::str::contains("\"tool\":\"read_index_ranges\""))
         .stdout(predicate::str::contains("\"tool\":\"read_index_range\""));
+
+    let mut empty_batch = Command::cargo_bin("orient").unwrap();
+    empty_batch
+        .args([
+            "search-auto-batch",
+            "--index",
+            index_path.to_str().unwrap(),
+            "issue_token definitely_missing",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"query_plan_result\""))
+        .stdout(predicate::str::contains("\"tool\":\"indexed_search_code\""));
 }
 
 #[test]

@@ -43,7 +43,8 @@ Once a daemon has exactly one shard directory or index warmed, `search_auto`
 lets wrappers search that target with just a query.
 Use `search_auto_batch` when an agent wants to try several query formulations in
 one daemon round trip.
-Both return a `query_plan_request` for empty or noisy result sets.
+Both return a `query_plan_request` for noisy result sets and inline
+`query_plan_result` diagnostics when an automatic search is empty.
 They also return a `repo_map_request` for quick orientation on the chosen
 search surface and a `read_batch_request` when results can be opened in one
 bounded batch read.

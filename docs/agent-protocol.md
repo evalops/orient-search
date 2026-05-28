@@ -75,7 +75,7 @@ Search results include:
 - `context`: optional attached file context when `context_lines` is set.
 - `explanation` and `query_plan` when `explain` is set.
 
-`search_auto` and each `search_auto_batch` item also include `query_plan_request`, a ready-to-send plan request for the chosen live, indexed, or shard surface. Use it when the result set is empty or suspicious. They also include `repo_map_request` for the matching map tool when the agent needs entrypoints, tests, commands, or top symbols before editing, plus `read_batch_request` when there are results to read in one batch call. Batch search items from `search_batch`, `indexed_search_batch`, and `search_shards_batch` include the same `read_batch_request` shape.
+`search_auto` and each `search_auto_batch` item also include `query_plan_request`, a ready-to-send plan request for the chosen live, indexed, or shard surface. When an automatic search is empty, the response also includes `query_plan_result` with repair hints and retry requests immediately. They also include `repo_map_request` for the matching map tool when the agent needs entrypoints, tests, commands, or top symbols before editing, plus `read_batch_request` when there are results to read in one batch call. Batch search items from `search_batch`, `indexed_search_batch`, and `search_shards_batch` include the same `read_batch_request` shape.
 
 Explicit `symbol:` searches center snippets and read ranges on the matching definition line when the language extractor can identify it, even if earlier callers also match the same tokens.
 
