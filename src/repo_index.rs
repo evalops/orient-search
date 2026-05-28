@@ -115,7 +115,7 @@ pub type ResultReadRequest = ResultToolRequest;
 impl ResultToolRequest {
     pub fn new(tool: impl Into<String>, arguments: serde_json::Value) -> Self {
         let tool = tool.into();
-        let cli = read_cli_command_for_request(&tool, &arguments);
+        let cli = cli_command_for_request(&tool, &arguments);
         Self {
             tool,
             arguments,
@@ -4086,7 +4086,7 @@ pub fn attach_result_related_symbol_requests(
     }
 }
 
-fn read_cli_command_for_request(tool: &str, arguments: &serde_json::Value) -> Option<String> {
+fn cli_command_for_request(tool: &str, arguments: &serde_json::Value) -> Option<String> {
     let args = arguments.as_object()?;
     let read_subcommand = match tool {
         "read_range" | "open_range" => "read-range",
@@ -4095,10 +4095,15 @@ fn read_cli_command_for_request(tool: &str, arguments: &serde_json::Value) -> Op
         "read_index_ranges" | "open_index_ranges" => "read-index-ranges",
         "read_shard_range" | "open_shard_range" => "read-shard-range",
         "read_shard_ranges" | "open_shard_ranges" => "read-shard-ranges",
-        _ => return related_cli_command_for_request(tool, args),
+        _ => {
+            return related_cli_command_for_request(tool, args)
+                .or_else(|| repo_map_cli_command_for_request(tool, args))
+                .or_else(|| query_plan_cli_command_for_request(tool, args))
+                .or_else(|| search_cli_command_for_request(tool, args));
+        }
     };
     let mut parts = vec!["orient".to_string(), read_subcommand.to_string()];
-    append_read_target_cli_args(&mut parts, args);
+    append_target_cli_args(&mut parts, args);
     if let Some(ranges) = args.get("ranges").and_then(|value| value.as_array()) {
         for range in ranges {
             let range = range.as_object()?;
@@ -4107,6 +4112,67 @@ fn read_cli_command_for_request(tool: &str, arguments: &serde_json::Value) -> Op
     } else {
         parts.push(compact_range_arg(args)?);
     }
+    Some(parts.join(" "))
+}
+
+fn repo_map_cli_command_for_request(
+    tool: &str,
+    args: &serde_json::Map<String, serde_json::Value>,
+) -> Option<String> {
+    if !matches!(tool, "repo_map" | "indexed_repo_map" | "shard_repo_map") {
+        return None;
+    }
+    let mut parts = vec!["orient".to_string(), "repo-map".to_string()];
+    append_target_cli_args(&mut parts, args);
+    append_repo_filter_cli_arg(&mut parts, args);
+    append_scalar_cli_arg(&mut parts, args, "symbols", "--symbols");
+    append_scalar_cli_arg(&mut parts, args, "tests", "--tests");
+    append_string_cli_arg(&mut parts, args, "detail", "--detail");
+    append_scalar_cli_arg(&mut parts, args, "read_limit", "--read-limit");
+    Some(parts.join(" "))
+}
+
+fn query_plan_cli_command_for_request(
+    tool: &str,
+    args: &serde_json::Map<String, serde_json::Value>,
+) -> Option<String> {
+    if !matches!(
+        tool,
+        "search_query_plan"
+            | "search_plan"
+            | "indexed_query_plan"
+            | "index_plan"
+            | "shard_query_plan"
+            | "shard_plan"
+    ) {
+        return None;
+    }
+    let query = args.get("query")?.as_str()?;
+    let mut parts = vec!["orient".to_string(), "search-plan".to_string()];
+    append_target_cli_args(&mut parts, args);
+    append_search_filter_cli_args(&mut parts, args);
+    parts.push(shell_quote(query));
+    Some(parts.join(" "))
+}
+
+fn search_cli_command_for_request(
+    tool: &str,
+    args: &serde_json::Map<String, serde_json::Value>,
+) -> Option<String> {
+    if !matches!(
+        tool,
+        "search" | "search_code" | "indexed_search" | "indexed_search_code" | "search_shards"
+    ) {
+        return None;
+    }
+    let query = args.get("query")?.as_str()?;
+    let mut parts = vec!["orient".to_string(), "search".to_string()];
+    append_target_cli_args(&mut parts, args);
+    append_scalar_cli_arg(&mut parts, args, "limit", "--limit");
+    append_search_filter_cli_args(&mut parts, args);
+    append_scalar_cli_arg(&mut parts, args, "context_lines", "--context-lines");
+    append_bool_cli_arg(&mut parts, args, "diagnose", "--diagnose");
+    parts.push(shell_quote(query));
     Some(parts.join(" "))
 }
 
@@ -4124,7 +4190,7 @@ fn related_cli_command_for_request(
         _ => return None,
     };
     let mut parts = vec!["orient".to_string(), subcommand.to_string()];
-    append_read_target_cli_args(&mut parts, args);
+    append_target_cli_args(&mut parts, args);
     if let Some(path) = args.get("path").and_then(|value| value.as_str()) {
         parts.push("--path".to_string());
         parts.push(shell_quote(path));
@@ -4140,20 +4206,153 @@ fn related_cli_command_for_request(
     Some(parts.join(" "))
 }
 
-fn append_read_target_cli_args(
+fn append_search_filter_cli_args(
     parts: &mut Vec<String>,
     args: &serde_json::Map<String, serde_json::Value>,
 ) {
-    for (name, flag) in [
-        ("repo", "--repo"),
-        ("index", "--index"),
-        ("index_dir", "--index-dir"),
-    ] {
-        if let Some(value) = args.get(name).and_then(|value| value.as_str()) {
+    append_repo_filter_cli_arg(parts, args);
+    append_repeated_string_cli_arg(parts, args, "path", "--path");
+    append_repeated_string_cli_arg(parts, args, "language", "--language");
+    append_repeated_string_cli_arg(parts, args, "extension", "--extension");
+    append_repeated_string_cli_arg(parts, args, "file", "--file");
+    append_repeated_string_cli_arg(parts, args, "symbol", "--symbol");
+    append_repeated_string_cli_arg(parts, args, "symbol_kind", "--kind");
+    append_repeated_string_cli_arg(parts, args, "dependency", "--dependency");
+    append_repeated_string_cli_arg(parts, args, "import", "--import");
+    append_bool_value_cli_arg(parts, args, "test", "--test");
+    append_bool_cli_arg(parts, args, "require_all", "--require-all");
+    append_bool_cli_arg(parts, args, "any_terms", "--any-terms");
+    append_string_cli_arg(parts, args, "snippet", "--snippet");
+    append_bool_cli_arg(parts, args, "explain", "--explain");
+    append_repeated_string_cli_arg(parts, args, "exclude_file", "--exclude-file");
+    append_repeated_string_cli_arg(parts, args, "exclude_path", "--exclude-path");
+    append_repeated_string_cli_arg(parts, args, "exclude_language", "--exclude-language");
+    append_repeated_string_cli_arg(parts, args, "exclude_extension", "--exclude-extension");
+    append_repeated_string_cli_arg(parts, args, "exclude_symbol", "--exclude-symbol");
+    append_repeated_string_cli_arg(parts, args, "exclude_symbol_kind", "--exclude-kind");
+    append_repeated_string_cli_arg(parts, args, "exclude_repo", "--exclude-repo");
+    append_repeated_string_cli_arg(parts, args, "exclude_dependency", "--exclude-dependency");
+    append_repeated_string_cli_arg(parts, args, "exclude_import", "--exclude-import");
+    append_bool_cli_arg(parts, args, "refresh_if_stale", "--refresh-if-stale");
+}
+
+fn append_target_cli_args(
+    parts: &mut Vec<String>,
+    args: &serde_json::Map<String, serde_json::Value>,
+) {
+    if let Some(value) = args.get("index_dir").and_then(|value| value.as_str()) {
+        parts.push("--index-dir".to_string());
+        parts.push(shell_quote(value));
+    } else if let Some(value) = args.get("index").and_then(|value| value.as_str()) {
+        parts.push("--index".to_string());
+        parts.push(shell_quote(value));
+    } else if let Some(value) = args.get("repo").and_then(|value| value.as_str()) {
+        parts.push("--repo".to_string());
+        parts.push(shell_quote(value));
+    }
+}
+
+fn append_repo_filter_cli_arg(
+    parts: &mut Vec<String>,
+    args: &serde_json::Map<String, serde_json::Value>,
+) {
+    if args.get("index_dir").is_some() {
+        if let Some(value) = args
+            .get("repo_filter")
+            .or_else(|| args.get("repo"))
+            .and_then(|value| value.as_str())
+        {
+            parts.push("--repo-filter".to_string());
+            parts.push(shell_quote(value));
+        }
+    } else {
+        append_string_cli_arg(parts, args, "repo_filter", "--repo-filter");
+    }
+}
+
+fn append_scalar_cli_arg(
+    parts: &mut Vec<String>,
+    args: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    flag: &str,
+) {
+    let Some(value) = args.get(key).and_then(scalar_cli_arg_value) else {
+        return;
+    };
+    parts.push(flag.to_string());
+    parts.push(shell_quote(&value));
+}
+
+fn append_string_cli_arg(
+    parts: &mut Vec<String>,
+    args: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    flag: &str,
+) {
+    let Some(value) = args.get(key).and_then(|value| value.as_str()) else {
+        return;
+    };
+    parts.push(flag.to_string());
+    parts.push(shell_quote(value));
+}
+
+fn append_repeated_string_cli_arg(
+    parts: &mut Vec<String>,
+    args: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    flag: &str,
+) {
+    let Some(value) = args.get(key) else {
+        return;
+    };
+    if value.is_null() {
+        return;
+    }
+    if let Some(values) = value.as_array() {
+        for value in values.iter().filter_map(|value| value.as_str()) {
             parts.push(flag.to_string());
             parts.push(shell_quote(value));
         }
+    } else if let Some(value) = value.as_str() {
+        parts.push(flag.to_string());
+        parts.push(shell_quote(value));
     }
+}
+
+fn append_bool_cli_arg(
+    parts: &mut Vec<String>,
+    args: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    flag: &str,
+) {
+    if args.get(key).and_then(|value| value.as_bool()) == Some(true) {
+        parts.push(flag.to_string());
+    }
+}
+
+fn append_bool_value_cli_arg(
+    parts: &mut Vec<String>,
+    args: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    flag: &str,
+) {
+    let Some(value) = args.get(key).and_then(|value| value.as_bool()) else {
+        return;
+    };
+    parts.push(flag.to_string());
+    parts.push(value.to_string());
+}
+
+fn scalar_cli_arg_value(value: &serde_json::Value) -> Option<String> {
+    if value.is_null() {
+        return None;
+    }
+    value
+        .as_str()
+        .map(str::to_string)
+        .or_else(|| value.as_u64().map(|value| value.to_string()))
+        .or_else(|| value.as_i64().map(|value| value.to_string()))
+        .or_else(|| value.as_f64().map(|value| value.to_string()))
 }
 
 fn compact_range_arg(args: &serde_json::Map<String, serde_json::Value>) -> Option<String> {
@@ -4915,6 +5114,60 @@ mod tests {
             request.cli.as_deref(),
             Some(
                 "orient related-symbols --repo '/tmp/my repo' --path src/auth.rs --query 'symbol:SessionManager issue token'"
+            )
+        );
+    }
+
+    #[test]
+    fn map_plan_and_search_requests_include_cli_hints() {
+        let map = ResultToolRequest::new(
+            "repo_map",
+            serde_json::json!({
+                "index_dir": "/tmp/orient shards",
+                "repo": "platform",
+                "detail": "compact",
+                "read_limit": 8
+            }),
+        );
+        assert_eq!(
+            map.cli.as_deref(),
+            Some(
+                "orient repo-map --index-dir '/tmp/orient shards' --repo-filter platform --detail compact --read-limit 8"
+            )
+        );
+
+        let plan = ResultToolRequest::new(
+            "search_query_plan",
+            serde_json::json!({
+                "repo": "/tmp/my repo",
+                "query": "symbol:SessionManager issue token",
+                "path": "src/auth",
+                "language": "rust",
+                "require_all": true
+            }),
+        );
+        assert_eq!(
+            plan.cli.as_deref(),
+            Some(
+                "orient search-plan --repo '/tmp/my repo' --path src/auth --language rust --require-all 'symbol:SessionManager issue token'"
+            )
+        );
+
+        let retry = ResultToolRequest::new(
+            "search",
+            serde_json::json!({
+                "repo": "/tmp/my repo",
+                "query": "mode:any issue token",
+                "path": null,
+                "language": "rust",
+                "explain": true,
+                "limit": 5
+            }),
+        );
+        assert_eq!(
+            retry.cli.as_deref(),
+            Some(
+                "orient search --repo '/tmp/my repo' --limit 5 --language rust --explain 'mode:any issue token'"
             )
         );
     }

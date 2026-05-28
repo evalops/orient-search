@@ -1082,11 +1082,10 @@ fn cli_retry_requests<T: Serialize>(
         arguments.insert(target_name.to_string(), serde_json::json!(target_value));
         arguments.insert("query".to_string(), serde_json::json!(query));
         arguments.insert("explain".to_string(), serde_json::json!(true));
-        requests.push(ResultToolRequest {
-            tool: search_tool.to_string(),
-            arguments: Value::Object(arguments),
-            cli: None,
-        });
+        requests.push(ResultToolRequest::new(
+            search_tool.to_string(),
+            Value::Object(arguments),
+        ));
     }
     requests
 }

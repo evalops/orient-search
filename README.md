@@ -70,6 +70,9 @@ for the same target-aware plain batch search shape from the CLI.
 Both return a `query_plan_request` for noisy result sets and inline
 `query_plan_result` diagnostics when an automatic search is empty. Add
 `diagnose:true` / `--diagnose` to include the plan even when results exist.
+Generated plan, map, and retry follow-ups include `cli` hints too, so a terminal
+agent can replay the same repair/orientation step with `orient search-plan`,
+`orient repo-map`, or `orient search`.
 They also return a `repo_map_request` for quick orientation on the chosen
 search surface and a `read_batch_request` when results can be opened in one
 bounded batch read.

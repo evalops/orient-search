@@ -1441,11 +1441,7 @@ fn auto_query_plan_request<T: Serialize>(
     }
     arguments.insert(target_name.to_string(), json!(target_value));
     arguments.insert("query".to_string(), json!(query));
-    ResultToolRequest {
-        tool: tool.to_string(),
-        arguments: Value::Object(arguments),
-        cli: None,
-    }
+    ResultToolRequest::new(tool.to_string(), Value::Object(arguments))
 }
 
 fn auto_query_plan_passthrough_arg(name: &str, target_name: &str) -> bool {
@@ -1487,11 +1483,7 @@ fn auto_repo_map_request<T: Serialize>(
             }
         }
     }
-    ResultToolRequest {
-        tool: tool.to_string(),
-        arguments: Value::Object(arguments),
-        cli: None,
-    }
+    ResultToolRequest::new(tool.to_string(), Value::Object(arguments))
 }
 
 fn attach_retry_requests<T: Serialize>(
@@ -1564,11 +1556,10 @@ fn retry_search_requests<T: Serialize>(
         arguments.insert(target_name.to_string(), json!(target_value));
         arguments.insert("query".to_string(), json!(query));
         arguments.insert("explain".to_string(), json!(true));
-        requests.push(ResultToolRequest {
-            tool: search_tool.to_string(),
-            arguments: Value::Object(arguments),
-            cli: None,
-        });
+        requests.push(ResultToolRequest::new(
+            search_tool.to_string(),
+            Value::Object(arguments),
+        ));
     }
     requests
 }

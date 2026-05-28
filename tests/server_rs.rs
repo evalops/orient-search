@@ -1183,6 +1183,12 @@ fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
         serde_json::json!(repo.path())
     );
     assert_eq!(live["repo_map_request"]["arguments"]["detail"], "compact");
+    assert!(
+        live["repo_map_request"]["cli"]
+            .as_str()
+            .unwrap()
+            .contains("orient repo-map --repo")
+    );
     assert_eq!(
         live["repo_map_request"]["arguments"]["read_limit"],
         serde_json::json!(DEFAULT_REPO_MAP_READ_BATCH_RANGES)
@@ -1190,6 +1196,12 @@ fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
     assert_eq!(
         live["query_plan_request"]["arguments"]["query"],
         "issue_token"
+    );
+    assert!(
+        live["query_plan_request"]["cli"]
+            .as_str()
+            .unwrap()
+            .contains("orient search-plan --repo")
     );
     assert_eq!(live["results"][0]["read_request"]["tool"], "read_range");
     assert_eq!(
@@ -1294,6 +1306,12 @@ fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
     assert_eq!(
         empty_live["query_plan_result"]["retry_requests"][0]["tool"],
         "search_code"
+    );
+    assert!(
+        empty_live["query_plan_result"]["retry_requests"][0]["cli"]
+            .as_str()
+            .unwrap()
+            .contains("orient search --repo")
     );
     let retry = runtime.dispatch(ToolRequest {
         id: serde_json::json!("empty-live-retry"),
