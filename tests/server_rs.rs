@@ -5250,6 +5250,66 @@ fn runtime_can_refresh_stale_index_before_search() {
 }
 
 #[test]
+fn runtime_search_auto_reports_stale_index_refresh_request_on_empty_results() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/auth.rs"),
+        "pub struct SessionManager;\npub fn issue_token() {}\n",
+    );
+    let index_path = repo.path().join(".orient/index");
+    FastIndex::build(repo.path())
+        .unwrap()
+        .save(&index_path)
+        .unwrap();
+    write(
+        &repo.path().join("src/new_session.rs"),
+        "pub fn new_session_token() {}\n",
+    );
+
+    let runtime = ToolRuntime::default();
+    runtime.warm_index(index_path.clone()).unwrap();
+    let stale = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("stale-auto-index"),
+        tool: "search_auto".to_string(),
+        arguments: serde_json::json!({
+            "query": "new_session_token",
+            "limit": 3,
+            "require_all": true
+        }),
+    });
+    assert!(stale.error.is_none(), "{:?}", stale.error);
+    let stale = stale.result.unwrap();
+    assert_eq!(stale["surface"], serde_json::json!("indexed"));
+    assert_eq!(stale["results"], serde_json::json!([]));
+    assert_eq!(stale["freshness"]["stale"], serde_json::json!(true));
+    assert_eq!(stale["freshness"]["added_files"], serde_json::json!(1));
+    assert_eq!(
+        stale["freshness"]["refresh_request"]["tool"],
+        serde_json::json!("search_auto")
+    );
+    assert_eq!(
+        stale["freshness"]["refresh_request"]["arguments"]["refresh_if_stale"],
+        serde_json::json!(true)
+    );
+    assert_eq!(
+        stale["freshness"]["refresh_request"]["arguments"]["index"],
+        serde_json::json!(index_path.canonicalize().unwrap())
+    );
+
+    let refresh = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("fresh-auto-index"),
+        tool: stale["freshness"]["refresh_request"]["tool"]
+            .as_str()
+            .unwrap()
+            .to_string(),
+        arguments: stale["freshness"]["refresh_request"]["arguments"].clone(),
+    });
+    assert!(refresh.error.is_none(), "{:?}", refresh.error);
+    let refreshed = serde_json::to_string(&refresh.result).unwrap();
+    assert!(refreshed.contains("src/new_session.rs"), "{refreshed}");
+}
+
+#[test]
 fn runtime_coalesces_parallel_cold_index_requests() {
     let repo = tempfile::tempdir().unwrap();
     write(
@@ -5989,6 +6049,90 @@ fn runtime_search_auto_refreshes_only_client_cwd_shard_when_scoped() {
     assert!(
         !other_search.contains("other-app/src/new_other.rs"),
         "{other_search}"
+    );
+}
+
+#[test]
+fn runtime_search_auto_reports_stale_shard_refresh_request_on_empty_results() {
+    let workspace = tempfile::tempdir().unwrap();
+    let current_repo = workspace.path().join("current-app");
+    let other_repo = workspace.path().join("other-app");
+    fs::create_dir_all(current_repo.join(".git")).unwrap();
+    fs::create_dir_all(other_repo.join(".git")).unwrap();
+    write(
+        &current_repo.join("src/lib.rs"),
+        "pub fn baseline_current_token() {}\n",
+    );
+    write(
+        &other_repo.join("src/lib.rs"),
+        "pub fn baseline_other_token() {}\n",
+    );
+    let shard_dir = workspace.path().join("shards");
+    build_shards(
+        &[PathBuf::from(&current_repo), PathBuf::from(&other_repo)],
+        &shard_dir,
+    )
+    .unwrap();
+
+    write(
+        &current_repo.join("src/new_current.rs"),
+        "pub fn current_after_refresh_token() {}\n",
+    );
+    write(
+        &other_repo.join("src/new_other.rs"),
+        "pub fn other_after_refresh_token() {}\n",
+    );
+
+    let runtime = ToolRuntime::default();
+    runtime.warm_shards(shard_dir.clone()).unwrap();
+
+    let stale = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("stale-auto-shard"),
+        tool: "search_auto".to_string(),
+        arguments: serde_json::json!({
+            "cwd": current_repo.join("src"),
+            "query": "current_after_refresh_token",
+            "limit": 5,
+            "require_all": true
+        }),
+    });
+    assert!(stale.error.is_none(), "{:?}", stale.error);
+    let stale = stale.result.unwrap();
+    assert_eq!(stale["surface"], serde_json::json!("shards"));
+    assert_eq!(stale["results"], serde_json::json!([]));
+    assert_eq!(stale["freshness"]["stale"], serde_json::json!(true));
+    assert_eq!(stale["freshness"]["stale_shards"], serde_json::json!(1));
+    assert_eq!(stale["freshness"]["added_files"], serde_json::json!(1));
+    assert_eq!(
+        stale["freshness"]["refresh_request"]["tool"],
+        serde_json::json!("search_auto")
+    );
+    assert_eq!(
+        stale["freshness"]["refresh_request"]["arguments"]["refresh_if_stale"],
+        serde_json::json!(true)
+    );
+    assert_eq!(
+        stale["freshness"]["refresh_request"]["arguments"]["index_dir"],
+        serde_json::json!(shard_dir.canonicalize().unwrap())
+    );
+
+    let refreshed = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("fresh-auto-shard"),
+        tool: stale["freshness"]["refresh_request"]["tool"]
+            .as_str()
+            .unwrap()
+            .to_string(),
+        arguments: stale["freshness"]["refresh_request"]["arguments"].clone(),
+    });
+    assert!(refreshed.error.is_none(), "{:?}", refreshed.error);
+    let refreshed = serde_json::to_string(&refreshed.result).unwrap();
+    assert!(
+        refreshed.contains("current-app/src/new_current.rs"),
+        "{refreshed}"
+    );
+    assert!(
+        !refreshed.contains("other-app/src/new_other.rs"),
+        "{refreshed}"
     );
 }
 

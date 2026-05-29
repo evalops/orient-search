@@ -1,7 +1,7 @@
 use crate::discover::{
     DiscoverOptions, DiscoverySelectionSummary, discover_repos, discovery_selection_summary,
 };
-use crate::fast_index::{FastIndex, RefreshStats};
+use crate::fast_index::{FastIndex, IndexFreshness, RefreshStats};
 use crate::query::{merge_filters, normalize_symbol_kind, parse_query, query_text};
 use crate::repo_index::{
     DEFAULT_REPO_MAP_READ_BATCH_RANGES, MAX_ATTACHED_CONTEXT_LINES, MAX_READ_RANGE_LINES,
@@ -15,7 +15,7 @@ use crate::repo_index::{
     symbol_lookup_read_batch_request, symbol_lookup_results,
 };
 use crate::shards::{
-    ShardEntry, ShardManifest, ShardQueryPlan, ShardRepoMap, ShardSearchScope,
+    ShardEntry, ShardFreshness, ShardManifest, ShardQueryPlan, ShardRepoMap, ShardSearchScope,
     append_shard_facet_repair_hints, build_shards_with_force, ensure_shards,
     filter_repo_map_by_prefix, filters_for_shard_scope, load_manifest, refresh_shards,
     refresh_shards_by_root, related_query_without_shard_selectors,
@@ -73,6 +73,8 @@ struct SearchAutoResult {
     query: String,
     surface: String,
     target: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    freshness: Option<SearchFreshness>,
     query_plan_request: ResultToolRequest,
     #[serde(skip_serializing_if = "Option::is_none")]
     query_plan_result: Option<Value>,
@@ -86,6 +88,23 @@ struct SearchAutoResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     read_batch_request: Option<ResultToolRequest>,
     results: Vec<SearchResult>,
+}
+
+#[derive(Debug, Serialize)]
+struct SearchFreshness {
+    stale: bool,
+    summary: String,
+    #[serde(skip_serializing_if = "is_zero")]
+    checked_files: usize,
+    #[serde(skip_serializing_if = "is_zero")]
+    changed_files: usize,
+    #[serde(skip_serializing_if = "is_zero")]
+    added_files: usize,
+    #[serde(skip_serializing_if = "is_zero")]
+    deleted_files: usize,
+    #[serde(skip_serializing_if = "is_zero")]
+    stale_shards: usize,
+    refresh_request: ResultToolRequest,
 }
 
 #[derive(Debug, Serialize)]
@@ -1945,6 +1964,118 @@ fn auto_repo_map_request<T: Serialize>(
         }
     }
     ResultToolRequest::new(tool.to_string(), Value::Object(arguments))
+}
+
+fn search_auto_refresh_request<T: Serialize>(
+    target_name: &str,
+    target_value: T,
+    source_arguments: &Value,
+    query: &str,
+) -> ResultToolRequest {
+    let mut arguments = source_arguments.as_object().cloned().unwrap_or_default();
+    arguments.remove("queries");
+    arguments.insert(target_name.to_string(), json!(target_value));
+    arguments.insert("query".to_string(), json!(query));
+    arguments.insert("refresh_if_stale".to_string(), json!(true));
+    ResultToolRequest::new("search_auto".to_string(), Value::Object(arguments))
+}
+
+fn index_search_freshness(
+    status: &IndexFreshness,
+    refresh_request: ResultToolRequest,
+) -> SearchFreshness {
+    SearchFreshness {
+        stale: true,
+        summary: freshness_summary(
+            "Index",
+            status.changed_files,
+            status.added_files,
+            status.deleted_files,
+            0,
+        ),
+        checked_files: status.checked_files,
+        changed_files: status.changed_files,
+        added_files: status.added_files,
+        deleted_files: status.deleted_files,
+        stale_shards: 0,
+        refresh_request,
+    }
+}
+
+fn shard_search_freshness(
+    status: &ShardFreshness,
+    refresh_request: ResultToolRequest,
+) -> SearchFreshness {
+    SearchFreshness {
+        stale: true,
+        summary: freshness_summary(
+            "Scoped shard index",
+            status.changed_files,
+            status.added_files,
+            status.deleted_files,
+            status.stale_shards,
+        ),
+        checked_files: status
+            .shards
+            .iter()
+            .map(|shard| shard.status.checked_files)
+            .sum(),
+        changed_files: status.changed_files,
+        added_files: status.added_files,
+        deleted_files: status.deleted_files,
+        stale_shards: status.stale_shards,
+        refresh_request,
+    }
+}
+
+fn freshness_summary(
+    label: &str,
+    changed_files: usize,
+    added_files: usize,
+    deleted_files: usize,
+    stale_shards: usize,
+) -> String {
+    let mut parts = Vec::new();
+    if stale_shards > 0 {
+        parts.push(format!("{stale_shards} stale shard(s)"));
+    }
+    if changed_files > 0 {
+        parts.push(format!("{changed_files} changed file(s)"));
+    }
+    if added_files > 0 {
+        parts.push(format!("{added_files} added file(s)"));
+    }
+    if deleted_files > 0 {
+        parts.push(format!("{deleted_files} deleted file(s)"));
+    }
+    if parts.is_empty() {
+        format!("{label} is stale; rerun the refresh_request before trusting empty results.")
+    } else {
+        format!(
+            "{label} is stale: {}; rerun the refresh_request before trusting empty results.",
+            parts.join(", ")
+        )
+    }
+}
+
+fn shard_freshness_roots_for_search(
+    index_dir: &Path,
+    arguments: &Value,
+    filters: &SearchFilters,
+) -> Result<Vec<PathBuf>> {
+    let mut roots = scoped_shard_status_roots(arguments)?;
+    if roots.is_empty() && filters.repo.is_some() {
+        let manifest = load_manifest(index_dir)?;
+        roots = manifest
+            .shards
+            .iter()
+            .filter(|shard| !shard_search_scopes(shard, filters).is_empty())
+            .map(|shard| shard.root.clone())
+            .collect();
+    }
+    roots.sort();
+    roots.dedup();
+    Ok(roots)
 }
 
 fn add_shard_scope_filter_args(arguments: &mut Map<String, Value>, filters: &SearchFilters) {
@@ -4548,6 +4679,7 @@ impl ToolRuntime {
             query: query.to_string(),
             surface: "fallback".to_string(),
             target: repo.to_string_lossy().to_string(),
+            freshness: None,
             query_plan_request: auto_query_plan_request(
                 "search_query_plan",
                 "repo",
@@ -4623,10 +4755,18 @@ impl ToolRuntime {
             results.is_empty(),
             primary_retry_request.as_ref(),
         )?;
+        let freshness = self.search_auto_shard_freshness(
+            !refresh_if_stale && (diagnose || results.is_empty()),
+            &index_dir,
+            arguments,
+            &shard_scope_filters,
+            query,
+        )?;
         Ok(SearchAutoResult {
             query: query.to_string(),
             surface: "shards".to_string(),
             target: index_dir.to_string_lossy().to_string(),
+            freshness,
             query_plan_request: auto_query_plan_request(
                 "shard_query_plan",
                 "index_dir",
@@ -4717,10 +4857,18 @@ impl ToolRuntime {
             results.is_empty(),
             primary_retry_request.as_ref(),
         )?;
+        let freshness = self.search_auto_index_freshness(
+            !refresh_if_stale && (diagnose || results.is_empty()),
+            &index,
+            &index_path,
+            arguments,
+            query,
+        )?;
         Ok(SearchAutoResult {
             query: query.to_string(),
             surface: "indexed".to_string(),
             target: index_path.to_string_lossy().to_string(),
+            freshness,
             query_plan_request: auto_query_plan_request(
                 "indexed_query_plan",
                 "index",
@@ -4746,6 +4894,52 @@ impl ToolRuntime {
             ),
             results,
         })
+    }
+
+    fn search_auto_index_freshness(
+        &self,
+        should_check: bool,
+        index: &FastIndex,
+        index_path: &Path,
+        arguments: &Value,
+        query: &str,
+    ) -> Result<Option<SearchFreshness>> {
+        if !should_check {
+            return Ok(None);
+        }
+        let status = index.freshness_at(index_path)?;
+        if !status.stale {
+            return Ok(None);
+        }
+        Ok(Some(index_search_freshness(
+            &status,
+            search_auto_refresh_request("index", index_path, arguments, query),
+        )))
+    }
+
+    fn search_auto_shard_freshness(
+        &self,
+        should_check: bool,
+        index_dir: &Path,
+        arguments: &Value,
+        filters: &SearchFilters,
+        query: &str,
+    ) -> Result<Option<SearchFreshness>> {
+        if !should_check {
+            return Ok(None);
+        }
+        let roots = shard_freshness_roots_for_search(index_dir, arguments, filters)?;
+        if roots.is_empty() {
+            return Ok(None);
+        }
+        let status = shard_status_by_root(index_dir, &roots)?;
+        if !status.stale {
+            return Ok(None);
+        }
+        Ok(Some(shard_search_freshness(
+            &status,
+            search_auto_refresh_request("index_dir", index_dir, arguments, query),
+        )))
     }
 
     fn cached_index_maybe_refresh(
@@ -7079,6 +7273,10 @@ fn context_lines_arg(arguments: &Value) -> Result<usize> {
         0,
         Some(MAX_ATTACHED_CONTEXT_LINES),
     )
+}
+
+fn is_zero(value: &usize) -> bool {
+    *value == 0
 }
 
 fn repo_map_read_limit_arg(arguments: &Value) -> Result<usize> {
