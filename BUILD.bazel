@@ -81,3 +81,8 @@ sh_binary(
     name = "ci_perf_gates",
     srcs = ["tools/ci/orient_perf_gates.sh"],
 )
+
+sh_binary(
+    name = "ci_wide_perf",
+    srcs = ["tools/ci/orient_wide_perf.sh"],
+)

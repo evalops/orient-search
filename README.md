@@ -27,6 +27,7 @@ bazel build -c opt //:orient
 bazel test //...
 bazel run //:ci_full_test
 bazel run //:ci_perf_gates
+ORIENT_WIDE_SHARDS=0 bazel run //:ci_wide_perf
 ```
 
 ## Give it to agents

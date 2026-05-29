@@ -77,7 +77,7 @@ Implemented now:
 
 Measured on this machine:
 
-- Wide tree fallback: `/Users/jonathanhaas/Documents/Projects`, common top-10 literal/token queries at about `26-54ms` p95 after warmup across the latest sampled release run.
+- Wide tree fallback: `/Users/jonathanhaas/Documents/Projects`, common top-10 literal/token queries passed the local wide gate with p95s of about `79ms`, `31ms`, and `109ms` after warmup, below the `300ms` target.
 - Local repo fallback: query `indexed search symbol filters`, top 10 at about `12.5ms` p95 after warmup.
 - Hot-path fallback has a `250ms` wall-clock timeout plus match caps; if the timeout fires it returns partial results instead of blocking the agent.
 - Search result output is capped at 100 items per query across fallback, indexed, and shard search surfaces; batch request sizes are capped too.
@@ -85,8 +85,9 @@ Measured on this machine:
 - Local repo refresh after build: reuses unchanged files, reuses same-content renames by retargeting path-derived postings, and rebuilds postings from per-file term lists; tests verify renamed symbols plus related-file and related-symbol followups resolve to the new path.
 - Local repo indexed search: query `indexed search symbol filters`, top 10 at about `0.96ms` p95 after warmup.
 - Local single-shard search: query `repo:agent-jsonl-explorer indexed search symbol filters`, top 10 at about `3.43ms` p95 after warmup, or about `1.01ms` p95 through the warm cached runtime path.
-- Real local layout discovery: `/Users/jonathanhaas/Documents/Projects` now resolves to 409 git or manifest-backed repo roots at `max-depth 4` after scanning 508 directories, with the hottest repeated families being `maestro-internal` at 82 checkouts, `deploy` at 67, `platform` at 45, `browser-use-rs` at 30, and `maestro` at 23. `/Users/jonathanhaas/repos` resolves to 72 repo roots after scanning 106 directories. Before git-boundary discovery, the same broad tree could hit a 2,000-candidate cap by walking every nested package manifest.
-- With `--family-limit 1`, the same `Documents/Projects` root selects 109 repo representatives from 409 candidates while preserving full family counts; `~/repos` selects 49 representatives from 72 candidates.
+- Real local layout discovery: `/Users/jonathanhaas/Documents/Projects` now resolves to 454 git or manifest-backed repo roots at `max-depth 4` after scanning 554 directories, with the hottest repeated families being `maestro-internal` at 99 checkouts, `deploy` at 72, `platform` at 53, `browser-use-rs` at 30, and `maestro` at 30. `/Users/jonathanhaas/repos` resolves to 72 repo roots after scanning 106 directories. Before git-boundary discovery, the same broad tree could hit a 2,000-candidate cap by walking every nested package manifest.
+- With `--family-limit 1`, the same `Documents/Projects` root selects 115 repo representatives from 454 candidates while preserving full family counts; the latest local wide shard build covered 133,337 files and about 1.25GB of source snapshots.
+- Wide cached shard search over that family-limited `Documents/Projects` shard set returned top-10 results with p95s of about `15ms`, `15ms`, and `3ms` for the default wide-gate queries.
 
 ## Exit Conditions
 
@@ -98,6 +99,19 @@ High-performance definition:
 - Indexed search beats fallback search on repeated repo-local queries.
 - No multi-second hangs: candidate collection has bounded match caps and a hard wall-clock timeout.
 - Top results avoid obvious duplicate spam from repeated worktrees.
+
+Local wide-corpus gate:
+
+```bash
+ORIENT_WIDE_SHARDS=0 bazel run //:ci_wide_perf
+ORIENT_WIDE_SHARDS=1 ORIENT_WIDE_FAMILY_LIMIT=1 bazel run //:ci_wide_perf
+```
+
+The script defaults to `~/Documents/Projects`, enforces the `<=300ms` fallback
+p95 target, and can also rebuild a family-limited shard set under
+`/tmp/orient-wide-shards` for warm cached shard measurements. It skips when the
+wide root is absent unless `ORIENT_WIDE_REQUIRE_ROOT=1` is set, so GitHub CI can
+stay deterministic while local runs cover the user's real multi-repo layout.
 
 Search quality definition:
 
