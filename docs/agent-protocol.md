@@ -8,6 +8,7 @@ Run either a one-shot stdio server or a shared TCP daemon:
 
 ```bash
 export ORIENT_SHARDS=/path/to/local/cache/orient-shards
+export ORIENT_INDEX=/path/to/local/cache/orient.index
 export ORIENT_SOCKET=/path/to/local/cache/orient.sock
 export ORIENT_REPO_A=/path/to/repo-a
 export ORIENT_REPO_B=/path/to/repo-b
@@ -215,6 +216,9 @@ Examples:
 CLI equivalents support repeatable `--range path:start:lines`:
 
 ```bash
+export ORIENT_INDEX=/path/to/local/cache/orient.index
+export ORIENT_SHARDS=/path/to/local/cache/orient-shards
+
 orient read-index-ranges --index "$ORIENT_INDEX" --range src/auth.rs:1:80
 orient read-shard-ranges --index-dir "$ORIENT_SHARDS" --range service/src/auth.rs:40:80
 ```

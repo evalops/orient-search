@@ -17,6 +17,9 @@ export ORIENT_SHARDS=/path/to/local/cache/orient-shards
 orient agent-instructions --index-dir "$ORIENT_SHARDS"
 ```
 
+Keep that cache path local to the machine running the agents; the generated
+rule should not contain private workspace layouts.
+
 The rule should tell agents:
 
 - Prefer Orient before `rg`, `find`, `ls`, or `cat` for code discovery.
