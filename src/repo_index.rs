@@ -929,9 +929,6 @@ fn filter_only_candidates_from_direct_location(
     filters: &SearchFilters,
     deadline: Instant,
 ) -> Result<Option<Vec<(String, FilterOnlyMatch)>>> {
-    if filters.target_line.is_none() {
-        return Ok(None);
-    }
     let Some((path, authoritative)) = direct_location_filter_path(filters) else {
         return Ok(None);
     };
@@ -973,8 +970,9 @@ fn direct_location_filter_path(filters: &SearchFilters) -> Option<(String, bool)
         .as_deref()
         .filter(|path| exact_direct_path_filter(path))
     {
-        return Some((path.to_string(), true));
+        return Some((path.to_string(), filters.target_line.is_some()));
     }
+    filters.target_line?;
     filters
         .file
         .as_deref()

@@ -1917,7 +1917,7 @@ fn bare_path_like_queries_use_filter_only_fast_paths() {
     );
 
     let path_fallback = search_repo_fast_filtered(repo.path(), "src/lib.rs", 10, &filters).unwrap();
-    assert_eq!(path_fallback[0].path, "src/lib.rs");
+    assert_eq!(result_paths(&path_fallback), vec!["src/lib.rs"]);
     assert!(
         path_fallback[0]
             .explanation
