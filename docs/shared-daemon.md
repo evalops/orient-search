@@ -79,6 +79,9 @@ The generated rule should keep agents on this loop. See
   Orient refreshes only the active checkout's shard. For `search_auto_batch`,
   Orient coalesces refresh across the batch's selected shard roots before
   running the searches.
+- Branch, origin, and worktree metadata are part of shard freshness. If a
+  checkout moves branches without file changes, `refresh_if_stale:true` updates
+  the manifest before branch-scoped searches run.
 - Call `shard_status` with `cwd` or `repo_filter` when only one repo's
   freshness matters.
 - Treat generated bundle output as searchable but lower-priority by default;

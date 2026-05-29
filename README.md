@@ -73,7 +73,8 @@ which keeps shared multi-repo daemons focused on the current task. With the same
 scope, `refresh_if_stale:true` refreshes only that repo's shard. Empty or
 diagnostic `search_auto` responses include a compact `freshness` object when
 the scoped index is stale, plus a top-level ready-to-run `refresh_request` that
-refreshes and repeats the search.
+refreshes and repeats the search. Shard freshness includes branch/origin
+metadata drift, so switching branches without touching files is still detected.
 When a JSON-lines or MCP client calls `daemon_status` with `cwd`, the returned
 `default_requests` also include that `cwd`, so copyable first map, search,
 batch, and query-plan calls stay scoped to the active checkout.

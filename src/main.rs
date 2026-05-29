@@ -5388,7 +5388,8 @@ fn shard_status_summary(status: &ShardFreshness) -> Value {
                     "compressed_posting_bytes": shard.status.compressed_posting_bytes,
                     "files": shard.status.indexed_files,
                     "symbols": shard.status.symbols,
-                    "stale": shard.status.stale
+                    "stale": shard.status.stale || shard.git_metadata_stale,
+                    "git_metadata_stale": shard.git_metadata_stale
                 }),
             )
         })
@@ -5399,7 +5400,7 @@ fn shard_status_summary(status: &ShardFreshness) -> Value {
     let stale_shards = status
         .shards
         .iter()
-        .filter(|shard| shard.status.stale)
+        .filter(|shard| shard.status.stale || shard.git_metadata_stale)
         .take(20)
         .map(|shard| {
             serde_json::json!({
@@ -5407,7 +5408,8 @@ fn shard_status_summary(status: &ShardFreshness) -> Value {
                 "root": shard.root,
                 "changed_files": shard.status.changed_files,
                 "deleted_files": shard.status.deleted_files,
-                "added_files": shard.status.added_files
+                "added_files": shard.status.added_files,
+                "git_metadata_stale": shard.git_metadata_stale
             })
         })
         .collect::<Vec<_>>();
@@ -5440,6 +5442,7 @@ fn shard_status_summary(status: &ShardFreshness) -> Value {
         "changed_files": status.changed_files,
         "deleted_files": status.deleted_files,
         "added_files": status.added_files,
+        "git_metadata_changed": status.git_metadata_changed,
         "largest_shards": largest.into_iter().map(|(_, value)| value).collect::<Vec<_>>(),
         "stale_shard_examples": stale_shards
     })

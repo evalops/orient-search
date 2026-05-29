@@ -19,7 +19,7 @@ use orient::server::{
     agent_guide, agent_instructions, mcp_dispatch_value, mcp_tool_manifest, serve_mcp_with_runtime,
     tool_manifest,
 };
-use orient::shards::{build_shards, refresh_shards};
+use orient::shards::{build_shards, refresh_shards, shard_status};
 
 fn write(path: &Path, text: &str) {
     fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -4579,6 +4579,147 @@ fn runtime_shard_repo_map_reports_git_metadata() {
     assert!(result.contains("MODULE.bazel"), "{result}");
     assert!(result.contains("just test"), "{result}");
     assert!(result.contains("Justfile"), "{result}");
+}
+
+#[test]
+fn runtime_refresh_if_stale_picks_up_git_branch_metadata_changes() {
+    let repo = tempfile::tempdir().unwrap();
+    let other_repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/lib.rs"),
+        "pub fn branch_switch_token() -> &'static str { \"needle\" }\n",
+    );
+    write(
+        &repo.path().join("Cargo.toml"),
+        "[package]\nname='branch-project'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    write(
+        &other_repo.path().join("src/lib.rs"),
+        "pub fn other_branch_switch_token() {}\n",
+    );
+    write(
+        &other_repo.path().join("Cargo.toml"),
+        "[package]\nname='other-branch-project'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    git(repo.path(), &["init", "-b", "old-branch"]);
+    git(repo.path(), &["add", "."]);
+    git(
+        repo.path(),
+        &[
+            "-c",
+            "user.name=Orient Tests",
+            "-c",
+            "user.email=orient@example.com",
+            "commit",
+            "-m",
+            "init",
+        ],
+    );
+    git(other_repo.path(), &["init", "-b", "other-old-branch"]);
+    git(other_repo.path(), &["add", "."]);
+    git(
+        other_repo.path(),
+        &[
+            "-c",
+            "user.name=Orient Tests",
+            "-c",
+            "user.email=orient@example.com",
+            "commit",
+            "-m",
+            "init",
+        ],
+    );
+
+    let shard_dir = tempfile::tempdir().unwrap();
+    build_shards(
+        &[repo.path().to_path_buf(), other_repo.path().to_path_buf()],
+        shard_dir.path(),
+    )
+    .unwrap();
+    let repo_root = repo.path().canonicalize().unwrap();
+    let other_repo_root = other_repo.path().canonicalize().unwrap();
+
+    git(repo.path(), &["checkout", "-b", "new-branch"]);
+    git(other_repo.path(), &["checkout", "-b", "other-new-branch"]);
+    let stale = shard_status(shard_dir.path()).unwrap();
+    assert!(stale.stale, "{stale:?}");
+    assert_eq!(stale.stale_shards, 2);
+    assert_eq!(stale.git_metadata_changed, 2);
+    let stale_current = stale
+        .shards
+        .iter()
+        .find(|shard| shard.root == repo_root)
+        .unwrap();
+    assert!(stale_current.git_metadata_stale);
+    assert_eq!(
+        stale_current
+            .indexed_git
+            .as_ref()
+            .and_then(|git| git.branch.as_deref()),
+        Some("old-branch")
+    );
+    assert_eq!(
+        stale_current
+            .current_git
+            .as_ref()
+            .and_then(|git| git.branch.as_deref()),
+        Some("new-branch")
+    );
+
+    let runtime = ToolRuntime::default();
+    runtime.warm_shards(shard_dir.path().to_path_buf()).unwrap();
+    let refreshed = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("search-new-branch"),
+        tool: "search_auto".to_string(),
+        arguments: serde_json::json!({
+            "cwd": repo.path().join("src"),
+            "index_dir": shard_dir.path(),
+            "query": "branch:new-branch branch switch token",
+            "limit": 5,
+            "require_all": true,
+            "refresh_if_stale": true
+        }),
+    });
+    assert!(refreshed.error.is_none(), "{:?}", refreshed.error);
+    let refreshed = refreshed.result.unwrap();
+    assert_eq!(refreshed["surface"], "shards");
+    assert_eq!(
+        refreshed["repo_map_request"]["arguments"]["branch"],
+        "new-branch"
+    );
+    let refreshed = serde_json::to_string(&refreshed).unwrap();
+    assert!(refreshed.contains("src/lib.rs"), "{refreshed}");
+    assert!(refreshed.contains("branch_switch_token"), "{refreshed}");
+
+    let fresh = shard_status(shard_dir.path()).unwrap();
+    assert!(fresh.stale, "{fresh:?}");
+    assert_eq!(fresh.git_metadata_changed, 1);
+    let fresh_current = fresh
+        .shards
+        .iter()
+        .find(|shard| shard.root == repo_root)
+        .unwrap();
+    assert!(!fresh_current.git_metadata_stale, "{fresh_current:?}");
+    assert_eq!(
+        fresh_current
+            .indexed_git
+            .as_ref()
+            .and_then(|git| git.branch.as_deref()),
+        Some("new-branch")
+    );
+    let stale_other = fresh
+        .shards
+        .iter()
+        .find(|shard| shard.root == other_repo_root)
+        .unwrap();
+    assert!(stale_other.git_metadata_stale, "{stale_other:?}");
+    assert_eq!(
+        stale_other
+            .indexed_git
+            .as_ref()
+            .and_then(|git| git.branch.as_deref()),
+        Some("other-old-branch")
+    );
 }
 
 #[test]

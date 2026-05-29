@@ -112,6 +112,8 @@ struct SearchFreshness {
     deleted_files: usize,
     #[serde(skip_serializing_if = "is_zero")]
     stale_shards: usize,
+    #[serde(skip_serializing_if = "is_zero")]
+    git_metadata_changed: usize,
     refresh_request: ResultToolRequest,
 }
 
@@ -2084,12 +2086,14 @@ fn index_search_freshness(
             status.added_files,
             status.deleted_files,
             0,
+            0,
         ),
         checked_files: status.checked_files,
         changed_files: status.changed_files,
         added_files: status.added_files,
         deleted_files: status.deleted_files,
         stale_shards: 0,
+        git_metadata_changed: 0,
         refresh_request,
     }
 }
@@ -2106,6 +2110,7 @@ fn shard_search_freshness(
             status.added_files,
             status.deleted_files,
             status.stale_shards,
+            status.git_metadata_changed,
         ),
         checked_files: status
             .shards
@@ -2116,6 +2121,7 @@ fn shard_search_freshness(
         added_files: status.added_files,
         deleted_files: status.deleted_files,
         stale_shards: status.stale_shards,
+        git_metadata_changed: status.git_metadata_changed,
         refresh_request,
     }
 }
@@ -2132,10 +2138,14 @@ fn freshness_summary(
     added_files: usize,
     deleted_files: usize,
     stale_shards: usize,
+    git_metadata_changed: usize,
 ) -> String {
     let mut parts = Vec::new();
     if stale_shards > 0 {
         parts.push(format!("{stale_shards} stale shard(s)"));
+    }
+    if git_metadata_changed > 0 {
+        parts.push(format!("{git_metadata_changed} git metadata change(s)"));
     }
     if changed_files > 0 {
         parts.push(format!("{changed_files} changed file(s)"));
@@ -2193,6 +2203,15 @@ fn shard_refresh_selection_for_search(
     filters: &SearchFilters,
 ) -> Result<ShardRefreshSelection> {
     let roots = shard_freshness_roots_for_search(index_dir, arguments, filters)?;
+    if roots.is_empty()
+        && (filters.repo.is_some() || filters.branch.is_some() || filters.origin.is_some())
+    {
+        let scoped_roots = scoped_shard_status_roots(arguments)?;
+        if !scoped_roots.is_empty() {
+            return Ok(ShardRefreshSelection::Roots(scoped_roots));
+        }
+        return Ok(ShardRefreshSelection::All);
+    }
     if !roots.is_empty()
         || filters.repo.is_some()
         || filters.branch.is_some()

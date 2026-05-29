@@ -424,6 +424,7 @@ pub struct ShardFreshness {
     pub changed_files: usize,
     pub deleted_files: usize,
     pub added_files: usize,
+    pub git_metadata_changed: usize,
     pub shards: Vec<ShardIndexFreshness>,
 }
 
@@ -433,6 +434,11 @@ pub struct ShardIndexFreshness {
     pub root: PathBuf,
     pub aliases: Vec<String>,
     pub index: String,
+    pub git_metadata_stale: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub indexed_git: Option<RepoGitMetadata>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_git: Option<RepoGitMetadata>,
     pub status: IndexFreshness,
 }
 
@@ -776,6 +782,7 @@ fn shard_freshness_from_statuses(
     let mut changed_files = 0usize;
     let mut deleted_files = 0usize;
     let mut added_files = 0usize;
+    let mut git_metadata_changed = 0usize;
     let mut index_bytes = 0u64;
     let mut source_bytes = 0u64;
     let mut content_snapshot_bytes = 0u64;
@@ -789,8 +796,11 @@ fn shard_freshness_from_statuses(
 
     for shard in &shards {
         let status = &shard.status;
-        if status.stale {
+        if status.stale || shard.git_metadata_stale {
             stale_shards += 1;
+        }
+        if shard.git_metadata_stale {
+            git_metadata_changed += 1;
         }
         changed_files += status.changed_files;
         deleted_files += status.deleted_files;
@@ -851,6 +861,7 @@ fn shard_freshness_from_statuses(
         changed_files,
         deleted_files,
         added_files,
+        git_metadata_changed,
         shards,
     }
 }
@@ -911,6 +922,8 @@ fn shard_status_job_batch(
         let status = loaded
             .freshness_at(&index_path)
             .with_context(|| format!("check shard freshness {}", shard.name))?;
+        let current_git = shard_git_metadata(&shard.root);
+        let git_metadata_stale = shard.git != current_git;
         statuses.push((
             offset + index,
             ShardIndexFreshness {
@@ -922,6 +935,9 @@ fn shard_status_job_batch(
                     .map(|alias| alias.name.clone())
                     .collect(),
                 index: shard.index.clone(),
+                git_metadata_stale,
+                indexed_git: shard.git.clone(),
+                current_git,
                 status,
             },
         ));

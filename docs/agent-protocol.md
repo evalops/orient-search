@@ -76,9 +76,10 @@ then live fallback search from the daemon runtime.
 Generated follow-up objects such as `read_request`, `read_batch_request`, `related_request`, `related_symbols_request`, `repo_map_request`, `query_plan_request`, and query-plan `retry_requests` are complete tool requests. They include an `id`, `tool`, `arguments`, raw `jsonl`, a shell-native `client_cli` pipe for `orient client-jsonl`, and, when there is a compact human CLI equivalent, a `cli` hint.
 
 Use `index_status` or `shard_status` when live files may have changed since
-indexing. They report added, changed, and deleted files so an agent can refresh
-before trusting indexed results. `indexed_search_code` and `search_shards` also
-accept `refresh_if_stale:true` for a one-call freshness check and refresh before
+indexing. They report added, changed, deleted files, and shard git metadata
+drift such as branch switches, so an agent can refresh before trusting indexed
+results. `indexed_search_code` and `search_shards` also accept
+`refresh_if_stale:true` for a one-call freshness check and refresh before
 search.
 For registered shard daemons, `search_auto_batch` coalesces
 `refresh_if_stale:true` across the batch: it resolves each query's `cwd`,
