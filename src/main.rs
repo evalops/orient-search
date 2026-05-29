@@ -471,7 +471,7 @@ enum Commands {
         diagnose: bool,
         #[arg(long)]
         retry_if_empty: bool,
-        #[arg(long = "daemon-addr", default_value = DEFAULT_DAEMON_ADDR)]
+        #[arg(long = "daemon-addr", visible_alias = "addr", default_value = DEFAULT_DAEMON_ADDR)]
         daemon_addr: String,
         #[arg(long)]
         no_daemon: bool,
@@ -499,7 +499,7 @@ enum Commands {
         diagnose: bool,
         #[arg(long)]
         retry_if_empty: bool,
-        #[arg(long = "daemon-addr", default_value = DEFAULT_DAEMON_ADDR)]
+        #[arg(long = "daemon-addr", visible_alias = "addr", default_value = DEFAULT_DAEMON_ADDR)]
         daemon_addr: String,
         #[arg(long)]
         no_daemon: bool,
