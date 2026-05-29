@@ -355,6 +355,14 @@ impl FastIndex {
         Self::load_index_bytes(&bytes, path)
     }
 
+    pub fn load_reusable(path: impl AsRef<Path>) -> Result<Option<Self>> {
+        match Self::load(path) {
+            Ok(index) => Ok(Some(index)),
+            Err(error) if rebuildable_load_error(&error) => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
     fn load_index_bytes(bytes: &[u8], path: &Path) -> Result<Self> {
         let (payload, header_version) = index_payload(bytes)
             .with_context(|| format!("parse index header {}", path.display()))?;
@@ -1910,6 +1918,16 @@ fn load_raw_index(payload: &[u8]) -> Result<FastIndex> {
         index.symbol_kind_postings = rebuild_symbol_kind_postings(&index.files);
     }
     Ok(index)
+}
+
+fn rebuildable_load_error(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        let message = cause.to_string();
+        message.starts_with("parse index ")
+            || message.starts_with("parse index header ")
+            || message.starts_with("decode index ")
+            || message.starts_with("unsupported index version ")
+    })
 }
 
 fn compress_posting_map(

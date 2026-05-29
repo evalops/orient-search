@@ -4668,7 +4668,7 @@ fn normalize_family_limit(value: Option<usize>) -> Option<usize> {
 
 fn refresh_or_build_index(repo: PathBuf, index: PathBuf) -> Result<RefreshStats> {
     let previous = if index.exists() {
-        Some(FastIndex::load(&index)?)
+        FastIndex::load_reusable(&index)?
     } else {
         None
     };

@@ -287,10 +287,8 @@ pub fn refresh_shards(index_dir: impl AsRef<Path>) -> Result<ShardRefreshStats> 
         }
         let index_path = index_dir.join(&shard.index);
         let previous = if index_path.exists() {
-            Some(
-                FastIndex::load(&index_path)
-                    .with_context(|| format!("load shard {}", shard.index))?,
-            )
+            FastIndex::load_reusable(&index_path)
+                .with_context(|| format!("load shard {}", shard.index))?
         } else {
             None
         };

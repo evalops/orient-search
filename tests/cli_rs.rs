@@ -2727,6 +2727,54 @@ impl SessionManager {
 }
 
 #[test]
+fn cli_ensure_index_repairs_corrupt_persistent_index() {
+    let repo = sample_repo();
+    let index_path = repo.path().join(".orient/index");
+
+    let mut first = Command::cargo_bin("orient").unwrap();
+    first
+        .args([
+            "ensure-index",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--index",
+            index_path.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    fs::write(&index_path, b"not a valid orient index").unwrap();
+
+    let mut repaired = Command::cargo_bin("orient").unwrap();
+    repaired
+        .args([
+            "ensure-index",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--index",
+            index_path.to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"refreshed_files\""))
+        .stdout(predicate::str::contains("\"files\""));
+
+    let mut search = Command::cargo_bin("orient").unwrap();
+    search
+        .args([
+            "indexed-search",
+            "--index",
+            index_path.to_str().unwrap(),
+            "SessionManager",
+            "--limit",
+            "1",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("src/auth.rs"));
+}
+
+#[test]
 fn cli_builds_and_searches_shard_directory() {
     let auth_repo = sample_repo();
     write(

@@ -348,7 +348,7 @@ impl ToolRuntime {
 
     pub fn refresh_index(&self, repo: PathBuf, index_path: PathBuf) -> Result<RefreshStats> {
         let previous = if index_path.exists() {
-            Some(self.cached_index(index_path.clone())?)
+            FastIndex::load_reusable(&index_path)?.map(Arc::new)
         } else {
             None
         };

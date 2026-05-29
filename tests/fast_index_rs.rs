@@ -2535,6 +2535,15 @@ fn loading_corrupt_index_returns_error() {
 }
 
 #[test]
+fn load_reusable_discards_corrupt_index_for_refresh() {
+    let repo = tempfile::tempdir().unwrap();
+    let path = repo.path().join("corrupt.index");
+    fs::write(&path, b"not a bincode orient index").unwrap();
+
+    assert!(FastIndex::load_reusable(&path).unwrap().is_none());
+}
+
+#[test]
 fn loading_empty_index_returns_error_without_mmap_failure() {
     let repo = tempfile::tempdir().unwrap();
     let path = repo.path().join("empty.index");

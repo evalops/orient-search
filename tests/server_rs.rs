@@ -4343,6 +4343,40 @@ fn runtime_ensure_index_builds_missing_index_and_warms_cache() {
 }
 
 #[test]
+fn runtime_ensure_index_rebuilds_corrupt_index() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/auth.rs"),
+        "pub fn issue_token() {}\n",
+    );
+    let index_path = repo.path().join(".orient/index");
+    write(&index_path, "not a bincode orient index");
+    let runtime = ToolRuntime::default();
+
+    let ensure = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("ensure"),
+        tool: "ensure_index".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "index": index_path
+        }),
+    });
+    assert!(ensure.error.is_none(), "{:?}", ensure.error);
+    assert_eq!(ensure.result.as_ref().unwrap()["files"], 1);
+
+    let search = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("search"),
+        tool: "indexed_search_code".to_string(),
+        arguments: serde_json::json!({
+            "index": repo.path().join(".orient/index"),
+            "query": "issue token",
+            "limit": 3
+        }),
+    });
+    assert!(search.error.is_none(), "{:?}", search.error);
+}
+
+#[test]
 fn runtime_reports_index_status_for_cached_indexes() {
     let repo = tempfile::tempdir().unwrap();
     write(
@@ -4823,6 +4857,42 @@ fn runtime_warms_shards_by_tool_request() {
         result["warmed_shards"]["repos"][0]["aliases"][0],
         result["warmed_shards"]["repos"][0]["name"]
     );
+}
+
+#[test]
+fn refresh_shards_repairs_corrupt_shard_index() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/billing.rs"),
+        "pub fn invoice_total() -> usize { 42 }\n",
+    );
+    write(
+        &repo.path().join("Cargo.toml"),
+        "[package]\nname='billing'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    let shard_dir = tempfile::tempdir().unwrap();
+    build_shards(&[repo.path().to_path_buf()], shard_dir.path()).unwrap();
+
+    let shard_index = fs::read_dir(shard_dir.path())
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .find(|path| path.extension().is_some_and(|ext| ext == "orient"))
+        .expect("shard index file");
+    fs::write(&shard_index, b"not a valid orient shard").unwrap();
+
+    let stats = refresh_shards(shard_dir.path()).unwrap();
+    assert_eq!(stats.shards, 1);
+    assert_eq!(stats.files, 2);
+
+    let loaded = FastIndex::load(&shard_index).unwrap();
+    let results = loaded
+        .search_filtered(
+            "invoice total",
+            5,
+            &orient::repo_index::SearchFilters::default(),
+        )
+        .unwrap();
+    assert_eq!(results[0].path, "src/billing.rs");
 }
 
 #[test]
