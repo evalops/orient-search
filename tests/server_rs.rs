@@ -185,6 +185,10 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         false
     );
     assert_eq!(
+        search_auto["input_schema"]["properties"]["cwd"]["type"],
+        "string"
+    );
+    assert_eq!(
         search_auto_batch["input_schema"]["properties"]["diagnose"]["type"],
         "boolean"
     );
@@ -5335,6 +5339,71 @@ fn runtime_warms_shards_by_tool_request() {
         result["warmed_shards"]["repos"][0]["aliases"][0],
         result["warmed_shards"]["repos"][0]["name"]
     );
+}
+
+#[test]
+fn runtime_search_auto_scopes_warmed_shards_to_client_cwd() {
+    let workspace = tempfile::tempdir().unwrap();
+    let current_repo = workspace.path().join("current-app");
+    let other_repo = workspace.path().join("other-app");
+    fs::create_dir_all(current_repo.join(".git")).unwrap();
+    fs::create_dir_all(other_repo.join(".git")).unwrap();
+    write(
+        &current_repo.join("src/lib.rs"),
+        "pub fn shared_lookup_token() -> &'static str { \"current\" }\n",
+    );
+    write(
+        &other_repo.join("src/lib.rs"),
+        "pub fn shared_lookup_token() -> &'static str { \"other\" }\n",
+    );
+    let shard_dir = workspace.path().join("shards");
+    build_shards(
+        &[PathBuf::from(&current_repo), PathBuf::from(&other_repo)],
+        &shard_dir,
+    )
+    .unwrap();
+
+    let runtime = ToolRuntime::default();
+    runtime.warm_shards(shard_dir.clone()).unwrap();
+
+    let search = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("search-auto-cwd"),
+        tool: "search_auto".to_string(),
+        arguments: serde_json::json!({
+            "cwd": current_repo.join("src"),
+            "query": "shared_lookup_token",
+            "limit": 5
+        }),
+    });
+    assert!(search.error.is_none(), "{:?}", search.error);
+    let value = search.result.unwrap();
+    assert_eq!(value["surface"], serde_json::json!("shards"));
+    assert_eq!(
+        value["query_plan_request"]["arguments"]["repo_filter"],
+        serde_json::json!(current_repo.canonicalize().unwrap().to_string_lossy())
+    );
+    let serialized = serde_json::to_string(&value).unwrap();
+    assert!(serialized.contains("current-app/src/lib.rs"), "{value}");
+    assert!(!serialized.contains("other-app/src/lib.rs"), "{value}");
+
+    let batch = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("search-auto-batch-cwd"),
+        tool: "search_auto_batch".to_string(),
+        arguments: serde_json::json!({
+            "cwd": current_repo.join("src"),
+            "queries": ["shared_lookup_token"],
+            "limit": 5
+        }),
+    });
+    assert!(batch.error.is_none(), "{:?}", batch.error);
+    let batch = batch.result.unwrap();
+    assert_eq!(
+        batch[0]["query_plan_request"]["arguments"]["repo_filter"],
+        serde_json::json!(current_repo.canonicalize().unwrap().to_string_lossy())
+    );
+    let batch_serialized = serde_json::to_string(&batch).unwrap();
+    assert!(batch_serialized.contains("current-app/src/lib.rs"));
+    assert!(!batch_serialized.contains("other-app/src/lib.rs"));
 }
 
 #[test]

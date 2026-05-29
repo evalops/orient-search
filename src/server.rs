@@ -1124,6 +1124,7 @@ For many local repos, bootstrap it with `orient ensure-shards --discover-root /p
 For one repo, bootstrap it with `orient ensure-index --repo {repo} --index {index}` and `orient serve-tcp --addr {addr} --index {index}`.\n\
 Start each session with `daemon_status` or `agent_guide`, then use `search_auto` for normal lookup and `search_auto_batch` for alternate query phrasings.\n\
 Trust `daemon_status.search_auto_default` to see whether no-target `search_auto` will use a warmed shard directory, warmed index, or the daemon current directory; use `daemon_status.default_requests` for copyable first repo-map/search/query-plan calls.\n\
+When calling `search_auto` or `search_auto_batch` through JSON-lines/MCP without an explicit target, pass `cwd` so shared shard daemons scope results to the current git checkout.\n\
 Use query filters directly: `file:`, `path:`, `lang:`, `ext:`, `symbol:`, `type:`, `repo:`, `test:`, `generated:`, `code:`, `is:code`, `is:docs`, quoted literals, and negative filters like `-path:vendor` or `-is:generated`.\n\
 Generated paths, including hashed JavaScript bundles, are demoted by default; use `generated:true` or `is:generated` when intentionally inspecting generated output.\n\
 After search, follow returned `read_batch_request`, `read_request`, `related_request`, and `related_symbols_request`; each includes `jsonl` and `client_cli` for direct replay through `orient client-jsonl`.\n\
@@ -1577,6 +1578,9 @@ fn argument_description(tool_name: &str, name: &str) -> &'static str {
     match name {
         "repo" => "Local repository root or shard repo filter, depending on the tool.",
         "repo_filter" => "Repository name filter when repo is already used as a root path.",
+        "cwd" => {
+            "Client working directory used by search_auto/search_auto_batch to scope warmed daemon searches to the current git checkout when no explicit target or repo_filter is supplied."
+        }
         "branch" | "git_branch" => "Git branch substring filter for shard-aware agent searches.",
         "origin" | "remote" | "remote_origin" => {
             "Git remote origin substring filter for shard-aware agent searches."
@@ -1802,6 +1806,7 @@ fn auto_query_plan_passthrough_arg(name: &str, target_name: &str) -> bool {
         name,
         "query"
             | "queries"
+            | "cwd"
             | "limit"
             | "context_lines"
             | "snippet"
@@ -1925,6 +1930,49 @@ fn primary_retry_result_value(request: &ResultToolRequest, result: Value) -> Res
     }))
 }
 
+fn search_auto_arguments_scoped_to_cwd(arguments: &Value) -> Result<Value> {
+    if optional_string_arg(arguments, "repo_filter").is_some() {
+        return Ok(arguments.clone());
+    }
+    let Some(repo_root) = search_auto_git_root_from_cwd(arguments)? else {
+        return Ok(arguments.clone());
+    };
+    let mut scoped = arguments.clone();
+    let Some(object) = scoped.as_object_mut() else {
+        return Ok(scoped);
+    };
+    object.insert(
+        "repo_filter".to_string(),
+        json!(repo_root.to_string_lossy().to_string()),
+    );
+    Ok(scoped)
+}
+
+fn search_auto_live_repo_from_cwd(arguments: &Value) -> Result<PathBuf> {
+    if let Some(repo_root) = search_auto_git_root_from_cwd(arguments)? {
+        return Ok(repo_root);
+    }
+    if let Some(cwd) = optional_string_arg(arguments, "cwd") {
+        return PathBuf::from(cwd)
+            .canonicalize()
+            .context("canonicalize search_auto cwd");
+    }
+    std::env::current_dir().context("resolve current directory for search_auto")
+}
+
+fn search_auto_git_root_from_cwd(arguments: &Value) -> Result<Option<PathBuf>> {
+    let Some(cwd) = optional_string_arg(arguments, "cwd") else {
+        return Ok(None);
+    };
+    let cwd = PathBuf::from(cwd)
+        .canonicalize()
+        .context("canonicalize search_auto cwd")?;
+    Ok(cwd
+        .ancestors()
+        .find(|ancestor| ancestor.join(".git").exists())
+        .map(Path::to_path_buf))
+}
+
 fn retry_search_requests<T: Serialize>(
     plan: &QueryPlan,
     search_tool: &str,
@@ -2031,6 +2079,7 @@ fn retry_search_passthrough_arg(name: &str, target_name: &str) -> bool {
         name,
         "query"
             | "queries"
+            | "cwd"
             | "limit"
             | "context_lines"
             | "snippet"
@@ -3673,10 +3722,11 @@ impl ToolRuntime {
                 retry_if_empty,
             );
         }
+        let scoped_arguments = search_auto_arguments_scoped_to_cwd(arguments)?;
         if let Ok(index_dir) = self.single_cached_shard_manifest_path() {
             return self.search_auto_shards(
                 index_dir,
-                arguments,
+                &scoped_arguments,
                 query,
                 limit,
                 context_lines,
@@ -3688,7 +3738,7 @@ impl ToolRuntime {
         if let Ok(index_path) = self.single_cached_index_path() {
             return self.search_auto_index(
                 index_path,
-                arguments,
+                &scoped_arguments,
                 query,
                 limit,
                 context_lines,
@@ -3697,10 +3747,10 @@ impl ToolRuntime {
                 retry_if_empty,
             );
         }
-        let repo = std::env::current_dir().context("resolve current directory for search_auto")?;
+        let repo = search_auto_live_repo_from_cwd(arguments)?;
         self.search_auto_live(
             repo,
-            arguments,
+            &scoped_arguments,
             query,
             limit,
             context_lines,
@@ -5473,6 +5523,7 @@ const SEARCH_AUTO_OPTIONAL_ARGS: &[&str] = &[
     "repo",
     "index",
     "index_dir",
+    "cwd",
     "limit",
     "path",
     "dir",
