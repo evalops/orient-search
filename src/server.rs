@@ -4041,13 +4041,15 @@ impl ToolRuntime {
                 let query = string_arg(&request.arguments, "query")?;
                 let limit = search_limit_arg(&request.arguments)?;
                 let context_lines = context_lines_arg(&request.arguments)?;
-                let filters = search_filters(&request.arguments, true)?;
+                let scoped_arguments =
+                    arguments_scoped_to_client_cwd_for_query(&request.arguments, &query)?;
+                let filters = search_filters(&scoped_arguments, true)?;
                 if bool_arg(&request.arguments, "refresh_if_stale") {
                     let refresh_filters =
                         merge_filters(filters.clone(), parse_query(&query).filters);
                     self.refresh_shards_for_arguments_if_stale(
                         &index_dir,
-                        &request.arguments,
+                        &scoped_arguments,
                         &refresh_filters,
                     )?;
                 }
@@ -4064,17 +4066,20 @@ impl ToolRuntime {
                 let queries = string_array_arg(&request.arguments, "queries")?;
                 let limit = search_limit_arg(&request.arguments)?;
                 let context_lines = context_lines_arg(&request.arguments)?;
-                let filters = search_filters(&request.arguments, true)?;
-                if bool_arg(&request.arguments, "refresh_if_stale") {
-                    self.refresh_shards_for_query_batch_if_stale(
-                        &index_dir,
-                        &request.arguments,
-                        &filters,
-                        &queries,
-                    )?;
-                }
                 let mut batch = Vec::new();
                 for query in queries {
+                    let scoped_arguments =
+                        arguments_scoped_to_client_cwd_for_query(&request.arguments, &query)?;
+                    let filters = search_filters(&scoped_arguments, true)?;
+                    if bool_arg(&request.arguments, "refresh_if_stale") {
+                        let refresh_filters =
+                            merge_filters(filters.clone(), parse_query(&query).filters);
+                        self.refresh_shards_for_arguments_if_stale(
+                            &index_dir,
+                            &scoped_arguments,
+                            &refresh_filters,
+                        )?;
+                    }
                     let results = self.search_shards_cached(
                         &index_dir,
                         &query,
@@ -4098,36 +4103,41 @@ impl ToolRuntime {
             "shard_query_plan" | "shard_plan" => {
                 let index_dir = self.shard_dir_arg_or_single_cached(&request.arguments)?;
                 let query = string_arg(&request.arguments, "query")?;
-                let filters = search_filters(&request.arguments, true)?;
+                let scoped_arguments =
+                    arguments_scoped_to_client_cwd_for_query(&request.arguments, &query)?;
+                let filters = search_filters(&scoped_arguments, true)?;
                 if bool_arg(&request.arguments, "refresh_if_stale") {
                     let refresh_filters =
                         merge_filters(filters.clone(), parse_query(&query).filters);
                     self.refresh_shards_for_arguments_if_stale(
                         &index_dir,
-                        &request.arguments,
+                        &scoped_arguments,
                         &refresh_filters,
                     )?;
                 }
                 let mut plans = self.shard_query_plans_cached(&index_dir, &query, &filters)?;
-                attach_shard_retry_requests(&mut plans, &index_dir, &request.arguments);
+                attach_shard_retry_requests(&mut plans, &index_dir, &scoped_arguments);
                 Ok(serde_json::to_value(plans)?)
             }
             "shard_query_plan_batch" => {
                 let index_dir = self.shard_dir_arg_or_single_cached(&request.arguments)?;
                 let queries = string_array_arg(&request.arguments, "queries")?;
-                let filters = search_filters(&request.arguments, true)?;
-                if bool_arg(&request.arguments, "refresh_if_stale") {
-                    self.refresh_shards_for_query_batch_if_stale(
-                        &index_dir,
-                        &request.arguments,
-                        &filters,
-                        &queries,
-                    )?;
-                }
                 let mut batch = Vec::new();
                 for query in queries {
+                    let scoped_arguments =
+                        arguments_scoped_to_client_cwd_for_query(&request.arguments, &query)?;
+                    let filters = search_filters(&scoped_arguments, true)?;
+                    if bool_arg(&request.arguments, "refresh_if_stale") {
+                        let refresh_filters =
+                            merge_filters(filters.clone(), parse_query(&query).filters);
+                        self.refresh_shards_for_arguments_if_stale(
+                            &index_dir,
+                            &scoped_arguments,
+                            &refresh_filters,
+                        )?;
+                    }
                     let mut plans = self.shard_query_plans_cached(&index_dir, &query, &filters)?;
-                    attach_shard_retry_requests(&mut plans, &index_dir, &request.arguments);
+                    attach_shard_retry_requests(&mut plans, &index_dir, &scoped_arguments);
                     batch.push(ShardQueryPlanBatchResult { query, plans });
                 }
                 Ok(serde_json::to_value(batch)?)

@@ -7437,7 +7437,7 @@ fn daemon_status_with_cwd_returns_checkout_scoped_default_requests() {
     git(&billing_repo, &["init"]);
 
     let shard_dir = tempfile::tempdir().unwrap();
-    build_shards(&[auth_repo.clone(), billing_repo], shard_dir.path()).unwrap();
+    build_shards(&[auth_repo.clone(), billing_repo.clone()], shard_dir.path()).unwrap();
 
     let runtime = ToolRuntime::default();
     runtime
@@ -7490,6 +7490,60 @@ fn daemon_status_with_cwd_returns_checkout_scoped_default_requests() {
     let map = serde_json::to_string(&map.result).unwrap();
     assert!(map.contains("AuthSession"), "{map}");
     assert!(!map.contains("BillingInvoice"), "{map}");
+
+    let direct_plan = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("direct-plan"),
+        tool: "shard_query_plan".to_string(),
+        arguments: serde_json::json!({
+            "cwd": cwd,
+            "query": "issue token"
+        }),
+    });
+    assert!(direct_plan.error.is_none(), "{:?}", direct_plan.error);
+    let direct_plan = serde_json::to_string(&direct_plan.result).unwrap();
+    assert!(direct_plan.contains("\"name\":\"auth\""), "{direct_plan}");
+    assert!(
+        !direct_plan.contains("\"name\":\"billing\""),
+        "{direct_plan}"
+    );
+
+    let direct_search = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("direct-search"),
+        tool: "search_shards".to_string(),
+        arguments: serde_json::json!({
+            "cwd": cwd,
+            "query": "issue token",
+            "require_all": true
+        }),
+    });
+    assert!(direct_search.error.is_none(), "{:?}", direct_search.error);
+    let direct_search = serde_json::to_string(&direct_search.result).unwrap();
+    assert!(direct_search.contains("auth/src/lib.rs"), "{direct_search}");
+    assert!(
+        !direct_search.contains("billing/src/lib.rs"),
+        "{direct_search}"
+    );
+
+    let direct_plan_batch = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("direct-plan-batch"),
+        tool: "shard_query_plan_batch".to_string(),
+        arguments: serde_json::json!({
+            "cwd": cwd,
+            "queries": ["issue token", "repo:billing invoice total"]
+        }),
+    });
+    assert!(
+        direct_plan_batch.error.is_none(),
+        "{:?}",
+        direct_plan_batch.error
+    );
+    let direct_plan_batch = direct_plan_batch.result.unwrap();
+    let first = serde_json::to_string(&direct_plan_batch[0]).unwrap();
+    assert!(first.contains("\"name\":\"auth\""), "{first}");
+    assert!(!first.contains("\"name\":\"billing\""), "{first}");
+    let second = serde_json::to_string(&direct_plan_batch[1]).unwrap();
+    assert!(second.contains("\"name\":\"billing\""), "{second}");
+    assert!(!second.contains("\"name\":\"auth\""), "{second}");
 }
 
 #[test]
