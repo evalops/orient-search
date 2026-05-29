@@ -15,8 +15,14 @@ root="${ORIENT_WIDE_ROOT:-${user_home}/Documents/Projects}"
 fallback_p95_ms="${ORIENT_WIDE_FALLBACK_P95_MS:-300}"
 shard_p95_ms="${ORIENT_WIDE_SHARD_P95_MS:-300}"
 family_limit="${ORIENT_WIDE_FAMILY_LIMIT:-1}"
+fallback="${ORIENT_WIDE_FALLBACK:-1}"
 shards="${ORIENT_WIDE_SHARDS:-1}"
 output_dir="${ORIENT_WIDE_OUTPUT_DIR:-/tmp/orient-wide-shards}"
+queries=(
+  "search query plan"
+  "read range tool"
+  "file:Cargo.toml"
+)
 
 if [[ ! -d "${root}" ]]; then
   if [[ "${ORIENT_WIDE_REQUIRE_ROOT:-0}" == "1" ]]; then
@@ -29,22 +35,33 @@ fi
 
 cargo build --release
 
-target/release/orient bench-search \
-  --repo "${root}" \
-  --runs "${ORIENT_WIDE_RUNS:-5}" \
-  --warmup "${ORIENT_WIDE_WARMUP:-1}" \
-  --limit 10 \
-  --fail-p95-ms "${fallback_p95_ms}" \
-  "search query plan" \
-  "read range tool" \
-  "file:Cargo.toml"
+query_args=()
+for query in "${queries[@]}"; do
+  query_args+=(--query "${query}")
+done
+
+if [[ "${fallback}" == "1" ]]; then
+  echo "wide fallback gate: root=${root} p95<=${fallback_p95_ms}ms" >&2
+  target/release/orient bench-search \
+    --repo "${root}" \
+    --mode fallback \
+    --runs "${ORIENT_WIDE_RUNS:-5}" \
+    --warmup "${ORIENT_WIDE_WARMUP:-1}" \
+    --limit 10 \
+    --fail-p95-ms "${fallback_p95_ms}" \
+    "${query_args[@]}"
+else
+  echo "skipping wide fallback gate; ORIENT_WIDE_FALLBACK=${fallback}" >&2
+fi
 
 if [[ "${shards}" == "1" ]]; then
   rm -rf "${output_dir}"
+  echo "wide shard build: root=${root} output_dir=${output_dir} family_limit=${family_limit}" >&2
   target/release/orient ensure-shards \
     --discover-root "${root}" \
     --output-dir "${output_dir}" \
     --family-limit "${family_limit}"
+  echo "wide cached shard gate: output_dir=${output_dir} p95<=${shard_p95_ms}ms" >&2
   target/release/orient bench-shards \
     --index-dir "${output_dir}" \
     --cached \
@@ -52,7 +69,5 @@ if [[ "${shards}" == "1" ]]; then
     --warmup "${ORIENT_WIDE_SHARD_WARMUP:-1}" \
     --limit 10 \
     --fail-p95-ms "${shard_p95_ms}" \
-    "search query plan" \
-    "read range tool" \
-    "file:Cargo.toml"
+    "${query_args[@]}"
 fi
