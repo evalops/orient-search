@@ -6385,20 +6385,28 @@ pub(crate) fn filter_only_search_result(
     filters: &SearchFilters,
 ) -> SearchResult {
     let snippet_mode = filters.snippet;
-    let snippet = filters
+    let symbol_anchor = filters
+        .symbol_kind
+        .as_deref()
+        .and_then(|kind| filter_only_symbol_kind_anchor(path, text, kind));
+    let snippet_anchor = filters
         .target_line
+        .or(symbol_anchor.as_ref().map(|anchor| anchor.line));
+    let snippet = snippet_anchor
         .map(|line| best_snippet_at_line(text, line, snippet_mode))
         .filter(|snippet| !snippet.is_empty())
         .unwrap_or_else(|| best_snippet_for_path(path, text, &[], snippet_mode));
-    let match_lines = filters
-        .target_line
-        .map(|line| vec![line])
-        .unwrap_or_default();
+    let match_lines = snippet_anchor.map(|line| vec![line]).unwrap_or_default();
+    let mut reason = format!("filter match {}", matched.reasons.join(", "));
+    if let Some(anchor) = &symbol_anchor {
+        reason.push_str(", symbol:");
+        reason.push_str(&anchor.name);
+    }
 
     SearchResult {
         path: path.to_string(),
         score: matched.score,
-        reason: format!("filter match {}", matched.reasons.join(", ")),
+        reason,
         snippet,
         line_range: None,
         match_lines,
@@ -6411,6 +6419,26 @@ pub(crate) fn filter_only_search_result(
         related_request: None,
         related_symbols_request: None,
     }
+}
+
+struct FilterOnlySymbolAnchor {
+    name: String,
+    line: usize,
+}
+
+fn filter_only_symbol_kind_anchor(
+    path: &str,
+    text: &str,
+    kind: &str,
+) -> Option<FilterOnlySymbolAnchor> {
+    let language = language_for(Path::new(path))?;
+    extract_symbols(path, text, &language)
+        .into_iter()
+        .find(|symbol| symbol.kind.eq_ignore_ascii_case(kind))
+        .map(|symbol| FilterOnlySymbolAnchor {
+            name: symbol.name,
+            line: symbol.line,
+        })
 }
 
 fn add_filter_signal(

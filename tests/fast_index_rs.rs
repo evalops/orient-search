@@ -2040,6 +2040,39 @@ fn filter_only_queries_discover_files_without_content_terms() {
 }
 
 #[test]
+fn filter_only_symbol_kind_results_anchor_on_matching_definition() {
+    let repo = tempfile::tempdir().unwrap();
+    let mut source = String::new();
+    for line in 1..=30 {
+        source.push_str(&format!("// intro filler {line}\n"));
+    }
+    source.push_str("fn target_definition() -> bool { true }\n");
+    write(&repo.path().join("src/lib.rs"), &source);
+    write(&repo.path().join("src/types.rs"), "pub struct OnlyType;\n");
+
+    let fallback =
+        search_repo_fast_filtered(repo.path(), "kind:function", 10, &SearchFilters::default())
+            .unwrap();
+    assert_eq!(fallback.len(), 1);
+    assert_eq!(fallback[0].path, "src/lib.rs");
+    assert!(fallback[0].reason.contains("symbol:target_definition"));
+    assert!(fallback[0].snippet.contains("fn target_definition()"));
+    assert_eq!(fallback[0].match_lines.first().copied(), Some(31));
+    assert_eq!(fallback[0].read_range.as_ref().unwrap().start, 31);
+
+    let index = FastIndex::build(repo.path()).unwrap();
+    let indexed = index
+        .search_filtered("kind:function", 10, &SearchFilters::default())
+        .unwrap();
+    assert_eq!(indexed.len(), 1);
+    assert_eq!(indexed[0].path, "src/lib.rs");
+    assert!(indexed[0].reason.contains("symbol:target_definition"));
+    assert!(indexed[0].snippet.contains("fn target_definition()"));
+    assert_eq!(indexed[0].match_lines.first().copied(), Some(31));
+    assert_eq!(indexed[0].read_range.as_ref().unwrap().start, 31);
+}
+
+#[test]
 fn bare_path_like_queries_use_filter_only_fast_paths() {
     let repo = tempfile::tempdir().unwrap();
     write(
