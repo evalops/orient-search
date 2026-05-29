@@ -2329,10 +2329,22 @@ fn primary_cli_retry_request_from_plan(plan: &QueryPlan) -> Option<Value> {
         .and_then(|request| serde_json::to_value(request).ok())
 }
 
+fn primary_cli_diagnosis_from_plan(plan: &QueryPlan) -> Option<Value> {
+    plan.diagnosis
+        .as_ref()
+        .and_then(|diagnosis| serde_json::to_value(diagnosis).ok())
+}
+
 fn primary_cli_retry_request_from_shard_plans(plans: &[ShardQueryPlan]) -> Option<Value> {
     plans
         .iter()
         .find_map(|shard_plan| primary_cli_retry_request_from_plan(&shard_plan.plan))
+}
+
+fn primary_cli_diagnosis_from_shard_plans(plans: &[ShardQueryPlan]) -> Option<Value> {
+    plans
+        .iter()
+        .find_map(|shard_plan| primary_cli_diagnosis_from_plan(&shard_plan.plan))
 }
 
 fn primary_cli_retry_result(
@@ -3351,16 +3363,18 @@ fn run() -> Result<()> {
                     Some(&query),
                     read_request_args("index_dir", &index_dir),
                 );
-                let (query_plan_result, primary_retry_request) = if diagnose || results.is_empty() {
-                    let mut plans = shard_query_plans(&index_dir, &query, &filters)?;
-                    attach_cli_shard_retry_requests(&mut plans, &index_dir, &filters);
-                    (
-                        Some(serde_json::to_value(&plans)?),
-                        primary_cli_retry_request_from_shard_plans(&plans),
-                    )
-                } else {
-                    (None, None)
-                };
+                let (query_plan_result, primary_diagnosis, primary_retry_request) =
+                    if diagnose || results.is_empty() {
+                        let mut plans = shard_query_plans(&index_dir, &query, &filters)?;
+                        attach_cli_shard_retry_requests(&mut plans, &index_dir, &filters);
+                        (
+                            Some(serde_json::to_value(&plans)?),
+                            primary_cli_diagnosis_from_shard_plans(&plans),
+                            primary_cli_retry_request_from_shard_plans(&plans),
+                        )
+                    } else {
+                        (None, None, None)
+                    };
                 let primary_retry_result = primary_cli_retry_result(
                     retry_if_empty,
                     results.is_empty(),
@@ -3383,6 +3397,7 @@ fn run() -> Result<()> {
                     "results": results
                 });
                 insert_optional_json_field(&mut output, "query_plan_result", query_plan_result);
+                insert_optional_json_field(&mut output, "primary_diagnosis", primary_diagnosis);
                 insert_optional_json_field(
                     &mut output,
                     "primary_retry_request",
@@ -3424,21 +3439,23 @@ fn run() -> Result<()> {
                     Some(&query),
                     read_request_args("index", &index_path),
                 );
-                let (query_plan_result, primary_retry_request) = if diagnose || results.is_empty() {
-                    let plan = attach_cli_retry_requests(
-                        index.query_plan(&query, &filters)?,
-                        "indexed_search_code",
-                        "index",
-                        &index_path,
-                        &filters,
-                    );
-                    (
-                        Some(serde_json::to_value(&plan)?),
-                        primary_cli_retry_request_from_plan(&plan),
-                    )
-                } else {
-                    (None, None)
-                };
+                let (query_plan_result, primary_diagnosis, primary_retry_request) =
+                    if diagnose || results.is_empty() {
+                        let plan = attach_cli_retry_requests(
+                            index.query_plan(&query, &filters)?,
+                            "indexed_search_code",
+                            "index",
+                            &index_path,
+                            &filters,
+                        );
+                        (
+                            Some(serde_json::to_value(&plan)?),
+                            primary_cli_diagnosis_from_plan(&plan),
+                            primary_cli_retry_request_from_plan(&plan),
+                        )
+                    } else {
+                        (None, None, None)
+                    };
                 let primary_retry_result = primary_cli_retry_result(
                     retry_if_empty,
                     results.is_empty(),
@@ -3464,6 +3481,7 @@ fn run() -> Result<()> {
                     "results": results
                 });
                 insert_optional_json_field(&mut output, "query_plan_result", query_plan_result);
+                insert_optional_json_field(&mut output, "primary_diagnosis", primary_diagnosis);
                 insert_optional_json_field(
                     &mut output,
                     "primary_retry_request",
@@ -3498,22 +3516,24 @@ fn run() -> Result<()> {
                     Some(&query),
                     read_request_args("repo", &repo),
                 );
-                let (query_plan_result, primary_retry_request) = if diagnose || results.is_empty() {
-                    let index = FastIndex::build(&repo)?;
-                    let plan = attach_cli_retry_requests(
-                        index.query_plan(&query, &filters)?,
-                        "search_code",
-                        "repo",
-                        &repo,
-                        &filters,
-                    );
-                    (
-                        Some(serde_json::to_value(&plan)?),
-                        primary_cli_retry_request_from_plan(&plan),
-                    )
-                } else {
-                    (None, None)
-                };
+                let (query_plan_result, primary_diagnosis, primary_retry_request) =
+                    if diagnose || results.is_empty() {
+                        let index = FastIndex::build(&repo)?;
+                        let plan = attach_cli_retry_requests(
+                            index.query_plan(&query, &filters)?,
+                            "search_code",
+                            "repo",
+                            &repo,
+                            &filters,
+                        );
+                        (
+                            Some(serde_json::to_value(&plan)?),
+                            primary_cli_diagnosis_from_plan(&plan),
+                            primary_cli_retry_request_from_plan(&plan),
+                        )
+                    } else {
+                        (None, None, None)
+                    };
                 let primary_retry_result = primary_cli_retry_result(
                     retry_if_empty,
                     results.is_empty(),
@@ -3539,6 +3559,7 @@ fn run() -> Result<()> {
                     "results": results
                 });
                 insert_optional_json_field(&mut output, "query_plan_result", query_plan_result);
+                insert_optional_json_field(&mut output, "primary_diagnosis", primary_diagnosis);
                 insert_optional_json_field(
                     &mut output,
                     "primary_retry_request",
@@ -3617,16 +3638,17 @@ fn run() -> Result<()> {
                         Some(&query),
                         read_request_args("index_dir", &index_dir),
                     );
-                    let (query_plan_result, primary_retry_request) =
+                    let (query_plan_result, primary_diagnosis, primary_retry_request) =
                         if diagnose || results.is_empty() {
                             let mut plans = shard_query_plans(&index_dir, &query, &filters)?;
                             attach_cli_shard_retry_requests(&mut plans, &index_dir, &filters);
                             (
                                 Some(serde_json::to_value(&plans)?),
+                                primary_cli_diagnosis_from_shard_plans(&plans),
                                 primary_cli_retry_request_from_shard_plans(&plans),
                             )
                         } else {
-                            (None, None)
+                            (None, None, None)
                         };
                     let primary_retry_result = primary_cli_retry_result(
                         retry_if_empty,
@@ -3650,6 +3672,7 @@ fn run() -> Result<()> {
                         "results": results
                     });
                     insert_optional_json_field(&mut item, "query_plan_result", query_plan_result);
+                    insert_optional_json_field(&mut item, "primary_diagnosis", primary_diagnosis);
                     insert_optional_json_field(
                         &mut item,
                         "primary_retry_request",
@@ -3694,7 +3717,7 @@ fn run() -> Result<()> {
                         Some(&query),
                         read_request_args("index", &index_path),
                     );
-                    let (query_plan_result, primary_retry_request) =
+                    let (query_plan_result, primary_diagnosis, primary_retry_request) =
                         if diagnose || results.is_empty() {
                             let plan = attach_cli_retry_requests(
                                 index.query_plan(&query, &filters)?,
@@ -3705,10 +3728,11 @@ fn run() -> Result<()> {
                             );
                             (
                                 Some(serde_json::to_value(&plan)?),
+                                primary_cli_diagnosis_from_plan(&plan),
                                 primary_cli_retry_request_from_plan(&plan),
                             )
                         } else {
-                            (None, None)
+                            (None, None, None)
                         };
                     let primary_retry_result = primary_cli_retry_result(
                         retry_if_empty,
@@ -3735,6 +3759,7 @@ fn run() -> Result<()> {
                         "results": results
                     });
                     insert_optional_json_field(&mut item, "query_plan_result", query_plan_result);
+                    insert_optional_json_field(&mut item, "primary_diagnosis", primary_diagnosis);
                     insert_optional_json_field(
                         &mut item,
                         "primary_retry_request",
@@ -3772,7 +3797,7 @@ fn run() -> Result<()> {
                         Some(&query),
                         read_request_args("repo", &repo),
                     );
-                    let (query_plan_result, primary_retry_request) =
+                    let (query_plan_result, primary_diagnosis, primary_retry_request) =
                         if diagnose || results.is_empty() {
                             let index = FastIndex::build(&repo)?;
                             let plan = attach_cli_retry_requests(
@@ -3784,10 +3809,11 @@ fn run() -> Result<()> {
                             );
                             (
                                 Some(serde_json::to_value(&plan)?),
+                                primary_cli_diagnosis_from_plan(&plan),
                                 primary_cli_retry_request_from_plan(&plan),
                             )
                         } else {
-                            (None, None)
+                            (None, None, None)
                         };
                     let primary_retry_result = primary_cli_retry_result(
                         retry_if_empty,
@@ -3814,6 +3840,7 @@ fn run() -> Result<()> {
                         "results": results
                     });
                     insert_optional_json_field(&mut item, "query_plan_result", query_plan_result);
+                    insert_optional_json_field(&mut item, "primary_diagnosis", primary_diagnosis);
                     insert_optional_json_field(
                         &mut item,
                         "primary_retry_request",

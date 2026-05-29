@@ -538,6 +538,7 @@ fn cli_search_auto_selects_live_indexed_and_shard_surfaces() {
         .assert()
         .success()
         .stdout(predicate::str::contains("\"query_plan_result\""))
+        .stdout(predicate::str::contains("\"primary_diagnosis\""))
         .stdout(predicate::str::contains("\"primary_retry_request\""))
         .stdout(predicate::str::contains("drop_missing_terms"))
         .stdout(predicate::str::contains("\"tool\":\"search_code\""));
@@ -569,6 +570,7 @@ fn cli_search_auto_selects_live_indexed_and_shard_surfaces() {
         .assert()
         .success()
         .stdout(predicate::str::contains("\"query_plan_result\""))
+        .stdout(predicate::str::contains("\"primary_diagnosis\""))
         .stdout(predicate::str::contains("\"final_match_count\":1"));
 
     let mut diagnosed_bad_scope = Command::cargo_bin("orient").unwrap();
@@ -757,6 +759,7 @@ fn cli_search_auto_batch_returns_query_surfaces() {
         .assert()
         .success()
         .stdout(predicate::str::contains("\"query_plan_result\""))
+        .stdout(predicate::str::contains("\"primary_diagnosis\""))
         .stdout(predicate::str::contains("\"primary_retry_request\""))
         .stdout(predicate::str::contains("\"tool\":\"indexed_search_code\""));
 
@@ -786,6 +789,7 @@ fn cli_search_auto_batch_returns_query_surfaces() {
         .assert()
         .success()
         .stdout(predicate::str::contains("\"query_plan_result\""))
+        .stdout(predicate::str::contains("\"primary_diagnosis\""))
         .stdout(predicate::str::contains("\"final_match_count\":1"));
 
     let mut default_live_batch = Command::cargo_bin("orient").unwrap();

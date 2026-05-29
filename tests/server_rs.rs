@@ -1510,6 +1510,14 @@ fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
         diagnosed_live["query_plan_result"]["final_match_count"],
         serde_json::json!(1)
     );
+    assert_eq!(
+        diagnosed_live["primary_diagnosis"],
+        diagnosed_live["query_plan_result"]["diagnosis"]
+    );
+    assert_eq!(
+        diagnosed_live["primary_diagnosis"]["status"],
+        serde_json::json!("matched")
+    );
     assert!(
         diagnosed_live["query_plan_request"]["arguments"]
             .get("diagnose")
@@ -1546,6 +1554,18 @@ fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
     assert_eq!(
         empty_live["query_plan_result"]["repair_hints"][0]["kind"],
         "drop_missing_terms"
+    );
+    assert_eq!(
+        empty_live["primary_diagnosis"],
+        empty_live["query_plan_result"]["diagnosis"]
+    );
+    assert_eq!(
+        empty_live["primary_diagnosis"]["status"],
+        serde_json::json!("missing_terms")
+    );
+    assert_eq!(
+        empty_live["primary_diagnosis"]["primary_hint_kind"],
+        serde_json::json!("drop_missing_terms")
     );
     assert_eq!(
         empty_live["query_plan_result"]["retry_requests"][0]["tool"],
@@ -1608,6 +1628,10 @@ fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
     assert_eq!(
         git_scope_miss["query_plan_result"]["repair_hints"][0]["kind"],
         "relax_branch_filter"
+    );
+    assert_eq!(
+        git_scope_miss["primary_diagnosis"]["status"],
+        serde_json::json!("scope_mismatch")
     );
     assert_eq!(
         git_scope_miss["query_plan_result"]["retry_requests"][0]["arguments"]["query"],
@@ -1700,6 +1724,14 @@ fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
         "indexed_search_code"
     );
     assert_eq!(
+        empty_indexed["primary_diagnosis"],
+        empty_indexed["query_plan_result"]["diagnosis"]
+    );
+    assert_eq!(
+        empty_indexed["primary_diagnosis"]["status"],
+        serde_json::json!("missing_terms")
+    );
+    assert_eq!(
         empty_indexed["primary_retry_request"],
         empty_indexed["query_plan_result"]["retry_requests"][0]
     );
@@ -1741,6 +1773,10 @@ fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
     assert_eq!(
         kind_typo["query_plan_result"]["repair_hints"][0]["kind"],
         "replace_symbol_kind_filter"
+    );
+    assert_eq!(
+        kind_typo["primary_diagnosis"]["primary_hint_kind"],
+        serde_json::json!("replace_symbol_kind_filter")
     );
     assert_eq!(
         kind_typo["query_plan_result"]["retry_requests"][0]["arguments"]["query"],
@@ -1785,6 +1821,10 @@ fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
     assert_eq!(
         symbol_typo["query_plan_result"]["repair_hints"][0]["kind"],
         "replace_symbol_filter"
+    );
+    assert_eq!(
+        symbol_typo["primary_diagnosis"]["primary_hint_kind"],
+        serde_json::json!("replace_symbol_filter")
     );
     assert_eq!(
         symbol_typo["query_plan_result"]["retry_requests"][0]["arguments"]["query"],
@@ -2910,6 +2950,14 @@ fn runtime_search_auto_batch_uses_single_warmed_index() {
         diagnosed_batch[0]["query_plan_result"]["final_match_count"],
         serde_json::json!(1)
     );
+    assert_eq!(
+        diagnosed_batch[0]["primary_diagnosis"],
+        diagnosed_batch[0]["query_plan_result"]["diagnosis"]
+    );
+    assert_eq!(
+        diagnosed_batch[0]["primary_diagnosis"]["status"],
+        serde_json::json!("matched")
+    );
 
     let empty_batch = runtime.dispatch(ToolRequest {
         id: serde_json::json!("empty-batch"),
@@ -2925,6 +2973,10 @@ fn runtime_search_auto_batch_uses_single_warmed_index() {
     assert_eq!(
         empty_batch[0]["query_plan_result"]["retry_requests"][0]["tool"],
         "indexed_search_code"
+    );
+    assert_eq!(
+        empty_batch[0]["primary_diagnosis"]["status"],
+        serde_json::json!("missing_terms")
     );
 
     let explicit_live_batch = runtime.dispatch(ToolRequest {
