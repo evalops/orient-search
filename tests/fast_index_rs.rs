@@ -759,6 +759,12 @@ fn indexed_repo_map_returns_orientation_from_persisted_metadata() {
         &repo.path().join("Makefile"),
         "test:\n\tcargo test\nbuild:\n\tcargo build\n",
     );
+    write(
+        &repo.path().join("pom.xml"),
+        "<project><modelVersion>4.0.0</modelVersion></project>\n",
+    );
+    write(&repo.path().join("build.gradle"), "plugins { id 'java' }\n");
+    write(&repo.path().join("gradlew"), "#!/bin/sh\n");
     write(&repo.path().join("yarn.lock"), "# yarn lockfile\n");
 
     let map = FastIndex::build(repo.path()).unwrap().repo_map(5, 5);
@@ -770,6 +776,12 @@ fn indexed_repo_map_returns_orientation_from_persisted_metadata() {
         map.brief
             .manifest_files
             .contains(&"MODULE.bazel".to_string())
+    );
+    assert!(map.brief.manifest_files.contains(&"pom.xml".to_string()));
+    assert!(
+        map.brief
+            .manifest_files
+            .contains(&"build.gradle".to_string())
     );
     assert!(
         map.brief
@@ -783,6 +795,7 @@ fn indexed_repo_map_returns_orientation_from_persisted_metadata() {
     );
     assert!(map.brief.important_files.contains(&"Justfile".to_string()));
     assert!(map.brief.important_files.contains(&"Makefile".to_string()));
+    assert!(map.brief.important_files.contains(&"gradlew".to_string()));
     assert!(map.brief.known_commands.contains(&"cargo test".to_string()));
     assert!(
         map.brief
@@ -798,6 +811,22 @@ fn indexed_repo_map_returns_orientation_from_persisted_metadata() {
     assert!(map.brief.known_commands.contains(&"just check".to_string()));
     assert!(map.brief.known_commands.contains(&"make test".to_string()));
     assert!(map.brief.known_commands.contains(&"make build".to_string()));
+    assert!(map.brief.known_commands.contains(&"mvn test".to_string()));
+    assert!(
+        map.brief
+            .known_commands
+            .contains(&"mvn package".to_string())
+    );
+    assert!(
+        map.brief
+            .known_commands
+            .contains(&"./gradlew test".to_string())
+    );
+    assert!(
+        map.brief
+            .known_commands
+            .contains(&"./gradlew build".to_string())
+    );
     assert!(map.brief.known_commands.contains(&"yarn test".to_string()));
     assert!(
         map.brief
@@ -826,6 +855,18 @@ fn indexed_repo_map_returns_orientation_from_persisted_metadata() {
     }));
     assert!(map.brief.command_hints.iter().any(|hint| {
         hint.command == "make build" && hint.kind == "build" && hint.source == "Makefile"
+    }));
+    assert!(map.brief.command_hints.iter().any(|hint| {
+        hint.command == "mvn test" && hint.kind == "test" && hint.source == "pom.xml"
+    }));
+    assert!(map.brief.command_hints.iter().any(|hint| {
+        hint.command == "mvn package" && hint.kind == "build" && hint.source == "pom.xml"
+    }));
+    assert!(map.brief.command_hints.iter().any(|hint| {
+        hint.command == "./gradlew test" && hint.kind == "test" && hint.source == "build.gradle"
+    }));
+    assert!(map.brief.command_hints.iter().any(|hint| {
+        hint.command == "./gradlew build" && hint.kind == "build" && hint.source == "build.gradle"
     }));
     assert!(map.brief.dependency_hints.iter().any(|hint| {
         hint.name == "serde" && hint.kind == "dependency" && hint.source == "Cargo.toml"

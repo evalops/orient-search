@@ -65,6 +65,12 @@ def test_issue_token_round_trip():
         &temp.path().join("Makefile"),
         "test:\n\tpytest\nlint:\n\truff check .\n",
     );
+    write(
+        &temp.path().join("pom.xml"),
+        "<project><modelVersion>4.0.0</modelVersion></project>\n",
+    );
+    write(&temp.path().join("build.gradle.kts"), "plugins { java }\n");
+    write(&temp.path().join("gradlew"), "#!/bin/sh\n");
 
     let index = RepoIndexer::new(temp.path()).build().unwrap();
 
@@ -204,6 +210,14 @@ def test_issue_token_round_trip():
     assert!(brief.known_commands.contains(&"just fmt".to_string()));
     assert!(brief.known_commands.contains(&"make test".to_string()));
     assert!(brief.known_commands.contains(&"make lint".to_string()));
+    assert!(brief.known_commands.contains(&"mvn test".to_string()));
+    assert!(brief.known_commands.contains(&"mvn package".to_string()));
+    assert!(brief.known_commands.contains(&"./gradlew test".to_string()));
+    assert!(
+        brief
+            .known_commands
+            .contains(&"./gradlew build".to_string())
+    );
     assert!(brief.known_commands.contains(&"pnpm run lint".to_string()));
     assert!(
         brief
@@ -234,6 +248,20 @@ def test_issue_token_round_trip():
     assert!(brief.command_hints.iter().any(|hint| {
         hint.command == "make lint" && hint.kind == "lint" && hint.source == "Makefile"
     }));
+    assert!(brief.command_hints.iter().any(|hint| {
+        hint.command == "mvn test" && hint.kind == "test" && hint.source == "pom.xml"
+    }));
+    assert!(brief.command_hints.iter().any(|hint| {
+        hint.command == "mvn package" && hint.kind == "build" && hint.source == "pom.xml"
+    }));
+    assert!(brief.command_hints.iter().any(|hint| {
+        hint.command == "./gradlew test" && hint.kind == "test" && hint.source == "build.gradle.kts"
+    }));
+    assert!(brief.command_hints.iter().any(|hint| {
+        hint.command == "./gradlew build"
+            && hint.kind == "build"
+            && hint.source == "build.gradle.kts"
+    }));
     assert!(brief.dependency_hints.iter().any(|hint| {
         hint.name == "fastapi" && hint.kind == "dependency" && hint.source == "pyproject.toml"
     }));
@@ -257,6 +285,12 @@ def test_issue_token_round_trip():
     }));
     assert!(brief.manifest_files.contains(&"pyproject.toml".to_string()));
     assert!(brief.manifest_files.contains(&"MODULE.bazel".to_string()));
+    assert!(brief.manifest_files.contains(&"pom.xml".to_string()));
+    assert!(
+        brief
+            .manifest_files
+            .contains(&"build.gradle.kts".to_string())
+    );
     assert!(
         brief
             .important_files

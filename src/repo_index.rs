@@ -1648,7 +1648,7 @@ fn rg_language_globs(language: &str) -> &'static [&'static str] {
         "json" => &["**/*.json"],
         "yaml" => &["**/*.yaml", "**/*.yml"],
         "xml" => &["**/*.xml"],
-        "gradle" => &["**/*.gradle"],
+        "gradle" => &["**/*.gradle", "**/*.gradle.kts"],
         "dockerfile" => &["**/Dockerfile"],
         "justfile" => &["**/Justfile"],
         "go-mod" => &["**/go.mod", "**/go.sum"],
@@ -3315,6 +3315,19 @@ pub(crate) fn command_hints_from_manifest_texts<'a>(
     if let Some(source) = manifest_path("pyproject.toml") {
         hints.push(command_hint("pytest", "test", source));
     }
+    if let Some(source) = manifest_path("pom.xml") {
+        hints.push(command_hint("mvn test", "test", source.clone()));
+        hints.push(command_hint("mvn package", "build", source));
+    }
+    if let Some(source) = gradle_manifest_source(&manifest_path) {
+        let gradle = gradle_command(&has_file);
+        hints.push(command_hint(
+            format!("{gradle} test"),
+            "test",
+            source.clone(),
+        ));
+        hints.push(command_hint(format!("{gradle} build"), "build", source));
+    }
     for (path, package_json) in files.iter().filter(|(path, _)| {
         Path::new(path).file_name().and_then(|value| value.to_str()) == Some("package.json")
     }) {
@@ -4059,6 +4072,23 @@ fn bazel_manifest_source(manifest_path: &impl Fn(&str) -> Option<String>) -> Opt
         .or_else(|| manifest_path("BUILD"))
 }
 
+fn gradle_manifest_source(manifest_path: &impl Fn(&str) -> Option<String>) -> Option<String> {
+    manifest_path("build.gradle")
+        .or_else(|| manifest_path("build.gradle.kts"))
+        .or_else(|| manifest_path("settings.gradle"))
+        .or_else(|| manifest_path("settings.gradle.kts"))
+}
+
+fn gradle_command(has_file: &impl Fn(&str) -> bool) -> &'static str {
+    if has_file("gradlew") {
+        "./gradlew"
+    } else if has_file("gradlew.bat") {
+        "gradlew.bat"
+    } else {
+        "gradle"
+    }
+}
+
 fn command_hint(
     command: impl Into<String>,
     kind: impl Into<String>,
@@ -4149,6 +4179,9 @@ pub(crate) fn language_for(path: &Path) -> Option<String> {
 }
 
 fn special_file_language(file_name: &str) -> Option<&'static str> {
+    if file_name.ends_with(".gradle.kts") {
+        return Some("gradle");
+    }
     match file_name {
         "Cargo.lock" => Some("toml"),
         "Dockerfile" => Some("dockerfile"),
@@ -4156,9 +4189,11 @@ fn special_file_language(file_name: &str) -> Option<&'static str> {
         "Justfile" => Some("justfile"),
         "go.mod" | "go.sum" => Some("go-mod"),
         "pom.xml" => Some("xml"),
-        "build.gradle" | "settings.gradle" => Some("gradle"),
+        "build.gradle" | "build.gradle.kts" | "settings.gradle" | "settings.gradle.kts" => {
+            Some("gradle")
+        }
         "MODULE.bazel" | "WORKSPACE.bazel" | "WORKSPACE" | "BUILD.bazel" | "BUILD" => Some("bazel"),
-        "yarn.lock" | "bun.lock" | "bun.lockb" => Some("text"),
+        "yarn.lock" | "bun.lock" | "bun.lockb" | "gradlew" | "gradlew.bat" => Some("text"),
         _ => None,
     }
 }
@@ -5277,7 +5312,11 @@ pub(crate) fn is_manifest_file(path: &str) -> bool {
             | "Package.swift"
             | "pom.xml"
             | "build.gradle"
+            | "build.gradle.kts"
             | "settings.gradle"
+            | "settings.gradle.kts"
+            | "gradlew"
+            | "gradlew.bat"
             | "deno.json"
             | "composer.json"
     )
@@ -5286,7 +5325,14 @@ pub(crate) fn is_manifest_file(path: &str) -> bool {
 pub(crate) fn is_important_file(path: &str) -> bool {
     matches!(
         path,
-        "AGENTS.md" | "CLAUDE.md" | "README.md" | "Dockerfile" | "Justfile" | "Makefile"
+        "AGENTS.md"
+            | "CLAUDE.md"
+            | "README.md"
+            | "Dockerfile"
+            | "Justfile"
+            | "Makefile"
+            | "gradlew"
+            | "gradlew.bat"
     ) || is_manifest_file(path)
 }
 

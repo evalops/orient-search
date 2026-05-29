@@ -511,7 +511,9 @@ fn looks_like_file_name_query(term: &str) -> bool {
             | "go.sum"
             | "pom.xml"
             | "build.gradle"
+            | "build.gradle.kts"
             | "settings.gradle"
+            | "settings.gradle.kts"
             | "yarn.lock"
             | "bun.lock"
             | "bun.lockb"
@@ -543,6 +545,7 @@ fn agent_path_query_extension(extension: &str) -> bool {
             | "go"
             | "java"
             | "kt"
+            | "kts"
             | "swift"
             | "rb"
     )

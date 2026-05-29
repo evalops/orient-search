@@ -107,6 +107,9 @@ fn language_for(path: &str) -> Option<&'static str> {
 }
 
 fn special_file_language(file_name: &str) -> Option<&'static str> {
+    if file_name.ends_with(".gradle.kts") {
+        return Some("gradle");
+    }
     match file_name {
         "Cargo.lock" => Some("toml"),
         "Dockerfile" => Some("dockerfile"),
@@ -114,8 +117,10 @@ fn special_file_language(file_name: &str) -> Option<&'static str> {
         "Justfile" => Some("justfile"),
         "go.mod" | "go.sum" => Some("go-mod"),
         "pom.xml" => Some("xml"),
-        "build.gradle" | "settings.gradle" => Some("gradle"),
-        "yarn.lock" | "bun.lock" | "bun.lockb" => Some("text"),
+        "build.gradle" | "build.gradle.kts" | "settings.gradle" | "settings.gradle.kts" => {
+            Some("gradle")
+        }
+        "yarn.lock" | "bun.lock" | "bun.lockb" | "gradlew" | "gradlew.bat" => Some("text"),
         _ => None,
     }
 }
