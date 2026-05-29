@@ -3220,6 +3220,10 @@ pub(crate) fn command_hints_from_manifest_texts<'a>(
     if let Some(source) = manifest_path("Cargo.toml") {
         hints.push(command_hint("cargo test", "test", source));
     }
+    if let Some(source) = bazel_manifest_source(&manifest_path) {
+        hints.push(command_hint("bazel build //...", "build", source.clone()));
+        hints.push(command_hint("bazel test //...", "test", source));
+    }
     if let Some(source) = manifest_path("pyproject.toml") {
         hints.push(command_hint("pytest", "test", source));
     }
@@ -3891,6 +3895,14 @@ fn manifest_path_in_files(files: &[(&str, &str)], name: &str) -> Option<String> 
         .map(|(path, _)| (*path).to_string())
 }
 
+fn bazel_manifest_source(manifest_path: &impl Fn(&str) -> Option<String>) -> Option<String> {
+    manifest_path("MODULE.bazel")
+        .or_else(|| manifest_path("WORKSPACE.bazel"))
+        .or_else(|| manifest_path("WORKSPACE"))
+        .or_else(|| manifest_path("BUILD.bazel"))
+        .or_else(|| manifest_path("BUILD"))
+}
+
 fn command_hint(
     command: impl Into<String>,
     kind: impl Into<String>,
@@ -3974,6 +3986,7 @@ pub(crate) fn language_for(path: &Path) -> Option<String> {
         "yaml" | "yml" => "yaml",
         "xml" => "xml",
         "gradle" => "gradle",
+        "bazel" | "bzl" => "bazel",
         _ => return None,
     };
     Some(language.to_string())
@@ -3988,6 +4001,7 @@ fn special_file_language(file_name: &str) -> Option<&'static str> {
         "go.mod" | "go.sum" => Some("go-mod"),
         "pom.xml" => Some("xml"),
         "build.gradle" | "settings.gradle" => Some("gradle"),
+        "MODULE.bazel" | "WORKSPACE.bazel" | "WORKSPACE" | "BUILD.bazel" | "BUILD" => Some("bazel"),
         "yarn.lock" | "bun.lock" | "bun.lockb" => Some("text"),
         _ => None,
     }
@@ -5085,6 +5099,11 @@ pub(crate) fn is_manifest_file(path: &str) -> bool {
             | "package-lock.json"
             | "pnpm-lock.yaml"
             | "yarn.lock"
+            | "MODULE.bazel"
+            | "WORKSPACE.bazel"
+            | "WORKSPACE"
+            | "BUILD.bazel"
+            | "BUILD"
             | "go.mod"
             | "go.sum"
             | "Gemfile"

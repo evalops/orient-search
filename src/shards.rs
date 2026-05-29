@@ -2062,6 +2062,10 @@ fn command_hints_for_manifest_paths(paths: &[String]) -> Vec<CommandHint> {
     if let Some(source) = manifest_path("Cargo.toml") {
         hints.push(command_hint("cargo test", "test", source));
     }
+    if let Some(source) = bazel_manifest_source(&manifest_path) {
+        hints.push(command_hint("bazel build //...", "build", source.clone()));
+        hints.push(command_hint("bazel test //...", "test", source));
+    }
     if let Some(source) = manifest_path("pyproject.toml") {
         hints.push(command_hint("pytest", "test", source));
     }
@@ -2094,6 +2098,14 @@ fn command_hints_for_manifest_paths(paths: &[String]) -> Vec<CommandHint> {
     });
     hints.dedup_by(|left, right| left.command == right.command && left.source == right.source);
     hints
+}
+
+fn bazel_manifest_source(manifest_path: &impl Fn(&str) -> Option<String>) -> Option<String> {
+    manifest_path("MODULE.bazel")
+        .or_else(|| manifest_path("WORKSPACE.bazel"))
+        .or_else(|| manifest_path("WORKSPACE"))
+        .or_else(|| manifest_path("BUILD.bazel"))
+        .or_else(|| manifest_path("BUILD"))
 }
 
 fn command_hint(

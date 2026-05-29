@@ -743,6 +743,14 @@ fn indexed_repo_map_returns_orientation_from_persisted_metadata() {
         &repo.path().join("package.json"),
         r#"{"scripts":{"test":"vitest run","lint":"eslint .","build":"vite build"},"dependencies":{"react":"latest"},"devDependencies":{"vite":"latest"}}"#,
     );
+    write(
+        &repo.path().join("MODULE.bazel"),
+        "module(name = \"sample\")\n",
+    );
+    write(
+        &repo.path().join("BUILD.bazel"),
+        "exports_files([\"Cargo.toml\"])\n",
+    );
     write(&repo.path().join("yarn.lock"), "# yarn lockfile\n");
 
     let map = FastIndex::build(repo.path()).unwrap().repo_map(5, 5);
@@ -752,10 +760,30 @@ fn indexed_repo_map_returns_orientation_from_persisted_metadata() {
     assert!(map.brief.manifest_files.contains(&"Cargo.toml".to_string()));
     assert!(
         map.brief
+            .manifest_files
+            .contains(&"MODULE.bazel".to_string())
+    );
+    assert!(
+        map.brief
             .important_files
             .contains(&"Cargo.toml".to_string())
     );
+    assert!(
+        map.brief
+            .important_files
+            .contains(&"MODULE.bazel".to_string())
+    );
     assert!(map.brief.known_commands.contains(&"cargo test".to_string()));
+    assert!(
+        map.brief
+            .known_commands
+            .contains(&"bazel build //...".to_string())
+    );
+    assert!(
+        map.brief
+            .known_commands
+            .contains(&"bazel test //...".to_string())
+    );
     assert!(map.brief.known_commands.contains(&"yarn test".to_string()));
     assert!(
         map.brief
@@ -772,6 +800,12 @@ fn indexed_repo_map_returns_orientation_from_persisted_metadata() {
     }));
     assert!(map.brief.command_hints.iter().any(|hint| {
         hint.command == "cargo test" && hint.kind == "test" && hint.source == "Cargo.toml"
+    }));
+    assert!(map.brief.command_hints.iter().any(|hint| {
+        hint.command == "bazel build //..." && hint.kind == "build" && hint.source == "MODULE.bazel"
+    }));
+    assert!(map.brief.command_hints.iter().any(|hint| {
+        hint.command == "bazel test //..." && hint.kind == "test" && hint.source == "MODULE.bazel"
     }));
     assert!(map.brief.dependency_hints.iter().any(|hint| {
         hint.name == "serde" && hint.kind == "dependency" && hint.source == "Cargo.toml"

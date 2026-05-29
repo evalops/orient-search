@@ -46,6 +46,14 @@ def test_issue_token_round_trip():
         r#"{"scripts":{"test":"vitest run","lint":"eslint .","typecheck":"tsc --noEmit"},"dependencies":{"react":"latest"},"devDependencies":{"typescript":"latest"}}"#,
     );
     write(
+        &temp.path().join("MODULE.bazel"),
+        "module(name = \"sample\")\n",
+    );
+    write(
+        &temp.path().join("BUILD.bazel"),
+        "exports_files([\"pyproject.toml\"])\n",
+    );
+    write(
         &temp.path().join("pnpm-lock.yaml"),
         "lockfileVersion: '9.0'\n",
     );
@@ -171,6 +179,16 @@ def test_issue_token_round_trip():
     let brief = index.repo_brief();
     assert_eq!(brief.language_counts.get("python"), Some(&2));
     assert!(brief.known_commands.contains(&"pytest".to_string()));
+    assert!(
+        brief
+            .known_commands
+            .contains(&"bazel build //...".to_string())
+    );
+    assert!(
+        brief
+            .known_commands
+            .contains(&"bazel test //...".to_string())
+    );
     assert!(brief.known_commands.contains(&"pnpm test".to_string()));
     assert!(brief.known_commands.contains(&"pnpm run lint".to_string()));
     assert!(
@@ -186,6 +204,12 @@ def test_issue_token_round_trip():
     }));
     assert!(brief.command_hints.iter().any(|hint| {
         hint.command == "pytest" && hint.kind == "test" && hint.source == "pyproject.toml"
+    }));
+    assert!(brief.command_hints.iter().any(|hint| {
+        hint.command == "bazel build //..." && hint.kind == "build" && hint.source == "MODULE.bazel"
+    }));
+    assert!(brief.command_hints.iter().any(|hint| {
+        hint.command == "bazel test //..." && hint.kind == "test" && hint.source == "MODULE.bazel"
     }));
     assert!(brief.dependency_hints.iter().any(|hint| {
         hint.name == "fastapi" && hint.kind == "dependency" && hint.source == "pyproject.toml"
@@ -209,11 +233,13 @@ def test_issue_token_round_trip():
             && hint.line == 2
     }));
     assert!(brief.manifest_files.contains(&"pyproject.toml".to_string()));
+    assert!(brief.manifest_files.contains(&"MODULE.bazel".to_string()));
     assert!(
         brief
             .important_files
             .contains(&"pyproject.toml".to_string())
     );
+    assert!(brief.important_files.contains(&"MODULE.bazel".to_string()));
 
     let map = index.repo_map(10, 10);
     assert!(

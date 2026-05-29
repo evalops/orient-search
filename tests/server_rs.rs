@@ -4152,6 +4152,10 @@ fn runtime_shard_repo_map_reports_git_metadata() {
         &repo.path().join("Cargo.toml"),
         "[package]\nname='shard-project'\nversion='0.1.0'\nedition='2024'\n",
     );
+    write(
+        &repo.path().join("MODULE.bazel"),
+        "module(name = \"shard_project\")\n",
+    );
     git(repo.path(), &["init", "-b", "shard-feature-branch"]);
     git(
         repo.path(),
@@ -4319,6 +4323,8 @@ fn runtime_shard_repo_map_reports_git_metadata() {
         result.contains("https://github.com/example/shard-project.git"),
         "{result}"
     );
+    assert!(result.contains("bazel test //..."), "{result}");
+    assert!(result.contains("MODULE.bazel"), "{result}");
 }
 
 #[test]
