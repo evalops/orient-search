@@ -1,11 +1,12 @@
 # Shared Daemon
 
-Orient is most useful when many local agents share one warmed runtime instead of
-each session repeatedly walking the same repos with shell commands.
+Run one warmed Orient daemon per machine or workspace family. Local agents can
+then reuse the same repo maps, search index, query plans, and bounded reads
+instead of repeatedly walking the same source tree.
 
-## Start One Shared Runtime
+## Start
 
-For a multi-repo workspace:
+For several repos:
 
 ```bash
 orient ensure-shards \
@@ -18,29 +19,23 @@ orient serve-tcp \
   --index-dir /tmp/orient-shards
 ```
 
-For a single repo:
+For one repo:
 
 ```bash
 orient ensure-index --repo /path/to/repo --index /tmp/orient.index
 orient serve-tcp --addr 127.0.0.1:8796 --index /tmp/orient.index
 ```
 
-Unix sockets are also supported:
+Unix sockets are available when a TCP port is inconvenient:
 
 ```bash
 orient serve-unix --socket /tmp/orient.sock --index-dir /tmp/orient-shards
-orient daemon-status --socket /tmp/orient.sock
-orient daemon-status --socket /tmp/orient.sock --format json
 orient client-jsonl --socket /tmp/orient.sock
 ```
 
-The default CLI status is compact and omits detailed cached paths. Use
-`--format json` when an agent needs copyable default requests or full cached
-index/shard details.
+## Agent Rule
 
-## Give Agents One Rule
-
-Generate the current local instruction:
+Generate a local rule for the current daemon target:
 
 ```bash
 orient agent-instructions --index-dir /tmp/orient-shards
@@ -48,54 +43,35 @@ orient agent-instructions --index-dir /tmp/orient-shards
 
 The important behavior is:
 
-- Call `daemon_status` first.
-- Trust `search_auto_default` when exactly one target is warmed.
-- Use `default_requests` for the first repo map, search, and query-plan calls.
-- Use returned `read_request`, `read_batch_request`, `related_request`, and
-  `related_symbols_request` objects directly.
-- Prefer `search_auto_batch` for alternate query phrasings.
-- Use `refresh_if_stale:true` when live files may have changed.
+- Start with `daemon_status` or `agent_guide`.
+- Use `search_auto` for normal lookup and `search_auto_batch` for alternate
+  query phrasings.
+- Follow returned `read_*`, `related_*`, `repo_map_request`, and
+  `query_plan_request` objects directly.
+- Pass `refresh_if_stale:true` when live files may have changed.
+- Fall back to shell search only when Orient is unavailable or unhelpful.
 
-## Health Check
+## Operations
 
-Run:
+Check local readiness:
 
 ```bash
 orient doctor --index-dir /tmp/orient-shards
+orient daemon-status
+orient daemon-status --format json
 ```
 
-`doctor` checks local tool availability, daemon reachability, index/shard
-freshness, and emits copyable repair/start commands. It does not inspect or
-record agent sessions.
+The compact status is meant for humans. JSON status includes full warmed-target
+details and copyable default requests for agent adapters.
 
-## Freshness Model
-
-Shared use has two freshness layers:
-
-- `index_status` and `shard_status` compare persisted indexes to live files.
-- The daemon cache fingerprints loaded index and manifest files and reloads
-  changed persisted files automatically.
-
-For one-call repair, pass `refresh_if_stale:true` to indexed or shard search
-tools. For explicit maintenance, run:
+Refresh explicitly when needed:
 
 ```bash
 orient refresh-index --repo /path/to/repo --index /tmp/orient.index
 orient refresh-shards --index-dir /tmp/orient-shards
 ```
 
-Shard writes use a bounded local writer lock. `index-shards` refuses to shrink
-an existing shard directory unless `--force` is passed; `ensure-shards` is the
-preferred command for shared directories because it adds or refreshes without
-accidentally dropping existing shards.
-
-## Recommended Agent Loop
-
-1. Call `daemon_status` or `agent_guide`.
-2. Call `search_auto` or `search_auto_batch`.
-3. Read top hits with the returned bounded range requests.
-4. Use related-file and related-symbol follow-ups before opening random files.
-5. If results are empty or noisy, call the returned query-plan request and use
-   safe retry requests.
-6. Fall back to shell search only when the daemon is unavailable or the plan is
-   not useful.
+`ensure-shards` is the preferred shared-directory bootstrap. It adds missing
+repos and refreshes existing shards without accidentally shrinking the shard
+set. Use `index-shards --force` only when intentionally replacing a shard
+directory.

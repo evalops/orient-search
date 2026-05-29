@@ -1,77 +1,45 @@
 # Memory And Footprint
 
-Orient optimizes for local agent latency. Persisted indexes intentionally keep
-enough source snapshot and line-offset data to answer search snippets and
-bounded range reads without reopening every live file.
+Orient optimizes for local agent latency. Persisted indexes store enough data to
+serve snippets and bounded range reads directly from the index, which makes
+reads fast but increases disk usage.
 
-## What Is Stored
+## What Gets Stored
 
-Each persisted index contains:
+Each index contains:
 
 - file metadata and path terms
-- content-token postings
-- trigram postings for substring-style planning
-- exact symbol and symbol-kind postings
-- source snapshots for bounded snippet and range reads
+- content-token, trigram, symbol, and symbol-kind postings
+- filter metadata for language, extension, tests, generated files, code/docs,
+  dependencies, and imports
+- source snapshots for snippets and bounded range reads
 - line-offset and token-to-line tables
-- repo/dependency/import metadata used by filters and repo maps
 
-This makes reads reliable when a daemon is shared across many agents, but it
-means the index can be several times larger than source.
+That tradeoff is intentional: agents can inspect search hits without reopening
+live files, and a shared daemon amortizes the load cost across sessions.
 
-## Inspect Footprint
-
-For one repo:
+## Inspect It
 
 ```bash
 orient index-status --index /tmp/orient.index
-```
-
-For shards:
-
-```bash
 orient shard-status --index-dir /tmp/orient-shards --summary
-```
-
-For a running shared daemon:
-
-```bash
 orient daemon-status
 orient daemon-status --format json
 ```
 
-The default output includes a compact top-level `footprint` object for the
-warmed cache: loaded index count, loaded files, loaded source bytes, loaded
-snapshot bytes, line-offset bytes, symbols, posting entries, known shard bytes,
-and stale or missing disk-state counts. Use `--format json` when you also need
-full cached path details and copyable default requests.
+Useful counters:
 
-Important counters:
-
-- `index_bytes`: total bytes of persisted index files
-- `source_bytes`: live source bytes represented by the index
-- `content_snapshot_bytes`: bytes held for indexed source snapshots
-- `line_offset_bytes`: bytes used for line/range lookup tables
+- `index_bytes`: total persisted index size
+- `source_bytes`: source represented by the index
+- `content_snapshot_bytes`: stored source snapshot bytes
+- `line_offset_bytes`: line/range lookup table bytes
 - `posting_entries`: logical posting-list entries
 - `compressed_posting_bytes`: compressed posting-map bytes
-- `largest_shards`: largest repos by index footprint
+- `largest_shards`: largest shard indexes in a shard directory
 
-## Example Shape
+## Defaults
 
-On a large local workspace, expect the broad shape to look like this:
-
-- persisted indexes can be several times larger than the source snapshot
-- line-offset tables are meaningful but usually smaller than source snapshots
-- compressed postings are visible separately from total index bytes
-- warm cached shard search should remain in the low tens of milliseconds for
-  common top-10 queries
-
-That result is the core tradeoff: build and disk cost are non-trivial, but a
-single warmed daemon amortizes them across many local agent sessions.
-
-## Practical Defaults
-
-Use `--family-limit` when indexing a broad workspace with many repeated
+Use `--family-limit` when discovering broad workspaces with repeated clones or
 worktrees:
 
 ```bash
@@ -81,24 +49,15 @@ orient ensure-shards \
   --family-limit 2
 ```
 
-Use `--family-limit 1` when you only need representative canonical repos and
-want a smaller shard directory. Use a higher limit when active worktrees matter.
+Use `--family-limit 1` for a smaller representative shard set. Increase it when
+active worktrees matter.
 
-Keep shard directories outside the repo, usually under `/tmp` or another local
-cache location. Do not commit them.
+Keep generated indexes outside the repo, such as under `/tmp` or another local
+cache directory. Do not commit them.
 
-## Memory Notes
+## Current Shape
 
-The current saved index has an mmap-backed load path, compressed posting maps,
-and cached daemon reuse, but search still works with owned Rust structures after
-load. The next large-monorepo improvement is a sectioned format where queries
-touch only the needed dictionaries/posting blocks instead of decoding most of an
-index into memory.
-
-Until then, the recommended production shape is:
-
-- build or refresh shards explicitly
-- keep one daemon warm
-- reuse that daemon from every local agent
-- monitor `shard-status --summary`
-- use `refresh_if_stale:true` for searches that must see live edits
+The saved index has compressed posting maps, an mmap-backed load path, and
+cached daemon reuse. After load, search still uses owned Rust structures. The
+next major footprint improvement is a sectioned index format where queries load
+only the dictionaries and posting blocks they need.

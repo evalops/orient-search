@@ -4244,7 +4244,7 @@ fn runtime_warms_index_by_tool_request() {
             .unwrap()
             .ends_with(".orient/index")
     );
-    assert!(result["process_cwd"]["path"].as_str().is_some());
+    assert!(result.get("process_cwd").is_none(), "{result}");
     assert!(
         result["cached_index_paths"]
             .as_array()
@@ -6176,17 +6176,15 @@ fn tcp_daemon_status_cli_reports_runtime_cache() {
     assert!(full_output.status.success(), "{full_output:?}");
     let status: serde_json::Value = serde_json::from_slice(&full_output.stdout).unwrap();
     assert!(status["search_auto_default"]["target"].as_str().is_some());
-    assert_eq!(
-        status["search_auto_default"]["target"],
-        status["process_cwd"]["path"]
-    );
+    let default_target = status["search_auto_default"]["target"].clone();
+    assert!(default_target.as_str().is_some());
     assert_eq!(
         status["default_requests"]["repo_map"]["tool"],
         serde_json::json!("repo_map")
     );
     assert_eq!(
         status["default_requests"]["repo_map"]["arguments"]["repo"],
-        status["process_cwd"]["path"]
+        default_target
     );
     assert_eq!(
         status["default_requests"]["search"]["tool"],

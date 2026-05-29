@@ -6,7 +6,7 @@ use crate::query::{merge_filters, parse_query, query_text, query_with_filters_te
 use crate::repo_index::{
     CommandHint, FileRange, QueryPlan, QueryPlanFilter, QueryPlanRepairHint, RelatedFile,
     RelatedSymbol, RepoMap, RepoMapDetail, SearchFilters, SearchResult, Symbol, finalize_results,
-    is_manifest_file, language_for, normalize_token,
+    is_manifest_file, language_for, normalize_token, unique_query_tokens,
 };
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use anyhow::{Context, Result};
@@ -24,6 +24,8 @@ const SHARD_WRITE_LOCK_FILE: &str = ".orient-shards.lock";
 const SHARD_WRITE_LOCK_TIMEOUT: Duration = Duration::from_secs(120);
 const SHARD_WRITE_LOCK_STALE_AFTER: Duration = Duration::from_secs(30 * 60);
 const SHARD_WRITE_LOCK_RETRY: Duration = Duration::from_millis(25);
+const SHARD_KIND_SKETCH_WORDS: usize = 16;
+const SHARD_FILTER_SKETCH_WORDS: usize = 64;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ShardManifest {
@@ -40,6 +42,22 @@ pub struct ShardEntry {
     pub aliases: Vec<ShardAlias>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub git: Option<RepoGitMetadata>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sketch: Option<ShardQuerySketch>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShardQuerySketch {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exact_hashes: Vec<u32>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub trigram_hashes: Vec<u32>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exact_bits: Vec<u64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub trigram_bits: Vec<u64>,
+    pub symbol_kind_bits: Vec<u64>,
+    pub filter_bits: Vec<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -231,6 +249,7 @@ fn build_shards_unlocked(
         manifest.shards.push(ShardEntry {
             aliases: shard_aliases(&root, &base_name)?,
             git: shard_git_metadata(&root),
+            sketch: Some(shard_query_sketch(&index)),
             name,
             root,
             index: index_name,
@@ -389,6 +408,7 @@ fn refresh_shards_unlocked(index_dir: &Path) -> Result<ShardRefreshStats> {
             .unwrap_or_else(|| shard.name.clone());
         shard.aliases = shard_aliases(&shard.root, &base_name)?;
         shard.git = shard_git_metadata(&shard.root);
+        shard.sketch = Some(shard_query_sketch(&outcome.index));
         kept_shards.push(shard);
     }
 
@@ -654,6 +674,7 @@ fn add_missing_shards(
         manifest.shards.push(ShardEntry {
             aliases: shard_aliases(&root, &base_name)?,
             git: shard_git_metadata(&root),
+            sketch: Some(shard_query_sketch(&index)),
             name,
             root,
             index: index_name,
@@ -681,10 +702,14 @@ pub fn search_shards(
     let parsed = parse_query(query);
     let filters = merge_filters(filters.clone(), parsed.filters);
     let shard_query = query_text(&parsed.terms, &filters);
+    let query_tokens = unique_query_tokens(&shard_query);
     let jobs = manifest
         .shards
         .into_iter()
         .filter_map(|shard| {
+            if !shard_sketch_may_match(&shard, &query_tokens, &filters) {
+                return None;
+            }
             let scopes = shard_search_scopes(&shard, &filters);
             (!scopes.is_empty()).then_some(ShardJob { shard, scopes })
         })
@@ -1675,6 +1700,192 @@ fn command_hint(
     }
 }
 
+fn shard_query_sketch(index: &FastIndex) -> ShardQuerySketch {
+    let mut exact_hashes = Vec::with_capacity(
+        index.postings.len() + index.path_postings.len() + index.symbol_postings.len(),
+    );
+    let mut trigram_hashes = Vec::with_capacity(index.trigram_postings.len());
+    let mut symbol_kind_bits = vec![0; SHARD_KIND_SKETCH_WORDS];
+    let mut filter_bits = vec![0; SHARD_FILTER_SKETCH_WORDS];
+
+    for key in index
+        .postings
+        .keys()
+        .chain(index.path_postings.keys())
+        .chain(index.symbol_postings.keys())
+    {
+        exact_hashes.push(sketch_fingerprint(key));
+    }
+    exact_hashes.sort_unstable();
+    exact_hashes.dedup();
+    for key in index.trigram_postings.keys() {
+        trigram_hashes.push(sketch_fingerprint(key));
+    }
+    trigram_hashes.sort_unstable();
+    trigram_hashes.dedup();
+    for key in index.symbol_kind_postings.keys() {
+        sketch_insert(&mut symbol_kind_bits, key);
+    }
+    for key in index.attribute_postings.keys() {
+        sketch_insert(&mut filter_bits, key);
+    }
+
+    ShardQuerySketch {
+        exact_hashes,
+        trigram_hashes,
+        exact_bits: Vec::new(),
+        trigram_bits: Vec::new(),
+        symbol_kind_bits,
+        filter_bits,
+    }
+}
+
+pub(crate) fn shard_sketch_may_match(
+    shard: &ShardEntry,
+    query_tokens: &[String],
+    filters: &SearchFilters,
+) -> bool {
+    let Some(sketch) = &shard.sketch else {
+        return true;
+    };
+
+    if !shard_sketch_filters_may_match(sketch, filters) {
+        return false;
+    }
+    if query_tokens.is_empty() {
+        return true;
+    }
+
+    let require_all = filters.require_all || (query_tokens.len() > 1 && !filters.match_any);
+    let allow_trigram_fallback = query_tokens.len() == 1 || filters.match_any;
+    if require_all {
+        query_tokens.iter().all(|token| {
+            shard_sketch_token_may_match(sketch, token, filters, allow_trigram_fallback)
+        })
+    } else {
+        query_tokens.iter().any(|token| {
+            shard_sketch_token_may_match(sketch, token, filters, allow_trigram_fallback)
+        })
+    }
+}
+
+fn shard_sketch_token_may_match(
+    sketch: &ShardQuerySketch,
+    token: &str,
+    filters: &SearchFilters,
+    allow_trigram_fallback: bool,
+) -> bool {
+    let exact = shard_sketch_exact_may_contain(sketch, token);
+    if exact {
+        return true;
+    }
+    if filters.symbol_kind.is_some() || !allow_trigram_fallback {
+        return false;
+    }
+    let trigrams = shard_query_trigrams(token);
+    !trigrams.is_empty()
+        && trigrams
+            .iter()
+            .all(|trigram| shard_sketch_trigram_may_contain(sketch, trigram))
+}
+
+fn shard_sketch_exact_may_contain(sketch: &ShardQuerySketch, token: &str) -> bool {
+    if !sketch.exact_hashes.is_empty() {
+        return sketch
+            .exact_hashes
+            .binary_search(&sketch_fingerprint(token))
+            .is_ok();
+    }
+    sketch_contains(&sketch.exact_bits, token)
+}
+
+fn shard_sketch_trigram_may_contain(sketch: &ShardQuerySketch, trigram: &str) -> bool {
+    if !sketch.trigram_hashes.is_empty() {
+        return sketch
+            .trigram_hashes
+            .binary_search(&sketch_fingerprint(trigram))
+            .is_ok();
+    }
+    sketch_contains(&sketch.trigram_bits, trigram)
+}
+
+fn shard_sketch_filters_may_match(sketch: &ShardQuerySketch, filters: &SearchFilters) -> bool {
+    if let Some(kind) = &filters.symbol_kind {
+        if !sketch_contains(&sketch.symbol_kind_bits, kind) {
+            return false;
+        }
+    }
+    for (field, value) in [
+        ("language", filters.language.as_deref()),
+        ("extension", filters.extension.as_deref()),
+    ] {
+        if let Some(value) = value {
+            if !sketch_contains(&sketch.filter_bits, &format!("{field}:{value}")) {
+                return false;
+            }
+        }
+    }
+    for (field, value) in [
+        ("test", filters.test),
+        ("generated", filters.generated),
+        ("code", filters.code),
+    ] {
+        if let Some(value) = value {
+            if !sketch_contains(&sketch.filter_bits, &format!("{field}:{value}")) {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+fn sketch_insert(words: &mut [u64], value: &str) {
+    for salt in 0..3 {
+        let bit = sketch_bit(words.len(), value, salt);
+        words[bit / 64] |= 1u64 << (bit % 64);
+    }
+}
+
+fn sketch_contains(words: &[u64], value: &str) -> bool {
+    !words.is_empty()
+        && (0..3).all(|salt| {
+            let bit = sketch_bit(words.len(), value, salt);
+            (words[bit / 64] & (1u64 << (bit % 64))) != 0
+        })
+}
+
+fn sketch_bit(words: usize, value: &str, salt: u64) -> usize {
+    (sketch_hash(value, salt) as usize) % (words * 64)
+}
+
+fn sketch_fingerprint(value: &str) -> u32 {
+    let hash = sketch_hash(value, 0x517c_c1b7);
+    ((hash >> 32) as u32) ^ (hash as u32)
+}
+
+fn sketch_hash(value: &str, salt: u64) -> u64 {
+    let mut hash = 0xcbf29ce484222325u64 ^ salt.wrapping_mul(0x9e3779b97f4a7c15);
+    for byte in value.as_bytes() {
+        hash ^= *byte as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash
+}
+
+fn shard_query_trigrams(query: &str) -> Vec<String> {
+    let mut trigrams = query
+        .chars()
+        .flat_map(char::to_lowercase)
+        .filter(|ch| ch.is_ascii_alphanumeric() || *ch == '_')
+        .collect::<Vec<_>>()
+        .windows(3)
+        .map(|window| window.iter().collect::<String>())
+        .collect::<Vec<_>>();
+    trigrams.sort();
+    trigrams.dedup();
+    trigrams
+}
+
 pub(crate) fn load_manifest(index_dir: &Path) -> Result<ShardManifest> {
     let bytes = fs::read(index_dir.join("manifest.json"))
         .with_context(|| format!("read shard manifest {}", index_dir.display()))?;
@@ -2192,6 +2403,7 @@ mod tests {
             index: "auth.orient".to_string(),
             aliases: Vec::new(),
             git: None,
+            sketch: None,
         }];
         if let Some(root_b) = root_b {
             shards.push(ShardEntry {
@@ -2200,6 +2412,7 @@ mod tests {
                 index: "billing.orient".to_string(),
                 aliases: Vec::new(),
                 git: None,
+                sketch: None,
             });
         }
         ShardManifest {

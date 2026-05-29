@@ -1,170 +1,73 @@
 # Fast Search Roadmap
 
-This project should become a Rust-native, local-agent-first search layer: the useful architecture shape of Zoekt, but optimized for Codex/Claude/Amp-style tool calls instead of a human web UI.
-
-## Research Notes
-
-The GitHub sweep covered 722 code-search, agent-context, semantic-search, and repository-understanding projects. The strongest references:
-
-| Project | Useful signal |
-| --- | --- |
-| [sourcegraph/zoekt](https://github.com/sourcegraph/zoekt) | Fast trigram code search, rich query language, shards, mmap-friendly index files, branch masks, ranking with symbol/path signals. |
-| [Sourcegraph Zoekt blog](https://sourcegraph.com/blog/zoekt-creating-internal-tools-at-google) | Origin story and rationale for internal-code-search tooling that needs to be fast enough to become default behavior. |
-| [Zoekt design docs](https://github.com/sourcegraph/zoekt/blob/main/doc/design.md) | Explicit target of sub-50ms search over large corpora, positional trigrams, shard format, query trees, and ranking signals. |
-| [probelabs/probe](https://github.com/probelabs/probe) | Agent-oriented search that combines ripgrep speed with tree-sitter/AST-aware snippets. |
-| [MinishLab/semble](https://github.com/MinishLab/semble) | Agent-first code search framing: reduce grep/read token burn, local CPU, fast indexing/search. |
-| [BloopAI/bloop](https://github.com/BloopAI/bloop) | Rust code-search engine precedent, hybrid regex/semantic direction. |
-| [zilliztech/claude-context](https://github.com/zilliztech/claude-context) | MCP-shaped code search for Claude Code with vector DB integration. |
-| [colbymchenry/codegraph](https://github.com/colbymchenry/codegraph) | Pre-indexed local graph for coding agents, framed around fewer tokens and fewer tool calls. |
-| [lemon07r/Vera](https://github.com/lemon07r/Vera) | Rust local code search with BM25, vector similarity, reranking, tree-sitter metadata. |
+Orient is a Rust-native local search layer for coding agents. The design is
+Zoekt-inspired, but the interface is optimized for tool calls: repo maps,
+indexed search, query plans, bounded reads, and structured follow-up requests.
 
 ## Product Thesis
 
-Agents already search. The win is not convincing them to search; it is making search cheap, low-latency, and structured enough that they stop doing dozens of exploratory `rg`, `find`, `ls`, and `cat` calls.
+Agents already search. The useful work is making local search fast, cheap, and
+structured enough that agents stop spending turns on repeated `rg`, `find`,
+`ls`, and `cat` exploration.
 
-The Ceramic-level insight for this product is: agents already search, so the leverage is making local code search cheap enough that it becomes the default first action before scattered `rg`, `find`, `ls`, and `cat` exploration.
+## Already In Place
 
-## Current Baseline
+- Live `rg`-backed search with Rust-side scoring and snippets.
+- Persistent local indexes with token, path, trigram, symbol, symbol-kind, and
+  filter postings.
+- Incremental single-repo refresh for add, edit, delete, and rename cases.
+- Multi-repo shard directories with one index per repo and a validated manifest.
+- TCP, Unix-socket, stdio JSON-lines, and MCP-style transports.
+- A shared daemon that can warm index and shard targets once and serve many
+  local agents.
+- Repo maps, related-file lookup, related-symbol lookup, and bounded range
+  reads from live repos, indexes, and shard directories.
+- Query plans with missing-term diagnostics, filter rejection counts, and safe
+  retry requests.
+- Footprint counters for index size, represented source bytes, snapshots, line
+  offsets, postings, and largest shards.
+- Bazel-backed CI for build, tests, smoke checks, and performance gates.
 
-Implemented now:
+## Near-Term Direction
 
-- `orient search`: fast `rg`-backed candidate collection with Rust-side scoring/snippets.
-- Agent-oriented query language for `file:`/`filename:`, `path:`/`dir:`/`folder:`, `lang:`, `ext:`, `symbol:`, `kind:`/`symbol_kind:`, `repo:`, `branch:`, `origin:`, dependency filters via `dep:`/`dependency:`, import/module filters, `test:`, implementation/prose filters via `code:` / `is:code` / `is:docs`, `content:` terms, `-content:` exclusions, filter-only discovery queries, separator-normalized exact quoted phrases, negative filters, and default multi-term AND behavior.
-- `orient index`: persistent Rust content-token, path-token, and trigram posting index with a versioned binary file header, mmap-backed load path, delta-varint-compressed posting maps on disk, atomic same-directory saves, and legacy raw bincode load support.
-- `orient ensure-index` / `orient refresh-index`: single-repo index bootstrap and incremental refresh that reuse unchanged file metadata/terms, detect same-content renames, and refresh changed files.
-- `orient indexed-search`: indexed query path.
-- `orient discover-repos`: bounded local repo discovery for broad workspaces and repeated worktree layouts, with git checkout boundaries by default and an explicit nested-manifest opt-in.
-- `orient index-shards`, `orient ensure-shards`, `orient refresh-shards`, `orient search-shards`, `orient read-shard-range`, and `orient read-shard-ranges`: local multi-repo shard manifest with structural validation, atomic manifest writes, one versioned index file per repo, optional discovery from workspace roots, one-step build-or-refresh bootstrap, incremental shard refresh, bounded parallel direct shard search, git topology metadata, and bounded range reads from prefixed shard paths or unique unqualified shard-relative paths.
-- `orient bench-search` and `orient bench-shards`: built-in p50/p95/p99/max latency reporting for fallback, indexed, warm cached shard, and explicit cold direct shard search, with repeatable `--query`, `bench-search --mode auto|fallback|indexed`, `--fail-p95-ms`, `--write-baseline`, `--baseline`, `--allow-baseline-mode-mismatch`, and `--require-faster-than-baseline` for Rust-native regression and indexed-vs-fallback gates.
-- GitHub Actions CI is Bazel-driven: it builds the release binary with `bazel build -c opt //:orient`, runs Bazel-native Rust search tests plus a Bazel-built binary smoke test with `bazel test //...`, and then executes Bazel-owned fmt, full Cargo, JSON-lines smoke, fallback/indexed `bench-search --fail-p95-ms`, and cached `bench-shards --fail-p95-ms` gates.
-- JSON-lines tools: `tool_manifest`, `mcp_manifest`, `agent_guide`, `agent_instructions`, `daemon_status`, `warm_index`, `ensure_index`, `refresh_index`, `index_status`, `warm_shards`, `discover_repos`, `search_code`/`search`, `search_auto`, `search_auto_batch`, `search_batch`, `search_query_plan`/`search_plan`, `search_query_plan_batch`/`search_plan_batch`, `indexed_search_code`/`indexed_search`, `indexed_search_batch`, `indexed_query_plan`/`index_plan`, `indexed_query_plan_batch`, `indexed_repo_map`, `read_index_range`/`open_index_range`, `read_index_ranges`/`open_index_ranges`, `find_index_symbol`, `find_index_symbol_batch`, `shard_repo_map`, `find_shard_symbol`, `find_shard_symbol_batch`, `related_index_files`, `related_index_symbols`, `related_shard_files`, `related_shard_symbols`, `index_shards`, `ensure_shards`, `refresh_shards`, `shard_status`, `search_shards`, `search_shards_batch`, `shard_query_plan`/`shard_plan`, `shard_query_plan_batch`, `read_shard_range`/`open_shard_range`, `read_shard_ranges`/`open_shard_ranges`, target-aware `repo_map`, target-aware `read_range`/`open_range`, target-aware `read_ranges`/`open_ranges`, target-aware `find_symbol`, target-aware `find_symbol_batch`, target-aware `related_files`, and target-aware `related_symbols`; automatic search resolves explicit targets first, then one warmed target, then the daemon current directory as a live repo.
-- Local TCP or Unix-socket daemon/client mode for sharing one warm JSON-lines runtime across many local agents working in the same repeated worktree layout, with startup prewarming via `--index` and `--index-dir`, single-warmed-target defaults for indexed and shard tools, cached shard manifests, compact daemon status details for warmed repos/aliases/git topology, cached single-index bootstrap via `ensure_index`, cached single-index refresh via `refresh_index`, cached parallel shard query plans, cached shard range/related-context followups, single-flight cold index loads, bounded parallel fanout for broad cached shard searches, `bench-shards` default parity with the warm runtime path, explicit `bench-shards --cold` direct-load measurement, and no global search lock around cached index requests.
-- `ensure_shards` JSON-lines bootstrap for shared daemons: build missing shard directories, refresh existing shard directories, prune missing repo roots, add newly discovered repo shards to existing shard directories, clear stale cache entries, and warm every shard index before agent traffic arrives.
-- `index_status` and `shard_status` report live-file freshness versus persisted indexes, including added, changed, and deleted paths; indexed and shard searches can opt into `refresh_if_stale` for a one-call refresh-before-search path. `shard_status` uses bounded parallel fanout across shard indexes while preserving manifest order. Index, shard, and daemon status outputs expose footprint counters including on-disk index bytes, source bytes, posting entries, and compressed posting bytes.
-- CLI tools: `ensure-index`, `index-status`, `repo-map`, `index-map`, `agent-instructions`, `search-auto`, `search-auto-batch`, `search-plan`, `search-plan-batch`, `index-plan`, `index-plan-batch`, `search-batch`, `indexed-search-batch`, `shard-status`, `shard-plan`, `shard-plan-batch`, `shard-map`, `search-shards-batch`, `bench-shards`, `read-range`, `read-ranges`, `read-index-range`, `read-index-ranges`, `read-shard-ranges`, `symbol`, `symbol-batch`, `index-symbol`, `index-symbol-batch`, `shard-symbol`, `shard-symbol-batch`, `related-index`, `related-index-symbols`, `related-shard`, `related-shard-symbols`, and `related-symbols`, so agents can inspect freshness, entrypoints/tests/top symbols, use one automatic search entrypoint for explicit targets or current-directory live search, debug live or indexed query planning, open bounded file context, benchmark shard search, batch search hypotheses, and jump to nearby definitions after a search hit.
-- `orient tool-manifest`, `orient mcp-manifest`, `orient serve-mcp`, `orient agent-guide`, and `orient agent-instructions`: emit descriptions, compatibility required/optional argument names, typed argument metadata, daemon-default hints, defaults, enums, JSON-schema-like input schemas, MCP-shaped `inputSchema` entries, a stdio JSON-RPC MCP server, compact local-agent workflow/request templates for wrappers, and copyable AGENTS.md/CLAUDE.md/Amp snippets.
-- Search snippet modes: `short`, `medium`, `block`, and `symbol`.
-- Search results include structured `line_range` metadata, exact `match_lines` from indexed token-to-line tables when available, a compact `read_range` hint, plus ready-to-send `read_request`, `read_batch_request`, `related_request`, and query-carrying `related_symbols_request` follow-up tools for live, indexed, or shard searches; related-file and related-symbol responses also carry ready-to-send read requests. Generated follow-up requests now include `id`, raw `jsonl`, `client_cli` pipes for `orient client-jsonl`, and compact human `cli` hints where available.
-- `search_auto` and `search_auto_batch` return a top-level `query_plan_request` for the chosen live, indexed, or shard surface, inline `query_plan_result` for empty auto searches, and a promoted `primary_retry_request` when a concrete repair exists; `retry_if_empty` / `--retry-if-empty` can also execute that retry once and attach `primary_retry_result`, so agents can recover without re-deriving the target, parsing every diagnostic, or spending another round trip.
-- `search_auto` and `search_auto_batch` also return a top-level `repo_map_request` for the chosen live, indexed, or shard surface, so agents can orient around entrypoints, tests, commands, and symbols after weak search results; repo-map responses include a bounded `read_batch_request` for the most actionable map files and definitions.
-- Search requests can attach bounded line-numbered `context` ranges with `context_lines` / `--context-lines`, letting agents search and inspect edit context in one fallback, indexed, or shard round trip.
-- Persistent indexes store bounded source snapshots and line-offset tables, so indexed snippets, `read-index-range`, `read-index-ranges`, and shard range reads can return context directly from the saved index even when the live workspace file is unavailable.
-- Path, file, repo, extension, language, symbol, test/generated, and code/prose filters match case-insensitively across fallback, indexed, and shard search surfaces.
-- Live fallback pushes safe positive and negative file/path scope filters plus conservative `generated:true`/`generated:false` directory and filename scopes down into `rg`/`fd` before Orient's Rust matcher rechecks candidates, so common agent scopes like `path:src -path:generated`, `generated:false`, or `is:generated` avoid walking avoidable non-matching trees and generated-file suffixes.
-- Filter-only discovery queries like `file:Cargo.toml`, `lang:rust test:true`, `is:generated`, or `is:docs` work across fallback, indexed, shard, CLI, and JSON-lines search surfaces; indexed explain output reports them as `filter_scan`.
-- CLI and JSON-lines search, related-file, and related-symbol tools accept structured query-filter aliases such as `folder`, `filename`, `lang`, `ext`, `kind`, `type`, `dep`, and `module`, plus structured `exclude_*` filters such as `exclude_content` as strings or arrays, so wrappers can express positive and negative filters without query-string rewriting.
-- Optional structured ranking explanations with path/content/term-frequency/symbol signals.
-- Indexed explain mode includes query-plan metadata: planner strategy, active filters with candidate match/rejection counts, normalized tokens, exact phrases, trigrams, rarest planned posting lists, broad-query candidate caps, missing postings, candidate counts through planning, file-filtering, phrase/scoring, and final-match stages, plus structured repair hints for zero-hit and candidate-capped searches; `search-plan` / `search_query_plan`, `index-plan` / `indexed_query_plan`, their batch forms, and parallel shard forms expose the same diagnostics for zero-result searches. Shard plans emit a `__shard_selection__` diagnostic when repo/branch/origin filters select no shard. Query-plan tools attach ready-to-send `retry_requests` only for hints with a concrete suggested query, preserving active filters unless the hint is specifically to relax or replace a bad filter such as a misspelled `file:`, `path:`, `symbol:`, or unknown `kind:`. Candidate-cap warnings stay diagnostic instead of generating no-op retry loops. File/path replacements preserve indexed path casing, can recover accidental `file:path/to.rs` scopes as `path:` retries, and avoid fuzzy replacement for wildcard scopes.
-- Broad shard plans add safe `narrow_by_repo`, `narrow_by_branch`, and `narrow_by_origin` facet hints when a shard-level facet meaningfully reduces the weighted candidate set, so multi-agent shared shard directories can recover from noisy multi-repo searches without manually inspecting every warmed repo.
-- Warm shard search skips indexes whose posting, symbol, trigram, attribute, repo, or dependency metadata proves the query cannot match, reducing fanout for impossible or tightly scoped searches without changing recall.
-- Indexed search plans candidates from the rarest content/path token postings, applies structured file/path/language/extension/test filters before broad-candidate caps, falls back to rare trigram postings for substring queries, and caps broad candidate scoring after a cheap rank-aware prefilter.
-- Indexed search stores compressed exact-symbol and symbol-kind posting lists, using them to narrow explicit `symbol:` / `kind:` filters plus identifier-shaped raw queries such as `SessionManager` or `agent_instructions`, so agents get symbol-like speed whether they use structured filters or plain names. Indexed `kind:` filters use the persisted symbol table directly instead of re-parsing source text for every candidate; filter-only `kind:` hits include the matching symbol name and snippet line, and unknown kinds return zero-candidate plans without scanning every indexed file.
-- The golden retrieval suite reports Recall@10 and MRR across fallback, indexed, shard, and `search_auto` surfaces on adversarial source/docs/tests/generated/lockfile fixtures, so relevance regressions fail locally and in Bazel CI.
-- Indexed filter-only scans use cached path metadata plus persisted line offsets for snippet rendering, so broad scoped lookups such as `lang:rust -file:*spec.rs` avoid generic content rescans.
-- Indexed files persist line-offset and token-to-line tables for bounded snippet rendering and exact match-line metadata.
-- Index, shard, and daemon status report `content_snapshot_bytes` and `line_offset_bytes` alongside source, index, posting-entry, and compressed-posting footprints, making the current snapshot-backed layout visible before deeper sectioned-index work.
-- Result de-duping and grouping for repeated worktree copies using normalized path suffixes and snippet signatures, with compact duplicate metadata on the kept result.
-- Exact symbol definition boosting in both fallback and indexed search.
-- Direct symbol lookup and related-context lookup from live and persistent indexes, including filter-aware single and batch `find_symbol`/`find_index_symbol`/`find_shard_symbol` tools, ready-to-send symbol `read_request` payloads, batch symbol `read_batch_request` payloads, and test-to-source stem matching for common `_test`, `test_`, `.test`, and `.spec` naming, so agent wrappers can jump to definitions and nearby tests/files without rebuilding a repo index.
-- Direct symbol lookup across local shard directories, returning repo-prefixed paths that can be passed to `read-shard-range`.
-- Bounded workspace discovery finds git or manifest-backed repo roots while skipping dependency/build directories, so agents can build shard directories from broad workspace roots without manual repo lists. It prioritizes visible canonical repos before dated split, temp, and worktree folders when limits are small, treats git checkouts as traversal boundaries by default, accepts `nested_manifests` / `--nested-manifests` when an agent really wants package-level subprojects as separate shard candidates, and supports `family_limit` / `--family-limit` to cap selected checkouts per repeated git family while still reporting full family counts plus `candidates_found`. `index-shards` and `ensure-shards` include compact discovery summaries in their JSON output, and accept repeated discovery roots so one daemon can warm the canonical repos and active worktrees together.
-- Repo-map orientation from live repos, persistent indexes, and shard directories, so agents can inspect entrypoints, manifests, tests, symbols, compact related-file/symbol hints, important files, structured command hints, manifest-derived dependency hints, and source-derived import/module hints without rebuilding a separate live repo index.
-- Command hints are manifest-aware, include command kind/source provenance, and parse common `package.json` scripts while respecting package-manager lockfiles.
-- Shard manifests record aliases for nested repo-looking child directories, so broad dated worktree shards can still answer stable filters like `repo:service` and scope results to the matching child path.
-- Shard manifests record bounded git metadata for each shard, including origin, branch, clone/worktree kind, and common git dir when available. Shard repo filters and shard maps can use this topology, so agents can target an active branch or origin without knowing the exact checkout path.
-- `daemon_status`, `warm_index`, `warm_shards`, and `serve-tcp --index-dir` expose compact warmed-index and warmed-shard details, so parallel local agents can confirm they are sharing the intended repo/branch shard set without session analytics.
-- Alias-scoped shard search, symbol lookup, and repo maps emit stable alias-prefixed paths, so search hits like `service/src/foo.rs` can be opened without knowing the enclosing worktree shard name.
-- Shard related-file and related-symbol tools accept alias-prefixed search-hit paths plus unique unqualified shard-relative paths, and keep returned context inside the same alias scope.
-- Batch search and read tools cap query/range array sizes plus read line counts, reducing JSON-lines round trips without letting one caller monopolize the daemon; CLI batch reads also accept repeatable `--range path:start:lines` specs for search hits with different line windows.
-- Shard refresh recomputes nested repo aliases, so newly added child repos become filterable after `refresh-shards`.
-- `read-shard-range` resolves alias-prefixed paths and unique unqualified shard-relative paths, so agents can read `service/src/foo.rs` even when `service` lives inside a broader dated worktree shard, while single-repo shard directories can also accept `src/foo.rs`.
+- Keep the no-index `rg` path as the baseline fallback.
+- Keep improving shard fanout so impossible searches avoid cold index loads.
+- Make query-plan output shorter and more actionable for agents.
+- Continue moving the persisted format toward sectioned, mmap-friendly blocks.
+- Keep docs focused on local setup, shared daemon operation, and footprint.
 
-Measured examples:
+## Performance Targets
 
-- Broad workspace fallback common top-10 literal/token queries passed the local wide gate below the `300ms` p95 target.
-- Local repo fallback: query `indexed search symbol filters`, top 10 at about `12.5ms` p95 after warmup.
-- Hot-path fallback has a `250ms` wall-clock timeout plus match caps; if the timeout fires it returns partial results instead of blocking the agent.
-- Search result output is capped at 100 items per query across fallback, indexed, and shard search surfaces; batch request sizes are capped too.
-- Local repo index build: about `0.25s`.
-- Local repo refresh after build: reuses unchanged files, reuses same-content renames by retargeting path-derived postings, and rebuilds postings from per-file term lists; tests verify renamed symbols plus related-file and related-symbol followups resolve to the new path.
-- Local repo indexed search: query `indexed search symbol filters`, top 10 at about `0.96ms` p95 after warmup.
-- Local single-shard search for a repo-scoped indexed query stayed in low single-digit milliseconds after warmup, and around 1ms through the warm cached runtime path.
-- Broad workspace discovery handles hundreds of git or manifest-backed repo roots while avoiding nested dependency/build directories; before git-boundary discovery, broad trees could hit candidate caps by walking every nested package manifest.
-- With a family limit, broad workspace shard builds can cover six-figure file counts. Persisted shard indexes may be several times larger than source snapshots because they include source snapshots, line offsets, and postings for fast agent reads.
-- Wide cached shard search over a family-limited broad workspace shard set returned top-10 results in the low tens of milliseconds for the default wide-gate queries.
+- Broad local fallback search: top-10 p95 at or below `300ms` for common
+  literal/token queries.
+- Repo-local fallback: p95 at or below `100ms` after warmup.
+- Indexed repeated queries should beat fallback queries.
+- Warm shard search should stay in the low tens of milliseconds for common
+  top-10 queries.
+- Candidate collection must stay bounded; no multi-second hangs.
 
-## Exit Conditions
-
-High-performance definition:
-
-- Wide-tree hot path returns useful top-10 results from a broad local workspace in `<=300ms` p95 for common literal/token queries.
-- Repo-local searches return `<=100ms` p95 after warmup.
-- Shard search has a first-class warm-runtime benchmark gate via `orient bench-shards --fail-p95-ms`; use `--cold` only when measuring repeated direct-load cost.
-- Indexed search beats fallback search on repeated repo-local queries.
-- No multi-second hangs: candidate collection has bounded match caps and a hard wall-clock timeout.
-- Top results avoid obvious duplicate spam from repeated worktrees.
-
-Local wide-corpus gate:
+## Verification
 
 ```bash
-ORIENT_WIDE_ROOT=~/code ORIENT_WIDE_SHARDS=0 bazel run //:ci_wide_perf
-ORIENT_WIDE_ROOT=~/code ORIENT_WIDE_SHARDS=1 ORIENT_WIDE_FAMILY_LIMIT=1 bazel run //:ci_wide_perf
-ORIENT_WIDE_ROOT=~/code ORIENT_WIDE_FALLBACK=0 ORIENT_WIDE_SHARDS=1 bazel run //:ci_wide_perf
+cargo fmt --check
+cargo test
+cargo build --release
+bazel test --test_output=errors //...
+bazel run //:ci_perf_gates
+ORIENT_WIDE_SHARDS=0 bazel run //:ci_wide_perf
 ```
 
-Set `ORIENT_WIDE_ROOT` to the local workspace you want to measure. The script
-enforces the `<=300ms` fallback p95 target and can also rebuild a family-limited
-shard set under `/tmp/orient-wide-shards` for warm cached shard measurements. It
-prints shard build time plus `shard-status --summary` footprint counters such as
-`index_bytes`, `source_bytes`, `content_snapshot_bytes`, `line_offset_bytes`,
-and compressed posting bytes before the warm latency gate. It skips when the
-wide root is absent unless `ORIENT_WIDE_REQUIRE_ROOT=1` is set, so GitHub CI can
-stay deterministic while local runs cover real multi-repo layouts. The fallback
-leg uses explicit `bench-search --mode fallback` and repeatable `--query`; set
-`ORIENT_WIDE_FALLBACK=0` when the goal is only the fast shared shard path for
-many local agents.
+For shared daemon or footprint changes, also run:
 
-Search quality definition:
+```bash
+orient doctor --index-dir /tmp/orient-shards
+orient daemon-status
+orient shard-status --index-dir /tmp/orient-shards --summary
+```
 
-- Query support covers literals, separator-normalized exact quoted phrases, multi-token AND semantics, path filters, extension/language filters, and exact-symbol boosts.
-- Snippets include line numbers, exact match-line metadata, and enough context for an agent to decide whether to read/edit.
-- Query-plan diagnostics explain zero-hit and candidate-capped searches by showing active filter impact and separating missing postings from filter rejections, exact-phrase/scoring rejections, final AND/symbol rejections, and broad-candidate caps, with structured repair hints and ready-to-send retry requests an agent can replay.
-- Query-plan diagnostics surface code/prose facets too, so agents can recover from docs-vs-implementation misses by retrying with `code:true` or `code:false` instead of guessing path filters.
-- Search surfaces can optionally attach bounded read-range context to each hit when an agent wants fewer follow-up calls.
-- Explain mode returns structured ranking signals when an agent needs to compare close results.
-- CLI and JSON-lines server expose the same search capabilities, including multi-repo shard search.
+## Non-Goals
 
-Engineering definition:
-
-- Persistent index has a versioned on-disk format with a cheap magic/version header before the encoded payload, and writes replace indexes atomically from same-directory temp files.
-- Persistent index stores separate content-token, path-token, and trigram postings, with sorted in-memory posting lists and compact delta-varint posting maps in saved indexes.
-- Multi-repo shard directories store a validated, atomically replaced manifest plus one versioned index per repo, and can refresh those indexes incrementally.
-- Shard-directory mutation is guarded by a bounded local writer lock so multiple local agents can share one warmed shard set without racing manifest and shard-index updates.
-- Persistent indexed files include line-offset tables, token-to-line tables, and bounded source snapshots for snippet and range retrieval.
-- Incremental refresh covers add/edit/delete and same-content rename detection.
-- Tests cover fallback search, indexed search, shard search/read tools, cross-surface golden retrieval, incremental refresh, corrupt index repair, filters, query parser stress cases, ranking explanations, duplicate suppression, JSON-lines server calls, path safety including symlink escapes, snippet modes, and a dedicated `rg` differential suite for scoped live fallback search.
-- Every release claim is backed by `cargo fmt --check`, `cargo test`, `cargo build --release`, and `orient bench-search` or equivalent timed searches, with saved baselines available for local or CI regression checks.
-
-## Architecture Direction
-
-Near term:
-
-- Keep `rg` as the brutally fast no-index baseline.
-- Add more query filters and aliases after the current path/language/extension/require-all surface.
-- Tighten CI benchmark thresholds once a stable runner produces enough history.
-
-Zoekt-inspired indexed mode:
-
-- Move from token postings to trigram postings for substring and regex-like queries.
-- Store the index in versioned shards, one shard per repo or repo slice.
-- Keep moving the saved index toward mmap-friendly sections rather than one bincode blob as the schema stabilizes.
-- Store compact file metadata and richer line/term offset tables.
-- Keep snapshot-backed snippet and range reads compact while exploring richer line/term offset tables.
-- Add query planning: choose the rarest required posting lists first, then verify candidates.
-
-Agent-specific differences from Zoekt:
-
-- Return compact JSON objects built for tool use, not web UI rendering.
-- Prefer de-duped, high-diversity top results over exhaustive match lists.
-- Keep ranking local and deterministic; do not add session analytics or telemetry.
-- Treat failed searches as an offline test-corpus signal when the user explicitly captures examples.
+- Hosted indexing.
+- Telemetry.
+- Background session analytics.
+- Replacing specialized shell tools when a direct command is clearly better.

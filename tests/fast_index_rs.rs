@@ -3043,6 +3043,54 @@ fn shard_search_prefixes_duplicate_group_paths() {
 }
 
 #[test]
+fn shard_manifest_sketch_prunes_impossible_cold_shards() {
+    let workspace = tempfile::tempdir().unwrap();
+    let hit_repo = workspace.path().join("hit-service");
+    let miss_repo = workspace.path().join("miss-service");
+    write(
+        &hit_repo.join("src/lib.rs"),
+        "pub struct SessionManager;\npub fn uniquehitneedle() -> &'static str { \"ok\" }\n",
+    );
+    write(
+        &miss_repo.join("src/lib.rs"),
+        "pub fn unrelated_service() -> &'static str { \"miss\" }\n",
+    );
+
+    let shard_dir = tempfile::tempdir().unwrap();
+    build_shards(&[hit_repo.clone(), miss_repo], shard_dir.path()).unwrap();
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(shard_dir.path().join("manifest.json")).unwrap()).unwrap();
+    assert!(manifest["shards"][0]["sketch"]["exact_hashes"].is_array());
+    assert!(manifest["shards"][0]["sketch"]["trigram_hashes"].is_array());
+    let miss_index = manifest["shards"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|shard| shard["name"] == "miss-service")
+        .unwrap()["index"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    fs::remove_file(shard_dir.path().join(miss_index)).unwrap();
+
+    let results = search_shards(
+        shard_dir.path(),
+        "uniquehitneedle",
+        10,
+        &SearchFilters::default(),
+    )
+    .unwrap();
+    assert_eq!(result_paths(&results), vec!["hit-service/src/lib.rs"]);
+
+    let substring_results =
+        search_shards(shard_dir.path(), "essionman", 10, &SearchFilters::default()).unwrap();
+    assert_eq!(
+        result_paths(&substring_results),
+        vec!["hit-service/src/lib.rs"]
+    );
+}
+
+#[test]
 fn dependency_filters_scope_fallback_indexed_and_shard_search() {
     let workspace = tempfile::tempdir().unwrap();
     let rust_repo = workspace.path().join("rust-api");

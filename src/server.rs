@@ -459,7 +459,6 @@ impl ToolRuntime {
         let footprint =
             daemon_footprint_summary(&cached_index_details, &cached_shard_manifest_details);
         json!({
-            "process_cwd": process_cwd_status(),
             "search_auto_default": search_auto_default.clone(),
             "default_requests": daemon_default_requests(&search_auto_default),
             "cached_indexes": self.cached_index_count(),
@@ -6062,18 +6061,6 @@ fn optional_string_arg(arguments: &Value, name: &str) -> Option<String> {
         .get(name)
         .and_then(Value::as_str)
         .map(String::from)
-}
-
-fn process_cwd_status() -> Value {
-    match std::env::current_dir() {
-        Ok(path) => json!({
-            "path": path.to_string_lossy()
-        }),
-        Err(error) => json!({
-            "path": Value::Null,
-            "error": error.to_string()
-        }),
-    }
 }
 
 fn daemon_footprint_summary(index_details: &[Value], shard_manifest_details: &[Value]) -> Value {
