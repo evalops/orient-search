@@ -3049,15 +3049,12 @@ impl ToolRuntime {
                 {
                     let filters = search_filters(&request.arguments, true)?;
                     if bool_arg(&request.arguments, "refresh_if_stale") {
-                        for query in &queries {
-                            let refresh_filters =
-                                merge_filters(filters.clone(), parse_query(query).filters);
-                            self.refresh_shards_for_arguments_if_stale(
-                                &index_dir,
-                                &request.arguments,
-                                &refresh_filters,
-                            )?;
-                        }
+                        self.refresh_shards_for_query_batch_if_stale(
+                            &index_dir,
+                            &request.arguments,
+                            &filters,
+                            &queries,
+                        )?;
                     }
                     for query in queries {
                         let mut results = self.search_shards_cached(
@@ -3435,15 +3432,12 @@ impl ToolRuntime {
                 {
                     let filters = search_filters(&request.arguments, true)?;
                     if bool_arg(&request.arguments, "refresh_if_stale") {
-                        for query in &queries {
-                            let refresh_filters =
-                                merge_filters(filters.clone(), parse_query(query).filters);
-                            self.refresh_shards_for_arguments_if_stale(
-                                &index_dir,
-                                &request.arguments,
-                                &refresh_filters,
-                            )?;
-                        }
+                        self.refresh_shards_for_query_batch_if_stale(
+                            &index_dir,
+                            &request.arguments,
+                            &filters,
+                            &queries,
+                        )?;
                     }
                     let mut batch = Vec::new();
                     for query in queries {
@@ -3783,15 +3777,12 @@ impl ToolRuntime {
                 let context_lines = context_lines_arg(&request.arguments)?;
                 let filters = search_filters(&request.arguments, true)?;
                 if bool_arg(&request.arguments, "refresh_if_stale") {
-                    for query in &queries {
-                        let refresh_filters =
-                            merge_filters(filters.clone(), parse_query(query).filters);
-                        self.refresh_shards_for_arguments_if_stale(
-                            &index_dir,
-                            &request.arguments,
-                            &refresh_filters,
-                        )?;
-                    }
+                    self.refresh_shards_for_query_batch_if_stale(
+                        &index_dir,
+                        &request.arguments,
+                        &filters,
+                        &queries,
+                    )?;
                 }
                 let mut batch = Vec::new();
                 for query in queries {
@@ -3837,15 +3828,12 @@ impl ToolRuntime {
                 let queries = string_array_arg(&request.arguments, "queries")?;
                 let filters = search_filters(&request.arguments, true)?;
                 if bool_arg(&request.arguments, "refresh_if_stale") {
-                    for query in &queries {
-                        let refresh_filters =
-                            merge_filters(filters.clone(), parse_query(query).filters);
-                        self.refresh_shards_for_arguments_if_stale(
-                            &index_dir,
-                            &request.arguments,
-                            &refresh_filters,
-                        )?;
-                    }
+                    self.refresh_shards_for_query_batch_if_stale(
+                        &index_dir,
+                        &request.arguments,
+                        &filters,
+                        &queries,
+                    )?;
                 }
                 let mut batch = Vec::new();
                 for query in queries {
@@ -5042,16 +5030,47 @@ impl ToolRuntime {
         arguments: &Value,
         filters: &SearchFilters,
     ) -> Result<()> {
-        match shard_refresh_selection_for_search(index_dir, arguments, filters)? {
-            ShardRefreshSelection::Roots(roots) => {
-                if roots.is_empty() || !shard_status_by_root(index_dir, &roots)?.stale {
-                    return Ok(());
-                }
-                refresh_shards_by_root(index_dir, &roots)?;
-                self.clear_runtime_caches()
+        self.refresh_shards_for_filter_set_if_stale(index_dir, arguments, [filters])
+    }
+
+    fn refresh_shards_for_filter_set_if_stale<'a>(
+        &self,
+        index_dir: &Path,
+        arguments: &Value,
+        filters: impl IntoIterator<Item = &'a SearchFilters>,
+    ) -> Result<()> {
+        let mut roots = Vec::new();
+        let mut refresh_all = false;
+        for filters in filters {
+            match shard_refresh_selection_for_search(index_dir, arguments, filters)? {
+                ShardRefreshSelection::Roots(selected_roots) => roots.extend(selected_roots),
+                ShardRefreshSelection::All => refresh_all = true,
             }
-            ShardRefreshSelection::All => self.refresh_shards_if_stale(index_dir),
         }
+        if refresh_all {
+            return self.refresh_shards_if_stale(index_dir);
+        }
+        roots.sort();
+        roots.dedup();
+        if roots.is_empty() || !shard_status_by_root(index_dir, &roots)?.stale {
+            return Ok(());
+        }
+        refresh_shards_by_root(index_dir, &roots)?;
+        self.clear_runtime_caches()
+    }
+
+    fn refresh_shards_for_query_batch_if_stale(
+        &self,
+        index_dir: &Path,
+        arguments: &Value,
+        base_filters: &SearchFilters,
+        queries: &[String],
+    ) -> Result<()> {
+        let refresh_filters = queries
+            .iter()
+            .map(|query| merge_filters(base_filters.clone(), parse_query(query).filters))
+            .collect::<Vec<_>>();
+        self.refresh_shards_for_filter_set_if_stale(index_dir, arguments, &refresh_filters)
     }
 
     fn next_index_access(&self) -> u64 {
