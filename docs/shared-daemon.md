@@ -54,7 +54,8 @@ The generated rule should keep agents on this loop:
 - From JSON-lines or MCP-style clients, pass `"cwd"` on no-target
   `search_auto`, `search_auto_batch`, `repo_map`, `search_plan`, and
   `find_symbol` requests to get the same current-checkout scope against the
-  shared daemon.
+  shared daemon. No-target `read_range`, `read_ranges`, `related_files`, and
+  `related_symbols` requests also accept `cwd` for manual context calls.
 - Follow returned `read_*`, `related_*`, `repo_map_request`, and
   `query_plan_request` objects directly.
 - Pass `refresh_if_stale:true` when live files may have changed.

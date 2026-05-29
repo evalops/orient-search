@@ -85,6 +85,9 @@ Protocol clients should pass `"cwd": "/path/inside/checkout"` on no-target
 `find_symbol` requests so a shared shard daemon scopes results to the agent's
 active checkout. Explicit `repo`, `index`, `index_dir`, or `repo_filter`
 arguments still win.
+No-target `read_range`, `read_ranges`, `related_files`, and `related_symbols`
+requests also accept `cwd` for manual context calls; returned follow-up
+requests already include an explicit target.
 The plain CLI `orient search` command also accepts `--index` and `--index-dir`
 as convenience target flags for agents that reach first for `search` and then
 add the available search surface.
@@ -154,9 +157,9 @@ For most agents, the handoff is:
 
 Read-range tools accept `/` or `\` separators in repo-relative paths and reject parent-directory escapes after separator normalization. Shard range and related-context tools accept exact shard-prefixed paths from search hits, such as `service/src/auth.rs`, and also accept unqualified paths like `src/auth.rs` when they resolve to exactly one shard. Ambiguous unqualified paths fail with a prompt to use `<repo>/<path>`.
 
-`read_range` / `open_range` and `read_ranges` / `open_ranges` are target-aware convenience tools: pass `repo`, `index`, or `index_dir` to read from a live repository, persistent index, or shard directory with one adapter path. The explicit `read_index_range` and `read_shard_range` families remain available for wrappers that want surface-specific tools.
+`read_range` / `open_range` and `read_ranges` / `open_ranges` are target-aware convenience tools: pass `repo`, `index`, or `index_dir` to read from a live repository, persistent index, or shard directory with one adapter path. With no explicit target, protocol clients can pass `cwd` to resolve repository-relative paths inside the active checkout. The explicit `read_index_range` and `read_shard_range` families remain available for wrappers that want surface-specific tools.
 
-`related_files` and `related_symbols` are target-aware too: pass `repo`, `index`, or `index_dir` to get nearby files or definitions from the same target style as `search`. The CLI mirrors this as `related --repo`, `related --index`, or `related --index-dir`, and likewise for `related-symbols`. Related-file and related-symbol tools accept the same structured scoping filters as search, with `path` reserved for the anchor file; use fields such as `test`, `generated`, `lang`, `file`, `exclude_path`, or `exclude_content` to control returned neighbors. For shard `related_symbols`, include the search-hit `path` so Orient can keep the lookup inside the right shard or alias scope. The explicit `related_index_*` and `related_shard_*` tools remain available.
+`related_files` and `related_symbols` are target-aware too: pass `repo`, `index`, or `index_dir` to get nearby files or definitions from the same target style as `search`, or pass `cwd` when using the shared daemon without an explicit target. The CLI mirrors this as `related --repo`, `related --index`, or `related --index-dir`, and likewise for `related-symbols`. Related-file and related-symbol tools accept the same structured scoping filters as search, with `path` reserved for the anchor file; use fields such as `test`, `generated`, `lang`, `file`, `exclude_path`, or `exclude_content` to control returned neighbors. For shard `related_symbols`, include the search-hit `path` so Orient can keep the lookup inside the right shard or alias scope. The explicit `related_index_*` and `related_shard_*` tools remain available.
 
 Examples:
 

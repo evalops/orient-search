@@ -53,7 +53,9 @@ or `--no-daemon` to force local fallback.
 
 JSON-lines and MCP-style clients can pass `"cwd": "/path/inside/checkout"` to
 no-target `search_auto`, `search_auto_batch`, `repo_map`, `search_plan`, or
-`find_symbol` calls for the same scoped-daemon behavior.
+`find_symbol` calls for the same scoped-daemon behavior. No-target
+`read_range`, `read_ranges`, `related_files`, and `related_symbols` also accept
+`cwd` so manual context calls resolve inside the agent's active checkout.
 
 Useful filters: `repo:`, `path:`/`dir:`, `file:`, `lang:`, `ext:`, `symbol:`,
 `kind:`/`type:`, `dep:`, `import:`, `test:`, `generated:`, `code:`,

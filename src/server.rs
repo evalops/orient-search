@@ -1124,7 +1124,7 @@ For many local repos, bootstrap it with `orient ensure-shards --discover-root /p
 For one repo, bootstrap it with `orient ensure-index --repo {repo} --index {index}` and `orient serve-tcp --addr {addr} --index {index}`.\n\
 Start each session with `daemon_status` or `agent_guide`, then use `search_auto` for normal lookup and `search_auto_batch` for alternate query phrasings.\n\
 Trust `daemon_status.search_auto_default` to see whether no-target `search_auto` will use a warmed shard directory, warmed index, or the daemon current directory; use `daemon_status.default_requests` for copyable first repo-map/search/query-plan calls.\n\
-When calling `search_auto`, `search_auto_batch`, `repo_map`, `search_plan`, or `find_symbol` through JSON-lines/MCP without an explicit target, pass `cwd` so shared shard daemons scope results to the current git checkout.\n\
+When calling `search_auto`, `search_auto_batch`, `repo_map`, `search_plan`, `find_symbol`, `read_range`, `read_ranges`, `related_files`, or `related_symbols` through JSON-lines/MCP without an explicit target, pass `cwd` so shared shard daemons scope results to the current git checkout.\n\
 Use query filters directly: `file:`, `path:`, `lang:`, `ext:`, `symbol:`, `type:`, `repo:`, `test:`, `generated:`, `code:`, `is:code`, `is:docs`, quoted literals, and negative filters like `-path:vendor` or `-is:generated`.\n\
 Generated paths, including hashed JavaScript bundles, are demoted by default; use `generated:true` or `is:generated` when intentionally inspecting generated output.\n\
 After search, follow returned `read_batch_request`, `read_request`, `related_request`, and `related_symbols_request`; each includes `jsonl` and `client_cli` for direct replay through `orient client-jsonl`.\n\
@@ -1579,7 +1579,7 @@ fn argument_description(tool_name: &str, name: &str) -> &'static str {
         "repo" => "Local repository root or shard repo filter, depending on the tool.",
         "repo_filter" => "Repository name filter when repo is already used as a root path.",
         "cwd" => {
-            "Client working directory used by search_auto/search_auto_batch to scope warmed daemon searches to the current git checkout when no explicit target or repo_filter is supplied."
+            "Client working directory used by no-target daemon tools to scope warmed searches and context reads to the current git checkout."
         }
         "branch" | "git_branch" => "Git branch substring filter for shard-aware agent searches.",
         "origin" | "remote" | "remote_origin" => {
@@ -2353,11 +2353,33 @@ impl ToolRuntime {
                         index.read_range(&path, start, lines)?,
                     )?);
                 }
+                if optional_string_arg(&request.arguments, "cwd").is_some() {
+                    if let Ok(index_dir) = self.single_cached_shard_manifest_path() {
+                        if let Some(range) = self.read_shard_range_for_client_cwd(
+                            &index_dir,
+                            &request.arguments,
+                            &path,
+                            start,
+                            lines,
+                            "read_range",
+                        )? {
+                            return Ok(serde_json::to_value(range)?);
+                        }
+                    }
+                    if let Ok(index_path) = self.single_cached_index_path() {
+                        let index = self.cached_index(index_path)?;
+                        if index_matches_client_cwd(&index, &request.arguments)? {
+                            return Ok(serde_json::to_value(
+                                index.read_range(&path, start, lines)?,
+                            )?);
+                        }
+                    }
+                }
                 let repo = optional_string_arg(&request.arguments, "repo")
                     .map(PathBuf::from)
                     .map(Ok)
                     .unwrap_or_else(|| {
-                        std::env::current_dir().context("resolve current directory for read_range")
+                        live_repo_from_client_cwd(&request.arguments, "read_range")
                     })?;
                 Ok(serde_json::to_value(read_file_range(
                     repo, &path, start, lines,
@@ -2396,11 +2418,49 @@ impl ToolRuntime {
                     }
                     return Ok(serde_json::to_value(results)?);
                 }
+                if optional_string_arg(&request.arguments, "cwd").is_some() {
+                    if let Ok(index_dir) = self.single_cached_shard_manifest_path() {
+                        let mut results = Vec::new();
+                        let mut matched = false;
+                        for range in &ranges {
+                            let Some(result) = self.read_shard_range_for_client_cwd(
+                                &index_dir,
+                                &request.arguments,
+                                &range.path,
+                                range.start,
+                                range.lines,
+                                "read_ranges",
+                            )?
+                            else {
+                                break;
+                            };
+                            matched = true;
+                            results.push(result);
+                        }
+                        if matched && results.len() == ranges.len() {
+                            return Ok(serde_json::to_value(results)?);
+                        }
+                    }
+                    if let Ok(index_path) = self.single_cached_index_path() {
+                        let index = self.cached_index(index_path)?;
+                        if index_matches_client_cwd(&index, &request.arguments)? {
+                            let mut results = Vec::new();
+                            for range in ranges {
+                                results.push(index.read_range(
+                                    &range.path,
+                                    range.start,
+                                    range.lines,
+                                )?);
+                            }
+                            return Ok(serde_json::to_value(results)?);
+                        }
+                    }
+                }
                 let repo = optional_string_arg(&request.arguments, "repo")
                     .map(PathBuf::from)
                     .map(Ok)
                     .unwrap_or_else(|| {
-                        std::env::current_dir().context("resolve current directory for read_ranges")
+                        live_repo_from_client_cwd(&request.arguments, "read_ranges")
                     })?;
                 let mut results = Vec::new();
                 for range in ranges {
@@ -3626,12 +3686,46 @@ impl ToolRuntime {
                         read_request_args("index", &index_path),
                     ))?);
                 }
+                if optional_string_arg(&request.arguments, "cwd").is_some() {
+                    if let Ok(index_dir) = self.single_cached_shard_manifest_path() {
+                        if let Some(scoped_path) = self.shard_output_path_for_client_cwd(
+                            &index_dir,
+                            &request.arguments,
+                            &path,
+                            "related_files",
+                        )? {
+                            let filters = related_file_filters(&request.arguments, true)?;
+                            let related = self.related_shard_files_cached(
+                                &index_dir,
+                                &scoped_path,
+                                limit,
+                                &filters,
+                            )?;
+                            return Ok(serde_json::to_value(related_file_lookup_results(
+                                related,
+                                "read_range",
+                                read_request_args("index_dir", &index_dir),
+                            ))?);
+                        }
+                    }
+                    if let Ok(index_path) = self.single_cached_index_path() {
+                        let index = self.cached_index(index_path.clone())?;
+                        if index_matches_client_cwd(&index, &request.arguments)? {
+                            let filters = related_file_filters(&request.arguments, true)?;
+                            let related = index.related_files_filtered(&path, limit, &filters);
+                            return Ok(serde_json::to_value(related_file_lookup_results(
+                                related,
+                                "read_range",
+                                read_request_args("index", &index_path),
+                            ))?);
+                        }
+                    }
+                }
                 let repo = optional_string_arg(&request.arguments, "repo")
                     .map(PathBuf::from)
                     .map(Ok)
                     .unwrap_or_else(|| {
-                        std::env::current_dir()
-                            .context("resolve current directory for related_files")
+                        live_repo_from_client_cwd(&request.arguments, "related_files")
                     })?;
                 let filters = related_file_filters(&request.arguments, false)?;
                 let index = RepoIndexer::new(&repo).build()?;
@@ -3716,12 +3810,48 @@ impl ToolRuntime {
                         read_request_args("index", &index_path),
                     ))?);
                 }
+                if optional_string_arg(&request.arguments, "cwd").is_some() {
+                    if let Ok(index_dir) = self.single_cached_shard_manifest_path() {
+                        let filters = related_symbol_filters(&request.arguments, true)?;
+                        if let Some(related) = self.related_shard_symbols_for_client_cwd(
+                            &index_dir,
+                            &request.arguments,
+                            path.as_deref(),
+                            query.as_deref(),
+                            limit,
+                            &filters,
+                            "related_symbols",
+                        )? {
+                            return Ok(serde_json::to_value(related_symbol_lookup_results(
+                                related,
+                                "read_range",
+                                read_request_args("index_dir", &index_dir),
+                            ))?);
+                        }
+                    }
+                    if let Ok(index_path) = self.single_cached_index_path() {
+                        let index = self.cached_index(index_path.clone())?;
+                        if index_matches_client_cwd(&index, &request.arguments)? {
+                            let filters = related_symbol_filters(&request.arguments, true)?;
+                            let related = index.related_symbols_filtered(
+                                path.as_deref(),
+                                query.as_deref(),
+                                limit,
+                                &filters,
+                            );
+                            return Ok(serde_json::to_value(related_symbol_lookup_results(
+                                related,
+                                "read_range",
+                                read_request_args("index", &index_path),
+                            ))?);
+                        }
+                    }
+                }
                 let repo = optional_string_arg(&request.arguments, "repo")
                     .map(PathBuf::from)
                     .map(Ok)
                     .unwrap_or_else(|| {
-                        std::env::current_dir()
-                            .context("resolve current directory for related_symbols")
+                        live_repo_from_client_cwd(&request.arguments, "related_symbols")
                     })?;
                 let filters = related_symbol_filters(&request.arguments, false)?;
                 let index = RepoIndexer::new(&repo).build()?;
@@ -4860,6 +4990,109 @@ impl ToolRuntime {
         Ok(range)
     }
 
+    fn read_shard_range_for_client_cwd(
+        &self,
+        index_dir: &Path,
+        arguments: &Value,
+        path: &str,
+        start: usize,
+        lines: usize,
+        tool_name: &str,
+    ) -> Result<Option<crate::repo_index::FileRange>> {
+        let Some(repo_root) = git_root_from_client_cwd(arguments, tool_name)? else {
+            return Ok(None);
+        };
+        let manifest = self.cached_shard_manifest(index_dir)?;
+        let Some(shard) = manifest
+            .shards
+            .iter()
+            .find(|shard| canonical_cache_key(&shard.root) == repo_root)
+        else {
+            return Ok(None);
+        };
+        let resolved = resolved_shard_read_for_client_cwd(shard, path);
+        let index = self.cached_index(index_dir.join(&resolved.index))?;
+        let mut range = index.read_range(&resolved.relative_path, start, lines)?;
+        range.path = resolved.output_path(&range.path);
+        Ok(Some(range))
+    }
+
+    fn shard_output_path_for_client_cwd(
+        &self,
+        index_dir: &Path,
+        arguments: &Value,
+        path: &str,
+        tool_name: &str,
+    ) -> Result<Option<String>> {
+        let Some(repo_root) = git_root_from_client_cwd(arguments, tool_name)? else {
+            return Ok(None);
+        };
+        let manifest = self.cached_shard_manifest(index_dir)?;
+        let Some(shard) = manifest
+            .shards
+            .iter()
+            .find(|shard| canonical_cache_key(&shard.root) == repo_root)
+        else {
+            return Ok(None);
+        };
+        let resolved = resolved_shard_read_for_client_cwd(shard, path);
+        Ok(Some(resolved.output_path(&resolved.relative_path)))
+    }
+
+    fn related_shard_symbols_for_client_cwd(
+        &self,
+        index_dir: &Path,
+        arguments: &Value,
+        path: Option<&str>,
+        query: Option<&str>,
+        limit: usize,
+        filters: &SearchFilters,
+        tool_name: &str,
+    ) -> Result<Option<Vec<crate::repo_index::RelatedSymbol>>> {
+        let Some(repo_root) = git_root_from_client_cwd(arguments, tool_name)? else {
+            return Ok(None);
+        };
+        let manifest = self.cached_shard_manifest(index_dir)?;
+        let Some(shard) = manifest
+            .shards
+            .iter()
+            .find(|shard| canonical_cache_key(&shard.root) == repo_root)
+        else {
+            return Ok(None);
+        };
+        let resolved = path.map(|path| resolved_shard_read_for_client_cwd(shard, path));
+        let index = self.cached_index(index_dir.join(&shard.index))?;
+        let query = related_query_without_shard_selectors(query);
+        let mut filters = filters.clone();
+        filters.repo = None;
+        filters.branch = None;
+        filters.origin = None;
+        filters.exclude_repo.clear();
+        filters.exclude_branch.clear();
+        filters.exclude_origin.clear();
+        let anchor_path = resolved
+            .as_ref()
+            .map(|resolved| resolved.relative_path.as_str());
+        let mut related = index.related_symbols_filtered(
+            anchor_path,
+            query.as_deref(),
+            limit.saturating_mul(4).max(10),
+            &filters,
+        );
+        if let Some(resolved) = &resolved {
+            related.retain(|symbol| resolved.contains_actual_path(&symbol.symbol.path));
+            for symbol in &mut related {
+                symbol.symbol.path = resolved.output_path(&symbol.symbol.path);
+            }
+        } else {
+            for symbol in &mut related {
+                symbol.symbol.path = format!("{}/{}", shard.name, symbol.symbol.path);
+            }
+        }
+        related.truncate(limit);
+        Ok(Some(related))
+    }
+
     fn related_shard_files_cached(
         &self,
         index_dir: &std::path::Path,
@@ -5129,6 +5362,53 @@ fn symbol_match_score(symbol: &Symbol, name: &str, needle: &str) -> u8 {
     }
 }
 
+fn resolved_shard_read_for_client_cwd(
+    shard: &ShardEntry,
+    path: &str,
+) -> crate::shards::ResolvedShardRead {
+    let normalized = path.trim().replace('\\', "/");
+    if let Some((prefix, relative_path)) = normalized.split_once('/') {
+        if prefix == shard.name {
+            return crate::shards::ResolvedShardRead {
+                index: shard.index.clone(),
+                relative_path: relative_path.to_string(),
+                output_prefix: shard.name.clone(),
+                path_prefix: None,
+            };
+        }
+        if let Some(alias) = shard.aliases.iter().find(|alias| alias.name == prefix) {
+            let relative_path = alias
+                .path_prefix
+                .as_deref()
+                .map(|path_prefix| {
+                    if relative_path.is_empty() {
+                        path_prefix.trim_end_matches('/').to_string()
+                    } else {
+                        format!(
+                            "{}/{}",
+                            path_prefix.trim_end_matches('/'),
+                            relative_path.trim_start_matches('/')
+                        )
+                    }
+                })
+                .unwrap_or_else(|| relative_path.to_string());
+            return crate::shards::ResolvedShardRead {
+                index: shard.index.clone(),
+                relative_path,
+                output_prefix: alias.name.clone(),
+                path_prefix: alias.path_prefix.clone(),
+            };
+        }
+    }
+
+    crate::shards::ResolvedShardRead {
+        index: shard.index.clone(),
+        relative_path: normalized,
+        output_prefix: shard.name.clone(),
+        path_prefix: None,
+    }
+}
+
 fn scoped_output_path(scope: &crate::shards::ShardSearchScope, path: &str) -> String {
     let trimmed = scope
         .path_prefix
@@ -5322,9 +5602,9 @@ const SEARCH_TARGET_OPTIONAL_ARGS: &[&str] = &[
     "exclude_term",
 ];
 
-const READ_TARGET_OPTIONAL_ARGS: &[&str] = &["repo", "index", "index_dir", "start", "lines"];
+const READ_TARGET_OPTIONAL_ARGS: &[&str] = &["repo", "index", "index_dir", "cwd", "start", "lines"];
 
-const READ_BATCH_TARGET_OPTIONAL_ARGS: &[&str] = &["repo", "index", "index_dir"];
+const READ_BATCH_TARGET_OPTIONAL_ARGS: &[&str] = &["repo", "index", "index_dir", "cwd"];
 
 const REPO_MAP_TARGET_OPTIONAL_ARGS: &[&str] = &[
     "repo",
@@ -5344,6 +5624,7 @@ const RELATED_FILES_TARGET_OPTIONAL_ARGS: &[&str] = &[
     "repo",
     "index",
     "index_dir",
+    "cwd",
     "limit",
     "language",
     "lang",
@@ -5458,6 +5739,7 @@ const RELATED_SYMBOLS_TARGET_OPTIONAL_ARGS: &[&str] = &[
     "repo",
     "index",
     "index_dir",
+    "cwd",
     "path",
     "query",
     "limit",

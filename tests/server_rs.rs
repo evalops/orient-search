@@ -511,6 +511,10 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         read_range["input_schema"]["properties"]["index_dir"]["type"],
         "string"
     );
+    assert_eq!(
+        read_range["input_schema"]["properties"]["cwd"]["type"],
+        "string"
+    );
     assert_eq!(read_ranges["required"], serde_json::json!(["ranges"]));
     assert_eq!(
         read_ranges["input_schema"]["properties"]["index"]["type"],
@@ -518,6 +522,10 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
     );
     assert_eq!(
         read_ranges["input_schema"]["properties"]["index_dir"]["type"],
+        "string"
+    );
+    assert_eq!(
+        read_ranges["input_schema"]["properties"]["cwd"]["type"],
         "string"
     );
     assert_eq!(
@@ -587,6 +595,10 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         "string"
     );
     assert_eq!(
+        related_files["input_schema"]["properties"]["cwd"]["type"],
+        "string"
+    );
+    assert_eq!(
         related_files["input_schema"]["properties"]["path"]["description"],
         "Result path for the selected target; use repo/index-relative paths for repo or index targets, and shard-prefixed or unique shard-relative paths for index_dir targets."
     );
@@ -601,6 +613,10 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
     );
     assert_eq!(
         related_symbols["input_schema"]["properties"]["index_dir"]["type"],
+        "string"
+    );
+    assert_eq!(
+        related_symbols["input_schema"]["properties"]["cwd"]["type"],
         "string"
     );
     assert_eq!(
@@ -2297,6 +2313,124 @@ fn runtime_related_alias_accepts_live_index_and_shard_targets() {
             .contains("path is required for shard related_symbols"),
         "{:?}",
         missing_shard_path.error
+    );
+}
+
+#[test]
+fn runtime_context_tools_scope_live_fallback_to_client_cwd() {
+    let repo = tempfile::tempdir().unwrap();
+    fs::create_dir_all(repo.path().join(".git")).unwrap();
+    write(
+        &repo.path().join("src/agent_context.rs"),
+        "pub struct AgentCwdMarker;\npub fn agent_cwd_marker() {}\n",
+    );
+    write(
+        &repo.path().join("tests/agent_context_test.rs"),
+        "use sample::AgentCwdMarker;\n#[test]\nfn agent_context_smoke() {}\n",
+    );
+    write(
+        &repo.path().join("Cargo.toml"),
+        "[package]\nname='sample'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    let cwd = repo.path().join("src");
+
+    let runtime = ToolRuntime::default();
+    let read = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("cwd-read"),
+        tool: "read_range".to_string(),
+        arguments: serde_json::json!({
+            "cwd": cwd,
+            "path": "src/agent_context.rs",
+            "start": 1,
+            "lines": 2
+        }),
+    });
+    assert!(read.error.is_none(), "{:?}", read.error);
+    assert!(
+        read.result.as_ref().unwrap()["text"]
+            .as_str()
+            .unwrap()
+            .contains("AgentCwdMarker"),
+        "{:?}",
+        read.result
+    );
+
+    let batch = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("cwd-read-batch"),
+        tool: "read_ranges".to_string(),
+        arguments: serde_json::json!({
+            "cwd": repo.path().join("src"),
+            "ranges": {"path": "src/agent_context.rs", "start": 2, "lines": 1}
+        }),
+    });
+    assert!(batch.error.is_none(), "{:?}", batch.error);
+    assert!(
+        batch.result.as_ref().unwrap()[0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("agent_cwd_marker"),
+        "{:?}",
+        batch.result
+    );
+
+    let related_files = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("cwd-related-files"),
+        tool: "related_files".to_string(),
+        arguments: serde_json::json!({
+            "cwd": repo.path().join("src"),
+            "path": "src/agent_context.rs",
+            "limit": 5
+        }),
+    });
+    assert!(related_files.error.is_none(), "{:?}", related_files.error);
+    let related_files = related_files.result.unwrap();
+    assert!(
+        related_files
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|file| file["path"] == "tests/agent_context_test.rs"),
+        "{related_files:?}"
+    );
+    assert_eq!(
+        related_files[0]["read_request"]["arguments"]["repo"],
+        serde_json::json!(repo.path().canonicalize().unwrap())
+    );
+
+    let related_symbols = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("cwd-related-symbols"),
+        tool: "related_symbols".to_string(),
+        arguments: serde_json::json!({
+            "cwd": repo.path().join("src"),
+            "path": "src/agent_context.rs",
+            "query": "AgentCwdMarker",
+            "limit": 5
+        }),
+    });
+    assert!(
+        related_symbols.error.is_none(),
+        "{:?}",
+        related_symbols.error
+    );
+    let related_symbols = serde_json::to_string(&related_symbols.result).unwrap();
+    assert!(
+        related_symbols.contains("AgentCwdMarker"),
+        "{related_symbols}"
+    );
+    assert!(
+        related_symbols.contains("src/agent_context.rs"),
+        "{related_symbols}"
+    );
+    assert!(
+        related_symbols.contains(
+            &repo
+                .path()
+                .canonicalize()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()
+        ),
+        "{related_symbols}"
     );
 }
 
@@ -5473,8 +5607,16 @@ fn runtime_orientation_tools_scope_warmed_shards_to_client_cwd() {
         "pub struct SharedThing;\npub fn shared_lookup_token() -> &'static str { \"current\" }\n",
     );
     write(
+        &current_repo.join("tests/lib_test.rs"),
+        "#[test]\nfn current_related_test() { assert_eq!(current_app::shared_lookup_token(), \"current\"); }\n",
+    );
+    write(
         &other_repo.join("src/lib.rs"),
         "pub struct SharedThing;\npub fn shared_lookup_token() -> &'static str { \"other\" }\n",
+    );
+    write(
+        &other_repo.join("tests/lib_test.rs"),
+        "#[test]\nfn other_related_test() { assert_eq!(other_app::shared_lookup_token(), \"other\"); }\n",
     );
     let shard_dir = workspace.path().join("shards");
     build_shards(
@@ -5513,6 +5655,123 @@ fn runtime_orientation_tools_scope_warmed_shards_to_client_cwd() {
         !serde_json::to_string(&repo_map)
             .unwrap()
             .contains("other-app/src/lib.rs")
+    );
+
+    let read = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("read-cwd"),
+        tool: "read_range".to_string(),
+        arguments: serde_json::json!({
+            "cwd": current_repo.join("src"),
+            "path": "src/lib.rs",
+            "start": 2,
+            "lines": 1
+        }),
+    });
+    assert!(read.error.is_none(), "{:?}", read.error);
+    let read = read.result.unwrap();
+    assert_eq!(read["path"], serde_json::json!("current-app/src/lib.rs"));
+    assert!(read["text"].as_str().unwrap().contains("\"current\""));
+    assert!(!read["text"].as_str().unwrap().contains("\"other\""));
+
+    let read_batch = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("read-batch-cwd"),
+        tool: "read_ranges".to_string(),
+        arguments: serde_json::json!({
+            "cwd": current_repo.join("src"),
+            "ranges": [{"path": "src/lib.rs", "start": 1, "lines": 2}]
+        }),
+    });
+    assert!(read_batch.error.is_none(), "{:?}", read_batch.error);
+    let read_batch = read_batch.result.unwrap();
+    assert_eq!(
+        read_batch[0]["path"],
+        serde_json::json!("current-app/src/lib.rs")
+    );
+    assert!(
+        read_batch[0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("\"current\"")
+    );
+    assert!(
+        !read_batch[0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("\"other\"")
+    );
+
+    let related = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("related-cwd"),
+        tool: "related_files".to_string(),
+        arguments: serde_json::json!({
+            "cwd": current_repo.join("src"),
+            "path": "src/lib.rs",
+            "limit": 5
+        }),
+    });
+    assert!(related.error.is_none(), "{:?}", related.error);
+    let related = serde_json::to_string(&related.result.unwrap()).unwrap();
+    assert!(
+        related.contains("current-app/tests/lib_test.rs"),
+        "{related}"
+    );
+    assert!(
+        !related.contains("other-app/tests/lib_test.rs"),
+        "{related}"
+    );
+
+    let related_symbols = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("related-symbols-cwd"),
+        tool: "related_symbols".to_string(),
+        arguments: serde_json::json!({
+            "cwd": current_repo.join("src"),
+            "path": "src/lib.rs",
+            "query": "SharedThing",
+            "limit": 5
+        }),
+    });
+    assert!(
+        related_symbols.error.is_none(),
+        "{:?}",
+        related_symbols.error
+    );
+    let related_symbols = serde_json::to_string(&related_symbols.result.unwrap()).unwrap();
+    assert!(
+        related_symbols.contains("current-app/src/lib.rs"),
+        "{related_symbols}"
+    );
+    assert!(
+        !related_symbols.contains("other-app/src/lib.rs"),
+        "{related_symbols}"
+    );
+
+    let query_related_symbols = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("related-symbols-query-cwd"),
+        tool: "related_symbols".to_string(),
+        arguments: serde_json::json!({
+            "cwd": current_repo.join("src"),
+            "query": "SharedThing",
+            "limit": 5
+        }),
+    });
+    assert!(
+        query_related_symbols.error.is_none(),
+        "{:?}",
+        query_related_symbols.error
+    );
+    let query_related_symbols =
+        serde_json::to_string(&query_related_symbols.result.unwrap()).unwrap();
+    assert!(
+        query_related_symbols.contains("current-app/src/lib.rs"),
+        "{query_related_symbols}"
+    );
+    assert!(
+        query_related_symbols.contains("\"index_dir\""),
+        "{query_related_symbols}"
+    );
+    assert!(
+        !query_related_symbols.contains("other-app/src/lib.rs"),
+        "{query_related_symbols}"
     );
 
     let plan = runtime.dispatch(ToolRequest {
