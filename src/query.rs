@@ -501,7 +501,7 @@ mod tests {
     #[test]
     fn parses_aliases_booleans_escapes_and_negatives() {
         let parsed = parse_query(
-            r#"file:'auth service.rs' language:Rust extension:.RS repo:orient branch:main origin:evalops tests -ext:md -repo:old -branch:wip -origin:legacy "quoted \"token\"""#,
+            r#"file:'auth service.rs' language:Rust extension:.RS repo:orient branch:main origin:example tests -ext:md -repo:old -branch:wip -origin:legacy "quoted \"token\"""#,
         );
 
         assert_eq!(parsed.terms, vec![r#"quoted "token""#]);
@@ -510,7 +510,7 @@ mod tests {
         assert_eq!(parsed.filters.extension.as_deref(), Some("rs"));
         assert_eq!(parsed.filters.repo.as_deref(), Some("orient"));
         assert_eq!(parsed.filters.branch.as_deref(), Some("main"));
-        assert_eq!(parsed.filters.origin.as_deref(), Some("evalops"));
+        assert_eq!(parsed.filters.origin.as_deref(), Some("example"));
         assert_eq!(parsed.filters.test, Some(true));
         assert_eq!(parsed.filters.exclude_extension, vec!["md"]);
         assert_eq!(parsed.filters.exclude_repo, vec!["old"]);

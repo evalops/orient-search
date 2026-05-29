@@ -33,6 +33,19 @@ For shards:
 orient shard-status --index-dir /tmp/orient-shards --summary
 ```
 
+For a running shared daemon:
+
+```bash
+orient daemon-status
+orient daemon-status --format json
+```
+
+The default output includes a compact top-level `footprint` object for the
+warmed cache: loaded index count, loaded files, loaded source bytes, loaded
+snapshot bytes, line-offset bytes, symbols, posting entries, known shard bytes,
+and stale or missing disk-state counts. Use `--format json` when you also need
+full cached path details and copyable default requests.
+
 Important counters:
 
 - `index_bytes`: total bytes of persisted index files

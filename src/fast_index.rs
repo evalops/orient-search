@@ -1330,7 +1330,6 @@ impl FastIndex {
             .iter()
             .map(|(_, postings)| *postings)
             .chain(symbol_postings.iter().map(|(_, postings)| *postings))
-            .chain(symbol_kind_postings.iter().map(|(_, postings)| *postings))
             .chain(path_plan_postings.iter().map(|(_, postings)| *postings))
             .chain(
                 trigram_postings
@@ -1364,6 +1363,8 @@ impl FastIndex {
             } else {
                 intersect_planned_postings(&planned_postings, filters.require_all)
             };
+        let candidate_ids =
+            intersect_symbol_kind_postings(candidate_ids, &symbol_kind_postings, &filters);
         let candidate_ids = intersect_attribute_postings(candidate_ids, &attribute_postings);
         let candidate_count = candidate_ids.len();
 
@@ -1555,7 +1556,6 @@ impl FastIndex {
             .iter()
             .map(|(_, postings)| *postings)
             .chain(symbol_postings.iter().map(|(_, postings)| *postings))
-            .chain(symbol_kind_postings.iter().map(|(_, postings)| *postings))
             .chain(path_plan_postings.iter().map(|(_, postings)| *postings))
             .chain(
                 trigram_postings
@@ -1587,6 +1587,8 @@ impl FastIndex {
         } else {
             intersect_planned_postings(&planned_postings, filters.require_all)
         };
+        let candidate_ids =
+            intersect_symbol_kind_postings(candidate_ids, &symbol_kind_postings, &filters);
         let candidate_ids = intersect_attribute_postings(candidate_ids, &attribute_postings);
         !indexed_filter_candidate_ids(&self.files, candidate_ids, &filters).is_empty()
     }
@@ -1796,7 +1798,6 @@ impl FastIndex {
             .iter()
             .map(|(_, postings)| *postings)
             .chain(symbol_postings.iter().map(|(_, postings)| *postings))
-            .chain(symbol_kind_postings.iter().map(|(_, postings)| *postings))
             .chain(path_plan_postings.iter().map(|(_, postings)| *postings))
             .chain(
                 trigram_postings
@@ -1830,6 +1831,8 @@ impl FastIndex {
             } else {
                 intersect_planned_postings(&planned_postings, filters.require_all)
             };
+        let candidate_ids =
+            intersect_symbol_kind_postings(candidate_ids, &symbol_kind_postings, &filters);
         let candidate_ids = intersect_attribute_postings(candidate_ids, &attribute_postings);
 
         let candidate_count = candidate_ids.len();
@@ -3332,6 +3335,24 @@ fn candidate_facet_repair_hints(
             ));
         }
     }
+    if filters.symbol_kind.is_none() {
+        if let Some((kind, count)) = top_meaningful_string_facet(
+            candidate_ids
+                .iter()
+                .filter_map(|file_id| files.get(*file_id as usize))
+                .flat_map(symbol_kind_facets_for_file),
+            total,
+        ) {
+            hints.push(facet_hint(
+                "narrow_by_symbol_kind",
+                "kind",
+                &kind,
+                count,
+                total,
+                query_tokens,
+            ));
+        }
+    }
     if filters.test.is_none() {
         if let Some((value, count)) = meaningful_bool_facet(
             candidate_ids
@@ -3386,8 +3407,22 @@ fn candidate_facet_repair_hints(
             ));
         }
     }
-    hints.truncate(4);
+    hints.truncate(5);
     hints
+}
+
+fn symbol_kind_facets_for_file(file: &IndexedPath) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut kinds = file
+        .symbols
+        .iter()
+        .filter_map(|symbol| {
+            let kind = symbol.kind.to_ascii_lowercase();
+            (!kind.is_empty() && seen.insert(kind.clone())).then_some(kind)
+        })
+        .collect::<Vec<_>>();
+    kinds.sort();
+    kinds
 }
 
 fn top_meaningful_string_facet(
@@ -4137,6 +4172,24 @@ fn filter_only_strategy(filters: &SearchFilters) -> &'static str {
     } else {
         "filter_scan"
     }
+}
+
+fn intersect_symbol_kind_postings(
+    candidate_ids: Vec<u32>,
+    symbol_kind_postings: &[(&String, &Vec<Posting>)],
+    filters: &SearchFilters,
+) -> Vec<u32> {
+    if filters.symbol_kind.is_some() && symbol_kind_postings.is_empty() {
+        return Vec::new();
+    }
+    if candidate_ids.is_empty() || symbol_kind_postings.is_empty() {
+        return candidate_ids;
+    }
+    symbol_kind_postings
+        .iter()
+        .fold(candidate_ids, |candidate_ids, (_, postings)| {
+            intersect_sorted_ids_with_postings(&candidate_ids, postings)
+        })
 }
 
 fn intersect_attribute_postings(

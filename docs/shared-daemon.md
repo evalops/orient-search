@@ -30,8 +30,13 @@ Unix sockets are also supported:
 ```bash
 orient serve-unix --socket /tmp/orient.sock --index-dir /tmp/orient-shards
 orient daemon-status --socket /tmp/orient.sock
+orient daemon-status --socket /tmp/orient.sock --format json
 orient client-jsonl --socket /tmp/orient.sock
 ```
+
+The default CLI status is compact and omits detailed cached paths. Use
+`--format json` when an agent needs copyable default requests or full cached
+index/shard details.
 
 ## Give Agents One Rule
 

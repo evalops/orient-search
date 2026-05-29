@@ -799,6 +799,8 @@ enum Commands {
         socket: Option<PathBuf>,
         #[arg(long, default_value = DEFAULT_DAEMON_ADDR)]
         addr: Option<String>,
+        #[arg(long, default_value = "summary", value_parser = ["summary", "json"])]
+        format: String,
     },
     Doctor {
         #[arg(long, default_value = ".")]
@@ -4292,7 +4294,11 @@ fn run() -> Result<()> {
                 )
             );
         }
-        Commands::DaemonStatus { socket, addr } => {
+        Commands::DaemonStatus {
+            socket,
+            addr,
+            format,
+        } => {
             let (mut status, client_command) = if let Some(socket) = socket {
                 (
                     daemon_status_unix(&socket)?,
@@ -4303,7 +4309,12 @@ fn run() -> Result<()> {
                 (daemon_status_tcp(addr)?, tcp_client_command(addr))
             };
             retarget_client_cli_commands(&mut status, &client_command);
-            println!("{}", serde_json::to_string(&status)?);
+            let output = if format == "json" {
+                status
+            } else {
+                daemon_status_summary(&status)
+            };
+            println!("{}", serde_json::to_string(&output)?);
         }
         Commands::Doctor {
             repo,
@@ -4511,6 +4522,39 @@ fn daemon_status_stream(stream: impl Read + Write) -> Result<Value> {
         .get("result")
         .cloned()
         .ok_or_else(|| anyhow::anyhow!("daemon response did not include result"))
+}
+
+fn daemon_status_summary(status: &Value) -> Value {
+    let search_default = status
+        .get("search_auto_default")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
+    let target_present = search_default
+        .get("target")
+        .and_then(Value::as_str)
+        .is_some_and(|target| !target.is_empty());
+    serde_json::json!({
+        "search_auto_default": {
+            "surface": search_default.get("surface").cloned().unwrap_or(Value::Null),
+            "source": search_default.get("source").cloned().unwrap_or(Value::Null),
+            "target_present": target_present
+        },
+        "cached_indexes": status
+            .get("cached_indexes")
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!(0)),
+        "cached_shard_manifests": status
+            .get("cached_shard_manifests")
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!(0)),
+        "footprint": status
+            .get("footprint")
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!({})),
+        "default_requests_available": status.get("default_requests").is_some(),
+        "details_omitted": true,
+        "full_status_hint": "rerun with --format json for cached paths and copyable default requests"
+    })
 }
 
 #[derive(Debug, Serialize)]
@@ -4759,7 +4803,7 @@ fn doctor_report(config: DoctorConfig) -> DoctorReport {
             "pass --index or --index-dir to verify the exact shared search target".to_string(),
         );
         commands.push(
-            "orient ensure-shards --discover-root ~/Documents/Projects --output-dir /tmp/orient-shards --family-limit 2".to_string(),
+            "orient ensure-shards --discover-root ~/code --output-dir /tmp/orient-shards --family-limit 2".to_string(),
         );
         commands.push(format!(
             "orient serve-tcp --addr {} --index-dir /tmp/orient-shards",

@@ -29,9 +29,11 @@ In each agent session:
 orient doctor --index-dir /tmp/orient-shards
 orient agent-instructions --index-dir /tmp/orient-shards
 orient daemon-status
+orient daemon-status --format json
 ```
 
-`daemon-status` reports the warmed shard/index set, freshness, footprint
+`daemon-status` reports a compact warmed-cache summary by default. Add
+`--format json` for full warmed shard/index details, freshness, footprint
 counters, and copyable `default_requests` so agents can start with the right
 repo map, search, and query-plan calls.
 
@@ -80,9 +82,11 @@ orient shard-status --index-dir /tmp/orient-shards --summary
 
 The summary reports `index_bytes`, `source_bytes`, `content_snapshot_bytes`,
 `line_offset_bytes`, `posting_entries`, `compressed_posting_bytes`, and the
-largest shards. On large workspaces, expect indexes to be larger than source
-because Orient stores snapshots and line offsets for fast bounded reads; warm
-top-10 shard searches should still stay in the low tens of milliseconds.
+largest shards. `orient daemon-status` also includes a compact `footprint`
+object for the currently warmed cache. On large workspaces, expect indexes to
+be larger than source because Orient stores snapshots and line offsets for fast
+bounded reads; warm top-10 shard searches should still stay in the low tens of
+milliseconds.
 
 ## Build And Test
 

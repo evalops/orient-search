@@ -947,7 +947,7 @@ fn agent_guide_returns_local_agent_request_templates() {
     );
     assert_eq!(
         guide["quickstart"]["status"],
-        "orient daemon-status --addr 127.0.0.1:9999"
+        "orient daemon-status --addr 127.0.0.1:9999 --format json"
     );
     assert_eq!(
         guide["quickstart"]["one_shot_search"],
@@ -958,10 +958,9 @@ fn agent_guide_returns_local_agent_request_templates() {
             .as_array()
             .unwrap()
             .iter()
-            .any(|command| command
-                .as_str()
-                .unwrap()
-                .contains("orient ensure-shards --discover-root ~/Documents/Projects --output-dir /tmp/orient-shards"))
+            .any(|command| command.as_str().unwrap().contains(
+                "orient ensure-shards --discover-root ~/code --output-dir /tmp/orient-shards"
+            ))
     );
     assert!(
         guide["quickstart"]["single_repo"]
@@ -1060,7 +1059,7 @@ fn agent_instructions_returns_copyable_local_agent_rules() {
         "## Orient Search",
         "Use Orient as the first local code-discovery step",
         "orient client-jsonl --addr 127.0.0.1:9999",
-        "orient ensure-shards --discover-root ~/Documents/Projects --output-dir /tmp/orient-shards --family-limit 2",
+        "orient ensure-shards --discover-root ~/code --output-dir /tmp/orient-shards --family-limit 2",
         "orient ensure-index --repo /work/repo --index /tmp/repo.index",
         "search_auto_batch",
         "daemon_status.search_auto_default",
@@ -3516,7 +3515,7 @@ fn runtime_discovers_repos_by_tool_request() {
 #[test]
 fn runtime_discovery_suppresses_nested_manifest_projects_under_git_roots() {
     let root = tempfile::tempdir().unwrap();
-    let repo = root.path().join("workspace/platform");
+    let repo = root.path().join("workspace/service");
     write(
         &repo.join("package.json"),
         "{\"scripts\":{\"test\":\"vitest\"}}\n",
@@ -3540,7 +3539,7 @@ fn runtime_discovery_suppresses_nested_manifest_projects_under_git_roots() {
     assert!(default.error.is_none(), "{:?}", default.error);
     let result = serde_json::to_string(&default.result).unwrap();
     assert!(result.contains("\"repos_found\":1"), "{result}");
-    assert!(result.contains("\"name\":\"platform\""), "{result}");
+    assert!(result.contains("\"name\":\"service\""), "{result}");
     assert!(!result.contains("\"name\":\"ui\""), "{result}");
 
     let nested = runtime.dispatch(ToolRequest {
@@ -3574,7 +3573,7 @@ fn runtime_discovers_repo_families_with_git_metadata() {
             "remote",
             "add",
             "origin",
-            "https://github.com/evalops/project.git",
+            "https://github.com/example/project.git",
         ],
     );
     git(&repo, &["add", "Cargo.toml"]);
@@ -3640,7 +3639,7 @@ fn runtime_discovery_can_limit_repeated_repo_families() {
             "remote",
             "add",
             "origin",
-            "https://github.com/evalops/project.git",
+            "https://github.com/example/project.git",
         ],
     );
     git(&repo, &["add", "Cargo.toml"]);
@@ -3762,7 +3761,7 @@ fn runtime_shard_repo_map_reports_git_metadata() {
             "remote",
             "add",
             "origin",
-            "https://github.com/evalops/shard-project.git",
+            "https://github.com/example/shard-project.git",
         ],
     );
     git(repo.path(), &["add", "."]);
@@ -3829,7 +3828,7 @@ fn runtime_shard_repo_map_reports_git_metadata() {
         arguments: serde_json::json!({
             "index_dir": shard_dir.path(),
             "query": "unique branch token",
-            "origin": "evalops/shard-project",
+            "origin": "example/shard-project",
             "require_all": true
         }),
     });
@@ -3846,7 +3845,7 @@ fn runtime_shard_repo_map_reports_git_metadata() {
         tool: "search_auto".to_string(),
         arguments: serde_json::json!({
             "index_dir": shard_dir.path(),
-            "query": "branch:shard-feature-branch origin:evalops/shard-project unique_branch_token",
+            "query": "branch:shard-feature-branch origin:example/shard-project unique_branch_token",
             "limit": 5
         }),
     });
@@ -3863,7 +3862,7 @@ fn runtime_shard_repo_map_reports_git_metadata() {
     );
     assert_eq!(
         auto_by_git_scope["repo_map_request"]["arguments"]["origin"],
-        "evalops/shard-project"
+        "example/shard-project"
     );
     let scoped_auto_map = runtime.dispatch(ToolRequest {
         id: serde_json::json!("auto-git-scope-map"),
@@ -3906,7 +3905,7 @@ fn runtime_shard_repo_map_reports_git_metadata() {
         tool: "shard_repo_map".to_string(),
         arguments: serde_json::json!({
             "index_dir": shard_dir.path(),
-            "origin": "evalops/shard-project",
+            "origin": "example/shard-project",
             "symbols": 5,
             "tests": 5
         }),
@@ -3919,7 +3918,7 @@ fn runtime_shard_repo_map_reports_git_metadata() {
         "{result}"
     );
     assert!(
-        result.contains("https://github.com/evalops/shard-project.git"),
+        result.contains("https://github.com/example/shard-project.git"),
         "{result}"
     );
 }
@@ -3929,20 +3928,20 @@ fn runtime_indexes_shards_from_multiple_discovered_roots() {
     let left = tempfile::tempdir().unwrap();
     let right = tempfile::tempdir().unwrap();
     write(
-        &left.path().join("platform/src/lib.rs"),
-        "pub fn platform_session() {}\n",
+        &left.path().join("service/src/lib.rs"),
+        "pub fn service_session() {}\n",
     );
     write(
-        &left.path().join("platform/Cargo.toml"),
-        "[package]\nname='platform'\nversion='0.1.0'\nedition='2024'\n",
+        &left.path().join("service/Cargo.toml"),
+        "[package]\nname='service'\nversion='0.1.0'\nedition='2024'\n",
     );
     write(
-        &right.path().join("maestro/src/lib.rs"),
-        "pub fn maestro_session() {}\n",
+        &right.path().join("worker/src/lib.rs"),
+        "pub fn worker_session() {}\n",
     );
     write(
-        &right.path().join("maestro/Cargo.toml"),
-        "[package]\nname='maestro'\nversion='0.1.0'\nedition='2024'\n",
+        &right.path().join("worker/Cargo.toml"),
+        "[package]\nname='worker'\nversion='0.1.0'\nedition='2024'\n",
     );
     let shard_dir = tempfile::tempdir().unwrap();
 
@@ -3964,12 +3963,12 @@ fn runtime_indexes_shards_from_multiple_discovered_roots() {
         tool: "search_shards".to_string(),
         arguments: serde_json::json!({
             "index_dir": shard_dir.path(),
-            "query": "maestro_session"
+            "query": "worker_session"
         }),
     });
     assert!(search.error.is_none(), "{:?}", search.error);
     let result = serde_json::to_string(&search.result).unwrap();
-    assert!(result.contains("maestro/src/lib.rs"), "{result}");
+    assert!(result.contains("worker/src/lib.rs"), "{result}");
 }
 
 #[test]
@@ -4035,12 +4034,12 @@ fn runtime_index_shards_refuses_accidental_manifest_shrink_without_force() {
 fn runtime_ensures_shards_builds_refreshes_and_warms() {
     let root = tempfile::tempdir().unwrap();
     write(
-        &root.path().join("platform/src/lib.rs"),
-        "pub fn platform_session() {}\n",
+        &root.path().join("service/src/lib.rs"),
+        "pub fn service_session() {}\n",
     );
     write(
-        &root.path().join("platform/Cargo.toml"),
-        "[package]\nname='platform'\nversion='0.1.0'\nedition='2024'\n",
+        &root.path().join("service/Cargo.toml"),
+        "[package]\nname='service'\nversion='0.1.0'\nedition='2024'\n",
     );
     let shard_dir = root.path().join(".orient-shards");
 
@@ -4065,8 +4064,8 @@ fn runtime_ensures_shards_builds_refreshes_and_warms() {
     assert_eq!(build_result["cached_indexes"], serde_json::json!(1));
 
     write(
-        &root.path().join("platform/src/extra.rs"),
-        "pub fn extra_platform_session() {}\n",
+        &root.path().join("service/src/extra.rs"),
+        "pub fn extra_service_session() {}\n",
     );
     let refresh = runtime.dispatch(ToolRequest {
         id: serde_json::json!("ensure-refresh"),
@@ -4125,7 +4124,7 @@ fn runtime_ensures_shards_builds_refreshes_and_warms() {
     assert!(result.contains("billing/src/lib.rs"), "{result}");
 
     write(
-        &root.path().join("platform/src/after_status.rs"),
+        &root.path().join("service/src/after_status.rs"),
         "pub fn after_status_session() {}\n",
     );
     let status = runtime.dispatch(ToolRequest {
@@ -4152,7 +4151,7 @@ fn runtime_ensures_shards_builds_refreshes_and_warms() {
         .iter()
         .map(|shard| shard["name"].as_str().unwrap())
         .collect::<Vec<_>>();
-    assert_eq!(shard_names, vec!["platform", "billing"]);
+    assert_eq!(shard_names, vec!["service", "billing"]);
     assert!(
         status["shards"][0]["status"]["source_bytes"]
             .as_u64()
@@ -4193,7 +4192,7 @@ fn runtime_ensures_shards_builds_refreshes_and_warms() {
         refreshed_search.error
     );
     let result = serde_json::to_string(&refreshed_search.result).unwrap();
-    assert!(result.contains("platform/src/after_status.rs"), "{result}");
+    assert!(result.contains("service/src/after_status.rs"), "{result}");
 }
 
 #[test]
@@ -4296,6 +4295,20 @@ fn runtime_warms_index_by_tool_request() {
             .as_str()
             .unwrap()
             .ends_with(".orient/index")
+    );
+    assert_eq!(result["footprint"]["loaded_indexes"], serde_json::json!(1));
+    assert_eq!(result["footprint"]["loaded_files"], serde_json::json!(2));
+    assert_eq!(result["footprint"]["loaded_symbols"], serde_json::json!(2));
+    assert_eq!(
+        result["footprint"]["cached_shard_manifests"],
+        serde_json::json!(0)
+    );
+    assert!(result["footprint"]["loaded_index_bytes"].as_u64().unwrap() > 0);
+    assert!(
+        result["footprint"]["loaded_content_snapshot_bytes"]
+            .as_u64()
+            .unwrap()
+            > 0
     );
 }
 
@@ -5139,6 +5152,31 @@ fn runtime_reuses_cached_shard_manifest_after_initial_load() {
     assert_eq!(
         result["cached_shard_manifest_details"][0]["repos"][0]["aliases"][0],
         serde_json::json!(shard_name)
+    );
+    assert_eq!(result["footprint"]["loaded_indexes"], serde_json::json!(1));
+    assert_eq!(
+        result["footprint"]["cached_shard_manifests"],
+        serde_json::json!(1)
+    );
+    assert_eq!(
+        result["footprint"]["known_shard_repos"],
+        serde_json::json!(1)
+    );
+    assert_eq!(
+        result["footprint"]["manifest_disk_missing"],
+        serde_json::json!(1)
+    );
+    assert!(
+        result["footprint"]["known_shard_index_bytes"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
+    assert!(
+        result["footprint"]["known_shard_content_snapshot_bytes"]
+            .as_u64()
+            .unwrap()
+            > 0
     );
 }
 
@@ -6099,8 +6137,12 @@ fn tcp_daemon_status_cli_reports_runtime_cache() {
     let startup_json: serde_json::Value = serde_json::from_str(&startup).unwrap();
     let addr = startup_json["addr"].as_str().unwrap();
 
-    let output = Command::new(binary)
+    let output = Command::new(&binary)
         .args(["daemon-status", "--addr", addr])
+        .output()
+        .unwrap();
+    let full_output = Command::new(&binary)
+        .args(["daemon-status", "--addr", addr, "--format", "json"])
         .output()
         .unwrap();
 
@@ -6119,6 +6161,20 @@ fn tcp_daemon_status_cli_reports_runtime_cache() {
         status["search_auto_default"]["source"],
         serde_json::json!("process_current_dir")
     );
+    assert_eq!(
+        status["search_auto_default"]["target_present"],
+        serde_json::json!(true)
+    );
+    assert_eq!(status["details_omitted"], serde_json::json!(true));
+    assert!(status.get("default_requests").is_none(), "{status}");
+    assert!(status.get("cached_index_details").is_none(), "{status}");
+    assert!(
+        status.get("cached_shard_manifest_details").is_none(),
+        "{status}"
+    );
+
+    assert!(full_output.status.success(), "{full_output:?}");
+    let status: serde_json::Value = serde_json::from_slice(&full_output.stdout).unwrap();
     assert!(status["search_auto_default"]["target"].as_str().is_some());
     assert_eq!(
         status["search_auto_default"]["target"],
@@ -6339,8 +6395,18 @@ fn unix_daemon_status_cli_reports_runtime_cache() {
     let mut startup = String::new();
     startup_reader.read_line(&mut startup).unwrap();
 
-    let output = Command::new(binary)
+    let output = Command::new(&binary)
         .args(["daemon-status", "--socket", socket.to_str().unwrap()])
+        .output()
+        .unwrap();
+    let full_output = Command::new(&binary)
+        .args([
+            "daemon-status",
+            "--socket",
+            socket.to_str().unwrap(),
+            "--format",
+            "json",
+        ])
         .output()
         .unwrap();
 
@@ -6351,6 +6417,11 @@ fn unix_daemon_status_cli_reports_runtime_cache() {
     let status: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(status["cached_indexes"], serde_json::json!(0));
     assert_eq!(status["cached_shard_manifests"], serde_json::json!(0));
+    assert_eq!(status["details_omitted"], serde_json::json!(true));
+    assert!(status.get("default_requests").is_none(), "{status}");
+
+    assert!(full_output.status.success(), "{full_output:?}");
+    let status: serde_json::Value = serde_json::from_slice(&full_output.stdout).unwrap();
     assert!(
         status["default_requests"]["search"]["client_cli"]
             .as_str()

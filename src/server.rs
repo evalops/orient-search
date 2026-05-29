@@ -454,16 +454,21 @@ impl ToolRuntime {
 
     pub fn daemon_status(&self) -> Value {
         let search_auto_default = self.search_auto_default_status();
+        let cached_index_details = self.cached_index_details();
+        let cached_shard_manifest_details = self.cached_shard_manifest_details();
+        let footprint =
+            daemon_footprint_summary(&cached_index_details, &cached_shard_manifest_details);
         json!({
             "process_cwd": process_cwd_status(),
             "search_auto_default": search_auto_default.clone(),
             "default_requests": daemon_default_requests(&search_auto_default),
             "cached_indexes": self.cached_index_count(),
             "cached_index_paths": self.cached_index_paths(),
-            "cached_index_details": self.cached_index_details(),
+            "cached_index_details": cached_index_details,
             "cached_shard_manifests": self.cached_shard_manifest_count(),
             "cached_shard_manifest_paths": self.cached_shard_manifest_paths(),
-            "cached_shard_manifest_details": self.cached_shard_manifest_details()
+            "cached_shard_manifest_details": cached_shard_manifest_details,
+            "footprint": footprint
         })
     }
 
@@ -939,7 +944,7 @@ pub fn agent_guide(
         "quickstart": {
             "install": "cargo install --git https://github.com/evalops/orient-search",
             "multi_repo": [
-                format!("orient ensure-shards --discover-root ~/Documents/Projects --output-dir {index_dir} --family-limit 2"),
+                format!("orient ensure-shards --discover-root ~/code --output-dir {index_dir} --family-limit 2"),
                 format!("orient serve-tcp --addr {addr} --index-dir {index_dir}")
             ],
             "single_repo": [
@@ -966,7 +971,7 @@ pub fn agent_guide(
             "warmed_daemon_default": "search_auto"
         },
         "query_language": [
-            "repo:platform",
+            "repo:service",
             "path:src/auth or dir:src/auth",
             "file:auth.rs or file:*.rs",
             "lang:rust",
@@ -992,7 +997,7 @@ pub fn agent_guide(
                 format!("orient serve-tcp --addr {addr} --index {index}")
             ],
             "multi_repo_shards": [
-                format!("orient ensure-shards --discover-root ~/Documents/Projects --output-dir {index_dir} --family-limit 2"),
+                format!("orient ensure-shards --discover-root ~/code --output-dir {index_dir} --family-limit 2"),
                 format!("orient serve-tcp --addr {addr} --index-dir {index_dir}")
             ]
         },
@@ -1037,7 +1042,7 @@ pub fn agent_guide(
             "shard_search": {
                 "id": "search",
                 "tool": "search_shards",
-                "arguments": {"index_dir": index_dir, "query": "repo:platform symbol:SessionManager token", "limit": 10, "explain": true, "refresh_if_stale": true}
+                "arguments": {"index_dir": index_dir, "query": "repo:service symbol:SessionManager token", "limit": 10, "explain": true, "refresh_if_stale": true}
             },
             "live_query_plan": {
                 "id": "plan",
@@ -1052,7 +1057,7 @@ pub fn agent_guide(
             "shard_query_plan": {
                 "id": "plan",
                 "tool": "shard_query_plan",
-                "arguments": {"index_dir": index_dir, "query": "repo:platform symbol:SessionManager token"}
+                "arguments": {"index_dir": index_dir, "query": "repo:service symbol:SessionManager token"}
             }
         },
         "result_followups": [
@@ -1091,7 +1096,7 @@ pub fn agent_instructions(
         "## Orient Search\n\
 Use Orient as the first local code-discovery step before repeated `rg`, `find`, `ls`, or `cat`.\n\
 Prefer the shared daemon when it is running: `{client_command}`.\n\
-For many local repos, bootstrap it with `orient ensure-shards --discover-root ~/Documents/Projects --output-dir {index_dir} --family-limit 2` and `orient serve-tcp --addr {addr} --index-dir {index_dir}`.\n\
+For many local repos, bootstrap it with `orient ensure-shards --discover-root ~/code --output-dir {index_dir} --family-limit 2` and `orient serve-tcp --addr {addr} --index-dir {index_dir}`.\n\
 For one repo, bootstrap it with `orient ensure-index --repo {repo} --index {index}` and `orient serve-tcp --addr {addr} --index {index}`.\n\
 Start each session with `daemon_status` or `agent_guide`, then use `search_auto` for normal lookup and `search_auto_batch` for alternate query phrasings.\n\
 Trust `daemon_status.search_auto_default` to see whether no-target `search_auto` will use a warmed shard directory, warmed index, or the daemon current directory; use `daemon_status.default_requests` for copyable first repo-map/search/query-plan calls.\n\
@@ -1149,9 +1154,12 @@ pub fn unix_client_command(socket: &Path) -> String {
 
 fn daemon_status_command(addr: &str) -> String {
     if addr == DEFAULT_DAEMON_ADDR {
-        "orient daemon-status".to_string()
+        "orient daemon-status --format json".to_string()
     } else {
-        format!("orient daemon-status --addr {}", shell_quote(addr))
+        format!(
+            "orient daemon-status --addr {} --format json",
+            shell_quote(addr)
+        )
     }
 }
 
@@ -6066,6 +6074,46 @@ fn process_cwd_status() -> Value {
             "error": error.to_string()
         }),
     }
+}
+
+fn daemon_footprint_summary(index_details: &[Value], shard_manifest_details: &[Value]) -> Value {
+    json!({
+        "loaded_indexes": index_details.len(),
+        "loaded_files": sum_u64_field(index_details, "files"),
+        "loaded_index_bytes": sum_u64_field(index_details, "index_bytes"),
+        "loaded_source_bytes": sum_u64_field(index_details, "source_bytes"),
+        "loaded_content_snapshot_bytes": sum_u64_field(index_details, "content_snapshot_bytes"),
+        "loaded_line_offset_bytes": sum_u64_field(index_details, "line_offset_bytes"),
+        "loaded_symbols": sum_u64_field(index_details, "symbols"),
+        "loaded_posting_entries": sum_u64_field(index_details, "posting_entries"),
+        "loaded_compressed_posting_bytes": sum_u64_field(index_details, "compressed_posting_bytes"),
+        "disk_missing_indexes": count_bool_field(index_details, "disk_missing"),
+        "disk_changed_indexes": count_bool_field(index_details, "disk_changed"),
+        "cached_shard_manifests": shard_manifest_details.len(),
+        "known_shard_repos": sum_u64_field(shard_manifest_details, "shards"),
+        "known_shard_index_bytes": sum_u64_field(shard_manifest_details, "index_bytes"),
+        "known_shard_content_snapshot_bytes": sum_u64_field(
+            shard_manifest_details,
+            "content_snapshot_bytes",
+        ),
+        "known_shard_line_offset_bytes": sum_u64_field(shard_manifest_details, "line_offset_bytes"),
+        "manifest_disk_missing": count_bool_field(shard_manifest_details, "manifest_disk_missing"),
+        "manifest_disk_changed": count_bool_field(shard_manifest_details, "manifest_disk_changed"),
+    })
+}
+
+fn sum_u64_field(items: &[Value], field: &str) -> u64 {
+    items
+        .iter()
+        .filter_map(|item| item.get(field).and_then(Value::as_u64))
+        .sum()
+}
+
+fn count_bool_field(items: &[Value], field: &str) -> usize {
+    items
+        .iter()
+        .filter(|item| item.get(field).and_then(Value::as_bool).unwrap_or(false))
+        .count()
 }
 
 fn daemon_default_requests(search_auto_default: &Value) -> Value {

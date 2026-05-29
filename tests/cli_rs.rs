@@ -869,7 +869,7 @@ fn cli_discovery_can_group_git_worktree_families() {
             "remote",
             "add",
             "origin",
-            "https://github.com/evalops/project.git",
+            "https://github.com/example/project.git",
         ],
     );
     git(&repo, &["add", "Cargo.toml"]);
@@ -917,7 +917,7 @@ fn cli_discovery_can_group_git_worktree_families() {
     .stdout(predicate::str::contains("\"clones\":1"))
     .stdout(predicate::str::contains("\"tracked_files\":2"))
     .stdout(predicate::str::contains(
-        "https://github.com/evalops/project.git",
+        "https://github.com/example/project.git",
     ))
     .stdout(predicate::str::contains("\"git_kind\":\"worktree\""))
     .stdout(predicate::str::contains("\"branch\":\"feature/search\""));
@@ -938,7 +938,7 @@ fn cli_discovery_can_limit_repeated_repo_families() {
             "remote",
             "add",
             "origin",
-            "https://github.com/evalops/project.git",
+            "https://github.com/example/project.git",
         ],
     );
     git(&repo, &["add", "Cargo.toml"]);
@@ -1120,7 +1120,7 @@ fn cli_indexes_only_selected_family_representatives_when_limited() {
             "remote",
             "add",
             "origin",
-            "https://github.com/evalops/project.git",
+            "https://github.com/example/project.git",
         ],
     );
     git(&repo, &["add", "Cargo.toml", "src/lib.rs"]);
@@ -3468,7 +3468,7 @@ fn cli_shard_manifest_records_git_metadata() {
             "remote",
             "add",
             "origin",
-            "https://github.com/evalops/shard-project.git",
+            "https://github.com/example/shard-project.git",
         ],
     );
     git(repo.path(), &["add", "."]);
@@ -3500,7 +3500,7 @@ fn cli_shard_manifest_records_git_metadata() {
 
     let manifest = fs::read_to_string(shard_dir.path().join("manifest.json")).unwrap();
     assert!(manifest.contains("\"branch\": \"shard-feature-branch\""));
-    assert!(manifest.contains("https://github.com/evalops/shard-project.git"));
+    assert!(manifest.contains("https://github.com/example/shard-project.git"));
     assert!(manifest.contains("\"git_kind\": \"clone\""));
 
     let mut search_by_branch = Command::cargo_bin("orient").unwrap();
@@ -3541,7 +3541,7 @@ fn cli_shard_manifest_records_git_metadata() {
             shard_dir.path().to_str().unwrap(),
             "unique branch token",
             "--origin",
-            "evalops/shard-project",
+            "example/shard-project",
             "--require-all",
         ])
         .assert()
@@ -3554,7 +3554,7 @@ fn cli_shard_manifest_records_git_metadata() {
             "search-auto",
             "--index-dir",
             shard_dir.path().to_str().unwrap(),
-            "branch:shard-feature-branch origin:evalops/shard-project unique_branch_token",
+            "branch:shard-feature-branch origin:example/shard-project unique_branch_token",
         ])
         .output()
         .unwrap();
@@ -3567,7 +3567,7 @@ fn cli_shard_manifest_records_git_metadata() {
     );
     assert_eq!(
         value["repo_map_request"]["arguments"]["origin"],
-        "evalops/shard-project"
+        "example/shard-project"
     );
 
     let mut exclude_branch = Command::cargo_bin("orient").unwrap();
@@ -3592,7 +3592,7 @@ fn cli_shard_manifest_records_git_metadata() {
             "--index-dir",
             shard_dir.path().to_str().unwrap(),
             "--origin",
-            "evalops/shard-project",
+            "example/shard-project",
             "--symbols",
             "5",
             "--tests",
@@ -3605,7 +3605,7 @@ fn cli_shard_manifest_records_git_metadata() {
             "\"branch\":\"shard-feature-branch\"",
         ))
         .stdout(predicate::str::contains(
-            "https://github.com/evalops/shard-project.git",
+            "https://github.com/example/shard-project.git",
         ));
 }
 

@@ -1097,6 +1097,36 @@ fn indexed_query_plan_suggests_facets_for_noisy_successful_queries() {
 }
 
 #[test]
+fn indexed_query_plan_suggests_symbol_kind_facet_for_noisy_definition_searches() {
+    let repo = tempfile::tempdir().unwrap();
+    for index in 0..5 {
+        write(
+            &repo.path().join(format!("src/handler_{index}.rs")),
+            &format!("pub fn sharedneedle_handler_{index}() {{}}\n"),
+        );
+    }
+    for index in 0..17 {
+        write(
+            &repo.path().join(format!("src/comment_{index}.rs")),
+            &format!("// sharedneedle background note {index}\n"),
+        );
+    }
+
+    let index = FastIndex::build(repo.path()).unwrap();
+    let plan = index
+        .query_plan("sharedneedle", &SearchFilters::default())
+        .unwrap();
+
+    assert!(plan.final_match_count > 0);
+    assert!(!plan.candidate_cap_hit);
+    assert!(plan.repair_hints.iter().any(|hint| {
+        hint.kind == "narrow_by_symbol_kind"
+            && hint.suggested_query.as_deref() == Some("kind:function sharedneedle")
+            && hint.message.contains("from 22 files to 5")
+    }));
+}
+
+#[test]
 fn indexed_query_plan_counts_filter_and_phrase_rejections() {
     let repo = tempfile::tempdir().unwrap();
     write(
@@ -2323,6 +2353,55 @@ fn indexed_search_uses_symbol_postings_for_identifier_queries() {
         "{:?}",
         direct_kind_plan.planned_postings
     );
+}
+
+#[test]
+fn indexed_kind_filter_intersects_content_terms() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/handler.rs"),
+        "pub fn sharedneedle_handler() {}\n",
+    );
+    write(
+        &repo.path().join("src/noise.rs"),
+        "pub fn unrelated_alpha() {}\npub fn unrelated_beta() {}\n",
+    );
+    for index in 0..20 {
+        write(
+            &repo.path().join(format!("docs/sharedneedle-{index}.md")),
+            "sharedneedle operational notes\n",
+        );
+    }
+
+    let index = FastIndex::build(repo.path()).unwrap();
+    let results = index
+        .search_filtered(
+            "kind:function sharedneedle",
+            10,
+            &SearchFilters {
+                explain: true,
+                ..SearchFilters::default()
+            },
+        )
+        .unwrap();
+
+    assert_eq!(result_paths(&results), vec!["src/handler.rs".to_string()]);
+    let plan = results[0].query_plan.as_ref().unwrap();
+    assert_eq!(plan.candidate_count, 1);
+    assert_eq!(plan.final_match_count, 1);
+    assert!(
+        plan.planned_postings
+            .iter()
+            .any(|posting| posting.kind == "symbol_kind" && posting.value == "function"),
+        "{:?}",
+        plan.planned_postings
+    );
+
+    let direct_plan = index
+        .query_plan("kind:function sharedneedle", &SearchFilters::default())
+        .unwrap();
+    assert_eq!(direct_plan.candidate_count, 1);
+    assert_eq!(direct_plan.final_match_count, 1);
 }
 
 #[test]
