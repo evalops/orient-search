@@ -1777,6 +1777,27 @@ fn attach_retry_requests<T: Serialize>(
     plan
 }
 
+fn attach_result_query_plan_retry_requests<T: Serialize>(
+    results: &mut [SearchResult],
+    search_tool: &str,
+    target_name: &str,
+    target_value: &T,
+    source_arguments: &Value,
+) {
+    for result in results {
+        let Some(plan) = result.query_plan.take() else {
+            continue;
+        };
+        result.query_plan = Some(attach_retry_requests(
+            plan,
+            search_tool,
+            target_name,
+            target_value,
+            source_arguments,
+        ));
+    }
+}
+
 fn retry_search_requests<T: Serialize>(
     plan: &QueryPlan,
     search_tool: &str,
@@ -2242,6 +2263,13 @@ impl ToolRuntime {
                         self.cached_index_maybe_refresh(index_path.clone(), refresh_if_stale)?;
                     let filters = search_filters(&request.arguments, true)?;
                     let mut results = index.search_filtered(&query, limit, &filters)?;
+                    attach_result_query_plan_retry_requests(
+                        &mut results,
+                        "indexed_search_code",
+                        "index",
+                        &index_path,
+                        &request.arguments,
+                    );
                     attach_result_context(&mut results, context_lines, |path, start, lines| {
                         index.read_range(path, start, lines)
                     })?;
@@ -2646,6 +2674,13 @@ impl ToolRuntime {
                     self.cached_index_maybe_refresh(index_path.clone(), refresh_if_stale)?;
                 let filters = search_filters(&request.arguments, true)?;
                 let mut results = index.search_filtered(&query, limit, &filters)?;
+                attach_result_query_plan_retry_requests(
+                    &mut results,
+                    "indexed_search_code",
+                    "index",
+                    &index_path,
+                    &request.arguments,
+                );
                 attach_result_context(&mut results, context_lines, |path, start, lines| {
                     index.read_range(path, start, lines)
                 })?;
@@ -2680,6 +2715,13 @@ impl ToolRuntime {
                 let mut batch = Vec::new();
                 for query in queries {
                     let mut results = index.search_filtered(&query, limit, &filters)?;
+                    attach_result_query_plan_retry_requests(
+                        &mut results,
+                        "indexed_search_code",
+                        "index",
+                        &index_path,
+                        &request.arguments,
+                    );
                     attach_result_context(&mut results, context_lines, |path, start, lines| {
                         index.read_range(path, start, lines)
                     })?;
@@ -3651,6 +3693,13 @@ impl ToolRuntime {
         let index = self.cached_index_maybe_refresh(index_path.clone(), refresh_if_stale)?;
         let filters = search_filters(arguments, true)?;
         let mut results = index.search_filtered(query, limit, &filters)?;
+        attach_result_query_plan_retry_requests(
+            &mut results,
+            "indexed_search_code",
+            "index",
+            &index_path,
+            arguments,
+        );
         attach_result_context(&mut results, context_lines, |path, start, lines| {
             index.read_range(path, start, lines)
         })?;

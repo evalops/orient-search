@@ -2775,6 +2775,60 @@ fn cli_ensure_index_repairs_corrupt_persistent_index() {
 }
 
 #[test]
+fn cli_indexed_result_query_plan_includes_retry_requests() {
+    let repo = tempfile::tempdir().unwrap();
+    for index in 0..700 {
+        write(
+            &repo.path().join(format!("src/file_{index:04}.rs")),
+            "pub fn shared_cap_token() {}\n",
+        );
+    }
+    for index in 0..400 {
+        write(
+            &repo.path().join(format!("tests/file_{index:04}_test.rs")),
+            "pub fn shared_cap_token() {}\n",
+        );
+    }
+    let index_path = repo.path().join(".orient/index");
+
+    let mut ensure_index = Command::cargo_bin("orient").unwrap();
+    ensure_index
+        .args([
+            "ensure-index",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--index",
+            index_path.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let mut search = Command::cargo_bin("orient").unwrap();
+    search
+        .args([
+            "indexed-search",
+            "--index",
+            index_path.to_str().unwrap(),
+            "shared cap token",
+            "--limit",
+            "1",
+            "--explain",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"candidate_cap_hit\":true"))
+        .stdout(predicate::str::contains("\"retry_requests\""))
+        .stdout(predicate::str::contains("\"tool\":\"indexed_search_code\""))
+        .stdout(predicate::str::contains(
+            "\"query\":\"path:src shared cap token\"",
+        ))
+        .stdout(predicate::str::contains(&format!(
+            "\"index\":\"{}\"",
+            index_path.display()
+        )));
+}
+
+#[test]
 fn cli_builds_and_searches_shard_directory() {
     let auth_repo = sample_repo();
     write(

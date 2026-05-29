@@ -4928,6 +4928,56 @@ fn refresh_shards_waits_for_existing_writer_lock() {
 }
 
 #[test]
+fn runtime_indexed_result_query_plan_includes_retry_requests() {
+    let repo = tempfile::tempdir().unwrap();
+    for index in 0..700 {
+        write(
+            &repo.path().join(format!("src/file_{index:04}.rs")),
+            "pub fn shared_cap_token() {}\n",
+        );
+    }
+    for index in 0..400 {
+        write(
+            &repo.path().join(format!("tests/file_{index:04}_test.rs")),
+            "pub fn shared_cap_token() {}\n",
+        );
+    }
+    let index_path = repo.path().join(".orient/index");
+    FastIndex::build(repo.path())
+        .unwrap()
+        .save(&index_path)
+        .unwrap();
+
+    let runtime = ToolRuntime::default();
+    let response = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("search"),
+        tool: "indexed_search".to_string(),
+        arguments: serde_json::json!({
+            "index": index_path,
+            "query": "shared cap token",
+            "limit": 1,
+            "explain": true
+        }),
+    });
+    assert!(response.error.is_none(), "{:?}", response.error);
+    let result = response.result.unwrap();
+    let plan = &result[0]["query_plan"];
+    assert_eq!(plan["candidate_cap_hit"], serde_json::json!(true));
+    assert_eq!(
+        plan["retry_requests"][0]["tool"],
+        serde_json::json!("indexed_search_code")
+    );
+    assert_eq!(
+        plan["retry_requests"][0]["arguments"]["query"],
+        serde_json::json!("path:src shared cap token")
+    );
+    assert_eq!(
+        plan["retry_requests"][0]["arguments"]["index"],
+        serde_json::json!(index_path)
+    );
+}
+
+#[test]
 fn shard_manifest_save_replaces_existing_file_without_leaving_temp_files() {
     let workspace = tempfile::tempdir().unwrap();
     let repo = workspace.path().join("billing");
@@ -6538,6 +6588,57 @@ fn server_handles_indexed_search_request() {
     assert!(stdout.contains("\"final_match_count\":0"));
     assert!(stdout.contains("\"repair_hints\""));
     assert!(stdout.contains("drop_missing_terms"));
+}
+
+#[test]
+fn indexed_search_result_query_plan_includes_retry_requests() {
+    let repo = tempfile::tempdir().unwrap();
+    for index in 0..700 {
+        write(
+            &repo.path().join(format!("src/file_{index:04}.rs")),
+            "pub fn shared_cap_token() {}\n",
+        );
+    }
+    for index in 0..400 {
+        write(
+            &repo.path().join(format!("tests/file_{index:04}_test.rs")),
+            "pub fn shared_cap_token() {}\n",
+        );
+    }
+    let index_path = repo.path().join(".orient/index");
+    FastIndex::build(repo.path())
+        .unwrap()
+        .save(&index_path)
+        .unwrap();
+    let runtime = ToolRuntime::default();
+
+    let response = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("search"),
+        tool: "indexed_search_code".to_string(),
+        arguments: serde_json::json!({
+            "index": index_path,
+            "query": "shared cap token",
+            "limit": 1,
+            "explain": true
+        }),
+    });
+    assert!(response.error.is_none(), "{:?}", response.error);
+    let results = response.result.unwrap();
+    let plan = &results[0]["query_plan"];
+    assert_eq!(plan["candidate_cap_hit"], serde_json::json!(true));
+    assert!(
+        plan["retry_requests"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|request| {
+                request["tool"] == serde_json::json!("indexed_search_code")
+                    && request["arguments"]["query"]
+                        == serde_json::json!("path:src shared cap token")
+                    && request["arguments"]["explain"] == serde_json::json!(true)
+            }),
+        "{plan}"
+    );
 }
 
 #[test]
