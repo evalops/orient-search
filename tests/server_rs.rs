@@ -1595,6 +1595,10 @@ fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
         "drop_missing_terms"
     );
     assert_eq!(
+        empty_live["query_plan_result"]["repair_hints"][0]["action"],
+        "drop_terms"
+    );
+    assert_eq!(
         empty_live["primary_diagnosis"],
         empty_live["query_plan_result"]["diagnosis"]
     );
@@ -1812,6 +1816,10 @@ fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
     assert_eq!(
         kind_typo["query_plan_result"]["repair_hints"][0]["kind"],
         "replace_symbol_kind_filter"
+    );
+    assert_eq!(
+        kind_typo["query_plan_result"]["repair_hints"][0]["action"],
+        "replace_filter"
     );
     assert_eq!(
         kind_typo["primary_diagnosis"]["primary_hint_kind"],

@@ -523,9 +523,33 @@ pub struct QueryPlanFilter {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct QueryPlanRepairHint {
     pub kind: String,
+    pub action: String,
     pub message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub suggested_query: Option<String>,
+}
+
+pub fn query_plan_repair_action(kind: &str) -> &'static str {
+    if kind == "narrow_query" || kind.starts_with("narrow_by_") {
+        "narrow"
+    } else if kind.starts_with("replace_") {
+        "replace_filter"
+    } else if kind.ends_with("_filter")
+        || kind == "relax_filters"
+        || kind == "dependency_filter_mismatch"
+    {
+        "relax_filter"
+    } else if kind == "relax_phrase" || kind == "relax_and" {
+        "relax_query"
+    } else {
+        match kind {
+            "drop_missing_terms" => "drop_terms",
+            "try_any_terms" => "broaden_terms",
+            "shorten_substring" => "shorten_literal",
+            "broaden_query" => "broaden_query",
+            _ => "inspect",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

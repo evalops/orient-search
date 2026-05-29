@@ -1139,6 +1139,7 @@ fn indexed_query_plan_suggests_any_terms_for_strict_and_misses() {
     );
     assert!(plan.repair_hints.iter().any(|hint| {
         hint.kind == "try_any_terms"
+            && hint.action == "broaden_terms"
             && hint.suggested_query.as_deref() == Some("mode:any alpha beta")
             && hint.message.contains("no file contains all terms")
     }));
@@ -1186,6 +1187,7 @@ fn indexed_query_plan_suggests_facets_for_noisy_successful_queries() {
     assert!(diagnosis.suggested_query.as_deref().is_some());
     assert!(plan.repair_hints.iter().any(|hint| {
         hint.kind == "narrow_by_code"
+            && hint.action == "narrow"
             && hint.suggested_query.as_deref() == Some("code:true sharedneedle")
             && hint.message.contains("from 22 files to 5")
     }));
@@ -1216,6 +1218,7 @@ fn indexed_query_plan_suggests_symbol_kind_facet_for_noisy_definition_searches()
     assert!(!plan.candidate_cap_hit);
     assert!(plan.repair_hints.iter().any(|hint| {
         hint.kind == "narrow_by_symbol_kind"
+            && hint.action == "narrow"
             && hint.suggested_query.as_deref() == Some("kind:function sharedneedle")
             && hint.message.contains("from 22 files to 5")
     }));
@@ -1254,6 +1257,7 @@ fn indexed_query_plan_counts_filter_and_phrase_rejections() {
     );
     assert!(filter_rejected.repair_hints.iter().any(|hint| {
         hint.kind == "relax_path_filter"
+            && hint.action == "relax_filter"
             && hint.suggested_query.as_deref() == Some("session manager")
             && hint.message.contains("path:tests")
     }));

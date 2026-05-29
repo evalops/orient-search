@@ -12,8 +12,8 @@ use crate::repo_index::{
     is_generated_path, is_ignored, is_important_file, is_manifest_file, is_source_code_language,
     is_test_path, known_commands_from_hints, language_for,
     matches_filters_with_compiled_path_metadata, normalize_language_filter,
-    normalize_search_filters_for_root, normalize_token, referenced_symbol_name,
-    regular_file_metadata, related_file_reference_symbol_candidate,
+    normalize_search_filters_for_root, normalize_token, query_plan_repair_action,
+    referenced_symbol_name, regular_file_metadata, related_file_reference_symbol_candidate,
     related_query_terms_symbol_and_filters, related_stem_terms, repo_map_seed_paths, repo_matches,
     result_matches_all_tokens, result_matches_symbol_filters, round4, score_filter_only_path_match,
     select_repo_brief_import_hints, select_repo_map_top_symbols,
@@ -4131,8 +4131,10 @@ fn repair_hint(
     message: impl Into<String>,
     suggested_query: Option<String>,
 ) -> QueryPlanRepairHint {
+    let kind = kind.into();
     QueryPlanRepairHint {
-        kind: kind.into(),
+        action: query_plan_repair_action(&kind).to_string(),
+        kind,
         message: message.into(),
         suggested_query,
     }

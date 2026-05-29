@@ -7,7 +7,7 @@ use crate::repo_index::{
     CommandHint, FileRange, QueryPlan, QueryPlanFilter, QueryPlanRepairHint, RangeScope,
     RelatedFile, RelatedSymbol, RepoMap, RepoMapDetail, SearchFilters, SearchResult, Symbol,
     finalize_results_for_filters, is_manifest_file, language_for, normalize_token,
-    unique_query_tokens,
+    query_plan_repair_action, unique_query_tokens,
 };
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use anyhow::{Context, Result};
@@ -1263,6 +1263,7 @@ pub(crate) fn shard_selection_miss_plan(
             diagnosis: None,
             repair_hints: vec![QueryPlanRepairHint {
                 kind: "relax_filters".to_string(),
+                action: query_plan_repair_action("relax_filters").to_string(),
                 message: message.to_string(),
                 suggested_query: (!query.trim().is_empty()).then(|| query.to_string()),
             }],
@@ -1515,6 +1516,7 @@ fn shard_facet_hint(
     let suggested_query = query_with_filters_text(query_terms, &narrowed);
     QueryPlanRepairHint {
         kind: kind.to_string(),
+        action: query_plan_repair_action(kind).to_string(),
         message: format!(
             "Filter `{field}:{value}` narrows the shard candidate set from {total} files to {count}."
         ),
