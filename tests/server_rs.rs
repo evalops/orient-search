@@ -4271,6 +4271,14 @@ fn runtime_warms_index_by_tool_request() {
             .unwrap()
             > 0
     );
+    assert_eq!(
+        result["cached_index_details"][0]["disk_missing"],
+        serde_json::json!(false)
+    );
+    assert_eq!(
+        result["cached_index_details"][0]["disk_changed"],
+        serde_json::json!(false)
+    );
     assert!(
         result["cached_index_details"][0]["content_snapshot_bytes"]
             .as_u64()
@@ -4357,6 +4365,15 @@ fn runtime_reuses_cached_index_after_initial_load() {
         status.result.unwrap()["cached_indexes"],
         serde_json::json!(1)
     );
+    let status = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("missing-status"),
+        tool: "daemon_status".to_string(),
+        arguments: serde_json::json!({}),
+    });
+    assert_eq!(
+        status.result.unwrap()["cached_index_details"][0]["disk_missing"],
+        serde_json::json!(true)
+    );
 }
 
 #[test]
@@ -4405,6 +4422,22 @@ fn runtime_reloads_cached_index_when_file_changes() {
         .unwrap()
         .save(&index_path)
         .unwrap();
+
+    let stale_status = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("stale-status"),
+        tool: "daemon_status".to_string(),
+        arguments: serde_json::json!({}),
+    });
+    assert!(stale_status.error.is_none(), "{:?}", stale_status.error);
+    let stale_status = stale_status.result.unwrap();
+    assert_eq!(
+        stale_status["cached_index_details"][0]["disk_missing"],
+        serde_json::json!(false)
+    );
+    assert_eq!(
+        stale_status["cached_index_details"][0]["disk_changed"],
+        serde_json::json!(true)
+    );
 
     let second = runtime.dispatch(ToolRequest {
         id: serde_json::json!("second"),
@@ -5047,6 +5080,14 @@ fn runtime_reuses_cached_shard_manifest_after_initial_load() {
         result["cached_shard_manifest_details"][0]["shards"],
         serde_json::json!(1)
     );
+    assert_eq!(
+        result["cached_shard_manifest_details"][0]["manifest_disk_missing"],
+        serde_json::json!(true)
+    );
+    assert_eq!(
+        result["cached_shard_manifest_details"][0]["manifest_disk_changed"],
+        serde_json::json!(false)
+    );
     assert!(
         result["cached_shard_manifest_details"][0]["index_bytes"]
             .as_u64()
@@ -5070,6 +5111,14 @@ fn runtime_reuses_cached_shard_manifest_after_initial_load() {
             .as_u64()
             .unwrap()
             > 0
+    );
+    assert_eq!(
+        result["cached_shard_manifest_details"][0]["repos"][0]["index_disk_missing"],
+        serde_json::json!(false)
+    );
+    assert_eq!(
+        result["cached_shard_manifest_details"][0]["repos"][0]["index_disk_changed"],
+        serde_json::json!(false)
     );
     assert!(
         result["cached_shard_manifest_details"][0]["repos"][0]["content_snapshot_bytes"]
@@ -5136,6 +5185,27 @@ fn runtime_reloads_cached_shard_manifest_when_file_changes() {
         "pub fn revoke_token() -> usize { 2 }\n",
     );
     build_shards(&[auth_repo, billing_repo], shard_dir.path()).unwrap();
+
+    let stale_status = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("stale-status"),
+        tool: "daemon_status".to_string(),
+        arguments: serde_json::json!({}),
+    });
+    assert!(stale_status.error.is_none(), "{:?}", stale_status.error);
+    let stale_status = stale_status.result.unwrap();
+    assert_eq!(
+        stale_status["cached_shard_manifest_details"][0]["manifest_disk_missing"],
+        serde_json::json!(false)
+    );
+    assert_eq!(
+        stale_status["cached_shard_manifest_details"][0]["manifest_disk_changed"],
+        serde_json::json!(true)
+    );
+    assert_eq!(
+        stale_status["cached_shard_manifest_details"][0]["repos"][0]["index_disk_changed"],
+        serde_json::json!(true)
+    );
+
     let second = runtime.dispatch(ToolRequest {
         id: serde_json::json!("second"),
         tool: "search_shards".to_string(),

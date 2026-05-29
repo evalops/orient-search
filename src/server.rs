@@ -322,6 +322,19 @@ struct CacheFileFingerprint {
 struct CachedIndexFootprint {
     content_snapshot_bytes: u64,
     line_offset_bytes: usize,
+    fingerprint: Option<CacheFileFingerprint>,
+}
+
+struct CachedIndexSnapshot {
+    index: Arc<FastIndex>,
+    fingerprint: Option<CacheFileFingerprint>,
+}
+
+#[derive(Default)]
+struct CacheDiskState {
+    bytes: Option<u64>,
+    missing: bool,
+    changed: bool,
 }
 
 enum IndexCacheState {
@@ -360,9 +373,12 @@ impl IndexCacheEntry {
             .unwrap_or(false)
     }
 
-    fn ready_index(&self) -> Option<Arc<FastIndex>> {
+    fn ready_snapshot(&self) -> Option<CachedIndexSnapshot> {
         self.state.lock().ok().and_then(|state| match &*state {
-            IndexCacheState::Ready { index, .. } => Some(Arc::clone(index)),
+            IndexCacheState::Ready { index, fingerprint } => Some(CachedIndexSnapshot {
+                index: Arc::clone(index),
+                fingerprint: *fingerprint,
+            }),
             IndexCacheState::Loading | IndexCacheState::Failed(_) => None,
         })
     }
@@ -4083,16 +4099,17 @@ impl ToolRuntime {
                 indexes
                     .iter()
                     .filter_map(|(path, entry)| {
-                        entry.ready_index().map(|index| {
-                            let stats = index.stats();
-                            let index_bytes =
-                                fs::metadata(path).map(|metadata| metadata.len()).ok();
+                        entry.ready_snapshot().map(|snapshot| {
+                            let stats = snapshot.index.stats();
+                            let disk = cache_disk_state(path, snapshot.fingerprint);
                             json!({
                                 "index": path.to_string_lossy(),
                                 "root": stats.root.to_string_lossy(),
                                 "version": stats.version,
                                 "files": stats.files,
-                                "index_bytes": index_bytes,
+                                "index_bytes": disk.bytes,
+                                "disk_missing": disk.missing,
+                                "disk_changed": disk.changed,
                                 "source_bytes": stats.source_bytes,
                                 "content_snapshot_bytes": stats.content_snapshot_bytes,
                                 "line_offset_bytes": stats.line_offset_bytes,
@@ -4175,7 +4192,9 @@ impl ToolRuntime {
             .map(|manifests| {
                 manifests
                     .iter()
-                    .map(|(path, entry)| shard_manifest_detail(path, &entry.manifest, &footprints))
+                    .map(|(path, entry)| {
+                        shard_manifest_detail(path, &entry.manifest, entry.fingerprint, &footprints)
+                    })
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
@@ -4194,7 +4213,9 @@ impl ToolRuntime {
             .lock()
             .ok()
             .and_then(|manifests| manifests.get(&key).cloned())
-            .map(|entry| shard_manifest_detail(&key, &entry.manifest, &footprints))
+            .map(|entry| {
+                shard_manifest_detail(&key, &entry.manifest, entry.fingerprint, &footprints)
+            })
             .unwrap_or_else(|| {
                 json!({
                     "index_dir": key.to_string_lossy(),
@@ -4211,13 +4232,14 @@ impl ToolRuntime {
                 indexes
                     .iter()
                     .filter_map(|(path, entry)| {
-                        entry.ready_index().map(|index| {
-                            let stats = index.stats();
+                        entry.ready_snapshot().map(|snapshot| {
+                            let stats = snapshot.index.stats();
                             (
                                 path.clone(),
                                 CachedIndexFootprint {
                                     content_snapshot_bytes: stats.content_snapshot_bytes,
                                     line_offset_bytes: stats.line_offset_bytes,
+                                    fingerprint: snapshot.fingerprint,
                                 },
                             )
                         })
@@ -4667,33 +4689,35 @@ impl ToolRuntime {
 fn shard_manifest_detail(
     index_dir: &Path,
     manifest: &ShardManifest,
+    manifest_fingerprint: Option<CacheFileFingerprint>,
     footprints: &HashMap<PathBuf, CachedIndexFootprint>,
 ) -> Value {
     let mut total_index_bytes = 0u64;
     let mut total_content_snapshot_bytes = 0u64;
     let mut total_line_offset_bytes = 0usize;
+    let manifest_disk = cache_disk_state(&index_dir.join("manifest.json"), manifest_fingerprint);
     let repos = manifest
         .shards
         .iter()
         .map(|shard| {
             let index_path = index_dir.join(&shard.index);
-            let index_bytes = fs::metadata(&index_path)
-                .map(|metadata| metadata.len())
-                .ok();
-            if let Some(index_bytes) = index_bytes {
-                total_index_bytes += index_bytes;
-            }
             let footprint = footprints
                 .get(&canonical_cache_key(&index_path))
                 .copied()
                 .unwrap_or_default();
+            let index_disk = cache_disk_state(&index_path, footprint.fingerprint);
+            if let Some(index_bytes) = index_disk.bytes {
+                total_index_bytes += index_bytes;
+            }
             total_content_snapshot_bytes += footprint.content_snapshot_bytes;
             total_line_offset_bytes += footprint.line_offset_bytes;
             json!({
                 "name": shard.name,
                 "root": shard.root,
                 "index": shard.index,
-                "index_bytes": index_bytes,
+                "index_bytes": index_disk.bytes,
+                "index_disk_missing": index_disk.missing,
+                "index_disk_changed": index_disk.changed,
                 "content_snapshot_bytes": footprint.content_snapshot_bytes,
                 "line_offset_bytes": footprint.line_offset_bytes,
                 "aliases": shard
@@ -4708,6 +4732,9 @@ fn shard_manifest_detail(
     json!({
         "index_dir": index_dir.to_string_lossy().to_string(),
         "shards": manifest.shards.len(),
+        "manifest_bytes": manifest_disk.bytes,
+        "manifest_disk_missing": manifest_disk.missing,
+        "manifest_disk_changed": manifest_disk.changed,
         "index_bytes": total_index_bytes,
         "content_snapshot_bytes": total_content_snapshot_bytes,
         "line_offset_bytes": total_line_offset_bytes,
@@ -4741,6 +4768,18 @@ fn file_fingerprint(path: &Path) -> Option<CacheFileFingerprint> {
         len: metadata.len(),
         modified: metadata.modified().ok(),
     })
+}
+
+fn cache_disk_state(
+    path: &Path,
+    cached_fingerprint: Option<CacheFileFingerprint>,
+) -> CacheDiskState {
+    let current = file_fingerprint(path);
+    CacheDiskState {
+        bytes: current.map(|fingerprint| fingerprint.len),
+        missing: current.is_none(),
+        changed: current.is_some_and(|fingerprint| cached_fingerprint != Some(fingerprint)),
+    }
 }
 
 fn symbol_match_score(symbol: &Symbol, name: &str, needle: &str) -> u8 {
