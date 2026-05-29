@@ -194,7 +194,7 @@ For most agents, the handoff is:
 
 Read-range tools accept `/` or `\` separators in repo-relative paths and reject parent-directory escapes after separator normalization. Shard range and related-context tools accept exact shard-prefixed paths from search hits, such as `service/src/auth.rs`, and also accept unqualified paths like `src/auth.rs` when they resolve to exactly one shard. Ambiguous unqualified paths fail with a prompt to use `<repo>/<path>`.
 
-`read_range` / `open_range` and `read_ranges` / `open_ranges` are target-aware convenience tools: pass `repo`, `index`, or `index_dir` to read from a live repository, persistent index, or shard directory with one adapter path. With no explicit target, protocol clients can pass `cwd` to resolve repository-relative paths inside the active checkout. The explicit `read_index_range` and `read_shard_range` families remain available for wrappers that want surface-specific tools.
+`read_range` / `open_range` and `read_ranges` / `open_ranges` are target-aware convenience tools: pass `repo`, `index`, or `index_dir` to read from a live repository, persistent index, or shard directory with one adapter path. With no explicit target, protocol clients can pass `cwd` to resolve repository-relative paths inside the active checkout. The single-read `path` and batch `ranges` entries accept copied locations such as `path:line`, `path:line: copied text`, and `path#Lstart-Lend`; `read_ranges.ranges` can be one compact string, one `{path,start,lines}` object, or an array mixing both. The explicit `read_index_range` and `read_shard_range` families remain available for wrappers that want surface-specific tools.
 
 `related_files` and `related_symbols` are target-aware too: pass `repo`, `index`, or `index_dir` to get nearby files or definitions from the same target style as `search`, or pass `cwd` when using the shared daemon without an explicit target. The CLI mirrors this as `related --repo`, `related --index`, or `related --index-dir`, and likewise for `related-symbols`. Related-file and related-symbol tools accept the same structured scoping filters as search, with `path` reserved for the anchor file; use fields such as `test`, `generated`, `lang`, `file`, `exclude_path`, or `exclude_content` to control returned neighbors. For shard `related_symbols`, include the search-hit `path` so Orient can keep the lookup inside the right shard or alias scope. The explicit `related_index_*` and `related_shard_*` tools remain available.
 
@@ -203,7 +203,8 @@ Examples:
 ```json
 {"id":"read-one","tool":"read_ranges","arguments":{"index":"/tmp/orient.index","ranges":{"path":"src/auth.rs","start":1,"lines":80}}}
 {"id":"read","tool":"read_ranges","arguments":{"index":"/tmp/orient.index","ranges":[{"path":"src/auth.rs","start":1,"lines":80}]}}
-{"id":"read-shards","tool":"read_ranges","arguments":{"index_dir":"/tmp/orient-shards","ranges":[{"path":"service/src/auth.rs","start":40,"lines":80}]}}
+{"id":"read-copied","tool":"read_range","arguments":{"repo":"/path/to/repo","path":"src/auth.rs#L40-L45"}}
+{"id":"read-shards","tool":"read_ranges","arguments":{"index_dir":"/tmp/orient-shards","ranges":[{"path":"service/src/auth.rs","start":40,"lines":80},"service/src/lib.rs#L40-L45"]}}
 ```
 
 CLI equivalents support repeatable `--range path:start:lines`:
@@ -214,7 +215,7 @@ orient read-shard-ranges --index-dir /tmp/orient-shards --range service/src/auth
 ```
 
 Range reads follow manifest bounds: `start >= 1`, `1 <= lines <= lines.maximum`, non-empty batch arrays, and `ranges.maxItems`, so a mistaken request cannot dump unbounded file content.
-For CLI adapters, `read-range` and positional `read-ranges` entries accept compact `path:start:lines` specs as well as copied locations such as `path:line`, `path:line: copied text`, and `path#Lstart-Lend`. They also accept `--path`, `--start`, and `--lines`; add a trailing `:symbol` or `:exact` when one range in a batch needs its own scope. Parsing splits from the right so paths containing `:` still work when the trailing range fields are present.
+For CLI adapters, `read-range` and positional `read-ranges` entries accept compact `path:start:lines` specs as well as copied locations such as `path:line`, `path:line: copied text`, and `path#Lstart-Lend`. They also accept `--path`, `--start`, and `--lines`; add a trailing `:symbol` or `:exact` when one range in a batch needs its own scope. Protocol batch strings use the same compact `path:start:lines[:scope]` form. Parsing splits from the right so paths containing `:` still work when the trailing range fields are present.
 
 ## Orientation And Repair
 

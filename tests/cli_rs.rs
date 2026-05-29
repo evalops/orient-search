@@ -106,7 +106,9 @@ fn cli_outputs_tool_manifest() {
         .stdout(predicate::str::contains("\"maximum\":1000"))
         .stdout(predicate::str::contains("\"maxItems\":32"))
         .stdout(predicate::str::contains("\"maxItems\":64"))
-        .stdout(predicate::str::contains("\"type\":\"range|range[]\""));
+        .stdout(predicate::str::contains(
+            "\"type\":\"range|string|range[]\"",
+        ));
 }
 
 #[test]

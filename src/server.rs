@@ -1429,15 +1429,22 @@ fn argument_schema(tool_name: &str, name: &str) -> Value {
                     }
                 }
             });
+            let range_string_schema = json!({
+                "type": "string",
+                "description": "Compact PATH:START:LINES[:SCOPE] range or copied location such as path:line, path:line: text, or path#Lstart-Lend."
+            });
             schema.insert(
                 "oneOf".to_string(),
                 json!([
                     range_schema.clone(),
+                    range_string_schema.clone(),
                     {
                         "type": "array",
                         "minItems": 1,
                         "maxItems": MAX_BATCH_RANGES,
-                        "items": range_schema
+                        "items": {
+                            "oneOf": [range_schema, range_string_schema]
+                        }
                     }
                 ]),
             );
@@ -1564,7 +1571,7 @@ fn argument_type(name: &str) -> &'static str {
         "test" | "generated" | "code" | "explain" | "require_all" | "any_terms"
         | "refresh_if_stale" | "git_metadata" | "tracked_files" | "nested_manifests" => "boolean",
         name if string_list_argument(name) => "string|string[]",
-        "ranges" => "range|range[]",
+        "ranges" => "range|string|range[]",
         "repos" | "discover_roots" | "queries" => "string[]",
         _ => "string",
     }
@@ -1707,13 +1714,13 @@ fn argument_description(tool_name: &str, name: &str) -> &'static str {
             "Result path for the selected target; use repo/index-relative paths for repo or index targets, and shard-prefixed or unique shard-relative paths for index_dir targets."
         }
         "path" if is_shard_path_tool(tool_name) => {
-            "Shard-prefixed result path, such as repo/src/lib.rs, or a unique unqualified shard-relative path, such as src/lib.rs."
+            "Shard-prefixed result path, unique unqualified shard-relative path, or copied location such as repo/src/lib.rs#L40-L45."
         }
         "path" if is_index_path_tool(tool_name) => {
-            "Index-relative result path, such as src/lib.rs."
+            "Index-relative result path or copied location, such as src/lib.rs or src/lib.rs#L40-L45."
         }
         "path" if is_live_path_tool(tool_name) => {
-            "Repository-relative result path, such as src/lib.rs."
+            "Repository-relative result path or copied location, such as src/lib.rs or src/lib.rs#L40-L45."
         }
         "path" => "Path substring filter or result path, depending on the tool.",
         "dir" | "directory" | "folder" => {
@@ -1721,13 +1728,13 @@ fn argument_description(tool_name: &str, name: &str) -> &'static str {
         }
         "filename" | "file_name" => "Alias for file when filtering by basename.",
         "ranges" if is_shard_range_tool(tool_name) => {
-            "A {path,start,lines} object or array of them; path may be shard-prefixed or a unique unqualified shard-relative path."
+            "A compact range string, {path,start,lines} object, or array of them; path may be shard-prefixed or a unique unqualified shard-relative path."
         }
         "ranges" if is_index_range_tool(tool_name) => {
-            "A {path,start,lines} object or array of them for index-relative batch range reads."
+            "A compact range string, {path,start,lines} object, or array of them for index-relative batch range reads."
         }
         "ranges" => {
-            "A {path,start,lines} object or array of them for repository-relative batch range reads."
+            "A compact range string, {path,start,lines} object, or array of them for repository-relative batch range reads."
         }
         "limit" => "Maximum number of results to return.",
         "language" => "Detected language filter, such as rust, python, or typescript.",
@@ -1836,13 +1843,13 @@ fn argument_description(tool_name: &str, name: &str) -> &'static str {
 
 fn range_path_description(tool_name: &str) -> &'static str {
     if is_target_context_tool(tool_name) {
-        "Result path for the selected target; use repo/index-relative paths for repo or index targets, and shard-prefixed or unique shard-relative paths for index_dir targets."
+        "Result path or copied location for the selected target; use repo/index-relative paths for repo or index targets, and shard-prefixed or unique shard-relative paths for index_dir targets."
     } else if is_shard_range_tool(tool_name) {
-        "Shard-prefixed result path, such as repo/src/lib.rs, or a unique unqualified shard-relative path, such as src/lib.rs."
+        "Shard-prefixed result path, unique unqualified shard-relative path, or copied location such as repo/src/lib.rs#L40-L45."
     } else if is_index_range_tool(tool_name) {
-        "Index-relative result path, such as src/lib.rs."
+        "Index-relative result path or copied location, such as src/lib.rs or src/lib.rs#L40-L45."
     } else {
-        "Repository-relative result path, such as src/lib.rs."
+        "Repository-relative result path or copied location, such as src/lib.rs or src/lib.rs#L40-L45."
     }
 }
 
@@ -2621,6 +2628,14 @@ impl ToolRuntime {
                 let path = string_arg(&request.arguments, "path")?;
                 let (start, lines) = read_window_args(&request.arguments)?;
                 let scope = read_scope_arg(&request.arguments)?;
+                let range = normalize_read_range_arg(
+                    path,
+                    start,
+                    lines,
+                    scope,
+                    request.arguments.get("start").is_some(),
+                    request.arguments.get("lines").is_some(),
+                )?;
                 if request.arguments.get("index").is_some()
                     && request.arguments.get("index_dir").is_some()
                 {
@@ -2630,26 +2645,33 @@ impl ToolRuntime {
                     optional_string_arg(&request.arguments, "index_dir").map(PathBuf::from)
                 {
                     return Ok(serde_json::to_value(self.read_shard_range_cached_scoped(
-                        &index_dir, &path, start, lines, scope,
+                        &index_dir,
+                        &range.path,
+                        range.start,
+                        range.lines,
+                        range.scope,
                     )?)?);
                 }
                 if let Some(index_path) =
                     optional_string_arg(&request.arguments, "index").map(PathBuf::from)
                 {
                     let index = self.cached_index(index_path)?;
-                    return Ok(serde_json::to_value(
-                        index.read_range_scoped(&path, start, lines, scope)?,
-                    )?);
+                    return Ok(serde_json::to_value(index.read_range_scoped(
+                        &range.path,
+                        range.start,
+                        range.lines,
+                        range.scope,
+                    )?)?);
                 }
                 if optional_string_arg(&request.arguments, "cwd").is_some() {
                     if let Ok(index_dir) = self.single_cached_shard_manifest_path() {
                         if let Some(range) = self.read_shard_range_for_client_cwd(
                             &index_dir,
                             &request.arguments,
-                            &path,
-                            start,
-                            lines,
-                            scope,
+                            &range.path,
+                            range.start,
+                            range.lines,
+                            range.scope,
                             "read_range",
                         )? {
                             return Ok(serde_json::to_value(range)?);
@@ -2658,9 +2680,12 @@ impl ToolRuntime {
                     if let Ok(index_path) = self.single_cached_index_path() {
                         let index = self.cached_index(index_path)?;
                         if index_matches_client_cwd(&index, &request.arguments)? {
-                            return Ok(serde_json::to_value(
-                                index.read_range_scoped(&path, start, lines, scope)?,
-                            )?);
+                            return Ok(serde_json::to_value(index.read_range_scoped(
+                                &range.path,
+                                range.start,
+                                range.lines,
+                                range.scope,
+                            )?)?);
                         }
                     }
                 }
@@ -2671,7 +2696,11 @@ impl ToolRuntime {
                         live_repo_from_client_cwd(&request.arguments, "read_range")
                     })?;
                 Ok(serde_json::to_value(read_file_range_scoped(
-                    repo, &path, start, lines, scope,
+                    repo,
+                    &range.path,
+                    range.start,
+                    range.lines,
+                    range.scope,
                 )?)?)
             }
             "read_ranges" | "open_ranges" => {
@@ -7300,11 +7329,13 @@ fn range_args(arguments: &Value) -> Result<Vec<RangeArg>> {
     let owned_single;
     let values = if let Some(values) = value.as_array() {
         values
-    } else if value.is_object() {
+    } else if value.is_object() || value.is_string() {
         owned_single = vec![value.clone()];
         &owned_single
     } else {
-        return Err(anyhow!("argument ranges must be an object or array"));
+        return Err(anyhow!(
+            "argument ranges must be a string, object, or array"
+        ));
     };
     if values.is_empty() {
         return Err(anyhow!("argument ranges must not be empty"));
@@ -7319,23 +7350,151 @@ fn range_args(arguments: &Value) -> Result<Vec<RangeArg>> {
     let default_scope = read_scope_arg(arguments)?;
     let mut ranges = Vec::with_capacity(values.len());
     for value in values {
-        let path = value
-            .get("path")
-            .and_then(Value::as_str)
-            .map(String::from)
-            .ok_or_else(|| anyhow!("range entry must include string path"))?;
-        let start = bounded_usize_field(value, "start", 1, 1, None)?;
-        let lines = bounded_usize_field(value, "lines", 80, 1, Some(MAX_READ_RANGE_LINES))?;
-        let scope = optional_read_scope_arg(value, "scope")?.unwrap_or(default_scope);
-        validate_read_window(start, lines)?;
-        ranges.push(RangeArg {
-            path,
-            start,
-            lines,
-            scope,
-        });
+        ranges.push(range_arg(value, default_scope)?);
     }
     Ok(ranges)
+}
+
+fn range_arg(value: &Value, default_scope: RangeScope) -> Result<RangeArg> {
+    if let Some(value) = value.as_str() {
+        return range_arg_from_string(value, default_scope);
+    }
+    let path = value
+        .get("path")
+        .and_then(Value::as_str)
+        .map(String::from)
+        .ok_or_else(|| anyhow!("range entry must include string path"))?;
+    let start = bounded_usize_field(value, "start", 1, 1, None)?;
+    let lines = bounded_usize_field(value, "lines", 80, 1, Some(MAX_READ_RANGE_LINES))?;
+    let scope = optional_read_scope_arg(value, "scope")?.unwrap_or(default_scope);
+    normalize_read_range_arg(
+        path,
+        start,
+        lines,
+        scope,
+        value.get("start").is_some(),
+        value.get("lines").is_some(),
+    )
+}
+
+fn range_arg_from_string(value: &str, default_scope: RangeScope) -> Result<RangeArg> {
+    let (value, scope) = split_range_scope(value);
+    let scope = scope.unwrap_or(default_scope);
+    if let Some(range) = parse_compact_range_arg(value, scope)? {
+        return Ok(range);
+    }
+    parse_copied_location_range(value, 1, 80, scope, false, false).ok_or_else(|| {
+        anyhow!("range string must be PATH:START:LINES[:SCOPE] or a copied PATH:LINE location")
+    })
+}
+
+fn normalize_read_range_arg(
+    path: String,
+    start: usize,
+    lines: usize,
+    scope: RangeScope,
+    explicit_start: bool,
+    explicit_lines: bool,
+) -> Result<RangeArg> {
+    validate_read_window(start, lines)?;
+    if let Some(range) =
+        parse_copied_location_range(&path, start, lines, scope, explicit_start, explicit_lines)
+    {
+        validate_read_window(range.start, range.lines)?;
+        return Ok(range);
+    }
+    Ok(RangeArg {
+        path,
+        start,
+        lines,
+        scope,
+    })
+}
+
+fn split_range_scope(value: &str) -> (&str, Option<RangeScope>) {
+    let Some((base, scope_text)) = value.rsplit_once(':') else {
+        return (value, None);
+    };
+    let Some(scope) = RangeScope::parse(scope_text) else {
+        return (value, None);
+    };
+    (base, Some(scope))
+}
+
+fn parse_compact_range_arg(value: &str, scope: RangeScope) -> Result<Option<RangeArg>> {
+    let mut parts = value.rsplitn(3, ':');
+    let Some(lines) = parts.next().and_then(|value| value.parse::<usize>().ok()) else {
+        return Ok(None);
+    };
+    let Some(start) = parts.next().and_then(|value| value.parse::<usize>().ok()) else {
+        return Ok(None);
+    };
+    let Some(path) = parts.next().filter(|path| !path.is_empty()) else {
+        return Ok(None);
+    };
+    validate_read_window(start, lines)?;
+    Ok(Some(RangeArg {
+        path: path.to_string(),
+        start,
+        lines,
+        scope,
+    }))
+}
+
+fn parse_copied_location_range(
+    value: &str,
+    fallback_start: usize,
+    fallback_lines: usize,
+    scope: RangeScope,
+    explicit_start: bool,
+    explicit_lines: bool,
+) -> Option<RangeArg> {
+    let parsed = parse_query(value);
+    let target_line = parsed.filters.target_line?;
+    let path = parsed
+        .filters
+        .path
+        .or(parsed.filters.file)
+        .filter(|path| !path.is_empty())?;
+    Some(RangeArg {
+        path,
+        start: if explicit_start {
+            fallback_start
+        } else {
+            target_line
+        },
+        lines: if explicit_lines {
+            fallback_lines
+        } else {
+            copied_hash_anchor_lines(value).unwrap_or(80)
+        },
+        scope,
+    })
+}
+
+fn copied_hash_anchor_lines(value: &str) -> Option<usize> {
+    let lower = value.to_ascii_lowercase();
+    let marker = lower.find("#l")?;
+    let after_marker = &value[marker + 2..];
+    let (start, after_start) = split_leading_digits(after_marker)?;
+    let after_start = after_start.trim_start();
+    let after_dash = after_start.strip_prefix('-')?.trim_start();
+    let after_optional_l = after_dash
+        .strip_prefix('L')
+        .or_else(|| after_dash.strip_prefix('l'))
+        .unwrap_or(after_dash);
+    let (end, _) = split_leading_digits(after_optional_l)?;
+    (end >= start).then_some(end - start + 1)
+}
+
+fn split_leading_digits(value: &str) -> Option<(usize, &str)> {
+    let digit_end = value
+        .char_indices()
+        .take_while(|(_, ch)| ch.is_ascii_digit())
+        .map(|(index, ch)| index + ch.len_utf8())
+        .last()?;
+    let number = value[..digit_end].parse::<usize>().ok()?;
+    Some((number, &value[digit_end..]))
 }
 
 struct ShardRepoSelection {

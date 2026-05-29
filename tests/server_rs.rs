@@ -576,21 +576,25 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         serde_json::json!(MAX_READ_RANGE_LINES)
     );
     assert_eq!(
-        read_ranges["input_schema"]["properties"]["ranges"]["oneOf"][1]["maxItems"],
+        read_ranges["input_schema"]["properties"]["ranges"]["oneOf"][1]["type"],
+        "string"
+    );
+    assert_eq!(
+        read_ranges["input_schema"]["properties"]["ranges"]["oneOf"][2]["maxItems"],
         serde_json::json!(MAX_BATCH_RANGES)
     );
     assert_eq!(
-        read_ranges["input_schema"]["properties"]["ranges"]["oneOf"][1]["minItems"],
+        read_ranges["input_schema"]["properties"]["ranges"]["oneOf"][2]["minItems"],
         serde_json::json!(1)
     );
     assert_eq!(
-        read_ranges["input_schema"]["properties"]["ranges"]["oneOf"][1]["items"]["properties"]["path"]
-            ["type"],
+        read_ranges["input_schema"]["properties"]["ranges"]["oneOf"][2]["items"]["oneOf"][0]["properties"]
+            ["path"]["type"],
         "string"
     );
     assert_eq!(
         read_ranges["input_schema"]["properties"]["ranges"]["oneOf"][0]["properties"]["path"]["description"],
-        "Result path for the selected target; use repo/index-relative paths for repo or index targets, and shard-prefixed or unique shard-relative paths for index_dir targets."
+        "Result path or copied location for the selected target; use repo/index-relative paths for repo or index targets, and shard-prefixed or unique shard-relative paths for index_dir targets."
     );
     let read_ranges_range_arg = read_ranges["arguments"]
         .as_array()
@@ -598,31 +602,31 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         .iter()
         .find(|argument| argument["name"] == "ranges")
         .unwrap();
-    assert_eq!(read_ranges_range_arg["type"], "range|range[]");
+    assert_eq!(read_ranges_range_arg["type"], "range|string|range[]");
     assert_eq!(
         read_ranges_range_arg["max_items"],
         serde_json::json!(MAX_BATCH_RANGES)
     );
     assert_eq!(
         read_shard_range["input_schema"]["properties"]["path"]["description"],
-        "Shard-prefixed result path, such as repo/src/lib.rs, or a unique unqualified shard-relative path, such as src/lib.rs."
+        "Shard-prefixed result path, unique unqualified shard-relative path, or copied location such as repo/src/lib.rs#L40-L45."
     );
     assert_eq!(
         read_shard_range["arguments"][1]["description"],
-        "Shard-prefixed result path, such as repo/src/lib.rs, or a unique unqualified shard-relative path, such as src/lib.rs."
+        "Shard-prefixed result path, unique unqualified shard-relative path, or copied location such as repo/src/lib.rs#L40-L45."
     );
     assert_eq!(
         read_shard_ranges["input_schema"]["properties"]["ranges"]["description"],
-        "A {path,start,lines} object or array of them; path may be shard-prefixed or a unique unqualified shard-relative path."
+        "A compact range string, {path,start,lines} object, or array of them; path may be shard-prefixed or a unique unqualified shard-relative path."
     );
     assert_eq!(
         read_shard_ranges["input_schema"]["properties"]["ranges"]["oneOf"][0]["properties"]["path"]
             ["description"],
-        "Shard-prefixed result path, such as repo/src/lib.rs, or a unique unqualified shard-relative path, such as src/lib.rs."
+        "Shard-prefixed result path, unique unqualified shard-relative path, or copied location such as repo/src/lib.rs#L40-L45."
     );
     assert_eq!(
         read_index_range["input_schema"]["properties"]["path"]["description"],
-        "Index-relative result path, such as src/lib.rs."
+        "Index-relative result path or copied location, such as src/lib.rs or src/lib.rs#L40-L45."
     );
     assert_eq!(related_files["required"], serde_json::json!(["path"]));
     assert_eq!(
@@ -792,7 +796,7 @@ fn server_reports_tool_manifest_for_agent_wrappers() {
     assert!(stdout.contains("\"type\":\"integer\""));
     assert!(stdout.contains("\"default\":10"));
     assert!(stdout.contains("\"enum\":[\"short\",\"medium\",\"block\",\"symbol\"]"));
-    assert!(stdout.contains("\"type\":\"range|range[]\""));
+    assert!(stdout.contains("\"type\":\"range|string|range[]\""));
     assert!(stdout.contains("exclude_path"));
     assert!(stdout.contains("exclude_symbol"));
     assert!(stdout.contains("open_range"));
@@ -906,7 +910,7 @@ fn mcp_manifest_exposes_input_schema_for_adapter_wrappers() {
     assert_eq!(search["annotations"]["openWorldHint"], false);
     assert_eq!(
         read_shard_range["inputSchema"]["properties"]["path"]["description"],
-        "Shard-prefixed result path, such as repo/src/lib.rs, or a unique unqualified shard-relative path, such as src/lib.rs."
+        "Shard-prefixed result path, unique unqualified shard-relative path, or copied location such as repo/src/lib.rs#L40-L45."
     );
     assert!(
         read_shard_range["description"]
@@ -9027,8 +9031,29 @@ fn server_handles_json_lines_tool_request() {
             "limit": 3
         }
     });
+    let copied_read_request = serde_json::json!({
+        "id": 3,
+        "tool": "read_range",
+        "arguments": {
+            "repo": repo.path(),
+            "path": "src/auth.rs#L2-L2"
+        }
+    });
+    let copied_batch_read_request = serde_json::json!({
+        "id": 4,
+        "tool": "read_ranges",
+        "arguments": {
+            "repo": repo.path(),
+            "ranges": [
+                "src/auth.rs:2: pub fn issue_token",
+                "tests/auth_test.rs#L2-L3"
+            ]
+        }
+    });
     writeln!(child.stdin.as_mut().unwrap(), "{request}").unwrap();
     writeln!(child.stdin.as_mut().unwrap(), "{auto_request}").unwrap();
+    writeln!(child.stdin.as_mut().unwrap(), "{copied_read_request}").unwrap();
+    writeln!(child.stdin.as_mut().unwrap(), "{copied_batch_read_request}").unwrap();
     drop(child.stdin.take());
 
     let output = child.wait_with_output().unwrap();
@@ -9044,6 +9069,12 @@ fn server_handles_json_lines_tool_request() {
     assert!(stdout.contains("\"id\":2"));
     assert!(stdout.contains("\"surface\":\"fallback\""));
     assert!(stdout.contains("\"tool\":\"search_query_plan\""));
+    assert!(stdout.contains("\"id\":3"));
+    assert!(stdout.contains("\"start_line\":2"));
+    assert!(stdout.contains("\"end_line\":2"));
+    assert!(stdout.contains("\"id\":4"));
+    assert!(stdout.contains("\"path\":\"tests/auth_test.rs\""));
+    assert!(stdout.contains("\"end_line\":3"));
 }
 
 #[test]
