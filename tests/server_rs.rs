@@ -4140,6 +4140,12 @@ fn runtime_ensures_shards_builds_refreshes_and_warms() {
     assert!(status["manifest_route_bytes"].as_u64().unwrap() > 0);
     assert!(status["manifest_route_exact_terms"].as_u64().unwrap() > 0);
     assert!(status["manifest_route_trigram_terms"].as_u64().unwrap() > 0);
+    assert!(
+        status["manifest_route_substring_filter_shards"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
     assert!(status["index_bytes"].as_u64().unwrap() > 0);
     assert!(status["source_bytes"].as_u64().unwrap() > 0);
     assert!(status["content_snapshot_bytes"].as_u64().unwrap() > 0);

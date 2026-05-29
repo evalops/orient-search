@@ -5258,6 +5258,7 @@ fn shard_status_summary(status: &ShardFreshness) -> Value {
         "manifest_route_bytes": status.manifest_route_bytes,
         "manifest_route_exact_terms": status.manifest_route_exact_terms,
         "manifest_route_trigram_terms": status.manifest_route_trigram_terms,
+        "manifest_route_substring_filter_shards": status.manifest_route_substring_filter_shards,
         "manifest_route_omitted_exact_terms": status.manifest_route_omitted_exact_terms,
         "manifest_route_omitted_trigram_terms": status.manifest_route_omitted_trigram_terms,
         "stale": status.stale,

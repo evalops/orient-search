@@ -22,7 +22,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 const SHARD_MANIFEST_VERSION: u32 = 1;
 const SHARD_MANIFEST_SIDECAR_VERSION: u32 = 1;
 const SHARD_MANIFEST_PREFILTER_VERSION: u32 = 1;
-const SHARD_MANIFEST_ROUTE_VERSION: u32 = 5;
+const SHARD_MANIFEST_ROUTE_VERSION: u32 = 6;
 const SHARD_MANIFEST_FILE: &str = "manifest.json";
 const SHARD_MANIFEST_SIDECAR_FILE: &str = "manifest.bin";
 const SHARD_MANIFEST_PREFILTER_FILE: &str = "manifest.prefilter.bin";
@@ -33,9 +33,11 @@ const SHARD_WRITE_LOCK_TIMEOUT: Duration = Duration::from_secs(120);
 const SHARD_WRITE_LOCK_STALE_AFTER: Duration = Duration::from_secs(30 * 60);
 const SHARD_WRITE_LOCK_RETRY: Duration = Duration::from_millis(25);
 const SHARD_TRIGRAM_SKETCH_WORDS: usize = 512;
+const SHARD_SUBSTRING_SKETCH_WORDS: usize = 4096;
 const SHARD_KIND_SKETCH_WORDS: usize = 16;
 const SHARD_FILTER_SKETCH_WORDS: usize = 64;
 const SHARD_SUBSTRING_PREFILTER_MAX_TOKEN_CHARS: usize = 20;
+const SHARD_ROUTE_SUBSTRING_GRAM_CHARS: usize = 6;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ShardManifest {
@@ -76,6 +78,7 @@ struct ShardRouteEntry {
     index: String,
     aliases: Vec<ShardRouteAlias>,
     git: Option<ShardRouteGitMetadata>,
+    substring_bits: Vec<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -112,6 +115,7 @@ enum ShardRouteLookup {
 struct ShardRouteRequirements {
     exact_hashes: Vec<u32>,
     trigram_hashes: Vec<u32>,
+    substring_grams: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -144,6 +148,8 @@ pub struct ShardQuerySketch {
     pub exact_bits: Vec<u64>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub trigram_bits: Vec<u64>,
+    #[serde(skip)]
+    pub substring_bits: Vec<u64>,
     pub symbol_kind_bits: Vec<u64>,
     pub filter_bits: Vec<u64>,
 }
@@ -170,6 +176,11 @@ impl ShardRouteEntry {
                 })
                 .collect(),
             git: shard.git.as_ref().map(ShardRouteGitMetadata::from_git),
+            substring_bits: shard
+                .sketch
+                .as_ref()
+                .map(|sketch| sketch.substring_bits.clone())
+                .unwrap_or_default(),
         }
     }
 
@@ -308,6 +319,7 @@ pub struct ShardFreshness {
     pub manifest_route_bytes: u64,
     pub manifest_route_exact_terms: usize,
     pub manifest_route_trigram_terms: usize,
+    pub manifest_route_substring_filter_shards: usize,
     pub manifest_route_omitted_exact_terms: usize,
     pub manifest_route_omitted_trigram_terms: usize,
     pub stale: bool,
@@ -628,6 +640,16 @@ pub fn shard_status(index_dir: impl AsRef<Path>) -> Result<ShardFreshness> {
         manifest_route_trigram_terms: route
             .as_ref()
             .map(|route| route.trigram_terms.len())
+            .unwrap_or_default(),
+        manifest_route_substring_filter_shards: route
+            .as_ref()
+            .map(|route| {
+                route
+                    .shards
+                    .iter()
+                    .filter(|shard| !shard.substring_bits.is_empty())
+                    .count()
+            })
             .unwrap_or_default(),
         manifest_route_omitted_exact_terms: route
             .as_ref()
@@ -1908,6 +1930,7 @@ fn shard_query_sketch(index: &FastIndex) -> ShardQuerySketch {
         index.postings.len() + index.path_postings.len() + index.symbol_postings.len(),
     );
     let mut trigram_bits = vec![0; SHARD_TRIGRAM_SKETCH_WORDS];
+    let mut substring_bits = vec![0; SHARD_SUBSTRING_SKETCH_WORDS];
     let mut symbol_kind_bits = vec![0; SHARD_KIND_SKETCH_WORDS];
     let mut filter_bits = vec![0; SHARD_FILTER_SKETCH_WORDS];
 
@@ -1921,6 +1944,7 @@ fn shard_query_sketch(index: &FastIndex) -> ShardQuerySketch {
     }
     for file in &index.files {
         push_content_identifier_hashes(&file.content, &mut exact_hashes);
+        push_content_substring_grams(&file.content, &mut substring_bits);
     }
     exact_hashes.sort_unstable();
     exact_hashes.dedup();
@@ -1946,6 +1970,7 @@ fn shard_query_sketch(index: &FastIndex) -> ShardQuerySketch {
         trigram_hashes,
         exact_bits: Vec::new(),
         trigram_bits,
+        substring_bits,
         symbol_kind_bits,
         filter_bits,
     }
@@ -2059,6 +2084,45 @@ fn shard_sketch_token_may_diagnose(sketch: &ShardQuerySketch, token: &str) -> bo
 
 fn shard_allows_substring_prefilter(token: &str) -> bool {
     token.chars().count() <= SHARD_SUBSTRING_PREFILTER_MAX_TOKEN_CHARS && !token.contains('_')
+}
+
+fn shard_query_substring_grams(query: &str) -> Vec<String> {
+    let chars = query
+        .chars()
+        .flat_map(char::to_lowercase)
+        .filter(|ch| ch.is_ascii_alphanumeric() || *ch == '_')
+        .collect::<Vec<_>>();
+    if chars.len() < SHARD_ROUTE_SUBSTRING_GRAM_CHARS {
+        return Vec::new();
+    }
+    let mut grams = chars
+        .windows(SHARD_ROUTE_SUBSTRING_GRAM_CHARS)
+        .map(|window| window.iter().collect::<String>())
+        .collect::<Vec<_>>();
+    grams.sort();
+    grams.dedup();
+    grams
+}
+
+fn push_content_substring_grams(content: &str, substring_bits: &mut [u64]) {
+    let mut segment = String::new();
+    for ch in content.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '_' {
+            segment.extend(ch.to_lowercase());
+            continue;
+        }
+        push_segment_substring_grams(&mut segment, substring_bits);
+    }
+    push_segment_substring_grams(&mut segment, substring_bits);
+}
+
+fn push_segment_substring_grams(segment: &mut String, substring_bits: &mut [u64]) {
+    if segment.chars().count() >= SHARD_ROUTE_SUBSTRING_GRAM_CHARS {
+        for gram in shard_query_substring_grams(segment) {
+            sketch_insert(substring_bits, &gram);
+        }
+    }
+    segment.clear();
 }
 
 fn push_content_identifier_hashes(content: &str, exact_hashes: &mut Vec<u32>) {
@@ -2298,11 +2362,37 @@ fn shard_route_candidate_ids(
             break;
         }
     }
+    if !requirements.substring_grams.is_empty() {
+        let ids = candidate_ids
+            .take()
+            .unwrap_or_else(|| (0..route.shards.len()).map(|id| id as u16).collect());
+        candidate_ids = Some(
+            ids.into_iter()
+                .filter(|id| {
+                    route
+                        .shards
+                        .get(*id as usize)
+                        .is_some_and(|shard| shard_route_substrings_may_match(shard, requirements))
+                })
+                .collect(),
+        );
+    }
     match candidate_ids {
         Some(candidate_ids) => ShardRouteLookup::Candidates(candidate_ids),
         None if saw_omitted => ShardRouteLookup::Omitted,
         None => ShardRouteLookup::Candidates(Vec::new()),
     }
+}
+
+fn shard_route_substrings_may_match(
+    shard: &ShardRouteEntry,
+    requirements: &ShardRouteRequirements,
+) -> bool {
+    !shard.substring_bits.is_empty()
+        && requirements
+            .substring_grams
+            .iter()
+            .all(|gram| sketch_contains(&shard.substring_bits, gram))
 }
 
 fn shard_route_postings(
@@ -2338,11 +2428,20 @@ fn shard_route_requirements(shard_query: &str, filters: &SearchFilters) -> Shard
                 .map(|trigram| sketch_fingerprint(&trigram)),
         );
     }
+    let substring_grams = if filters.symbol_kind.is_none()
+        && query_tokens.len() == 1
+        && shard_allows_substring_prefilter(&query_tokens[0])
+    {
+        shard_query_substring_grams(&query_tokens[0])
+    } else {
+        Vec::new()
+    };
     trigram_hashes.sort_unstable();
     trigram_hashes.dedup();
     ShardRouteRequirements {
         exact_hashes,
         trigram_hashes,
+        substring_grams,
     }
 }
 
@@ -3180,6 +3279,7 @@ mod tests {
         ShardRouteRequirements {
             exact_hashes: hashes.to_vec(),
             trigram_hashes: Vec::new(),
+            substring_grams: Vec::new(),
         }
     }
 
@@ -3187,7 +3287,22 @@ mod tests {
         ShardRouteRequirements {
             exact_hashes: Vec::new(),
             trigram_hashes: hashes.to_vec(),
+            substring_grams: Vec::new(),
         }
+    }
+
+    fn substring_route_requirements(value: &str) -> ShardRouteRequirements {
+        ShardRouteRequirements {
+            exact_hashes: Vec::new(),
+            trigram_hashes: Vec::new(),
+            substring_grams: shard_query_substring_grams(value),
+        }
+    }
+
+    fn substring_bits_for(value: &str) -> Vec<u64> {
+        let mut bits = vec![0; SHARD_SUBSTRING_SKETCH_WORDS];
+        push_content_substring_grams(value, &mut bits);
+        bits
     }
 
     #[test]
@@ -3290,6 +3405,7 @@ mod tests {
             trigram_hashes: Vec::new(),
             exact_bits: Vec::new(),
             trigram_bits: Vec::new(),
+            substring_bits: Vec::new(),
             symbol_kind_bits: Vec::new(),
             filter_bits: Vec::new(),
         });
@@ -3298,6 +3414,7 @@ mod tests {
             trigram_hashes: Vec::new(),
             exact_bits: Vec::new(),
             trigram_bits: Vec::new(),
+            substring_bits: Vec::new(),
             symbol_kind_bits: Vec::new(),
             filter_bits: Vec::new(),
         });
@@ -3363,6 +3480,7 @@ mod tests {
                     trigram_hashes: Vec::new(),
                     exact_bits: Vec::new(),
                     trigram_bits: Vec::new(),
+                    substring_bits: Vec::new(),
                     symbol_kind_bits: Vec::new(),
                     filter_bits: Vec::new(),
                 }),
@@ -3416,6 +3534,7 @@ mod tests {
             trigram_hashes: needle_hashes.clone(),
             exact_bits: Vec::new(),
             trigram_bits: Vec::new(),
+            substring_bits: Vec::new(),
             symbol_kind_bits: Vec::new(),
             filter_bits: Vec::new(),
         });
@@ -3424,6 +3543,7 @@ mod tests {
             trigram_hashes: other_hashes,
             exact_bits: Vec::new(),
             trigram_bits: Vec::new(),
+            substring_bits: Vec::new(),
             symbol_kind_bits: Vec::new(),
             filter_bits: Vec::new(),
         });
@@ -3437,6 +3557,46 @@ mod tests {
         );
         assert_eq!(
             shard_route_candidate_ids(&route, &trigram_route_requirements(&needle_hashes)),
+            ShardRouteLookup::Candidates(vec![0])
+        );
+    }
+
+    #[test]
+    fn manifest_route_uses_long_substring_bits_to_prune_trigram_false_positives() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut manifest = test_manifest(&dir.path().join("hit"), Some(&dir.path().join("miss")));
+        let shared_trigrams = shard_query_trigrams("trigramprobe")
+            .into_iter()
+            .map(|trigram| sketch_fingerprint(&trigram))
+            .collect::<Vec<_>>();
+        manifest.shards[0].sketch = Some(ShardQuerySketch {
+            exact_hashes: Vec::new(),
+            trigram_hashes: shared_trigrams.clone(),
+            exact_bits: Vec::new(),
+            trigram_bits: Vec::new(),
+            substring_bits: substring_bits_for("prefix_trigramprobesuffix"),
+            symbol_kind_bits: Vec::new(),
+            filter_bits: Vec::new(),
+        });
+        manifest.shards[1].sketch = Some(ShardQuerySketch {
+            exact_hashes: Vec::new(),
+            trigram_hashes: shared_trigrams.clone(),
+            exact_bits: Vec::new(),
+            trigram_bits: Vec::new(),
+            substring_bits: substring_bits_for("trigram and probe appear apart"),
+            symbol_kind_bits: Vec::new(),
+            filter_bits: Vec::new(),
+        });
+        save_manifest(dir.path(), &manifest).unwrap();
+
+        let route = load_manifest_route(dir.path()).unwrap().unwrap();
+        assert!(!route.shards[0].substring_bits.is_empty());
+        assert_eq!(
+            shard_route_candidate_ids(&route, &trigram_route_requirements(&shared_trigrams)),
+            ShardRouteLookup::Candidates(vec![0, 1])
+        );
+        assert_eq!(
+            shard_route_candidate_ids(&route, &substring_route_requirements("trigramprobe")),
             ShardRouteLookup::Candidates(vec![0])
         );
     }

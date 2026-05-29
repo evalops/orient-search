@@ -2567,6 +2567,9 @@ fn cli_reports_index_and_shard_freshness() {
         .stdout(predicate::str::contains("\"compressed_posting_bytes\""))
         .stdout(predicate::str::contains("\"manifest_route_bytes\""))
         .stdout(predicate::str::contains("\"manifest_route_trigram_terms\""))
+        .stdout(predicate::str::contains(
+            "\"manifest_route_substring_filter_shards\"",
+        ))
         .stdout(predicate::str::contains("src/after_shard.rs"));
 
     let mut shard_status_summary = Command::cargo_bin("orient").unwrap();
@@ -2584,6 +2587,9 @@ fn cli_reports_index_and_shard_freshness() {
         .stdout(predicate::str::contains("\"index_bytes\""))
         .stdout(predicate::str::contains("\"manifest_route_bytes\""))
         .stdout(predicate::str::contains("\"manifest_route_trigram_terms\""))
+        .stdout(predicate::str::contains(
+            "\"manifest_route_substring_filter_shards\"",
+        ))
         .stdout(predicate::str::contains("\"largest_shards\""))
         .stdout(predicate::str::contains("\"stale_shard_examples\""))
         .stdout(predicate::str::contains("src/after_shard.rs").not());

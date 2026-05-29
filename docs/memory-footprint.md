@@ -39,6 +39,9 @@ Useful counters:
 - `manifest_route_bytes`: compact shard-route sidecar bytes
 - `manifest_route_exact_terms` / `manifest_route_trigram_terms`: routeable exact
   and trigram keys in the shard sidecar
+- `manifest_route_substring_filter_shards`: shards carrying the long-substring
+  Bloom filter used to reject broad trigram false positives before opening
+  shard indexes
 - `largest_shards`: largest shard indexes in a shard directory
 
 ## Defaults
