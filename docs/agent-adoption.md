@@ -34,6 +34,9 @@ The rule should tell agents:
   than following a returned request.
 - Follow returned `read_*`, `related_*`, `repo_map_request`, and
   `query_plan_request` objects directly.
+- When opening context manually from a line inside a definition, pass
+  `scope:"symbol"` on `read_range` or `read_ranges` so the returned window
+  starts from the nearest enclosing function, class, or type definition.
 - Use `refresh_if_stale:true` when indexed files may have changed. With `cwd`
   on a shared shard daemon, Orient refreshes the active checkout's shard rather
   than rebuilding every warmed repo.

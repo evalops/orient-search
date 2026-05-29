@@ -62,6 +62,9 @@ The generated rule should keep agents on this loop:
 - Pass `refresh_if_stale:true` when live files may have changed. With `cwd`
   scoped to the active checkout, this refreshes that checkout's shard instead
   of rebuilding every warmed repo.
+- Call `shard_status` with `cwd` or an absolute `repo_filter` when several
+  agents share one shard daemon and only the active checkout's freshness
+  matters.
 - Treat generated bundle output as searchable but lower-priority by default;
   use `generated:true` only when intentionally inspecting generated files.
 - Fall back to shell search only when Orient is unavailable or unhelpful.

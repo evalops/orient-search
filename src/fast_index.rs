@@ -3,21 +3,21 @@
 use crate::query::{merge_filters, normalize_phrase_text, parse_query, query_phrases, query_text};
 use crate::repo_index::{
     FileRange, GENERATED_PATH_SCORE_MULTIPLIER, MAX_READ_RANGE_LINES, PathFilterMatcher, QueryPlan,
-    QueryPlanFilter, QueryPlanPosting, QueryPlanRepairHint, RankSignal, RelatedFile, RelatedSymbol,
-    RepoBrief, RepoMap, RepoMapDetail, SearchFilters, SearchResult, SnippetMode, Symbol,
-    best_snippet_for_path_with_phrases, capped_search_limit, command_hints_from_manifest_texts,
-    dependency_filters_match, dependency_hints_from_manifest_texts, extract_symbols,
-    filter_only_query, filter_value_matches, finalize_results, import_hints_from_source_texts,
-    is_entrypoint_path, is_generated_path, is_ignored, is_important_file, is_manifest_file,
-    is_source_code_language, is_test_path, known_commands_from_hints, language_for,
-    matches_filters_with_compiled_path_metadata, normalize_language_filter, normalize_token,
-    referenced_symbol_name, regular_file_metadata, related_query_terms_symbol_and_filters,
-    related_stem_terms, repo_map_seed_paths, repo_matches, result_matches_all_tokens,
-    result_matches_symbol_filters, round4, score_filter_only_path_match,
+    QueryPlanFilter, QueryPlanPosting, QueryPlanRepairHint, RangeScope, RankSignal, RelatedFile,
+    RelatedSymbol, RepoBrief, RepoMap, RepoMapDetail, SearchFilters, SearchResult, SnippetMode,
+    Symbol, best_snippet_for_path_with_phrases, capped_search_limit,
+    command_hints_from_manifest_texts, dependency_filters_match,
+    dependency_hints_from_manifest_texts, extract_symbols, filter_only_query, filter_value_matches,
+    finalize_results, import_hints_from_source_texts, is_entrypoint_path, is_generated_path,
+    is_ignored, is_important_file, is_manifest_file, is_source_code_language, is_test_path,
+    known_commands_from_hints, language_for, matches_filters_with_compiled_path_metadata,
+    normalize_language_filter, normalize_token, referenced_symbol_name, regular_file_metadata,
+    related_query_terms_symbol_and_filters, related_stem_terms, repo_map_seed_paths, repo_matches,
+    result_matches_all_tokens, result_matches_symbol_filters, round4, score_filter_only_path_match,
     select_repo_brief_import_hints, select_repo_map_top_symbols,
     source_excluded_content_filters_match, source_import_filters_match, symbol_exact_phrase_bonus,
-    symbol_matches_related_filters, symbol_query_match_score, token_counts, tokenize,
-    unique_query_tokens,
+    symbol_for_anchor, symbol_matches_related_filters, symbol_query_match_score,
+    symbol_scoped_window, token_counts, tokenize, unique_query_tokens,
 };
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use anyhow::{Context, Result};
@@ -41,6 +41,7 @@ const INDEX_HEADER_LEN: usize = INDEX_MAGIC.len() + std::mem::size_of::<u32>();
 const MAX_FILE_BYTES: u64 = 512_000;
 const MAX_TERM_LINES_PER_TERM: usize = 64;
 const MAX_INDEX_CANDIDATES_TO_SCORE: usize = 8_192;
+const DEFAULT_INDEXED_SYMBOL_READ_CONTEXT_BEFORE: usize = 20;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FastIndex {
@@ -904,11 +905,23 @@ impl FastIndex {
         start_line: usize,
         line_count: usize,
     ) -> Result<FileRange> {
+        self.read_range_scoped(path, start_line, line_count, RangeScope::Exact)
+    }
+
+    pub fn read_range_scoped(
+        &self,
+        path: &str,
+        start_line: usize,
+        line_count: usize,
+        scope: RangeScope,
+    ) -> Result<FileRange> {
         let normalized = normalize_index_relative_path(path)?;
         let file = self
             .indexed_file(&normalized)
             .ok_or_else(|| anyhow::anyhow!("path is not present in index: {normalized}"))?;
-        Ok(indexed_file_range(file, start_line, line_count))
+        Ok(indexed_file_range_scoped(
+            file, start_line, line_count, scope,
+        ))
     }
 
     pub fn related_files(&self, path: &str, limit: usize) -> Vec<RelatedFile> {
@@ -5024,6 +5037,49 @@ fn render_indexed_window(
 }
 
 fn indexed_file_range(file: &IndexedPath, start_line: usize, line_count: usize) -> FileRange {
+    indexed_file_range_with_symbol(file, start_line, line_count, None)
+}
+
+fn indexed_file_range_scoped(
+    file: &IndexedPath,
+    start_line: usize,
+    line_count: usize,
+    scope: RangeScope,
+) -> FileRange {
+    if scope == RangeScope::Symbol {
+        let symbols = file
+            .symbols
+            .iter()
+            .map(|symbol| Symbol {
+                name: symbol.name.clone(),
+                kind: symbol.kind.clone(),
+                path: file.path.clone(),
+                line: symbol.line,
+            })
+            .collect::<Vec<_>>();
+        if let Some(symbol) = symbol_for_anchor(&symbols, start_line) {
+            let (symbol_start, symbol_lines) = symbol_scoped_window(
+                symbol.line,
+                line_count,
+                DEFAULT_INDEXED_SYMBOL_READ_CONTEXT_BEFORE,
+            );
+            return indexed_file_range_with_symbol(
+                file,
+                symbol_start,
+                symbol_lines,
+                Some(symbol.clone()),
+            );
+        }
+    }
+    indexed_file_range(file, start_line, line_count)
+}
+
+fn indexed_file_range_with_symbol(
+    file: &IndexedPath,
+    start_line: usize,
+    line_count: usize,
+    symbol: Option<Symbol>,
+) -> FileRange {
     let bytes = file.content.as_bytes();
     if bytes.is_empty() || file.line_offsets.is_empty() {
         return FileRange {
@@ -5032,6 +5088,7 @@ fn indexed_file_range(file: &IndexedPath, start_line: usize, line_count: usize) 
             end_line: 0,
             total_lines: 0,
             text: String::new(),
+            symbol,
         };
     }
 
@@ -5055,6 +5112,7 @@ fn indexed_file_range(file: &IndexedPath, start_line: usize, line_count: usize) 
         end_line,
         total_lines,
         text: rendered.join("\n"),
+        symbol,
     }
 }
 

@@ -52,7 +52,7 @@ For many repos:
 
 Generated follow-up objects such as `read_request`, `read_batch_request`, `related_request`, `related_symbols_request`, `repo_map_request`, `query_plan_request`, and query-plan `retry_requests` are complete tool requests. They include an `id`, `tool`, `arguments`, raw `jsonl`, a shell-native `client_cli` pipe for `orient client-jsonl`, and, when there is a compact human CLI equivalent, a `cli` hint.
 
-Use `index_status` or `shard_status` when live files may have changed since indexing. They report added, changed, and deleted files so an agent can call `refresh_index` or `refresh_shards` before trusting indexed results. `indexed_search_code` and `search_shards` also accept `refresh_if_stale:true` for a one-call freshness check and refresh before search. When a no-target daemon request includes `cwd` and scopes to one warmed shard repo, `refresh_if_stale:true` refreshes only that repo's shard. Index, shard, and daemon status outputs include footprint counters such as `index_bytes`, `source_bytes`, `content_snapshot_bytes`, `line_offset_bytes`, `posting_entries`, and `compressed_posting_bytes`; shard status also reports compact route-sidecar bytes, routeable exact/trigram term counts, and the number of shards with long-substring route filters. Use `shard_status --summary` for large shared shard sets. See [Memory and footprint](memory-footprint.md) for the disk/memory tradeoffs behind those counters.
+Use `index_status` or `shard_status` when live files may have changed since indexing. They report added, changed, and deleted files so an agent can call `refresh_index` or `refresh_shards` before trusting indexed results. `indexed_search_code` and `search_shards` also accept `refresh_if_stale:true` for a one-call freshness check and refresh before search. When a no-target daemon request includes `cwd` and scopes to one warmed shard repo, `refresh_if_stale:true` refreshes only that repo's shard. `shard_status` accepts `cwd` or an absolute `repo_filter` for the same current-checkout status check, avoiding unrelated shard loads in large shared daemons. Index, shard, and daemon status outputs include footprint counters such as `index_bytes`, `source_bytes`, `content_snapshot_bytes`, `line_offset_bytes`, `posting_entries`, and `compressed_posting_bytes`; shard status also reports compact route-sidecar bytes, routeable exact/trigram term counts, and the number of shards with long-substring route filters. Use `shard_status --summary` for large shared shard sets. See [Memory and footprint](memory-footprint.md) for the disk/memory tradeoffs behind those counters.
 
 Use `ensure_shards` for shard directories shared by several local agents. The lower-level `index_shards` rebuild path refuses to overwrite an existing shard directory when the requested repo set would remove existing shards; pass `force:true` or `orient index-shards --force` only when intentionally replacing that directory.
 
@@ -88,6 +88,9 @@ or `repo_filter` arguments still win.
 No-target `read_range`, `read_ranges`, `related_files`, and `related_symbols`
 requests also accept `cwd` for manual context calls; returned follow-up
 requests already include an explicit target.
+For manual context reads, add `"scope":"symbol"` to `read_range` or to a
+`read_ranges` request or range entry when the agent has a line inside a
+function, class, or type and wants the window anchored at that definition.
 The plain CLI `orient search` command also accepts `--index` and `--index-dir`
 as convenience target flags for agents that reach first for `search` and then
 add the available search surface.

@@ -25,7 +25,7 @@ pub const DEFAULT_REPO_MAP_READ_BATCH_RANGES: usize = 16;
 const MAX_REPO_BRIEF_IMPORT_HINTS: usize = 32;
 const DEFAULT_RESULT_READ_LINES: usize = 80;
 const DEFAULT_RELATED_FILE_READ_LINES: usize = 80;
-const DEFAULT_SYMBOL_READ_CONTEXT_BEFORE: usize = 20;
+pub(crate) const DEFAULT_SYMBOL_READ_CONTEXT_BEFORE: usize = 20;
 const DEFAULT_SYMBOL_READ_LINES: usize = 80;
 const RIPGREP_TIMEOUT: Duration = Duration::from_millis(250);
 const RIPGREP_POLL_INTERVAL: Duration = Duration::from_millis(5);
@@ -722,6 +722,25 @@ pub struct FileRange {
     pub end_line: usize,
     pub total_lines: usize,
     pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub symbol: Option<Symbol>,
+}
+
+#[derive(Debug, Copy, Clone, Default, PartialEq, Eq)]
+pub enum RangeScope {
+    #[default]
+    Exact,
+    Symbol,
+}
+
+impl RangeScope {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.to_ascii_lowercase().as_str() {
+            "exact" | "range" | "line" | "lines" => Some(Self::Exact),
+            "symbol" | "definition" | "def" => Some(Self::Symbol),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -2624,6 +2643,16 @@ pub fn read_file_range(
     start_line: usize,
     line_count: usize,
 ) -> Result<FileRange> {
+    read_file_range_scoped(root, path, start_line, line_count, RangeScope::Exact)
+}
+
+pub fn read_file_range_scoped(
+    root: impl AsRef<Path>,
+    path: &str,
+    start_line: usize,
+    line_count: usize,
+    scope: RangeScope,
+) -> Result<FileRange> {
     let root = root.as_ref().canonicalize()?;
     let normalized_separators = path.replace('\\', "/");
     let requested = Path::new(&normalized_separators);
@@ -2653,7 +2682,9 @@ pub fn read_file_range(
         .to_string_lossy()
         .replace('\\', "/");
 
-    Ok(file_range_from_text(rel, &text, start_line, line_count))
+    Ok(file_range_from_text_scoped(
+        rel, &text, start_line, line_count, scope,
+    ))
 }
 
 pub(crate) fn file_range_from_text(
@@ -2661,6 +2692,81 @@ pub(crate) fn file_range_from_text(
     text: &str,
     start_line: usize,
     line_count: usize,
+) -> FileRange {
+    file_range_from_text_with_symbol(path, text, start_line, line_count, None)
+}
+
+pub(crate) fn file_range_from_text_scoped(
+    path: impl Into<String>,
+    text: &str,
+    start_line: usize,
+    line_count: usize,
+    scope: RangeScope,
+) -> FileRange {
+    let path = path.into();
+    if scope == RangeScope::Symbol {
+        let language = language_for(Path::new(&path)).unwrap_or_else(|| "text".to_string());
+        let symbols = extract_symbols(&path, text, &language);
+        if let Some(symbol) = symbol_for_anchor(&symbols, start_line) {
+            let (symbol_start, symbol_lines) =
+                symbol_scoped_window(symbol.line, line_count, DEFAULT_SYMBOL_READ_CONTEXT_BEFORE);
+            return file_range_from_text_with_symbol(
+                path,
+                text,
+                symbol_start,
+                symbol_lines,
+                Some(symbol.clone()),
+            );
+        }
+    }
+    file_range_from_text_with_symbol(path, text, start_line, line_count, None)
+}
+
+pub(crate) fn symbol_scoped_window(
+    symbol_line: usize,
+    requested_lines: usize,
+    context_before: usize,
+) -> (usize, usize) {
+    let start = symbol_line.saturating_sub(context_before).max(1);
+    let prefix_lines = symbol_line.saturating_sub(start);
+    let lines = requested_lines
+        .max(1)
+        .saturating_add(prefix_lines)
+        .min(MAX_READ_RANGE_LINES);
+    (start, lines)
+}
+
+pub(crate) fn symbol_for_anchor(symbols: &[Symbol], anchor_line: usize) -> Option<&Symbol> {
+    symbols
+        .iter()
+        .filter(|symbol| is_context_anchor_symbol(&symbol.kind))
+        .filter(|symbol| symbol.line <= anchor_line)
+        .max_by_key(|symbol| symbol.line)
+        .or_else(|| {
+            symbols
+                .iter()
+                .filter(|symbol| is_context_anchor_symbol(&symbol.kind))
+                .next()
+        })
+        .or_else(|| {
+            symbols
+                .iter()
+                .filter(|symbol| symbol.line <= anchor_line)
+                .max_by_key(|symbol| symbol.line)
+        })
+        .or_else(|| symbols.first())
+}
+
+fn is_context_anchor_symbol(kind: &str) -> bool {
+    !matches!(kind, "const" | "let" | "var")
+}
+
+fn file_range_from_text_with_symbol(
+    path: impl Into<String>,
+    text: &str,
+    start_line: usize,
+    line_count: usize,
+    symbol: Option<Symbol>,
 ) -> FileRange {
     let lines = text.lines().collect::<Vec<_>>();
     let total_lines = lines.len();
@@ -2679,6 +2785,7 @@ pub(crate) fn file_range_from_text(
         end_line: end,
         total_lines,
         text: range_text,
+        symbol,
     }
 }
 
@@ -3535,7 +3642,7 @@ pub(crate) fn extract_symbols(path: &str, text: &str, language: &str) -> Vec<Sym
             let capture = SYMBOL_RE.captures(line)?;
             Some(Symbol {
                 name: capture.get(2)?.as_str().to_string(),
-                kind: generic_symbol_kind(capture.get(1)?.as_str()).to_string(),
+                kind: generic_symbol_kind(capture.get(1)?.as_str(), line).to_string(),
                 path: path.to_string(),
                 line: index + 1,
             })
@@ -3547,7 +3654,7 @@ fn language_supports_generic_symbols(language: &str) -> bool {
     matches!(language, "rust" | "javascript" | "typescript")
 }
 
-fn generic_symbol_kind(keyword: &str) -> &'static str {
+fn generic_symbol_kind(keyword: &str, line: &str) -> &'static str {
     match keyword {
         "class" => "class",
         "interface" => "interface",
@@ -3555,6 +3662,10 @@ fn generic_symbol_kind(keyword: &str) -> &'static str {
         "enum" => "enum",
         "trait" => "trait",
         "type" => "type",
+        "const" | "let" | "var" if line.contains("=>") || line.contains("function") => "function",
+        "const" => "const",
+        "let" => "let",
+        "var" => "var",
         _ => "function",
     }
 }
@@ -3664,6 +3775,7 @@ fn extract_java_symbols(path: &str, text: &str) -> Vec<Symbol> {
                         .get(1)
                         .map(|value| value.as_str())
                         .unwrap_or_default(),
+                    line,
                 )
                 .to_string(),
                 path: path.to_string(),
@@ -4852,6 +4964,7 @@ fn cli_command_for_request(tool: &str, arguments: &serde_json::Value) -> Option<
     };
     let mut parts = vec!["orient".to_string(), read_subcommand.to_string()];
     append_target_cli_args(&mut parts, args);
+    append_string_cli_arg(&mut parts, args, "scope", "--scope");
     if let Some(ranges) = args.get("ranges").and_then(|value| value.as_array()) {
         for range in ranges {
             let range = range.as_object()?;

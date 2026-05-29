@@ -8,12 +8,14 @@ use orient::fast_index::{FastIndex, RefreshStats};
 use orient::query::{merge_filters, normalize_symbol_kind, parse_query};
 use orient::repo_index::{
     DEFAULT_REPO_MAP_READ_BATCH_RANGES, MAX_READ_RANGE_LINES, MAX_RESULT_READ_BATCH_RANGES,
-    QueryPlan, QueryPlanFilter, RepoIndexer, RepoMapDetail, ResultToolRequest, SearchFilters,
-    SearchResult, SnippetMode, SymbolLookupResult, attach_repo_map_read_batch_request_with_limit,
-    attach_result_context, attach_result_read_requests, attach_result_related_requests,
+    QueryPlan, QueryPlanFilter, RangeScope, RepoIndexer, RepoMapDetail, ResultToolRequest,
+    SearchFilters, SearchResult, SnippetMode, SymbolLookupResult,
+    attach_repo_map_read_batch_request_with_limit, attach_result_context,
+    attach_result_read_requests, attach_result_related_requests,
     attach_result_related_symbol_requests, normalize_language_filter, read_file_range,
-    related_file_lookup_results, related_symbol_lookup_results, result_read_batch_request,
-    search_repo_fast_filtered, symbol_lookup_read_batch_request, symbol_lookup_results,
+    read_file_range_scoped, related_file_lookup_results, related_symbol_lookup_results,
+    result_read_batch_request, search_repo_fast_filtered, symbol_lookup_read_batch_request,
+    symbol_lookup_results,
 };
 use orient::server::{
     MAX_BATCH_QUERIES, MAX_BATCH_RANGES, ToolRequest, ToolRuntime, agent_guide, agent_instructions,
@@ -23,8 +25,9 @@ use orient::server::{
 };
 use orient::shards::{
     ShardFreshness, ShardQueryPlan, build_shards_with_force, ensure_shards, find_shard_symbol,
-    read_shard_range, refresh_shards, related_shard_files_filtered, related_shard_symbols_filtered,
-    search_shards, shard_query_plans, shard_repo_maps, shard_status,
+    read_shard_range, read_shard_range_scoped, refresh_shards, related_shard_files_filtered,
+    related_shard_symbols_filtered, search_shards, shard_query_plans, shard_repo_maps,
+    shard_status,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -208,6 +211,8 @@ enum Commands {
         start: usize,
         #[arg(long, default_value_t = 80)]
         lines: usize,
+        #[arg(long, value_enum, default_value_t = ReadScopeArg::Exact)]
+        scope: ReadScopeArg,
     },
     #[command(alias = "open-shard-ranges")]
     ReadShardRanges {
@@ -220,6 +225,8 @@ enum Commands {
         start: usize,
         #[arg(long, default_value_t = 80)]
         lines: usize,
+        #[arg(long, value_enum, default_value_t = ReadScopeArg::Exact)]
+        scope: ReadScopeArg,
     },
     ShardSymbol {
         #[arg(long)]
@@ -394,6 +401,8 @@ enum Commands {
         start: usize,
         #[arg(long, default_value_t = 80)]
         lines: usize,
+        #[arg(long, value_enum, default_value_t = ReadScopeArg::Exact)]
+        scope: ReadScopeArg,
     },
     #[command(alias = "open-ranges")]
     ReadRanges {
@@ -410,6 +419,8 @@ enum Commands {
         start: usize,
         #[arg(long, default_value_t = 80)]
         lines: usize,
+        #[arg(long, value_enum, default_value_t = ReadScopeArg::Exact)]
+        scope: ReadScopeArg,
     },
     Search {
         #[arg(long, default_value = ".")]
@@ -886,6 +897,21 @@ enum BenchSearchMode {
     Auto,
     Fallback,
     Indexed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum ReadScopeArg {
+    Exact,
+    Symbol,
+}
+
+impl From<ReadScopeArg> for RangeScope {
+    fn from(value: ReadScopeArg) -> Self {
+        match value {
+            ReadScopeArg::Exact => RangeScope::Exact,
+            ReadScopeArg::Symbol => RangeScope::Symbol,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Args)]
@@ -2697,15 +2723,17 @@ fn run() -> Result<()> {
             path_arg,
             start,
             lines,
+            scope,
         } => {
             let range = cli_single_range(path, path_arg, start, lines)?;
             println!(
                 "{}",
-                serde_json::to_string(&read_shard_range(
+                serde_json::to_string(&read_shard_range_scoped(
                     index_dir,
                     &range.path,
                     range.start,
-                    range.lines
+                    range.lines,
+                    RangeScope::from(scope),
                 )?)?
             );
         }
@@ -2715,14 +2743,17 @@ fn run() -> Result<()> {
             paths,
             start,
             lines,
+            scope,
         } => {
             let mut results = Vec::new();
+            let scope = RangeScope::from(scope);
             for range in cli_ranges(paths, ranges, start, lines)? {
-                results.push(read_shard_range(
+                results.push(read_shard_range_scoped(
                     &index_dir,
                     &range.path,
                     range.start,
                     range.lines,
+                    scope,
                 )?);
             }
             println!("{}", serde_json::to_string(&results)?);
@@ -3047,23 +3078,33 @@ fn run() -> Result<()> {
             path_arg,
             start,
             lines,
+            scope,
         } => {
             let range_spec = cli_single_range(path, path_arg, start, lines)?;
+            let scope = RangeScope::from(scope);
             let range = if let Some(index_dir) = index_dir {
-                read_shard_range(
+                read_shard_range_scoped(
                     &index_dir,
                     &range_spec.path,
                     range_spec.start,
                     range_spec.lines,
+                    scope,
                 )?
             } else if let Some(index_path) = index {
-                FastIndex::load(index_path)?.read_range(
+                FastIndex::load(index_path)?.read_range_scoped(
                     &range_spec.path,
                     range_spec.start,
                     range_spec.lines,
+                    scope,
                 )?
             } else {
-                read_file_range(repo, &range_spec.path, range_spec.start, range_spec.lines)?
+                read_file_range_scoped(
+                    repo,
+                    &range_spec.path,
+                    range_spec.start,
+                    range_spec.lines,
+                    scope,
+                )?
             };
             println!("{}", serde_json::to_string(&range)?);
         }
@@ -3075,29 +3116,38 @@ fn run() -> Result<()> {
             paths,
             start,
             lines,
+            scope,
         } => {
             let mut results = Vec::new();
+            let scope = RangeScope::from(scope);
             if let Some(index_dir) = index_dir {
                 for range in cli_ranges(paths, ranges, start, lines)? {
-                    results.push(read_shard_range(
+                    results.push(read_shard_range_scoped(
                         &index_dir,
                         &range.path,
                         range.start,
                         range.lines,
+                        scope,
                     )?);
                 }
             } else if let Some(index_path) = index {
                 let index = FastIndex::load(index_path)?;
                 for range in cli_ranges(paths, ranges, start, lines)? {
-                    results.push(index.read_range(&range.path, range.start, range.lines)?);
+                    results.push(index.read_range_scoped(
+                        &range.path,
+                        range.start,
+                        range.lines,
+                        scope,
+                    )?);
                 }
             } else {
                 for range in cli_ranges(paths, ranges, start, lines)? {
-                    results.push(read_file_range(
+                    results.push(read_file_range_scoped(
                         &repo,
                         &range.path,
                         range.start,
                         range.lines,
+                        scope,
                     )?);
                 }
             }

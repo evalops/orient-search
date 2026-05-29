@@ -1408,6 +1408,26 @@ fn cli_outputs_repo_map_and_reads_ranges() {
         .stdout(predicate::str::contains("\"start_line\":3"))
         .stdout(predicate::str::contains("issue_token"));
 
+    let mut symbol_read_range = Command::cargo_bin("orient").unwrap();
+    symbol_read_range
+        .args([
+            "read-range",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--scope",
+            "symbol",
+            "src/auth.rs",
+            "--start",
+            "5",
+            "--lines",
+            "1",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"start_line\":1"))
+        .stdout(predicate::str::contains("\"name\":\"issue_token\""))
+        .stdout(predicate::str::contains("SessionManager"));
+
     let mut read_ranges = Command::cargo_bin("orient").unwrap();
     read_ranges
         .args([

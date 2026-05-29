@@ -4,9 +4,9 @@ use crate::discover::{RepoGitMetadata, git_metadata_for_repo};
 use crate::fast_index::{FastIndex, IndexFreshness, IndexStats};
 use crate::query::{merge_filters, parse_query, query_text, query_with_filters_text};
 use crate::repo_index::{
-    CommandHint, FileRange, QueryPlan, QueryPlanFilter, QueryPlanRepairHint, RelatedFile,
-    RelatedSymbol, RepoMap, RepoMapDetail, SearchFilters, SearchResult, Symbol, finalize_results,
-    is_manifest_file, language_for, normalize_token, unique_query_tokens,
+    CommandHint, FileRange, QueryPlan, QueryPlanFilter, QueryPlanRepairHint, RangeScope,
+    RelatedFile, RelatedSymbol, RepoMap, RepoMapDetail, SearchFilters, SearchResult, Symbol,
+    finalize_results, is_manifest_file, language_for, normalize_token, unique_query_tokens,
 };
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use anyhow::{Context, Result};
@@ -724,6 +724,47 @@ pub fn shard_status(index_dir: impl AsRef<Path>) -> Result<ShardFreshness> {
     let manifest = load_manifest(index_dir)?;
     let route = load_manifest_route(index_dir)?;
     let shards = shard_status_jobs(index_dir, &manifest.shards)?;
+    Ok(shard_freshness_from_statuses(
+        index_dir,
+        manifest.shards.len(),
+        route.as_ref(),
+        shards,
+    ))
+}
+
+pub fn shard_status_by_root(
+    index_dir: impl AsRef<Path>,
+    roots: &[PathBuf],
+) -> Result<ShardFreshness> {
+    let index_dir = index_dir.as_ref();
+    let manifest = load_manifest(index_dir)?;
+    let route = load_manifest_route(index_dir)?;
+    let roots = roots
+        .iter()
+        .map(|root| canonical_or_self(root))
+        .collect::<HashSet<_>>();
+    let selected = manifest
+        .shards
+        .iter()
+        .filter(|shard| roots.contains(&canonical_or_self(&shard.root)))
+        .cloned()
+        .collect::<Vec<_>>();
+    let shard_count = selected.len();
+    let shards = shard_status_jobs(index_dir, &selected)?;
+    Ok(shard_freshness_from_statuses(
+        index_dir,
+        shard_count,
+        route.as_ref(),
+        shards,
+    ))
+}
+
+fn shard_freshness_from_statuses(
+    index_dir: &Path,
+    shard_count: usize,
+    route: Option<&ShardManifestRoute>,
+    shards: Vec<ShardIndexFreshness>,
+) -> ShardFreshness {
     let mut stale_shards = 0usize;
     let mut changed_files = 0usize;
     let mut deleted_files = 0usize;
@@ -759,24 +800,21 @@ pub fn shard_status(index_dir: impl AsRef<Path>) -> Result<ShardFreshness> {
         symbols += status.symbols;
     }
 
-    Ok(ShardFreshness {
+    ShardFreshness {
         version: SHARD_MANIFEST_VERSION,
         index_dir: index_dir.to_path_buf(),
-        shard_count: manifest.shards.len(),
+        shard_count,
         manifest_bytes: file_len(index_dir.join(SHARD_MANIFEST_FILE)),
         manifest_sidecar_bytes: file_len(index_dir.join(SHARD_MANIFEST_SIDECAR_FILE)),
         manifest_prefilter_bytes: file_len(index_dir.join(SHARD_MANIFEST_PREFILTER_FILE)),
         manifest_route_bytes: file_len(index_dir.join(SHARD_MANIFEST_ROUTE_FILE)),
         manifest_route_exact_terms: route
-            .as_ref()
             .map(|route| route.exact_terms.len())
             .unwrap_or_default(),
         manifest_route_trigram_terms: route
-            .as_ref()
             .map(|route| route.trigram_terms.len())
             .unwrap_or_default(),
         manifest_route_substring_filter_shards: route
-            .as_ref()
             .map(|route| {
                 route
                     .shards
@@ -786,11 +824,9 @@ pub fn shard_status(index_dir: impl AsRef<Path>) -> Result<ShardFreshness> {
             })
             .unwrap_or_default(),
         manifest_route_omitted_exact_terms: route
-            .as_ref()
             .map(|route| route.omitted_hashes.len())
             .unwrap_or_default(),
         manifest_route_omitted_trigram_terms: route
-            .as_ref()
             .map(|route| route.omitted_trigram_hashes.len())
             .unwrap_or_default(),
         stale: stale_shards > 0,
@@ -809,7 +845,7 @@ pub fn shard_status(index_dir: impl AsRef<Path>) -> Result<ShardFreshness> {
         deleted_files,
         added_files,
         shards,
-    })
+    }
 }
 
 fn file_len(path: impl AsRef<Path>) -> u64 {
@@ -1583,11 +1619,24 @@ pub fn read_shard_range(
     start: usize,
     lines: usize,
 ) -> Result<FileRange> {
+    read_shard_range_scoped(index_dir, shard_path, start, lines, RangeScope::Exact)
+}
+
+pub fn read_shard_range_scoped(
+    index_dir: impl AsRef<Path>,
+    shard_path: &str,
+    start: usize,
+    lines: usize,
+    scope: RangeScope,
+) -> Result<FileRange> {
     let resolved = resolve_shard_path(index_dir.as_ref(), shard_path)?;
     let index = FastIndex::load(index_dir.as_ref().join(&resolved.index))
         .with_context(|| format!("load shard {}", resolved.index))?;
-    let mut range = index.read_range(&resolved.relative_path, start, lines)?;
+    let mut range = index.read_range_scoped(&resolved.relative_path, start, lines, scope)?;
     range.path = resolved.output_path(&range.path);
+    if let Some(symbol) = &mut range.symbol {
+        symbol.path = resolved.output_path(&symbol.path);
+    }
     Ok(range)
 }
 

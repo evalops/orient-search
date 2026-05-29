@@ -59,6 +59,8 @@ behavior. No-target
 `cwd` so manual context calls resolve inside the agent's active checkout.
 When `cwd` scopes a warmed shard daemon to one checkout, `refresh_if_stale:true`
 refreshes that checkout's shard instead of rebuilding every warmed repo.
+`shard_status` also accepts `cwd` or an absolute `repo_filter` so shared
+daemons can answer freshness for one checkout without opening unrelated shards.
 
 Useful filters: `repo:`, `path:`/`dir:`, `file:`, `lang:`, `ext:`, `symbol:`,
 `kind:`/`type:`, `dep:`, `import:`, `test:`, `generated:`, `code:`,
@@ -84,6 +86,9 @@ JSON-lines requests look like this:
 
 Every search result includes ready-to-send read, related-file, related-symbol,
 and query-plan follow-ups with `jsonl`, `client_cli`, and compact CLI hints.
+For manual context reads, pass `scope:"symbol"` or `orient read-range --scope
+symbol` to anchor the returned window at the nearest function, class, or type
+definition instead of opening an exact line window.
 
 ## Footprint
 

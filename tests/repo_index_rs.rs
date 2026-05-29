@@ -3,8 +3,8 @@ use std::path::Path;
 
 use orient::fast_index::FastIndex;
 use orient::repo_index::{
-    MAX_READ_RANGE_LINES, RepoIndexer, RepoMapDetail, SearchFilters, read_file_range,
-    search_repo_fast_filtered,
+    MAX_READ_RANGE_LINES, RangeScope, RepoIndexer, RepoMapDetail, SearchFilters, read_file_range,
+    read_file_range_scoped, search_repo_fast_filtered,
 };
 
 fn write(path: &Path, text: &str) {
@@ -642,6 +642,45 @@ fn fallback_line_range_tracks_displayed_contiguous_snippet_block() {
     assert_eq!(results[0].line_range.as_ref().unwrap().start_line, 1);
     assert_eq!(results[0].line_range.as_ref().unwrap().end_line, 1);
     assert_eq!(results[0].match_lines, vec![1, 100]);
+}
+
+#[test]
+fn symbol_scoped_ranges_anchor_live_and_indexed_reads_on_nearest_definition() {
+    let repo = tempfile::tempdir().unwrap();
+    let mut source = String::new();
+    for line in 1..=25 {
+        source.push_str(&format!("// filler {line}\n"));
+    }
+    source.push_str("pub fn issue_token() {\n");
+    source.push_str("    let token = 42;\n");
+    source.push_str("}\n");
+    source.push_str("pub fn verify_token() {}\n");
+    write(&repo.path().join("src/auth.rs"), &source);
+
+    let exact = read_file_range(repo.path(), "src/auth.rs", 27, 3).unwrap();
+    assert_eq!(exact.start_line, 27);
+    assert_eq!(exact.symbol, None);
+
+    let scoped =
+        read_file_range_scoped(repo.path(), "src/auth.rs", 27, 2, RangeScope::Symbol).unwrap();
+    assert_eq!(scoped.symbol.as_ref().unwrap().name, "issue_token");
+    let symbol_line = scoped.symbol.as_ref().unwrap().line;
+    assert_eq!(scoped.start_line, symbol_line.saturating_sub(20).max(1));
+    assert_eq!(scoped.end_line, symbol_line + 1);
+    assert!(scoped.text.contains("pub fn issue_token() {"));
+    assert!(scoped.text.contains("let token = 42;"));
+    assert!(!scoped.text.contains("verify_token"));
+
+    let indexed = FastIndex::build(repo.path()).unwrap();
+    let indexed_range = indexed
+        .read_range_scoped("src/auth.rs", 27, 2, RangeScope::Symbol)
+        .unwrap();
+    assert_eq!(indexed_range.start_line, scoped.start_line);
+    assert_eq!(indexed_range.end_line, scoped.end_line);
+    assert_eq!(
+        indexed_range.symbol.as_ref().unwrap().name,
+        scoped.symbol.as_ref().unwrap().name
+    );
 }
 
 fn assert_symbol(symbol: &orient::repo_index::Symbol, path: &str, kind: &str) {

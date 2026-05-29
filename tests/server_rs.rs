@@ -476,6 +476,14 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         serde_json::json!("single_warmed_shard_dir")
     );
     assert_eq!(
+        shard_status["input_schema"]["properties"]["cwd"]["type"],
+        "string"
+    );
+    assert_eq!(
+        shard_status["input_schema"]["properties"]["repo_filter"]["type"],
+        "string"
+    );
+    assert_eq!(
         discover["input_schema"]["properties"]["limit"]["default"],
         500
     );
@@ -523,6 +531,10 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         read_range["input_schema"]["properties"]["cwd"]["type"],
         "string"
     );
+    assert_eq!(
+        read_range["input_schema"]["properties"]["scope"]["enum"],
+        serde_json::json!(["exact", "symbol"])
+    );
     assert_eq!(read_ranges["required"], serde_json::json!(["ranges"]));
     assert_eq!(
         read_ranges["input_schema"]["properties"]["index"]["type"],
@@ -537,8 +549,16 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         "string"
     );
     assert_eq!(
+        read_ranges["input_schema"]["properties"]["scope"]["default"],
+        "exact"
+    );
+    assert_eq!(
         read_ranges["input_schema"]["properties"]["ranges"]["oneOf"][0]["properties"]["lines"]["default"],
         80
+    );
+    assert_eq!(
+        read_ranges["input_schema"]["properties"]["ranges"]["oneOf"][0]["properties"]["scope"]["enum"],
+        serde_json::json!(["exact", "symbol"])
     );
     assert_eq!(
         read_ranges["input_schema"]["properties"]["ranges"]["oneOf"][0]["properties"]["lines"]["maximum"],
@@ -2124,6 +2144,29 @@ fn runtime_read_alias_accepts_live_index_and_shard_targets() {
             .contains("SessionManager")
     );
 
+    let symbol_scoped = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("symbol-scoped-read"),
+        tool: "read_range".to_string(),
+        arguments: serde_json::json!({
+            "index": repo.path().join(".orient/index"),
+            "path": "src/auth.rs",
+            "start": 2,
+            "lines": 1,
+            "scope": "symbol"
+        }),
+    });
+    assert!(symbol_scoped.error.is_none(), "{:?}", symbol_scoped.error);
+    let symbol_scoped = symbol_scoped.result.unwrap();
+    assert_eq!(symbol_scoped["start_line"], 1);
+    assert_eq!(symbol_scoped["end_line"], 2);
+    assert_eq!(symbol_scoped["symbol"]["name"], "issue_token");
+    assert!(
+        symbol_scoped["text"]
+            .as_str()
+            .unwrap()
+            .contains("SessionManager")
+    );
+
     let sharded = runtime.dispatch(ToolRequest {
         id: serde_json::json!("shard-read"),
         tool: "read_range".to_string(),
@@ -2155,7 +2198,7 @@ fn runtime_read_alias_accepts_live_index_and_shard_targets() {
             "index": repo.path().join(".orient/index"),
             "ranges": [
                 {"path": "src/auth.rs", "start": 1, "lines": 1},
-                {"path": "src/auth.rs", "start": 2, "lines": 1}
+                {"path": "src/auth.rs", "start": 2, "lines": 1, "scope": "symbol"}
             ]
         }),
     });
@@ -2168,6 +2211,7 @@ fn runtime_read_alias_accepts_live_index_and_shard_targets() {
             .unwrap()
             .contains("issue_token")
     );
+    assert_eq!(indexed_batch[1]["symbol"]["name"], "issue_token");
 
     let shard_batch = runtime.dispatch(ToolRequest {
         id: serde_json::json!("shard-read-batch"),
@@ -6287,6 +6331,93 @@ fn shard_manifest_rejects_unsafe_or_ambiguous_entries() {
     });
     let error = response.error.unwrap();
     assert!(error.contains("duplicate shard name"), "{error}");
+}
+
+#[test]
+fn runtime_shard_status_scopes_to_client_cwd_or_absolute_repo_filter() {
+    let root = tempfile::tempdir().unwrap();
+    let current_repo = root.path().join("current-app");
+    let other_repo = root.path().join("other-app");
+    write(
+        &current_repo.join("src/lib.rs"),
+        "pub fn current_marker() -> usize { 1 }\n",
+    );
+    write(
+        &current_repo.join("Cargo.toml"),
+        "[package]\nname='current-app'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    write(
+        &other_repo.join("src/lib.rs"),
+        "pub fn other_marker() -> usize { 2 }\n",
+    );
+    write(
+        &other_repo.join("Cargo.toml"),
+        "[package]\nname='other-app'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    git(&current_repo, &["init"]);
+    git(&other_repo, &["init"]);
+
+    let shard_dir = tempfile::tempdir().unwrap();
+    build_shards(
+        &[current_repo.clone(), other_repo.clone()],
+        shard_dir.path(),
+    )
+    .unwrap();
+    write(
+        &current_repo.join("src/new_file.rs"),
+        "pub fn current_added_after_index() {}\n",
+    );
+
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(shard_dir.path().join("manifest.json")).unwrap()).unwrap();
+    let other_index = manifest["shards"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|shard| shard["name"] == "other-app")
+        .unwrap()["index"]
+        .as_str()
+        .unwrap();
+    fs::write(shard_dir.path().join(other_index), b"not an orient index").unwrap();
+
+    let runtime = ToolRuntime::default();
+    let cwd_status = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("cwd-status"),
+        tool: "shard_status".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": shard_dir.path(),
+            "cwd": current_repo.join("src")
+        }),
+    });
+    assert!(cwd_status.error.is_none(), "{:?}", cwd_status.error);
+    let result = cwd_status.result.unwrap();
+    assert_eq!(result["shard_count"], serde_json::json!(1));
+    assert_eq!(result["stale"], serde_json::json!(true));
+    assert_eq!(result["stale_shards"], serde_json::json!(1));
+    assert_eq!(result["added_files"], serde_json::json!(1));
+    let rendered = serde_json::to_string(&result).unwrap();
+    assert!(rendered.contains("current-app"), "{rendered}");
+    assert!(!rendered.contains("other-app"), "{rendered}");
+
+    let repo_filter_status = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("repo-filter-status"),
+        tool: "shard_status".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": shard_dir.path(),
+            "repo_filter": current_repo.canonicalize().unwrap()
+        }),
+    });
+    assert!(
+        repo_filter_status.error.is_none(),
+        "{:?}",
+        repo_filter_status.error
+    );
+    let result = repo_filter_status.result.unwrap();
+    assert_eq!(result["shard_count"], serde_json::json!(1));
+    assert_eq!(result["stale_shards"], serde_json::json!(1));
+    let rendered = serde_json::to_string(&result).unwrap();
+    assert!(rendered.contains("current-app"), "{rendered}");
+    assert!(!rendered.contains("other-app"), "{rendered}");
 }
 
 #[test]

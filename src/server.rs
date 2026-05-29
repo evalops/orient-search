@@ -5,14 +5,14 @@ use crate::fast_index::{FastIndex, RefreshStats};
 use crate::query::{merge_filters, normalize_symbol_kind, parse_query, query_text};
 use crate::repo_index::{
     DEFAULT_REPO_MAP_READ_BATCH_RANGES, MAX_ATTACHED_CONTEXT_LINES, MAX_READ_RANGE_LINES,
-    MAX_RESULT_READ_BATCH_RANGES, MAX_SEARCH_RESULTS, QueryPlan, QueryPlanFilter, RepoIndexer,
-    RepoMapDetail, ResultToolRequest, SearchFilters, SearchResult, SnippetMode, Symbol,
-    SymbolLookupResult, attach_repo_map_read_batch_request_with_limit, attach_result_context,
-    attach_result_read_requests, attach_result_related_requests,
+    MAX_RESULT_READ_BATCH_RANGES, MAX_SEARCH_RESULTS, QueryPlan, QueryPlanFilter, RangeScope,
+    RepoIndexer, RepoMapDetail, ResultToolRequest, SearchFilters, SearchResult, SnippetMode,
+    Symbol, SymbolLookupResult, attach_repo_map_read_batch_request_with_limit,
+    attach_result_context, attach_result_read_requests, attach_result_related_requests,
     attach_result_related_symbol_requests, finalize_results, normalize_language_filter,
-    normalize_token, read_file_range, related_file_lookup_results, related_symbol_lookup_results,
-    result_read_batch_request, search_repo_fast_filtered, symbol_lookup_read_batch_request,
-    symbol_lookup_results,
+    normalize_token, read_file_range, read_file_range_scoped, related_file_lookup_results,
+    related_symbol_lookup_results, result_read_batch_request, search_repo_fast_filtered,
+    symbol_lookup_read_batch_request, symbol_lookup_results,
 };
 use crate::shards::{
     ShardEntry, ShardManifest, ShardQueryPlan, ShardRepoMap, ShardSearchScope,
@@ -21,7 +21,7 @@ use crate::shards::{
     refresh_shards_by_root, related_query_without_shard_selectors,
     resolve_shard_path_from_manifest, shard_prefilter_query_impossible, shard_route_entries,
     shard_search_scopes, shard_selection_miss_plan, shard_sketch_may_diagnose_query,
-    shard_sketch_may_match_query, shard_status,
+    shard_sketch_may_match_query, shard_status, shard_status_by_root,
 };
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use anyhow::{Context, Result, anyhow};
@@ -736,25 +736,25 @@ pub fn tool_manifest() -> Value {
             "read_index_range",
             "Read a bounded line range from a persistent index result path.",
             &["index", "path"],
-            &["start", "lines"],
+            &["start", "lines", "scope"],
         ),
         tool_entry(
             "open_index_range",
             "Alias for read_index_range for agents that phrase context fetches as opening a file range.",
             &["index", "path"],
-            &["start", "lines"],
+            &["start", "lines", "scope"],
         ),
         tool_entry(
             "read_index_ranges",
             "Read several bounded line ranges from persistent index result paths in one request.",
             &["index", "ranges"],
-            &[],
+            &["scope"],
         ),
         tool_entry(
             "open_index_ranges",
             "Alias for read_index_ranges for agents that phrase context fetches as opening file ranges.",
             &["index", "ranges"],
-            &[],
+            &["scope"],
         ),
         tool_entry(
             "index_shards",
@@ -778,7 +778,7 @@ pub fn tool_manifest() -> Value {
             "shard_status",
             "Report stale shards and added, changed, or deleted files in a local shard directory.",
             &["index_dir"],
-            &[],
+            &["cwd", "repo_filter"],
         ),
         tool_entry(
             "search_shards",
@@ -814,25 +814,25 @@ pub fn tool_manifest() -> Value {
             "read_shard_range",
             "Read a bounded line range from a shard search result path or unique shard-relative path.",
             &["index_dir", "path"],
-            &["start", "lines"],
+            &["start", "lines", "scope"],
         ),
         tool_entry(
             "open_shard_range",
             "Alias for read_shard_range for agents that phrase context fetches as opening a file range.",
             &["index_dir", "path"],
-            &["start", "lines"],
+            &["start", "lines", "scope"],
         ),
         tool_entry(
             "read_shard_ranges",
             "Read several bounded line ranges from shard result paths or unique shard-relative paths in one request.",
             &["index_dir", "ranges"],
-            &[],
+            &["scope"],
         ),
         tool_entry(
             "open_shard_ranges",
             "Alias for read_shard_ranges for agents that phrase context fetches as opening file ranges.",
             &["index_dir", "ranges"],
-            &[],
+            &["scope"],
         ),
         tool_entry(
             "shard_repo_map",
@@ -1092,6 +1092,7 @@ pub fn agent_guide(
             "Use search_auto.read_batch_request, a search_auto_batch item read_batch_request, or a search batch item read_batch_request to read top ranges in one call.",
             "Use result.read_request for one bounded file range.",
             "Batch several result.read_range objects with read_ranges, read_index_ranges, or read_shard_ranges.",
+            "Use scope:symbol on manual read_range/read_ranges calls when opening from a line inside a function, class, or type definition.",
             "Use result.related_request for source/test siblings.",
             "Use result.related_symbols_request for nearby definitions and types; search-generated requests include the original query."
         ],
@@ -1128,6 +1129,7 @@ When calling `search`, `search_batch`, `search_auto`, `search_auto_batch`, `repo
 Use query filters directly: `file:`, `path:`, `lang:`, `ext:`, `symbol:`, `type:`, `repo:`, `test:`, `generated:`, `code:`, `is:code`, `is:docs`, quoted literals, and negative filters like `-path:vendor` or `-is:generated`.\n\
 Generated paths, including hashed JavaScript bundles, are demoted by default; use `generated:true` or `is:generated` when intentionally inspecting generated output.\n\
 After search, follow returned `read_batch_request`, `read_request`, `related_request`, and `related_symbols_request`; each includes `jsonl` and `client_cli` for direct replay through `orient client-jsonl`.\n\
+For manual context reads from a line inside a definition, pass `scope:\"symbol\"` so `read_range` or `read_ranges` anchors at the nearest function, class, or type definition.\n\
 When results are empty, noisy, or suspicious, use the returned `query_plan_request` or inline `query_plan_result` before broadening the search; pass `retry_if_empty:true` when you want Orient to execute the promoted retry once and return `primary_retry_result` immediately.\n\
 Orient is local code search only and does not collect telemetry."
     )
@@ -1322,7 +1324,13 @@ fn argument_schema(tool_name: &str, name: &str) -> Value {
                 "properties": {
                     "path": {"type": "string", "description": path_description},
                     "start": {"type": "integer", "minimum": 1, "default": 1},
-                    "lines": {"type": "integer", "minimum": 1, "maximum": MAX_READ_RANGE_LINES, "default": 80}
+                    "lines": {"type": "integer", "minimum": 1, "maximum": MAX_READ_RANGE_LINES, "default": 80},
+                    "scope": {
+                        "type": "string",
+                        "enum": ["exact", "symbol"],
+                        "default": "exact",
+                        "description": "Use symbol to anchor this range around the nearest preceding symbol definition."
+                    }
                 }
             });
             schema.insert(
@@ -1513,6 +1521,7 @@ fn argument_default(tool_name: &str, name: &str) -> Option<Value> {
         (_, "read_limit") => Some(json!(DEFAULT_REPO_MAP_READ_BATCH_RANGES)),
         (_, "start") => Some(json!(1)),
         (_, "lines") => Some(json!(80)),
+        (_, "scope") => Some(json!("exact")),
         (_, "snippet") => Some(json!("medium")),
         (_, "detail") => Some(json!("compact")),
         (_, "context_lines") => Some(json!(0)),
@@ -1529,6 +1538,7 @@ fn argument_default(tool_name: &str, name: &str) -> Option<Value> {
 fn argument_enum(name: &str) -> Option<&'static [&'static str]> {
     match name {
         "snippet" => Some(&["short", "medium", "block", "symbol"]),
+        "scope" => Some(&["exact", "symbol"]),
         "detail" => Some(&["compact", "full"]),
         _ => None,
     }
@@ -1718,6 +1728,9 @@ fn argument_description(tool_name: &str, name: &str) -> &'static str {
         }
         "start" => "One-based start line for range reads.",
         "lines" => "Number of lines to read, capped to the maximum bounded range size.",
+        "scope" => {
+            "Range read scope: exact reads the requested line window; symbol starts from the nearest preceding symbol definition and includes enough leading context to keep that symbol visible."
+        }
         _ => "Tool argument.",
     }
 }
@@ -2014,6 +2027,30 @@ fn scoped_refresh_root(arguments: &Value) -> Result<Option<PathBuf>> {
             .with_context(|| format!("canonicalize refresh_if_stale repo_filter {repo_filter}"));
     }
     Ok(None)
+}
+
+fn scoped_shard_status_roots(arguments: &Value) -> Result<Vec<PathBuf>> {
+    let repo_filter = optional_string_arg(arguments, "repo_filter");
+    if let Some(repo_root) = git_root_from_client_cwd(arguments, "shard_status")? {
+        let repo_root_text = repo_root.to_string_lossy().to_string();
+        if repo_filter
+            .as_deref()
+            .is_none_or(|filter| filter == repo_root_text.as_str())
+        {
+            return Ok(vec![repo_root]);
+        }
+    }
+    let Some(repo_filter) = repo_filter else {
+        return Ok(Vec::new());
+    };
+    let path = PathBuf::from(&repo_filter);
+    if path.is_absolute() && path.exists() {
+        return path
+            .canonicalize()
+            .map(|root| vec![root])
+            .with_context(|| format!("canonicalize shard_status repo_filter {repo_filter}"));
+    }
+    Ok(Vec::new())
 }
 
 fn retry_search_requests<T: Serialize>(
@@ -2354,6 +2391,7 @@ impl ToolRuntime {
             "read_range" | "open_range" => {
                 let path = string_arg(&request.arguments, "path")?;
                 let (start, lines) = read_window_args(&request.arguments)?;
+                let scope = read_scope_arg(&request.arguments)?;
                 if request.arguments.get("index").is_some()
                     && request.arguments.get("index_dir").is_some()
                 {
@@ -2362,16 +2400,16 @@ impl ToolRuntime {
                 if let Some(index_dir) =
                     optional_string_arg(&request.arguments, "index_dir").map(PathBuf::from)
                 {
-                    return Ok(serde_json::to_value(
-                        self.read_shard_range_cached(&index_dir, &path, start, lines)?,
-                    )?);
+                    return Ok(serde_json::to_value(self.read_shard_range_cached_scoped(
+                        &index_dir, &path, start, lines, scope,
+                    )?)?);
                 }
                 if let Some(index_path) =
                     optional_string_arg(&request.arguments, "index").map(PathBuf::from)
                 {
                     let index = self.cached_index(index_path)?;
                     return Ok(serde_json::to_value(
-                        index.read_range(&path, start, lines)?,
+                        index.read_range_scoped(&path, start, lines, scope)?,
                     )?);
                 }
                 if optional_string_arg(&request.arguments, "cwd").is_some() {
@@ -2382,6 +2420,7 @@ impl ToolRuntime {
                             &path,
                             start,
                             lines,
+                            scope,
                             "read_range",
                         )? {
                             return Ok(serde_json::to_value(range)?);
@@ -2391,7 +2430,7 @@ impl ToolRuntime {
                         let index = self.cached_index(index_path)?;
                         if index_matches_client_cwd(&index, &request.arguments)? {
                             return Ok(serde_json::to_value(
-                                index.read_range(&path, start, lines)?,
+                                index.read_range_scoped(&path, start, lines, scope)?,
                             )?);
                         }
                     }
@@ -2402,8 +2441,8 @@ impl ToolRuntime {
                     .unwrap_or_else(|| {
                         live_repo_from_client_cwd(&request.arguments, "read_range")
                     })?;
-                Ok(serde_json::to_value(read_file_range(
-                    repo, &path, start, lines,
+                Ok(serde_json::to_value(read_file_range_scoped(
+                    repo, &path, start, lines, scope,
                 )?)?)
             }
             "read_ranges" | "open_ranges" => {
@@ -2420,11 +2459,12 @@ impl ToolRuntime {
                 {
                     let mut results = Vec::new();
                     for range in ranges {
-                        results.push(self.read_shard_range_cached(
+                        results.push(self.read_shard_range_cached_scoped(
                             &index_dir,
                             &range.path,
                             range.start,
                             range.lines,
+                            range.scope,
                         )?);
                     }
                     return Ok(serde_json::to_value(results)?);
@@ -2435,7 +2475,12 @@ impl ToolRuntime {
                     let index = self.cached_index(index_path)?;
                     let mut results = Vec::new();
                     for range in ranges {
-                        results.push(index.read_range(&range.path, range.start, range.lines)?);
+                        results.push(index.read_range_scoped(
+                            &range.path,
+                            range.start,
+                            range.lines,
+                            range.scope,
+                        )?);
                     }
                     return Ok(serde_json::to_value(results)?);
                 }
@@ -2450,6 +2495,7 @@ impl ToolRuntime {
                                 &range.path,
                                 range.start,
                                 range.lines,
+                                range.scope,
                                 "read_ranges",
                             )?
                             else {
@@ -2467,10 +2513,11 @@ impl ToolRuntime {
                         if index_matches_client_cwd(&index, &request.arguments)? {
                             let mut results = Vec::new();
                             for range in ranges {
-                                results.push(index.read_range(
+                                results.push(index.read_range_scoped(
                                     &range.path,
                                     range.start,
                                     range.lines,
+                                    range.scope,
                                 )?);
                             }
                             return Ok(serde_json::to_value(results)?);
@@ -2485,11 +2532,12 @@ impl ToolRuntime {
                     })?;
                 let mut results = Vec::new();
                 for range in ranges {
-                    results.push(read_file_range(
+                    results.push(read_file_range_scoped(
                         &repo,
                         &range.path,
                         range.start,
                         range.lines,
+                        range.scope,
                     )?);
                 }
                 Ok(serde_json::to_value(results)?)
@@ -3378,9 +3426,10 @@ impl ToolRuntime {
                 let index_path = self.index_path_arg_or_single_cached(&request.arguments)?;
                 let path = string_arg(&request.arguments, "path")?;
                 let (start, lines) = read_window_args(&request.arguments)?;
+                let scope = read_scope_arg(&request.arguments)?;
                 let index = self.cached_index(index_path)?;
                 Ok(serde_json::to_value(
-                    index.read_range(&path, start, lines)?,
+                    index.read_range_scoped(&path, start, lines, scope)?,
                 )?)
             }
             "read_index_ranges" | "open_index_ranges" => {
@@ -3389,7 +3438,12 @@ impl ToolRuntime {
                 let index = self.cached_index(index_path)?;
                 let mut results = Vec::new();
                 for range in ranges {
-                    results.push(index.read_range(&range.path, range.start, range.lines)?);
+                    results.push(index.read_range_scoped(
+                        &range.path,
+                        range.start,
+                        range.lines,
+                        range.scope,
+                    )?);
                 }
                 Ok(serde_json::to_value(results)?)
             }
@@ -3426,7 +3480,14 @@ impl ToolRuntime {
             }
             "shard_status" => {
                 let index_dir = self.shard_dir_arg_or_single_cached(&request.arguments)?;
-                Ok(serde_json::to_value(shard_status(index_dir)?)?)
+                let roots = scoped_shard_status_roots(&request.arguments)?;
+                if roots.is_empty() {
+                    Ok(serde_json::to_value(shard_status(index_dir)?)?)
+                } else {
+                    Ok(serde_json::to_value(shard_status_by_root(
+                        index_dir, &roots,
+                    )?)?)
+                }
             }
             "search_shards" => {
                 let index_dir = self.shard_dir_arg_or_single_cached(&request.arguments)?;
@@ -3508,8 +3569,9 @@ impl ToolRuntime {
                 let index_dir = self.shard_dir_arg_or_single_cached(&request.arguments)?;
                 let path = string_arg(&request.arguments, "path")?;
                 let (start, lines) = read_window_args(&request.arguments)?;
-                Ok(serde_json::to_value(self.read_shard_range_cached(
-                    &index_dir, &path, start, lines,
+                let scope = read_scope_arg(&request.arguments)?;
+                Ok(serde_json::to_value(self.read_shard_range_cached_scoped(
+                    &index_dir, &path, start, lines, scope,
                 )?)?)
             }
             "read_shard_ranges" | "open_shard_ranges" => {
@@ -3517,11 +3579,12 @@ impl ToolRuntime {
                 let ranges = range_args(&request.arguments)?;
                 let mut results = Vec::new();
                 for range in ranges {
-                    results.push(self.read_shard_range_cached(
+                    results.push(self.read_shard_range_cached_scoped(
                         &index_dir,
                         &range.path,
                         range.start,
                         range.lines,
+                        range.scope,
                     )?);
                 }
                 Ok(serde_json::to_value(results)?)
@@ -5196,10 +5259,24 @@ impl ToolRuntime {
         start: usize,
         lines: usize,
     ) -> Result<crate::repo_index::FileRange> {
+        self.read_shard_range_cached_scoped(index_dir, path, start, lines, RangeScope::Exact)
+    }
+
+    fn read_shard_range_cached_scoped(
+        &self,
+        index_dir: &std::path::Path,
+        path: &str,
+        start: usize,
+        lines: usize,
+        scope: RangeScope,
+    ) -> Result<crate::repo_index::FileRange> {
         let resolved = self.resolve_shard_path_cached(index_dir, path)?;
         let index = self.cached_index(index_dir.join(&resolved.index))?;
-        let mut range = index.read_range(&resolved.relative_path, start, lines)?;
+        let mut range = index.read_range_scoped(&resolved.relative_path, start, lines, scope)?;
         range.path = resolved.output_path(&range.path);
+        if let Some(symbol) = &mut range.symbol {
+            symbol.path = resolved.output_path(&symbol.path);
+        }
         Ok(range)
     }
 
@@ -5210,6 +5287,7 @@ impl ToolRuntime {
         path: &str,
         start: usize,
         lines: usize,
+        scope: RangeScope,
         tool_name: &str,
     ) -> Result<Option<crate::repo_index::FileRange>> {
         let Some(repo_root) = git_root_from_client_cwd(arguments, tool_name)? else {
@@ -5225,8 +5303,11 @@ impl ToolRuntime {
         };
         let resolved = resolved_shard_read_for_client_cwd(shard, path);
         let index = self.cached_index(index_dir.join(&resolved.index))?;
-        let mut range = index.read_range(&resolved.relative_path, start, lines)?;
+        let mut range = index.read_range_scoped(&resolved.relative_path, start, lines, scope)?;
         range.path = resolved.output_path(&range.path);
+        if let Some(symbol) = &mut range.symbol {
+            symbol.path = resolved.output_path(&symbol.path);
+        }
         Ok(Some(range))
     }
 
@@ -5816,9 +5897,17 @@ const SEARCH_TARGET_OPTIONAL_ARGS: &[&str] = &[
     "exclude_term",
 ];
 
-const READ_TARGET_OPTIONAL_ARGS: &[&str] = &["repo", "index", "index_dir", "cwd", "start", "lines"];
+const READ_TARGET_OPTIONAL_ARGS: &[&str] = &[
+    "repo",
+    "index",
+    "index_dir",
+    "cwd",
+    "start",
+    "lines",
+    "scope",
+];
 
-const READ_BATCH_TARGET_OPTIONAL_ARGS: &[&str] = &["repo", "index", "index_dir", "cwd"];
+const READ_BATCH_TARGET_OPTIONAL_ARGS: &[&str] = &["repo", "index", "index_dir", "cwd", "scope"];
 
 const REPO_MAP_TARGET_OPTIONAL_ARGS: &[&str] = &[
     "repo",
@@ -6608,6 +6697,22 @@ fn read_window_args(arguments: &Value) -> Result<(usize, usize)> {
     Ok((start, lines))
 }
 
+fn read_scope_arg(arguments: &Value) -> Result<RangeScope> {
+    optional_read_scope_arg(arguments, "scope")?.map_or(Ok(RangeScope::Exact), Ok)
+}
+
+fn optional_read_scope_arg(value: &Value, name: &str) -> Result<Option<RangeScope>> {
+    let Some(scope) = value.get(name) else {
+        return Ok(None);
+    };
+    let Some(scope) = scope.as_str() else {
+        return Err(anyhow!("{name} must be a string"));
+    };
+    RangeScope::parse(scope)
+        .map(Some)
+        .ok_or_else(|| anyhow!("invalid {name} {scope:?}; expected exact or symbol"))
+}
+
 fn validate_read_window(start: usize, lines: usize) -> Result<()> {
     if start == 0 {
         return Err(anyhow!("range start must be a positive integer"));
@@ -6673,6 +6778,7 @@ struct RangeArg {
     path: String,
     start: usize,
     lines: usize,
+    scope: RangeScope,
 }
 
 fn range_args(arguments: &Value) -> Result<Vec<RangeArg>> {
@@ -6698,6 +6804,7 @@ fn range_args(arguments: &Value) -> Result<Vec<RangeArg>> {
             MAX_BATCH_RANGES
         ));
     }
+    let default_scope = read_scope_arg(arguments)?;
     let mut ranges = Vec::with_capacity(values.len());
     for value in values {
         let path = value
@@ -6707,8 +6814,14 @@ fn range_args(arguments: &Value) -> Result<Vec<RangeArg>> {
             .ok_or_else(|| anyhow!("range entry must include string path"))?;
         let start = bounded_usize_field(value, "start", 1, 1, None)?;
         let lines = bounded_usize_field(value, "lines", 80, 1, Some(MAX_READ_RANGE_LINES))?;
+        let scope = optional_read_scope_arg(value, "scope")?.unwrap_or(default_scope);
         validate_read_window(start, lines)?;
-        ranges.push(RangeArg { path, start, lines });
+        ranges.push(RangeArg {
+            path,
+            start,
+            lines,
+            scope,
+        });
     }
     Ok(ranges)
 }
