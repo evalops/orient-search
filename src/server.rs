@@ -75,6 +75,8 @@ struct SearchAutoResult {
     target: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     freshness: Option<SearchFreshness>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    refresh_request: Option<ResultToolRequest>,
     query_plan_request: ResultToolRequest,
     #[serde(skip_serializing_if = "Option::is_none")]
     query_plan_result: Option<Value>,
@@ -2092,6 +2094,12 @@ fn shard_search_freshness(
         stale_shards: status.stale_shards,
         refresh_request,
     }
+}
+
+fn freshness_refresh_request(freshness: &Option<SearchFreshness>) -> Option<ResultToolRequest> {
+    freshness
+        .as_ref()
+        .map(|freshness| freshness.refresh_request.clone())
 }
 
 fn freshness_summary(
@@ -4955,6 +4963,7 @@ impl ToolRuntime {
             surface: "fallback".to_string(),
             target: repo.to_string_lossy().to_string(),
             freshness: None,
+            refresh_request: None,
             query_plan_request: auto_query_plan_request(
                 "search_query_plan",
                 "repo",
@@ -5045,6 +5054,7 @@ impl ToolRuntime {
             query: query.to_string(),
             surface: "shards".to_string(),
             target: index_dir.to_string_lossy().to_string(),
+            refresh_request: freshness_refresh_request(&freshness),
             freshness,
             query_plan_request: auto_query_plan_request(
                 "shard_query_plan",
@@ -5147,6 +5157,7 @@ impl ToolRuntime {
             query: query.to_string(),
             surface: "indexed".to_string(),
             target: index_path.to_string_lossy().to_string(),
+            refresh_request: freshness_refresh_request(&freshness),
             freshness,
             query_plan_request: auto_query_plan_request(
                 "indexed_query_plan",

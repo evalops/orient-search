@@ -5500,6 +5500,10 @@ fn runtime_search_auto_reports_stale_index_refresh_request_on_empty_results() {
         serde_json::json!("search_auto")
     );
     assert_eq!(
+        stale["refresh_request"],
+        stale["freshness"]["refresh_request"]
+    );
+    assert_eq!(
         stale["freshness"]["refresh_request"]["arguments"]["refresh_if_stale"],
         serde_json::json!(true)
     );
@@ -6477,6 +6481,10 @@ fn runtime_search_auto_reports_stale_shard_refresh_request_on_empty_results() {
     assert_eq!(
         stale["freshness"]["refresh_request"]["tool"],
         serde_json::json!("search_auto")
+    );
+    assert_eq!(
+        stale["refresh_request"],
+        stale["freshness"]["refresh_request"]
     );
     assert_eq!(
         stale["freshness"]["refresh_request"]["arguments"]["refresh_if_stale"],

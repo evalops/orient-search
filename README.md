@@ -71,9 +71,9 @@ search, map, plan, symbol, read, and related-file calls. Other protocol clients
 can pass `cwd` explicitly. The daemon uses that checkout as the default scope,
 which keeps shared multi-repo daemons focused on the current task. With the same
 scope, `refresh_if_stale:true` refreshes only that repo's shard. Empty or
-diagnostic `search_auto` responses include a compact
-`freshness` object when the scoped index is stale, plus a ready-to-run
-`refresh_request` that refreshes and repeats the search.
+diagnostic `search_auto` responses include a compact `freshness` object when
+the scoped index is stale, plus a top-level ready-to-run `refresh_request` that
+refreshes and repeats the search.
 
 Useful filters: `repo:`, `path:`/`dir:`, `file:`, `lang:`, `ext:`, `symbol:`,
 `kind:`/`type:`, `dep:`, `import:`, `test:`, `generated:`, `code:`,
