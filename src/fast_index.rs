@@ -2,9 +2,9 @@
 
 use crate::query::{merge_filters, normalize_phrase_text, parse_query, query_phrases, query_text};
 use crate::repo_index::{
-    FileRange, MAX_READ_RANGE_LINES, PathFilterMatcher, QueryPlan, QueryPlanFilter,
-    QueryPlanPosting, QueryPlanRepairHint, RankSignal, RelatedFile, RelatedSymbol, RepoBrief,
-    RepoMap, RepoMapDetail, SearchFilters, SearchResult, SnippetMode, Symbol,
+    FileRange, GENERATED_PATH_SCORE_MULTIPLIER, MAX_READ_RANGE_LINES, PathFilterMatcher, QueryPlan,
+    QueryPlanFilter, QueryPlanPosting, QueryPlanRepairHint, RankSignal, RelatedFile, RelatedSymbol,
+    RepoBrief, RepoMap, RepoMapDetail, SearchFilters, SearchResult, SnippetMode, Symbol,
     best_snippet_for_path_with_phrases, capped_search_limit, command_hints_from_manifest_texts,
     dependency_filters_match, dependency_hints_from_manifest_texts, extract_symbols,
     filter_only_query, filter_value_matches, finalize_results, import_hints_from_source_texts,
@@ -477,11 +477,7 @@ impl FastIndex {
         } else {
             normalize_posting_map(&mut self.symbol_kind_postings);
         }
-        if self.attribute_postings.is_empty() && !self.files.is_empty() {
-            self.attribute_postings = rebuild_attribute_postings(&self.files);
-        } else {
-            normalize_posting_map(&mut self.attribute_postings);
-        }
+        self.attribute_postings = rebuild_attribute_postings(&self.files);
         self.path_trigram_postings = rebuild_path_trigram_postings(&self.files);
         self.path_ids = rebuild_path_ids(&self.files);
     }
@@ -1438,6 +1434,7 @@ impl FastIndex {
                     filters.explain,
                     filters.symbol.as_deref(),
                     allow_implicit_symbol_score,
+                    filters.generated.is_none(),
                     None,
                 )
             })
@@ -1950,6 +1947,7 @@ impl FastIndex {
                     false,
                     filters.symbol.as_deref(),
                     allow_implicit_symbol_score,
+                    filters.generated.is_none(),
                     None,
                 )
             })
@@ -2071,6 +2069,7 @@ impl FastIndex {
         explain: bool,
         symbol_filter: Option<&str>,
         allow_implicit_symbol_score: bool,
+        demote_generated: bool,
         query_plan: Option<&QueryPlan>,
     ) -> Option<SearchResult> {
         let file = self.files.get(file_id as usize)?;
@@ -2150,6 +2149,16 @@ impl FastIndex {
         }
         if score == 0.0 {
             return None;
+        }
+        if demote_generated && is_generated_path(path_lower) {
+            score *= GENERATED_PATH_SCORE_MULTIPLIER;
+            if explain {
+                signals.push(rank_signal(
+                    "generated_path_penalty",
+                    &file.path,
+                    -1.0 + GENERATED_PATH_SCORE_MULTIPLIER,
+                ));
+            }
         }
 
         let symbol_line = symbol_filter.and_then(|wanted| indexed_symbol_filter_line(file, wanted));
@@ -2515,6 +2524,41 @@ mod compressed_posting_tests {
         assert_eq!(
             loaded
                 .query_plan("sharedneedle code:false", &SearchFilters::default())
+                .unwrap()
+                .candidate_count,
+            1
+        );
+    }
+
+    #[test]
+    fn current_disk_indexes_rebuild_stale_attribute_postings_on_load() {
+        let repo = tempfile::tempdir().unwrap();
+        let source = repo.path().join("src/lib.rs");
+        std::fs::create_dir_all(source.parent().unwrap()).unwrap();
+        std::fs::write(&source, "pub fn sharedneedle() {}\n").unwrap();
+        let bundle = repo
+            .path()
+            .join("webview/assets/chunk-OIYGIGL5-CJrBIAxA.js");
+        std::fs::create_dir_all(bundle.parent().unwrap()).unwrap();
+        std::fs::write(&bundle, "function sharedneedle() {}\n").unwrap();
+
+        let index = FastIndex::build(repo.path()).unwrap();
+        let mut disk = FastIndexDisk::from_index(&index);
+        disk.attribute_postings
+            .retain(|key, _| !key.starts_with("generated:"));
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(INDEX_MAGIC);
+        bytes.extend_from_slice(&INDEX_VERSION.to_le_bytes());
+        bytes.extend_from_slice(&bincode::serialize(&disk).unwrap());
+        let path = repo.path().join(".orient/current.index");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, bytes).unwrap();
+
+        let loaded = FastIndex::load(&path).unwrap();
+        assert!(loaded.attribute_postings.contains_key("generated:true"));
+        assert_eq!(
+            loaded
+                .query_plan("sharedneedle is:generated", &SearchFilters::default())
                 .unwrap()
                 .candidate_count,
             1

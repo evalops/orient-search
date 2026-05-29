@@ -1311,6 +1311,74 @@ fn fallback_search_boosts_exact_symbols() {
 }
 
 #[test]
+fn generated_bundle_assets_are_demoted_unless_requested() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/auth.ts"),
+        "export function issueToken() { return probeNeedle(); }\n",
+    );
+    write(
+        &repo
+            .path()
+            .join("webview/assets/chunk-OIYGIGL5-CJrBIAxA.js"),
+        "function minified(){return probeNeedle()}\n",
+    );
+
+    let filters = SearchFilters {
+        explain: true,
+        ..SearchFilters::default()
+    };
+    let fallback = search_repo_fast_filtered(repo.path(), "probeNeedle", 10, &filters).unwrap();
+    assert_eq!(fallback[0].path, "src/auth.ts");
+    let generated_fallback = fallback
+        .iter()
+        .find(|result| result.path == "webview/assets/chunk-OIYGIGL5-CJrBIAxA.js")
+        .expect("generated fallback hit");
+    assert!(
+        generated_fallback
+            .explanation
+            .as_ref()
+            .unwrap()
+            .iter()
+            .any(|signal| signal.kind == "generated_path_penalty")
+    );
+
+    let index = FastIndex::build(repo.path()).unwrap();
+    let indexed = index.search_filtered("probeNeedle", 10, &filters).unwrap();
+    assert_eq!(indexed[0].path, "src/auth.ts");
+    let generated_indexed = indexed
+        .iter()
+        .find(|result| result.path == "webview/assets/chunk-OIYGIGL5-CJrBIAxA.js")
+        .expect("generated indexed hit");
+    assert!(
+        generated_indexed
+            .explanation
+            .as_ref()
+            .unwrap()
+            .iter()
+            .any(|signal| signal.kind == "generated_path_penalty")
+    );
+
+    let generated_only = SearchFilters {
+        generated: Some(true),
+        ..SearchFilters::default()
+    };
+    let fallback_generated =
+        search_repo_fast_filtered(repo.path(), "probeNeedle", 10, &generated_only).unwrap();
+    assert_eq!(
+        result_paths(&fallback_generated),
+        vec!["webview/assets/chunk-OIYGIGL5-CJrBIAxA.js"]
+    );
+    let indexed_generated = index
+        .search_filtered("probeNeedle", 10, &generated_only)
+        .unwrap();
+    assert_eq!(
+        result_paths(&indexed_generated),
+        vec!["webview/assets/chunk-OIYGIGL5-CJrBIAxA.js"]
+    );
+}
+
+#[test]
 fn query_language_filters_fallback_and_indexed_search() {
     let repo = tempfile::tempdir().unwrap();
     write(
@@ -1332,6 +1400,14 @@ fn query_language_filters_fallback_and_indexed_search() {
     write(
         &repo.path().join("src/generated/session.generated.rs"),
         "pub struct SessionManagerGenerated;\npub fn issue_token_generated() {}\n",
+    );
+    write(
+        &repo.path().join("src/plain.js"),
+        "export const rareagentneedle = 'handwritten';\n",
+    );
+    write(
+        &repo.path().join("webview/assets/chunk-A1b2c3d4.js"),
+        "rareagentneedle rareagentneedle rareagentneedle rareagentneedle rareagentneedle rareagentneedle rareagentneedle rareagentneedle rareagentneedle rareagentneedle rareagentneedle rareagentneedle\n",
     );
     write(
         &repo.path().join("README.md"),
@@ -1524,6 +1600,33 @@ fn query_language_filters_fallback_and_indexed_search() {
     assert!(generated_plan.active_filters.iter().any(|filter| {
         filter.field == "generated" && filter.value == "true" && filter.candidate_matches == Some(1)
     }));
+
+    let fallback_generated_bundle_default =
+        search_repo_fast_filtered(repo.path(), "rareagentneedle", 2, &Default::default()).unwrap();
+    assert_eq!(fallback_generated_bundle_default[0].path, "src/plain.js");
+    let indexed_generated_bundle_default = indexed
+        .search_filtered("rareagentneedle", 2, &Default::default())
+        .unwrap();
+    assert_eq!(indexed_generated_bundle_default[0].path, "src/plain.js");
+
+    let fallback_generated_bundle_only = search_repo_fast_filtered(
+        repo.path(),
+        "is:generated rareagentneedle",
+        10,
+        &Default::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        result_paths(&fallback_generated_bundle_only),
+        vec!["webview/assets/chunk-A1b2c3d4.js"]
+    );
+    let indexed_generated_bundle_only = indexed
+        .search_filtered("is:generated rareagentneedle", 10, &Default::default())
+        .unwrap();
+    assert_eq!(
+        result_paths(&indexed_generated_bundle_only),
+        vec!["webview/assets/chunk-A1b2c3d4.js"]
+    );
 
     let fallback_without_generated_content = search_repo_fast_filtered(
         repo.path(),

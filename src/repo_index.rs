@@ -30,6 +30,7 @@ const DEFAULT_SYMBOL_READ_LINES: usize = 80;
 const RIPGREP_TIMEOUT: Duration = Duration::from_millis(250);
 const RIPGREP_POLL_INTERVAL: Duration = Duration::from_millis(5);
 const SYMBOL_REFERENCE_LOWERCASE_THRESHOLD: usize = 16;
+pub(crate) const GENERATED_PATH_SCORE_MULTIPLIER: f64 = 0.2;
 const GENERATED_DIRECTORY_SEGMENTS: &[&str] = &[
     "generated",
     "__generated__",
@@ -48,7 +49,8 @@ const GENERATED_FILE_STEM_SUFFIXES: &[&str] = &[
     "_gen",
     "-gen",
 ];
-const GENERATED_FILE_NAME_SUFFIXES: &[&str] = &[".pb.go", ".pb.rs", ".g.dart"];
+const GENERATED_FILE_NAME_SUFFIXES: &[&str] =
+    &[".pb.go", ".pb.rs", ".g.dart", ".min.js", ".bundle.js"];
 const GENERATED_FILE_GLOBS: &[&str] = &[
     "generated.*",
     "generated_*",
@@ -62,7 +64,16 @@ const GENERATED_FILE_GLOBS: &[&str] = &[
     "*.pb.go",
     "*.pb.rs",
     "*.g.dart",
+    "*.min.js",
+    "*.bundle.js",
+    "chunk-*.js",
+    "index-*.js",
+    "main-*.js",
+    "runtime-*.js",
+    "vendor-*.js",
+    "preload-helper-*.js",
 ];
+const GENERATED_BUNDLE_DIR_SEGMENTS: &[&str] = &["assets", "static"];
 const CODE_FILE_GLOBS: &[&str] = &[
     "**/*.py",
     "**/*.rs",
@@ -1556,6 +1567,7 @@ fn search_repo_ripgrep(
             true,
             filters.snippet,
             filters.explain,
+            filters.generated.is_none(),
         );
         match_count += 1;
         if match_count >= max_matches {
@@ -1706,6 +1718,7 @@ fn search_repo_streaming_until(
             true,
             filters.snippet,
             filters.explain,
+            filters.generated.is_none(),
         ) {
             results.push(result);
         }
@@ -1812,6 +1825,7 @@ fn merge_match_result(
     parse_symbols: bool,
     snippet_mode: SnippetMode,
     explain: bool,
+    demote_generated: bool,
 ) {
     let line_lower = line.to_lowercase();
     let query_name = query_tokens.join("");
@@ -1869,6 +1883,16 @@ fn merge_match_result(
 
     if score == 0.0 {
         return;
+    }
+    if demote_generated && is_generated_path(path_lower) {
+        score *= GENERATED_PATH_SCORE_MULTIPLIER;
+        if explain {
+            signals.push(rank_signal(
+                "generated_path_penalty",
+                path,
+                -1.0 + GENERATED_PATH_SCORE_MULTIPLIER,
+            ));
+        }
     }
 
     let snippet_line = line.trim_end();
@@ -3734,6 +3758,7 @@ fn score_text_file(
     parse_symbols: bool,
     snippet_mode: SnippetMode,
     explain: bool,
+    demote_generated: bool,
 ) -> Option<SearchResult> {
     let path_lower = path.to_lowercase();
     let text_lower = text.to_lowercase();
@@ -3788,6 +3813,16 @@ fn score_text_file(
 
     if score == 0.0 {
         return None;
+    }
+    if demote_generated && is_generated_path(&path_lower) {
+        score *= GENERATED_PATH_SCORE_MULTIPLIER;
+        if explain {
+            signals.push(rank_signal(
+                "generated_path_penalty",
+                path,
+                -1.0 + GENERATED_PATH_SCORE_MULTIPLIER,
+            ));
+        }
     }
 
     Some(SearchResult {
@@ -4318,14 +4353,18 @@ pub(crate) fn is_generated_path(path: &str) -> bool {
     };
 
     let mut file_name = path;
+    let mut in_bundle_dir = false;
     for part in path.split('/').filter(|part| !part.is_empty()) {
         if is_generated_directory_segment(part) {
             return true;
         }
+        if GENERATED_BUNDLE_DIR_SEGMENTS.contains(&part) {
+            in_bundle_dir = true;
+        }
         file_name = part;
     }
 
-    is_generated_file_name(file_name)
+    is_generated_file_name(file_name) || (in_bundle_dir && is_generated_bundle_asset(file_name))
 }
 
 fn is_generated_directory_segment(segment: &str) -> bool {
@@ -4347,6 +4386,35 @@ fn is_generated_file_name(file_name: &str) -> bool {
         || GENERATED_FILE_NAME_SUFFIXES
             .iter()
             .any(|suffix| file_name.ends_with(suffix))
+}
+
+fn is_generated_bundle_asset(file_name: &str) -> bool {
+    let Some(stem) = file_name.strip_suffix(".js") else {
+        return false;
+    };
+    let parts = stem.split('-').collect::<Vec<_>>();
+    if parts.len() < 2 {
+        return false;
+    };
+
+    for split_at in 1..parts.len() {
+        let hash_parts = &parts[split_at..];
+        if hash_parts.iter().all(|part| is_bundle_hash_segment(part))
+            && hash_parts
+                .iter()
+                .any(|part| part.bytes().any(|byte| byte.is_ascii_digit()))
+        {
+            return true;
+        }
+    }
+    false
+}
+
+fn is_bundle_hash_segment(value: &str) -> bool {
+    value.len() >= 6
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
 }
 
 pub(crate) fn is_entrypoint_path(path: &str) -> bool {
@@ -6187,6 +6255,8 @@ mod tests {
         assert!(globs.contains(&"!**/*.pb.go".to_string()));
         assert!(globs.contains(&"!**/*.g.dart".to_string()));
         assert!(globs.contains(&"!**/*_gen.*".to_string()));
+        assert!(globs.contains(&"!**/chunk-*.js".to_string()));
+        assert!(globs.contains(&"!**/preload-helper-*.js".to_string()));
         assert!(globs.iter().all(|glob| glob.starts_with("!**/")));
 
         let positive = generated_ripgrep_globs(&SearchFilters {
@@ -6196,6 +6266,7 @@ mod tests {
         assert!(positive.contains(&"**/generated/**".to_string()));
         assert!(positive.contains(&"**/*.pb.rs".to_string()));
         assert!(positive.contains(&"**/*.g.dart".to_string()));
+        assert!(positive.contains(&"**/chunk-*.js".to_string()));
         assert!(positive.iter().all(|glob| glob.starts_with("**/")));
         assert_eq!(
             generated_ripgrep_globs(&SearchFilters::default()),
@@ -6254,6 +6325,12 @@ mod tests {
             "src/models.g.dart",
             "src/generated_client.rs",
             "src/auth_gen.rs",
+            "webview/assets/chunk-OIYGIGL5-CJrBIAxA.js",
+            "webview/assets/react-BE0_fAZJ.js",
+            "webview/assets/preload-helper-Chd9yIcd.js",
+            "public/static/js/main-a1b2c3d4.js",
+            "src/vendor.min.js",
+            "src/client.bundle.js",
             r"Src\AUTO-GENERATED\Client.ts",
         ];
         for path in generated_paths {
@@ -6267,6 +6344,9 @@ mod tests {
             "src/auth.test.rs",
             "src/generation/auth.rs",
             "src/progenitor/client.rs",
+            "src/assets/chunk_loader.js",
+            "src/assets/date-helpers.js",
+            "src/static/react-wrapper.js",
         ];
         for path in handwritten_paths {
             assert!(!is_generated_path(path), "{path} should be handwritten");
