@@ -1,4 +1,4 @@
-# Memory And Footprint
+# Memory and Footprint
 
 Orient optimizes for local agent latency. Persisted indexes store source
 snapshots and line metadata so snippets and bounded reads do not need to reopen
@@ -20,7 +20,9 @@ That tradeoff is intentional: agents can inspect search hits quickly while a
 shared daemon amortizes load cost across local clients.
 
 Indexes contain source text. Treat them like local build artifacts for the
-repositories they represent.
+repositories they represent: keep them in local cache storage, out of source
+control, and away from shared locations unless the underlying source is allowed
+there too.
 
 ## Inspect It
 
@@ -67,8 +69,8 @@ Use `--family-limit 1` for a smaller representative shard set. Increase it when
 multiple active worktrees matter.
 
 Keep generated indexes outside the repo, such as under `/tmp` or another local
-cache directory. Do not commit them or sync them to locations where the source
-itself would not belong.
+cache directory. Public examples should use placeholders rather than
+machine-specific paths.
 
 Generated source and bundle files are still indexed so agents can inspect them
 when needed, but they are demoted in normal ranking. Use `generated:true` or

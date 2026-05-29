@@ -120,5 +120,6 @@ ORIENT_WIDE_SHARDS=0 bazel run //:ci_wide_perf
 
 - [Shared daemon guide](docs/shared-daemon.md)
 - [Memory and footprint](docs/memory-footprint.md)
+- [Agent adoption](docs/agent-adoption.md)
 - [Agent protocol](docs/agent-protocol.md)
 - [Fast search roadmap](docs/fast-search-roadmap.md)

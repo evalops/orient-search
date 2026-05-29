@@ -6,7 +6,7 @@ rescanning the same files. The daemon stays local and does not collect telemetry
 
 ## Start
 
-For several repos:
+For several repos, build or refresh a shard directory and serve it locally:
 
 ```bash
 orient ensure-shards \
@@ -19,7 +19,7 @@ orient serve-tcp \
   --index-dir /tmp/orient-shards
 ```
 
-For one repo:
+For one repo, use a single persisted index:
 
 ```bash
 orient ensure-index --repo /path/to/repo --index /tmp/orient.index
@@ -35,13 +35,14 @@ orient client-jsonl --socket /tmp/orient.sock
 
 ## Agent Setup
 
-Generate a local rule for the current daemon target:
+Generate a short local rule for the current daemon target:
 
 ```bash
 orient agent-instructions --index-dir /tmp/orient-shards
 ```
 
-The generated rule should keep agents on this loop:
+The generated rule should keep agents on this loop. See
+[Agent adoption](agent-adoption.md) for adapter examples.
 
 - Start with `daemon_status` or `agent_guide`.
 - Use `search_auto` for normal lookup and `search_auto_batch` for alternate
@@ -62,7 +63,7 @@ The generated rule should keep agents on this loop:
   use `generated:true` only when intentionally inspecting generated files.
 - Fall back to shell search only when Orient is unavailable or unhelpful.
 
-## Operations
+## Check And Refresh
 
 Check local readiness:
 
@@ -87,9 +88,13 @@ repos and refreshes existing shards without shrinking the shard set. Use
 `index-shards --force` only when intentionally replacing a shard directory.
 Keep shard directories in a local cache, not in source control.
 
-## Local Data
+## Local Data Boundary
 
 Shard directories contain source snapshots and line tables so reads can be
 served without reopening every file. Treat them like local build artifacts:
 place them in a cache directory, do not commit them, and do not copy them to
 shared storage unless the indexed source is allowed there too.
+
+Public docs and examples should use placeholders such as `/path/to/repo` and
+`/path/to/workspaces`. Keep machine-specific paths, user names, and private
+workspace layouts out of shared documentation.

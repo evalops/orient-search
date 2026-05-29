@@ -62,6 +62,12 @@ sh_test(
     data = [":orient"],
 )
 
+sh_test(
+    name = "docs_hygiene",
+    srcs = ["tools/ci/docs_hygiene.sh"],
+    data = glob(["docs/*.md"]) + ["README.md"],
+)
+
 sh_binary(
     name = "ci_fmt",
     srcs = ["tools/ci/cargo_fmt.sh"],
