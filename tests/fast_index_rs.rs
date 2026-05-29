@@ -237,17 +237,25 @@ fn saved_indexes_have_versioned_header_and_legacy_indexes_still_load() {
     assert_eq!(loaded.version, index.version);
     assert_eq!(loaded.files[0].file_name_lower, "auth.rs");
     assert_eq!(loaded.files[0].extension_lower.as_deref(), Some("rs"));
+    assert_eq!(loaded.files[0].symbols[0].name_lower, "sessionmanager");
     assert_eq!(
         loaded.search("SessionManager", 10).unwrap()[0].path,
         "src/auth.rs"
     );
 
     let legacy_path = repo.path().join(".orient/legacy.index");
-    fs::write(&legacy_path, bincode::serialize(&index).unwrap()).unwrap();
+    let mut legacy_raw_index = index.clone();
+    for file in &mut legacy_raw_index.files {
+        for symbol in &mut file.symbols {
+            symbol.name_lower.clear();
+        }
+    }
+    fs::write(&legacy_path, bincode::serialize(&legacy_raw_index).unwrap()).unwrap();
     let legacy = FastIndex::load(&legacy_path).unwrap();
     assert_eq!(legacy.version, index.version);
     assert_eq!(legacy.files[0].file_name_lower, "auth.rs");
     assert_eq!(legacy.files[0].extension_lower.as_deref(), Some("rs"));
+    assert_eq!(legacy.files[0].symbols[0].name_lower, "sessionmanager");
     assert_eq!(
         legacy.search("issue token", 10).unwrap()[0].path,
         "src/auth.rs"

@@ -105,6 +105,8 @@ pub struct IndexedPath {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IndexedSymbol {
     pub name: String,
+    #[serde(skip)]
+    pub name_lower: String,
     pub kind: String,
     pub line: usize,
     pub normalized: String,
@@ -882,7 +884,7 @@ impl FastIndex {
         let source_symbols = source_file
             .symbols
             .iter()
-            .map(|symbol| (symbol.name.clone(), symbol.name.to_ascii_lowercase()))
+            .map(|symbol| (symbol.name.clone(), symbol.name_lower.clone()))
             .collect::<Vec<_>>();
         let mut related = Vec::new();
         let path_filters = PathFilterMatcher::from_filters(filters);
@@ -1089,17 +1091,16 @@ impl FastIndex {
                             score += 4.0;
                             reasons.push("same directory".to_string());
                         }
-                        let symbol_path_lower = symbol.path.to_ascii_lowercase();
-                        let symbol_name_lower = symbol.name.to_ascii_lowercase();
                         if !path_stem.is_empty()
-                            && (symbol_name_lower.contains(&path_stem)
-                                || symbol_path_lower.contains(&path_stem))
+                            && (indexed_symbol.name_lower.contains(&path_stem)
+                                || file.path_lower.contains(&path_stem))
                         {
                             score += 3.0;
                             reasons.push(format!("shares stem {path_stem}"));
                         }
                         if path_stem_terms.iter().any(|term| {
-                            symbol_name_lower.contains(term) || symbol_path_lower.contains(term)
+                            indexed_symbol.name_lower.contains(term)
+                                || file.path_lower.contains(term)
                         }) {
                             score += 3.0;
                             reasons.push("shares normalized stem".to_string());
@@ -3772,6 +3773,7 @@ fn index_file(
         .map(|symbol| IndexedSymbol {
             normalized: normalize_token(&symbol.name),
             tokens: tokenize(&symbol.name),
+            name_lower: symbol.name.to_ascii_lowercase(),
             name: symbol.name,
             kind: symbol.kind,
             line: symbol.line,
@@ -3823,6 +3825,11 @@ fn refresh_indexed_path_metadata(file: &mut IndexedPath) {
     file.path_lower = file.path.to_ascii_lowercase();
     file.file_name_lower = indexed_file_name_lower(&file.path);
     file.extension_lower = indexed_extension_lower(&file.path);
+    for symbol in &mut file.symbols {
+        if symbol.name_lower.is_empty() {
+            symbol.name_lower = symbol.name.to_ascii_lowercase();
+        }
+    }
 }
 
 fn indexed_file_name_lower(path: &str) -> String {
