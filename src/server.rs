@@ -18,9 +18,9 @@ use crate::shards::{
     ShardEntry, ShardManifest, ShardQueryPlan, ShardRepoMap, ShardSearchScope,
     append_shard_facet_repair_hints, build_shards_with_force, ensure_shards,
     filter_repo_map_by_prefix, filters_for_shard_scope, load_manifest, refresh_shards,
-    related_query_without_shard_selectors, resolve_shard_path_from_manifest, shard_search_scopes,
-    shard_selection_miss_plan, shard_sketch_may_diagnose_query, shard_sketch_may_match_query,
-    shard_status,
+    related_query_without_shard_selectors, resolve_shard_path_from_manifest,
+    shard_prefilter_query_impossible, shard_search_scopes, shard_selection_miss_plan,
+    shard_sketch_may_diagnose_query, shard_sketch_may_match_query, shard_status,
 };
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use anyhow::{Context, Result, anyhow};
@@ -4296,10 +4296,13 @@ impl ToolRuntime {
         filters: &SearchFilters,
         context_lines: usize,
     ) -> Result<Vec<SearchResult>> {
-        let manifest = self.cached_shard_manifest(index_dir)?;
         let parsed = parse_query(query);
         let filters = merge_filters(filters.clone(), parsed.filters);
         let shard_query = query_text(&parsed.terms, &filters);
+        if shard_prefilter_query_impossible(index_dir, &shard_query, &filters)? {
+            return Ok(Vec::new());
+        }
+        let manifest = self.cached_shard_manifest(index_dir)?;
         let jobs = manifest
             .shards
             .iter()

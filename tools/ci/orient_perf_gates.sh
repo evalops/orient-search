@@ -67,6 +67,15 @@ target/release/orient ensure-shards \
   --output-dir "${shard_dir}"
 target/release/orient bench-shards \
   --index-dir "${shard_dir}" \
+  --cold \
+  --runs 5 \
+  --warmup 1 \
+  --limit 10 \
+  --fail-p95-ms 100 \
+  "globally_absent_orient_prefilter_probe_xyz"
+
+target/release/orient bench-shards \
+  --index-dir "${shard_dir}" \
   --cached \
   --runs 5 \
   --warmup 1 \

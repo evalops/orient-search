@@ -5592,6 +5592,35 @@ fn runtime_serves_parallel_warm_shard_searches() {
 }
 
 #[test]
+fn runtime_shard_search_uses_global_prefilter_before_manifest_cache() {
+    let workspace = tempfile::tempdir().unwrap();
+    let repo = workspace.path().join("service");
+    write(
+        &repo.join("src/lib.rs"),
+        "pub fn present_runtime_prefilter_symbol() -> bool { true }\n",
+    );
+
+    let shard_dir = tempfile::tempdir().unwrap();
+    build_shards(&[repo], shard_dir.path()).unwrap();
+
+    let runtime = ToolRuntime::default();
+    let response = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("search"),
+        tool: "search_shards".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": shard_dir.path(),
+            "query": "globally_absent_runtime_prefilter_probe_xyz",
+            "limit": 10
+        }),
+    });
+    assert!(response.error.is_none(), "{:?}", response.error);
+    let results = response.result.unwrap();
+    assert_eq!(results.as_array().unwrap().len(), 0);
+    assert_eq!(runtime.cached_shard_manifest_count(), 0);
+    assert_eq!(runtime.cached_index_count(), 0);
+}
+
+#[test]
 fn runtime_shard_search_uses_manifest_sketch_before_cold_load() {
     let workspace = tempfile::tempdir().unwrap();
     let hit_repo = workspace.path().join("hit-service");

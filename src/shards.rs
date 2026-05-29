@@ -2040,7 +2040,7 @@ pub(crate) fn load_manifest(index_dir: &Path) -> Result<ShardManifest> {
     Ok(manifest)
 }
 
-fn shard_prefilter_query_impossible(
+pub(crate) fn shard_prefilter_query_impossible(
     index_dir: &Path,
     shard_query: &str,
     filters: &SearchFilters,
