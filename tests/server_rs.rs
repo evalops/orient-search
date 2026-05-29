@@ -642,6 +642,14 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         "string"
     );
     assert_eq!(
+        related_files["input_schema"]["properties"]["include_read_batch"]["type"],
+        "boolean"
+    );
+    assert_eq!(
+        related_files["input_schema"]["properties"]["include_read_batch"]["default"],
+        false
+    );
+    assert_eq!(
         related_files["input_schema"]["properties"]["path"]["description"],
         "Result path for the selected target; use repo/index-relative paths for repo or index targets, and shard-prefixed or unique shard-relative paths for index_dir targets."
     );
@@ -661,6 +669,14 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
     assert_eq!(
         related_symbols["input_schema"]["properties"]["cwd"]["type"],
         "string"
+    );
+    assert_eq!(
+        related_symbols["input_schema"]["properties"]["include_read_batch"]["type"],
+        "boolean"
+    );
+    assert_eq!(
+        related_symbols["input_schema"]["properties"]["include_read_batch"]["default"],
+        false
     );
     assert_eq!(
         related_symbols["input_schema"]["properties"]["exclude_content"]["oneOf"][1]["items"]["type"],
@@ -2608,6 +2624,47 @@ fn runtime_related_alias_accepts_live_index_and_shard_targets() {
     );
     assert_eq!(live[0]["read_request"]["tool"], "read_range");
 
+    let live_batch = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("live-related-batch"),
+        tool: "related_files".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "path": "src/auth.rs",
+            "limit": 5,
+            "include_read_batch": true
+        }),
+    });
+    assert!(live_batch.error.is_none(), "{:?}", live_batch.error);
+    let live_batch = live_batch.result.unwrap();
+    assert!(
+        live_batch["results"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|file| file["path"] == "tests/auth_test.rs"),
+        "{live_batch:?}"
+    );
+    assert_eq!(
+        live_batch["read_batch_request"]["tool"],
+        serde_json::json!("read_ranges")
+    );
+    assert_eq!(
+        live_batch["read_batch_request"]["arguments"]["repo"],
+        serde_json::json!(repo.path())
+    );
+    assert!(
+        live_batch["read_batch_request"]["arguments"]["ranges"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|range| range["path"] == "tests/auth_test.rs"),
+        "{live_batch:?}"
+    );
+    assert_eq!(
+        live_batch["next_action"]["request"],
+        live_batch["read_batch_request"]
+    );
+
     let indexed = runtime.dispatch(ToolRequest {
         id: serde_json::json!("indexed-related"),
         tool: "related_files".to_string(),
@@ -2663,6 +2720,44 @@ fn runtime_related_alias_accepts_live_index_and_shard_targets() {
         serde_json::json!(index_path)
     );
     assert_eq!(indexed_symbols[0]["read_request"]["tool"], "read_range");
+
+    let indexed_symbol_batch = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("indexed-related-symbols-batch"),
+        tool: "related_symbols".to_string(),
+        arguments: serde_json::json!({
+            "index": repo.path().join(".orient/index"),
+            "path": "src/auth.rs",
+            "query": "SessionManager",
+            "limit": 5,
+            "include_read_batch": true
+        }),
+    });
+    assert!(
+        indexed_symbol_batch.error.is_none(),
+        "{:?}",
+        indexed_symbol_batch.error
+    );
+    let indexed_symbol_batch = indexed_symbol_batch.result.unwrap();
+    assert!(
+        indexed_symbol_batch["results"].as_array().unwrap().len() >= 1,
+        "{indexed_symbol_batch:?}"
+    );
+    assert_eq!(
+        indexed_symbol_batch["read_batch_request"]["tool"],
+        serde_json::json!("read_ranges")
+    );
+    assert_eq!(
+        indexed_symbol_batch["read_batch_request"]["arguments"]["index"],
+        serde_json::json!(index_path)
+    );
+    assert_eq!(
+        indexed_symbol_batch["next_action"]["source"],
+        serde_json::json!("read_batch_request")
+    );
+    assert_eq!(
+        indexed_symbol_batch["next_action"]["request"],
+        indexed_symbol_batch["read_batch_request"]
+    );
 
     let missing_shard_path = runtime.dispatch(ToolRequest {
         id: serde_json::json!("missing-shard-path"),

@@ -1563,8 +1563,8 @@ fn argument_schema(tool_name: &str, name: &str) -> Value {
             schema.insert("items".to_string(), json!({"type": "string"}));
         }
         "test" | "generated" | "code" | "explain" | "require_all" | "any_terms" | "details"
-        | "refresh_if_stale" | "diagnose" | "retry_if_empty" | "git_metadata" | "tracked_files"
-        | "nested_manifests" | "force" => {
+        | "refresh_if_stale" | "diagnose" | "retry_if_empty" | "include_read_batch"
+        | "git_metadata" | "tracked_files" | "nested_manifests" | "force" => {
             schema.insert("type".to_string(), json!("boolean"));
         }
         "limit" | "max_depth" | "discover_limit" | "family_limit" | "symbols" | "start"
@@ -1671,8 +1671,9 @@ fn argument_type(name: &str) -> &'static str {
     match name {
         "limit" | "max_depth" | "discover_limit" | "family_limit" | "symbols" | "start"
         | "lines" | "tests" | "context_lines" | "read_limit" | "line" | "target_line" => "integer",
-        "test" | "generated" | "code" | "explain" | "require_all" | "any_terms"
-        | "refresh_if_stale" | "git_metadata" | "tracked_files" | "nested_manifests" => "boolean",
+        "test" | "generated" | "code" | "explain" | "require_all" | "any_terms" | "details"
+        | "refresh_if_stale" | "include_read_batch" | "git_metadata" | "tracked_files"
+        | "nested_manifests" => "boolean",
         name if string_list_argument(name) => "string|string[]",
         "ranges" => "range|string|range[]",
         "repos" | "discover_roots" | "queries" => "string[]",
@@ -1735,8 +1736,9 @@ fn argument_default(tool_name: &str, name: &str) -> Option<Value> {
         ("agent_guide" | "agent_instructions", "addr") => Some(json!("127.0.0.1:8796")),
         (
             _,
-            "explain" | "require_all" | "any_terms" | "refresh_if_stale" | "diagnose"
-            | "retry_if_empty" | "git_metadata" | "tracked_files" | "nested_manifests" | "force",
+            "explain" | "require_all" | "any_terms" | "details" | "refresh_if_stale" | "diagnose"
+            | "retry_if_empty" | "include_read_batch" | "git_metadata" | "tracked_files"
+            | "nested_manifests" | "force",
         ) => Some(json!(false)),
         _ => None,
     }
@@ -1891,6 +1893,9 @@ fn argument_description(tool_name: &str, name: &str) -> &'static str {
         }
         "retry_if_empty" => {
             "When true, search_auto runs the primary_retry_request once after an empty result and returns primary_retry_result."
+        }
+        "include_read_batch" => {
+            "When true, related tools return {results, read_batch_request, next_action} instead of a bare result array."
         }
         "force" => {
             "When true for index_shards, replace an existing shard directory even if the rebuild would remove existing shards."
@@ -2396,6 +2401,33 @@ fn primary_retry_read_batch_request(
 ) -> Option<ResultToolRequest> {
     let base_arguments = retry_read_base_arguments(request)?;
     result_value_read_batch_request(result, "read_ranges", base_arguments)
+}
+
+fn related_lookup_response<T: Serialize>(
+    results: Vec<T>,
+    include_read_batch: bool,
+    batch_tool: &str,
+    base_arguments: Map<String, Value>,
+    summary: &str,
+) -> Result<Value> {
+    let results = serde_json::to_value(results)?;
+    if !include_read_batch {
+        return Ok(results);
+    }
+    let read_batch_request = result_value_read_batch_request(&results, batch_tool, base_arguments);
+    let next_action = read_batch_request.as_ref().map(|request| {
+        json!({
+            "kind": "read",
+            "source": "read_batch_request",
+            "summary": summary,
+            "request": request
+        })
+    });
+    Ok(json!({
+        "results": results,
+        "read_batch_request": read_batch_request,
+        "next_action": next_action
+    }))
 }
 
 fn promoted_next_read_batch_request(
@@ -4627,6 +4659,7 @@ impl ToolRuntime {
             "related_files" => {
                 let path = string_arg(&request.arguments, "path")?;
                 let limit = positive_usize_arg(&request.arguments, "limit", 10)?;
+                let include_read_batch = bool_arg(&request.arguments, "include_read_batch");
                 if request.arguments.get("index").is_some()
                     && request.arguments.get("index_dir").is_some()
                 {
@@ -4640,11 +4673,16 @@ impl ToolRuntime {
                     let filters = related_file_filters(&request.arguments, true)?;
                     let related =
                         self.related_shard_files_cached(&index_dir, &path, limit, &filters)?;
-                    return Ok(serde_json::to_value(related_file_lookup_results(
-                        related,
-                        "read_range",
-                        read_request_args("index_dir", &index_dir),
-                    ))?);
+                    let base_args = read_request_args("index_dir", &index_dir);
+                    let results =
+                        related_file_lookup_results(related, "read_range", base_args.clone());
+                    return related_lookup_response(
+                        results,
+                        include_read_batch,
+                        "read_ranges",
+                        base_args,
+                        "Read the related files in one bounded batch.",
+                    );
                 }
                 if let Some(index_path) =
                     optional_string_arg(&request.arguments, "index").map(PathBuf::from)
@@ -4652,11 +4690,16 @@ impl ToolRuntime {
                     let filters = related_file_filters(&request.arguments, true)?;
                     let index = self.cached_index(index_path.clone())?;
                     let related = index.related_files_filtered(&path, limit, &filters);
-                    return Ok(serde_json::to_value(related_file_lookup_results(
-                        related,
-                        "read_range",
-                        read_request_args("index", &index_path),
-                    ))?);
+                    let base_args = read_request_args("index", &index_path);
+                    let results =
+                        related_file_lookup_results(related, "read_range", base_args.clone());
+                    return related_lookup_response(
+                        results,
+                        include_read_batch,
+                        "read_ranges",
+                        base_args,
+                        "Read the related files in one bounded batch.",
+                    );
                 }
                 if optional_string_arg(&request.arguments, "cwd").is_some() {
                     if let Ok(index_dir) = self.single_cached_shard_manifest_path() {
@@ -4673,11 +4716,19 @@ impl ToolRuntime {
                                 limit,
                                 &filters,
                             )?;
-                            return Ok(serde_json::to_value(related_file_lookup_results(
+                            let base_args = read_request_args("index_dir", &index_dir);
+                            let results = related_file_lookup_results(
                                 related,
                                 "read_range",
-                                read_request_args("index_dir", &index_dir),
-                            ))?);
+                                base_args.clone(),
+                            );
+                            return related_lookup_response(
+                                results,
+                                include_read_batch,
+                                "read_ranges",
+                                base_args,
+                                "Read the related files in one bounded batch.",
+                            );
                         }
                     }
                     if let Ok(index_path) = self.single_cached_index_path() {
@@ -4685,11 +4736,19 @@ impl ToolRuntime {
                         if index_matches_client_cwd(&index, &request.arguments)? {
                             let filters = related_file_filters(&request.arguments, true)?;
                             let related = index.related_files_filtered(&path, limit, &filters);
-                            return Ok(serde_json::to_value(related_file_lookup_results(
+                            let base_args = read_request_args("index", &index_path);
+                            let results = related_file_lookup_results(
                                 related,
                                 "read_range",
-                                read_request_args("index", &index_path),
-                            ))?);
+                                base_args.clone(),
+                            );
+                            return related_lookup_response(
+                                results,
+                                include_read_batch,
+                                "read_ranges",
+                                base_args,
+                                "Read the related files in one bounded batch.",
+                            );
                         }
                     }
                 }
@@ -4702,42 +4761,59 @@ impl ToolRuntime {
                 let filters = related_file_filters(&request.arguments, false)?;
                 let index = RepoIndexer::new(&repo).build()?;
                 let related = index.related_files_filtered(&path, limit, &filters);
-                Ok(serde_json::to_value(related_file_lookup_results(
-                    related,
-                    "read_range",
-                    read_request_args("repo", &repo),
-                ))?)
+                let base_args = read_request_args("repo", &repo);
+                let results = related_file_lookup_results(related, "read_range", base_args.clone());
+                related_lookup_response(
+                    results,
+                    include_read_batch,
+                    "read_ranges",
+                    base_args,
+                    "Read the related files in one bounded batch.",
+                )
             }
             "related_index_files" => {
                 let index_path = self.index_path_arg_or_single_cached(&request.arguments)?;
                 let path = string_arg(&request.arguments, "path")?;
                 let limit = positive_usize_arg(&request.arguments, "limit", 10)?;
+                let include_read_batch = bool_arg(&request.arguments, "include_read_batch");
                 let filters = related_file_filters(&request.arguments, true)?;
                 let index = self.cached_index(index_path.clone())?;
                 let related = index.related_files_filtered(&path, limit, &filters);
-                Ok(serde_json::to_value(related_file_lookup_results(
-                    related,
-                    "read_index_range",
-                    read_request_args("index", &index_path),
-                ))?)
+                let base_args = read_request_args("index", &index_path);
+                let results =
+                    related_file_lookup_results(related, "read_index_range", base_args.clone());
+                related_lookup_response(
+                    results,
+                    include_read_batch,
+                    "read_index_ranges",
+                    base_args,
+                    "Read the related files in one bounded batch.",
+                )
             }
             "related_shard_files" => {
                 let index_dir = self.shard_dir_arg_or_single_cached(&request.arguments)?;
                 let path = string_arg(&request.arguments, "path")?;
                 let limit = positive_usize_arg(&request.arguments, "limit", 10)?;
+                let include_read_batch = bool_arg(&request.arguments, "include_read_batch");
                 let filters = related_file_filters(&request.arguments, true)?;
                 let related =
                     self.related_shard_files_cached(&index_dir, &path, limit, &filters)?;
-                Ok(serde_json::to_value(related_file_lookup_results(
-                    related,
-                    "read_shard_range",
-                    read_request_args("index_dir", &index_dir),
-                ))?)
+                let base_args = read_request_args("index_dir", &index_dir);
+                let results =
+                    related_file_lookup_results(related, "read_shard_range", base_args.clone());
+                related_lookup_response(
+                    results,
+                    include_read_batch,
+                    "read_shard_ranges",
+                    base_args,
+                    "Read the related files in one bounded batch.",
+                )
             }
             "related_symbols" => {
                 let path = optional_string_arg(&request.arguments, "path");
                 let query = optional_string_arg(&request.arguments, "query");
                 let limit = positive_usize_arg(&request.arguments, "limit", 10)?;
+                let include_read_batch = bool_arg(&request.arguments, "include_read_batch");
                 if request.arguments.get("index").is_some()
                     && request.arguments.get("index_dir").is_some()
                 {
@@ -4759,11 +4835,16 @@ impl ToolRuntime {
                         limit,
                         &filters,
                     )?;
-                    return Ok(serde_json::to_value(related_symbol_lookup_results(
-                        related,
-                        "read_range",
-                        read_request_args("index_dir", &index_dir),
-                    ))?);
+                    let base_args = read_request_args("index_dir", &index_dir);
+                    let results =
+                        related_symbol_lookup_results(related, "read_range", base_args.clone());
+                    return related_lookup_response(
+                        results,
+                        include_read_batch,
+                        "read_ranges",
+                        base_args,
+                        "Read the related symbol definitions in one bounded batch.",
+                    );
                 }
                 if let Some(index_path) =
                     optional_string_arg(&request.arguments, "index").map(PathBuf::from)
@@ -4776,11 +4857,16 @@ impl ToolRuntime {
                         limit,
                         &filters,
                     );
-                    return Ok(serde_json::to_value(related_symbol_lookup_results(
-                        related,
-                        "read_range",
-                        read_request_args("index", &index_path),
-                    ))?);
+                    let base_args = read_request_args("index", &index_path);
+                    let results =
+                        related_symbol_lookup_results(related, "read_range", base_args.clone());
+                    return related_lookup_response(
+                        results,
+                        include_read_batch,
+                        "read_ranges",
+                        base_args,
+                        "Read the related symbol definitions in one bounded batch.",
+                    );
                 }
                 if optional_string_arg(&request.arguments, "cwd").is_some() {
                     if let Ok(index_dir) = self.single_cached_shard_manifest_path() {
@@ -4794,11 +4880,19 @@ impl ToolRuntime {
                             &filters,
                             "related_symbols",
                         )? {
-                            return Ok(serde_json::to_value(related_symbol_lookup_results(
+                            let base_args = read_request_args("index_dir", &index_dir);
+                            let results = related_symbol_lookup_results(
                                 related,
                                 "read_range",
-                                read_request_args("index_dir", &index_dir),
-                            ))?);
+                                base_args.clone(),
+                            );
+                            return related_lookup_response(
+                                results,
+                                include_read_batch,
+                                "read_ranges",
+                                base_args,
+                                "Read the related symbol definitions in one bounded batch.",
+                            );
                         }
                     }
                     if let Ok(index_path) = self.single_cached_index_path() {
@@ -4811,11 +4905,19 @@ impl ToolRuntime {
                                 limit,
                                 &filters,
                             );
-                            return Ok(serde_json::to_value(related_symbol_lookup_results(
+                            let base_args = read_request_args("index", &index_path);
+                            let results = related_symbol_lookup_results(
                                 related,
                                 "read_range",
-                                read_request_args("index", &index_path),
-                            ))?);
+                                base_args.clone(),
+                            );
+                            return related_lookup_response(
+                                results,
+                                include_read_batch,
+                                "read_ranges",
+                                base_args,
+                                "Read the related symbol definitions in one bounded batch.",
+                            );
                         }
                     }
                 }
@@ -4833,17 +4935,23 @@ impl ToolRuntime {
                     limit,
                     &filters,
                 );
-                Ok(serde_json::to_value(related_symbol_lookup_results(
-                    related,
-                    "read_range",
-                    read_request_args("repo", &repo),
-                ))?)
+                let base_args = read_request_args("repo", &repo);
+                let results =
+                    related_symbol_lookup_results(related, "read_range", base_args.clone());
+                related_lookup_response(
+                    results,
+                    include_read_batch,
+                    "read_ranges",
+                    base_args,
+                    "Read the related symbol definitions in one bounded batch.",
+                )
             }
             "related_shard_symbols" => {
                 let index_dir = self.shard_dir_arg_or_single_cached(&request.arguments)?;
                 let path = string_arg(&request.arguments, "path")?;
                 let query = optional_string_arg(&request.arguments, "query");
                 let limit = positive_usize_arg(&request.arguments, "limit", 10)?;
+                let include_read_batch = bool_arg(&request.arguments, "include_read_batch");
                 let filters = related_symbol_filters(&request.arguments, true)?;
                 let related = self.related_shard_symbols_cached(
                     &index_dir,
@@ -4852,17 +4960,23 @@ impl ToolRuntime {
                     limit,
                     &filters,
                 )?;
-                Ok(serde_json::to_value(related_symbol_lookup_results(
-                    related,
-                    "read_shard_range",
-                    read_request_args("index_dir", &index_dir),
-                ))?)
+                let base_args = read_request_args("index_dir", &index_dir);
+                let results =
+                    related_symbol_lookup_results(related, "read_shard_range", base_args.clone());
+                related_lookup_response(
+                    results,
+                    include_read_batch,
+                    "read_shard_ranges",
+                    base_args,
+                    "Read the related symbol definitions in one bounded batch.",
+                )
             }
             "related_index_symbols" => {
                 let index_path = self.index_path_arg_or_single_cached(&request.arguments)?;
                 let path = optional_string_arg(&request.arguments, "path");
                 let query = optional_string_arg(&request.arguments, "query");
                 let limit = positive_usize_arg(&request.arguments, "limit", 10)?;
+                let include_read_batch = bool_arg(&request.arguments, "include_read_batch");
                 let filters = related_symbol_filters(&request.arguments, true)?;
                 let index = self.cached_index(index_path.clone())?;
                 let related = index.related_symbols_filtered(
@@ -4871,11 +4985,16 @@ impl ToolRuntime {
                     limit,
                     &filters,
                 );
-                Ok(serde_json::to_value(related_symbol_lookup_results(
-                    related,
-                    "read_index_range",
-                    read_request_args("index", &index_path),
-                ))?)
+                let base_args = read_request_args("index", &index_path);
+                let results =
+                    related_symbol_lookup_results(related, "read_index_range", base_args.clone());
+                related_lookup_response(
+                    results,
+                    include_read_batch,
+                    "read_index_ranges",
+                    base_args,
+                    "Read the related symbol definitions in one bounded batch.",
+                )
             }
             "warm_index" => {
                 let index_path = path_arg(&request.arguments, "index")?;
@@ -7014,6 +7133,7 @@ const RELATED_FILES_TARGET_OPTIONAL_ARGS: &[&str] = &[
     "index_dir",
     "cwd",
     "limit",
+    "include_read_batch",
     "language",
     "lang",
     "extension",
@@ -7068,6 +7188,7 @@ const RELATED_FILES_TARGET_OPTIONAL_ARGS: &[&str] = &[
 
 const RELATED_INDEX_FILES_OPTIONAL_ARGS: &[&str] = &[
     "limit",
+    "include_read_batch",
     "language",
     "lang",
     "extension",
@@ -7131,6 +7252,7 @@ const RELATED_SYMBOLS_TARGET_OPTIONAL_ARGS: &[&str] = &[
     "path",
     "query",
     "limit",
+    "include_read_batch",
     "language",
     "lang",
     "extension",
@@ -7187,6 +7309,7 @@ const RELATED_INDEX_SYMBOLS_OPTIONAL_ARGS: &[&str] = &[
     "path",
     "query",
     "limit",
+    "include_read_batch",
     "language",
     "lang",
     "extension",
@@ -7243,6 +7366,7 @@ const RELATED_INDEX_SYMBOLS_OPTIONAL_ARGS: &[&str] = &[
 const RELATED_SHARD_SYMBOLS_OPTIONAL_ARGS: &[&str] = &[
     "query",
     "limit",
+    "include_read_batch",
     "language",
     "lang",
     "extension",

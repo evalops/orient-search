@@ -118,6 +118,9 @@ JSON-lines requests look like this:
 
 Every search result includes ready-to-send read, related-file, related-symbol,
 and query-plan follow-ups with `jsonl`, `client_cli`, and compact CLI hints.
+Protocol related-file and related-symbol calls can also set
+`include_read_batch:true` to get one batch read follow-up for all returned
+context.
 `search_auto` and `search_auto_batch` also expose `next_read_batch_request`,
 which points to the best immediate batch read after normal results or an
 automatic retry. Their `next_action` field wraps the best immediate follow-up
