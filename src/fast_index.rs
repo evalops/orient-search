@@ -50,6 +50,8 @@ pub struct FastIndex {
     pub postings: HashMap<String, Vec<Posting>>,
     pub path_postings: HashMap<String, Vec<Posting>>,
     pub trigram_postings: HashMap<String, Vec<Posting>>,
+    #[serde(skip)]
+    path_trigram_postings: HashMap<String, Vec<Posting>>,
     #[serde(default)]
     pub symbol_postings: HashMap<String, Vec<Posting>>,
     #[serde(default)]
@@ -346,6 +348,7 @@ impl FastIndex {
         let postings = rebuild_postings(&files, |file| &file.terms);
         let path_postings = rebuild_postings(&files, |file| &file.path_terms);
         let trigram_postings = rebuild_postings(&files, |file| &file.trigrams);
+        let path_trigram_postings = rebuild_path_trigram_postings(&files);
         let symbol_postings = rebuild_symbol_postings(&files);
         let symbol_kind_postings = rebuild_symbol_kind_postings(&files);
         let attribute_postings = rebuild_attribute_postings(&files);
@@ -357,6 +360,7 @@ impl FastIndex {
             postings,
             path_postings,
             trigram_postings,
+            path_trigram_postings,
             symbol_postings,
             symbol_kind_postings,
             attribute_postings,
@@ -478,6 +482,7 @@ impl FastIndex {
         } else {
             normalize_posting_map(&mut self.attribute_postings);
         }
+        self.path_trigram_postings = rebuild_path_trigram_postings(&self.files);
         self.path_ids = rebuild_path_ids(&self.files);
     }
 
@@ -1237,6 +1242,11 @@ impl FastIndex {
         let symbol_kind_postings =
             symbol_kind_postings_for_filters(&self.symbol_kind_postings, &filters);
         let attribute_postings = attribute_postings_for_filters(&self.attribute_postings, &filters);
+        let path_filter_postings =
+            path_filter_trigram_postings_for_filters(&self.path_trigram_postings, &filters);
+        if path_filter_postings.is_impossible() {
+            return Ok(Vec::new());
+        }
         if limit == 0 {
             return Ok(Vec::new());
         }
@@ -1247,6 +1257,7 @@ impl FastIndex {
                     &filters,
                     &symbol_kind_postings,
                     &attribute_postings,
+                    &path_filter_postings,
                 ))
             } else {
                 Ok(Vec::new())
@@ -1375,6 +1386,8 @@ impl FastIndex {
         let candidate_ids =
             intersect_symbol_kind_postings(candidate_ids, &symbol_kind_postings, &filters);
         let candidate_ids = intersect_attribute_postings(candidate_ids, &attribute_postings);
+        let candidate_ids =
+            intersect_path_filter_trigram_postings(candidate_ids, &path_filter_postings);
         let candidate_ids = filter_symbol_kind_trigram_candidates(
             candidate_ids,
             &self.files,
@@ -1494,6 +1507,11 @@ impl FastIndex {
         }
         let attribute_postings = attribute_postings_for_filters(&self.attribute_postings, &filters);
         if attribute_postings.is_impossible() {
+            return false;
+        }
+        let path_filter_postings =
+            path_filter_trigram_postings_for_filters(&self.path_trigram_postings, &filters);
+        if path_filter_postings.is_impossible() {
             return false;
         }
         if query_tokens.is_empty() && query_trigrams.is_empty() {
@@ -1616,6 +1634,8 @@ impl FastIndex {
         let candidate_ids =
             intersect_symbol_kind_postings(candidate_ids, &symbol_kind_postings, &filters);
         let candidate_ids = intersect_attribute_postings(candidate_ids, &attribute_postings);
+        let candidate_ids =
+            intersect_path_filter_trigram_postings(candidate_ids, &path_filter_postings);
         let candidate_ids = filter_symbol_kind_trigram_candidates(
             candidate_ids,
             &self.files,
@@ -1683,6 +1703,8 @@ impl FastIndex {
         let symbol_kind_postings =
             symbol_kind_postings_for_filters(&self.symbol_kind_postings, &filters);
         let attribute_postings = attribute_postings_for_filters(&self.attribute_postings, &filters);
+        let path_filter_postings =
+            path_filter_trigram_postings_for_filters(&self.path_trigram_postings, &filters);
         if query_tokens.len() > 1 && !filters.match_any {
             filters.require_all = true;
         }
@@ -1692,8 +1714,12 @@ impl FastIndex {
             planned_symbol_query_name(&parsed.terms, &filters, parsed.explicit_content_terms);
         if query_tokens.is_empty() && query_trigrams.is_empty() {
             if filter_only_query(&filters) {
-                let candidate_ids =
-                    filter_only_candidate_ids(&symbol_kind_postings, &attribute_postings, &filters);
+                let candidate_ids = filter_only_candidate_ids(
+                    &symbol_kind_postings,
+                    &attribute_postings,
+                    &path_filter_postings,
+                    &filters,
+                );
                 let path_filters = PathFilterMatcher::from_filters(&filters);
                 let final_match_count = match &candidate_ids {
                     Some(candidate_ids) => candidate_ids
@@ -1716,7 +1742,7 @@ impl FastIndex {
                     .map(Vec::len)
                     .unwrap_or(final_match_count);
                 return Ok(QueryPlan {
-                    strategy: filter_only_strategy(&filters).to_string(),
+                    strategy: filter_only_strategy(&filters, &path_filter_postings).to_string(),
                     require_all: filters.require_all,
                     query_tokens,
                     query_phrases,
@@ -1726,6 +1752,7 @@ impl FastIndex {
                         .iter()
                         .map(|(kind, postings)| plan_posting("symbol_kind", kind, postings))
                         .chain(attribute_postings.plan_postings())
+                        .chain(path_filter_postings.plan_postings())
                         .collect(),
                     missing_terms: Vec::new(),
                     missing_trigrams: Vec::new(),
@@ -1876,6 +1903,8 @@ impl FastIndex {
         let candidate_ids =
             intersect_symbol_kind_postings(candidate_ids, &symbol_kind_postings, &filters);
         let candidate_ids = intersect_attribute_postings(candidate_ids, &attribute_postings);
+        let candidate_ids =
+            intersect_path_filter_trigram_postings(candidate_ids, &path_filter_postings);
         let candidate_ids = filter_symbol_kind_trigram_candidates(
             candidate_ids,
             &self.files,
@@ -1977,9 +2006,14 @@ impl FastIndex {
         filters: &SearchFilters,
         symbol_kind_postings: &[(&String, &Vec<Posting>)],
         attribute_postings: &AttributeFilterPostings<'_>,
+        path_filter_postings: &PathFilterTrigramPostings<'_>,
     ) -> Vec<SearchResult> {
-        let candidate_ids =
-            filter_only_candidate_ids(symbol_kind_postings, attribute_postings, filters);
+        let candidate_ids = filter_only_candidate_ids(
+            symbol_kind_postings,
+            attribute_postings,
+            path_filter_postings,
+            filters,
+        );
         let mut results = match &candidate_ids {
             Some(candidate_ids) => candidate_ids
                 .iter()
@@ -1999,7 +2033,7 @@ impl FastIndex {
                 .map(Vec::len)
                 .unwrap_or(final_match_count);
             let query_plan = QueryPlan {
-                strategy: filter_only_strategy(filters).to_string(),
+                strategy: filter_only_strategy(filters, path_filter_postings).to_string(),
                 require_all: filters.require_all,
                 query_tokens: Vec::new(),
                 query_phrases: Vec::new(),
@@ -2009,6 +2043,7 @@ impl FastIndex {
                     .iter()
                     .map(|(kind, postings)| plan_posting("symbol_kind", kind, postings))
                     .chain(attribute_postings.plan_postings())
+                    .chain(path_filter_postings.plan_postings())
                     .collect(),
                 missing_terms: Vec::new(),
                 missing_trigrams: Vec::new(),
@@ -2187,6 +2222,7 @@ impl FastIndexDisk {
             postings: decompress_posting_map(self.postings)?,
             path_postings: decompress_posting_map(self.path_postings)?,
             trigram_postings: decompress_posting_map(self.trigram_postings)?,
+            path_trigram_postings: HashMap::new(),
             symbol_postings: decompress_posting_map(self.symbol_postings)?,
             symbol_kind_postings: decompress_posting_map(self.symbol_kind_postings)?,
             attribute_postings: decompress_posting_map(self.attribute_postings)?,
@@ -2226,6 +2262,7 @@ impl FastIndexDiskV12 {
             postings: decompress_posting_map(self.postings)?,
             path_postings: decompress_posting_map(self.path_postings)?,
             trigram_postings: decompress_posting_map(self.trigram_postings)?,
+            path_trigram_postings: HashMap::new(),
             symbol_postings: decompress_posting_map(self.symbol_postings)?,
             symbol_kind_postings: decompress_posting_map(self.symbol_kind_postings)?,
             attribute_postings,
@@ -3261,6 +3298,9 @@ fn query_plan_repair_hints(
             None,
         ));
     }
+    if candidate_count == 0 {
+        hints.extend(filter_specific_repair_hints(active_filters, query_tokens));
+    }
     if require_all && query_tokens.len() > 1 && candidate_count == 0 && missing_terms.is_empty() {
         hints.push(repair_hint(
             "try_any_terms",
@@ -4169,6 +4209,29 @@ impl AttributeFilterPostings<'_> {
     }
 }
 
+#[derive(Debug)]
+struct PathFilterTrigramPostings<'a> {
+    postings: Vec<(String, &'a Vec<Posting>)>,
+    missing: Vec<String>,
+}
+
+impl PathFilterTrigramPostings<'_> {
+    fn is_impossible(&self) -> bool {
+        !self.missing.is_empty()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.postings.is_empty() && self.missing.is_empty()
+    }
+
+    fn plan_postings(&self) -> Vec<QueryPlanPosting> {
+        self.postings
+            .iter()
+            .map(|(key, postings)| plan_posting("path_filter_trigram", key, postings))
+            .collect()
+    }
+}
+
 fn attribute_postings_for_filters<'a>(
     postings: &'a HashMap<String, Vec<Posting>>,
     filters: &SearchFilters,
@@ -4220,18 +4283,62 @@ fn attribute_filter_keys(filters: &SearchFilters) -> Vec<String> {
     keys
 }
 
+fn path_filter_trigram_postings_for_filters<'a>(
+    postings: &'a HashMap<String, Vec<Posting>>,
+    filters: &SearchFilters,
+) -> PathFilterTrigramPostings<'a> {
+    let keys = path_filter_trigram_keys(filters);
+    let mut planned = Vec::with_capacity(keys.len());
+    let mut missing = Vec::new();
+    for key in keys {
+        match postings.get(&key) {
+            Some(values) => planned.push((key, values)),
+            None => missing.push(key),
+        }
+    }
+    PathFilterTrigramPostings {
+        postings: planned,
+        missing,
+    }
+}
+
+fn path_filter_trigram_keys(filters: &SearchFilters) -> Vec<String> {
+    let mut keys = Vec::new();
+    if let Some(file) = filters.file.as_deref() {
+        push_filter_trigram_keys(file, &mut keys);
+    }
+    if let Some(path) = filters.path.as_deref() {
+        push_filter_trigram_keys(path, &mut keys);
+    }
+    keys.sort();
+    keys.dedup();
+    keys
+}
+
+fn push_filter_trigram_keys(filter: &str, keys: &mut Vec<String>) {
+    let value = filter.trim().replace('\\', "/").to_ascii_lowercase();
+    if value.contains('*') || value.contains('?') {
+        return;
+    }
+    keys.extend(query_trigrams(&value));
+}
+
 fn filter_only_candidate_ids(
     symbol_kind_postings: &[(&String, &Vec<Posting>)],
     attribute_postings: &AttributeFilterPostings<'_>,
+    path_filter_postings: &PathFilterTrigramPostings<'_>,
     filters: &SearchFilters,
 ) -> Option<Vec<u32>> {
     if filters.symbol_kind.is_some() && symbol_kind_postings.is_empty() {
         return Some(Vec::new());
     }
-    if attribute_postings.is_impossible() {
+    if attribute_postings.is_impossible() || path_filter_postings.is_impossible() {
         return Some(Vec::new());
     }
-    if symbol_kind_postings.is_empty() && attribute_postings.is_empty() {
+    if symbol_kind_postings.is_empty()
+        && attribute_postings.is_empty()
+        && path_filter_postings.is_empty()
+    {
         return None;
     }
     let planned_postings = symbol_kind_postings
@@ -4243,11 +4350,20 @@ fn filter_only_candidate_ids(
                 .iter()
                 .map(|(_, postings)| *postings),
         )
+        .chain(
+            path_filter_postings
+                .postings
+                .iter()
+                .map(|(_, postings)| *postings),
+        )
         .collect::<Vec<_>>();
     Some(intersect_planned_postings(&planned_postings, true))
 }
 
-fn filter_only_strategy(filters: &SearchFilters) -> &'static str {
+fn filter_only_strategy(
+    filters: &SearchFilters,
+    path_filter_postings: &PathFilterTrigramPostings<'_>,
+) -> &'static str {
     if filters.symbol_kind.is_some() {
         "symbol_kind_filter_postings"
     } else if filters.language.is_some()
@@ -4257,6 +4373,8 @@ fn filter_only_strategy(filters: &SearchFilters) -> &'static str {
         || filters.code.is_some()
     {
         "attribute_filter_postings"
+    } else if !path_filter_postings.is_empty() {
+        "path_filter_trigram_postings"
     } else {
         "filter_scan"
     }
@@ -4347,6 +4465,24 @@ fn intersect_attribute_postings(
         return Vec::new();
     }
     attribute_postings
+        .postings
+        .iter()
+        .fold(candidate_ids, |candidate_ids, (_, postings)| {
+            intersect_sorted_ids_with_postings(&candidate_ids, postings)
+        })
+}
+
+fn intersect_path_filter_trigram_postings(
+    candidate_ids: Vec<u32>,
+    path_filter_postings: &PathFilterTrigramPostings<'_>,
+) -> Vec<u32> {
+    if candidate_ids.is_empty() || path_filter_postings.is_empty() {
+        return candidate_ids;
+    }
+    if path_filter_postings.is_impossible() {
+        return Vec::new();
+    }
+    path_filter_postings
         .postings
         .iter()
         .fold(candidate_ids, |candidate_ids, (_, postings)| {
@@ -4957,6 +5093,22 @@ fn rebuild_attribute_postings(files: &[IndexedPath]) -> HashMap<String, Vec<Post
             postings.entry(key).or_default().push(Posting {
                 file_id: file_id as u32,
                 count: 1,
+            });
+        }
+    }
+    for values in postings.values_mut() {
+        values.sort_unstable_by_key(|posting| posting.file_id);
+    }
+    postings
+}
+
+fn rebuild_path_trigram_postings(files: &[IndexedPath]) -> HashMap<String, Vec<Posting>> {
+    let mut postings: HashMap<String, Vec<Posting>> = HashMap::new();
+    for (file_id, file) in files.iter().enumerate() {
+        for term in counted_terms(&trigram_counts(&file.path_lower)) {
+            postings.entry(term.term).or_default().push(Posting {
+                file_id: file_id as u32,
+                count: term.count,
             });
         }
     }

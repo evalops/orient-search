@@ -2894,9 +2894,9 @@ fn runtime_batches_searches_and_query_plans_against_repo_index_and_shards() {
     );
     assert_eq!(
         relax_result["repair_hints"][1]["kind"],
-        serde_json::json!("relax_filters")
+        serde_json::json!("relax_language_filter")
     );
-    assert_eq!(relax_result["retry_requests"].as_array().unwrap().len(), 1);
+    assert_eq!(relax_result["retry_requests"].as_array().unwrap().len(), 2);
 
     let filter_only_plan = runtime.dispatch(ToolRequest {
         id: serde_json::json!("filter-only-plan"),
@@ -3371,7 +3371,7 @@ fn runtime_accepts_structured_negative_search_filters() {
     assert!(filter_only.error.is_none(), "{:?}", filter_only.error);
     let result = serde_json::to_string(&filter_only.result).unwrap();
     assert!(result.contains("src/auth.rs"), "{result}");
-    assert!(result.contains("filter_scan"), "{result}");
+    assert!(result.contains("path_filter_trigram_postings"), "{result}");
     assert!(result.contains("file_filter"), "{result}");
 
     let generated_true = runtime.dispatch(ToolRequest {

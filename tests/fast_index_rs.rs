@@ -1144,7 +1144,7 @@ fn indexed_query_plan_counts_filter_and_phrase_rejections() {
             },
         )
         .unwrap();
-    assert!(filter_rejected.candidate_count >= 1);
+    assert_eq!(filter_rejected.candidate_count, 0);
     assert_eq!(filter_rejected.filtered_candidate_count, 0);
     assert_eq!(filter_rejected.scored_candidate_count, 0);
     assert_eq!(filter_rejected.final_match_count, 0);
@@ -1155,15 +1155,12 @@ fn indexed_query_plan_counts_filter_and_phrase_rejections() {
     assert_eq!(filter_rejected.active_filters[0].candidate_matches, Some(0));
     assert_eq!(
         filter_rejected.active_filters[0].candidate_rejections,
-        Some(filter_rejected.candidate_count)
+        Some(0)
     );
     assert!(filter_rejected.repair_hints.iter().any(|hint| {
         hint.kind == "relax_path_filter"
             && hint.suggested_query.as_deref() == Some("session manager")
             && hint.message.contains("path:tests")
-    }));
-    assert!(filter_rejected.repair_hints.iter().any(|hint| {
-        hint.kind == "relax_filters" && hint.suggested_query.as_deref() == Some("session manager")
     }));
 
     let phrase_rejected = index
@@ -1745,6 +1742,56 @@ fn filter_only_queries_discover_files_without_content_terms() {
         .search_filtered("-path:docs", 10, &SearchFilters::default())
         .unwrap();
     assert!(negative_only.is_empty());
+}
+
+#[test]
+fn path_filter_only_queries_use_path_trigram_prefilter_after_load() {
+    let repo = tempfile::tempdir().unwrap();
+    for index in 0..200 {
+        write(
+            &repo.path().join(format!("src/module_{index}.rs")),
+            &format!("pub fn module_{index}() {{}}\n"),
+        );
+    }
+    write(
+        &repo.path().join("src/routes/special_path_probe.rs"),
+        "pub fn route_probe() {}\n",
+    );
+
+    let index_path = repo.path().join("repo.orient");
+    let index = FastIndex::build(repo.path()).unwrap();
+    index.save(&index_path).unwrap();
+    let loaded = FastIndex::load(&index_path).unwrap();
+
+    let results = loaded
+        .search_filtered(
+            "path:special_path_probe",
+            10,
+            &SearchFilters {
+                explain: true,
+                ..SearchFilters::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        result_paths(&results),
+        vec!["src/routes/special_path_probe.rs"]
+    );
+    let plan = results[0].query_plan.as_ref().unwrap();
+    assert_eq!(plan.strategy, "path_filter_trigram_postings");
+    assert_eq!(plan.candidate_count, 1);
+    assert!(
+        plan.planned_postings
+            .iter()
+            .any(|posting| { posting.kind == "path_filter_trigram" && posting.value == "spe" })
+    );
+
+    let file_plan = loaded
+        .query_plan("file:special_path_probe.rs", &SearchFilters::default())
+        .unwrap();
+    assert_eq!(file_plan.strategy, "path_filter_trigram_postings");
+    assert_eq!(file_plan.candidate_count, 1);
+    assert_eq!(file_plan.final_match_count, 1);
 }
 
 #[test]
@@ -2660,7 +2707,7 @@ fn indexed_search_filters_candidates_before_cap() {
 
     assert_eq!(result_paths(&results), vec!["zzz_scope/target.rs"]);
     let plan = results[0].query_plan.as_ref().unwrap();
-    assert_eq!(plan.candidate_count, 1101);
+    assert_eq!(plan.candidate_count, 1);
     assert_eq!(plan.filtered_candidate_count, 1);
     assert_eq!(plan.scored_candidate_count, 1);
     assert!(!plan.candidate_cap_hit);
@@ -2668,7 +2715,7 @@ fn indexed_search_filters_candidates_before_cap() {
     let query_plan = index
         .query_plan("commonneedle path:zzz_scope", &SearchFilters::default())
         .unwrap();
-    assert_eq!(query_plan.candidate_count, 1101);
+    assert_eq!(query_plan.candidate_count, 1);
     assert_eq!(query_plan.filtered_candidate_count, 1);
     assert_eq!(query_plan.final_match_count, 1);
     assert!(!query_plan.candidate_cap_hit);
