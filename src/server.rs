@@ -2919,8 +2919,10 @@ impl ToolRuntime {
                         }
                         let mut batch = Vec::new();
                         for query in queries {
-                            let scoped_arguments =
-                                arguments_scoped_to_client_cwd_for_query(&request.arguments, &query)?;
+                            let scoped_arguments = arguments_scoped_to_client_cwd_for_query(
+                                &request.arguments,
+                                &query,
+                            )?;
                             let filters = search_filters(&scoped_arguments, true)?;
                             let mut plans =
                                 self.shard_query_plans_cached(&index_dir, &query, &filters)?;

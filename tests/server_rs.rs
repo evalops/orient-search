@@ -5539,7 +5539,10 @@ fn runtime_orientation_tools_scope_warmed_shards_to_client_cwd() {
         tool: "search_plan_batch".to_string(),
         arguments: serde_json::json!({
             "cwd": current_repo.join("src"),
-            "queries": ["shared_lookup_token definitely_missing"],
+            "queries": [
+                "shared_lookup_token definitely_missing",
+                "repo:other-app shared_lookup_token definitely_missing"
+            ],
             "limit": 5
         }),
     });
@@ -5548,6 +5551,30 @@ fn runtime_orientation_tools_scope_warmed_shards_to_client_cwd() {
     assert_eq!(
         plan_batch[0]["plans"][0]["plan"]["retry_requests"][0]["arguments"]["repo_filter"],
         serde_json::json!(current_root)
+    );
+    assert!(
+        plan_batch[1]["plans"][0]["plan"]["retry_requests"][0]["arguments"]
+            .get("repo_filter")
+            .is_none(),
+        "{plan_batch}"
+    );
+    let first_plan_batch_item = serde_json::to_string(&plan_batch[0]).unwrap();
+    assert!(
+        first_plan_batch_item.contains("current-app"),
+        "{first_plan_batch_item}"
+    );
+    assert!(
+        !first_plan_batch_item.contains("other-app/src/lib.rs"),
+        "{first_plan_batch_item}"
+    );
+    let second_plan_batch_item = serde_json::to_string(&plan_batch[1]).unwrap();
+    assert!(
+        second_plan_batch_item.contains("other-app"),
+        "{second_plan_batch_item}"
+    );
+    assert!(
+        !second_plan_batch_item.contains("current-app/src/lib.rs"),
+        "{second_plan_batch_item}"
     );
 
     let symbol = runtime.dispatch(ToolRequest {
