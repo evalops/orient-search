@@ -295,10 +295,14 @@ fn cli_outputs_agent_guide() {
         "/tmp/orient-shards",
         "--addr",
         "127.0.0.1:9999",
+        "--profile",
+        "codex",
     ])
     .assert()
     .success()
     .stdout(predicate::str::contains("\"purpose\""))
+    .stdout(predicate::str::contains("\"profile\":\"codex\""))
+    .stdout(predicate::str::contains("AGENTS.md"))
     .stdout(predicate::str::contains("no telemetry"))
     .stdout(predicate::str::contains("\"tool\":\"search_shards\""))
     .stdout(predicate::str::contains("\"tool\":\"search_auto\""))
@@ -328,6 +332,8 @@ fn cli_outputs_agent_instructions() {
         "/tmp/orient-shards",
         "--addr",
         "127.0.0.1:9999",
+        "--profile",
+        "amp",
     ])
     .assert()
     .success()
@@ -338,6 +344,7 @@ fn cli_outputs_agent_instructions() {
     .stdout(predicate::str::contains(
         "orient client-jsonl --addr 127.0.0.1:9999",
     ))
+    .stdout(predicate::str::contains("local Amp project rules surface"))
     .stdout(predicate::str::contains(
         "orient ensure-index --repo /work/repo --index /tmp/repo.index",
     ))

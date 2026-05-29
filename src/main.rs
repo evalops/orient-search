@@ -797,6 +797,8 @@ enum Commands {
         index_dir: Option<String>,
         #[arg(long, default_value = "127.0.0.1:8796")]
         addr: String,
+        #[arg(long, value_enum, default_value_t = AgentProfileArg::Generic)]
+        profile: AgentProfileArg,
     },
     AgentInstructions {
         #[arg(long)]
@@ -807,6 +809,8 @@ enum Commands {
         index_dir: Option<String>,
         #[arg(long, default_value = "127.0.0.1:8796")]
         addr: String,
+        #[arg(long, value_enum, default_value_t = AgentProfileArg::Generic)]
+        profile: AgentProfileArg,
     },
     DaemonStatus {
         #[arg(long)]
@@ -906,6 +910,25 @@ enum BenchSearchMode {
 enum ReadScopeArg {
     Exact,
     Symbol,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum AgentProfileArg {
+    Generic,
+    Codex,
+    Claude,
+    Amp,
+}
+
+impl AgentProfileArg {
+    fn as_str(self) -> &'static str {
+        match self {
+            AgentProfileArg::Generic => "generic",
+            AgentProfileArg::Codex => "codex",
+            AgentProfileArg::Claude => "claude",
+            AgentProfileArg::Amp => "amp",
+        }
+    }
 }
 
 impl From<ReadScopeArg> for RangeScope {
@@ -3988,6 +4011,7 @@ fn run() -> Result<()> {
             index,
             index_dir,
             addr,
+            profile,
         } => {
             println!(
                 "{}",
@@ -3996,6 +4020,7 @@ fn run() -> Result<()> {
                     index.as_deref(),
                     index_dir.as_deref(),
                     Some(&addr),
+                    Some(profile.as_str()),
                 ))?
             );
         }
@@ -4004,6 +4029,7 @@ fn run() -> Result<()> {
             index,
             index_dir,
             addr,
+            profile,
         } => {
             println!(
                 "{}",
@@ -4012,6 +4038,7 @@ fn run() -> Result<()> {
                     index.as_deref(),
                     index_dir.as_deref(),
                     Some(&addr),
+                    Some(profile.as_str()),
                 )
             );
         }

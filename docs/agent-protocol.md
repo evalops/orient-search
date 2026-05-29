@@ -34,7 +34,7 @@ Each request is one JSON object per line:
 
 Responses preserve `id` and return either `result` or `error`. Use `tool_manifest` for the complete tool list, argument metadata, daemon-default hints, defaults, enums, and JSON-schema-like input schemas.
 Adapters that want MCP-shaped definitions can call `mcp_manifest` or `orient mcp-manifest`; it returns `tools` entries with `name`, `description`, `inputSchema`, and `annotations`. Search, read, map, status, and plan tools are marked read-only. Index/shard build, refresh, register, and warm-cache tools are marked non-destructive but not read-only. `orient serve-mcp` exposes the same runtime over stdio JSON-RPC for MCP clients, supporting `initialize`, `tools/list`, and `tools/call`; native JSON-lines remains available through `serve-jsonl`, TCP, or Unix sockets.
-Agents and wrappers that want a compact first-use recipe can call `agent_guide` or run `orient agent-guide`; it returns install, shard bootstrap, daemon, client, status, one-shot search, local-rule commands, request templates, and follow-up guidance. For copyable local rule files, call `agent_instructions` or run `orient agent-instructions`; it emits a compact local-agent instruction snippet.
+Agents and wrappers that want a compact first-use recipe can call `agent_guide` or run `orient agent-guide`; it returns install, shard bootstrap, daemon, client, status, one-shot search, local-rule commands, request templates, and follow-up guidance. For copyable local rule files, call `agent_instructions` or run `orient agent-instructions`; it emits a compact local-agent instruction snippet. Both accept `profile:"codex"`, `profile:"claude"`, `profile:"amp"`, or `profile:"generic"` to tailor the rule-placement hint without changing the search tools.
 
 ## Bootstrap
 
@@ -50,8 +50,8 @@ For many repos:
 ```json
 {"id":"ensure-shards","tool":"ensure_shards","arguments":{"output_dir":"/path/to/local/cache/orient-shards","discover_roots":["/path/to/workspace"],"max_depth":4,"discover_limit":500,"family_limit":2}}
 {"id":"status","tool":"daemon_status","arguments":{}}
-{"id":"instructions","tool":"agent_instructions","arguments":{"index_dir":"/path/to/local/cache/orient-shards"}}
-{"id":"guide","tool":"agent_guide","arguments":{"index_dir":"/path/to/local/cache/orient-shards"}}
+{"id":"instructions","tool":"agent_instructions","arguments":{"index_dir":"/path/to/local/cache/orient-shards","profile":"codex"}}
+{"id":"guide","tool":"agent_guide","arguments":{"index_dir":"/path/to/local/cache/orient-shards","profile":"codex"}}
 ```
 
 For an existing shard directory, call `register_shards` to cache only the

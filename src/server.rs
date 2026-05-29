@@ -632,13 +632,13 @@ pub fn tool_manifest() -> Value {
             "agent_guide",
             "Return a compact Orient workflow guide and request templates for local coding agents.",
             &[],
-            &["repo", "index", "index_dir", "addr"],
+            &["repo", "index", "index_dir", "addr", "profile"],
         ),
         tool_entry(
             "agent_instructions",
             "Return compact copyable local-agent instructions for using Orient first.",
             &[],
-            &["repo", "index", "index_dir", "addr"],
+            &["repo", "index", "index_dir", "addr", "profile"],
         ),
         tool_entry(
             "daemon_status",
@@ -1045,17 +1045,21 @@ pub fn agent_guide(
     index: Option<&str>,
     index_dir: Option<&str>,
     addr: Option<&str>,
+    profile: Option<&str>,
 ) -> Value {
     let repo = repo.unwrap_or("/path/to/repo");
     let index = index.unwrap_or("/path/to/local/cache/orient.index");
     let index_dir = index_dir.unwrap_or("/path/to/local/cache/orient-shards");
     let addr = addr.unwrap_or(DEFAULT_DAEMON_ADDR);
+    let profile = agent_profile(profile);
     let client_command = tcp_client_command(addr);
     let status_command = daemon_status_command(addr);
     json!({
         "name": "Orient Search",
         "purpose": "Fast local code search for coding agents; no telemetry.",
-        "instruction_snippet": agent_instructions(Some(repo), Some(index), Some(index_dir), Some(addr)),
+        "profile": profile.name,
+        "rule_target": profile.rule_target,
+        "instruction_snippet": agent_instructions(Some(repo), Some(index), Some(index_dir), Some(addr), Some(profile.name)),
         "quickstart": {
             "install": "cargo install --git https://github.com/evalops/orient-search",
             "multi_repo": [
@@ -1069,7 +1073,7 @@ pub fn agent_guide(
             "client": client_command,
             "status": status_command,
             "one_shot_search": "orient search-auto \"symbol:SessionManager token\"",
-            "agent_rules": format!("orient agent-instructions --index-dir {index_dir}"),
+            "agent_rules": format!("orient agent-instructions --profile {} --index-dir {index_dir}", profile.name),
             "followup_request_hints": "Generated follow-up requests include jsonl, client_cli, and compact cli hints where available."
         },
         "recommended_loop": [
@@ -1080,6 +1084,7 @@ pub fn agent_guide(
             "Call a query-plan tool when results are empty, noisy, or overly broad."
         ],
         "adapter_notes": [
+            profile.adapter_note,
             "Codex: add the instruction snippet to the repo-local AGENTS.md or equivalent local rule file.",
             "Claude Code: add the instruction snippet to the project CLAUDE.md or equivalent local memory/rules surface.",
             "Amp and other coding agents: add the instruction snippet to the local project rules surface and prefer JSON-lines/MCP tool calls over repeated shell scans.",
@@ -1212,17 +1217,19 @@ pub fn agent_instructions(
     index: Option<&str>,
     index_dir: Option<&str>,
     addr: Option<&str>,
+    profile: Option<&str>,
 ) -> String {
     let repo = repo.unwrap_or("/path/to/repo");
     let index = index.unwrap_or("/path/to/local/cache/orient.index");
     let index_dir = index_dir.unwrap_or("/path/to/local/cache/orient-shards");
     let addr = addr.unwrap_or(DEFAULT_DAEMON_ADDR);
+    let profile = agent_profile(profile);
     let client_command = tcp_client_command(addr);
     format!(
         "## Orient Search\n\
 Use Orient as the first local code-discovery step before repeated `rg`, `find`, `ls`, or `cat`.\n\
 Prefer the shared daemon when it is running: `{client_command}`.\n\
-Copy this snippet into the repo-local agent rule surface, such as AGENTS.md, CLAUDE.md, or a local Amp rules file.\n\
+Copy this snippet into {rule_target}.\n\
 Keep cache paths local to the machine running the agents; do not copy private workspace layouts into shared docs or reusable rules.\n\
 For many local repos, bootstrap it with `orient ensure-shards --discover-root /path/to/workspaces --output-dir {index_dir} --family-limit 2` and `orient serve-tcp --addr {addr} --index-dir {index_dir}`.\n\
 For one repo, bootstrap it with `orient ensure-index --repo {repo} --index {index}` and `orient serve-tcp --addr {addr} --index {index}`.\n\
@@ -1234,8 +1241,47 @@ Generated paths, including hashed JavaScript bundles, are demoted by default; us
 After search, follow returned `read_batch_request`, `read_request`, `related_request`, and `related_symbols_request`; each includes `jsonl` and `client_cli` for direct replay through `orient client-jsonl`.\n\
 For manual context reads from a line inside a definition, pass `scope:\"symbol\"` so `read_range` or `read_ranges` anchors at the nearest function, class, or type definition.\n\
 When results are empty, noisy, or suspicious, use the returned `query_plan_request` or inline `query_plan_result` before broadening the search; pass `retry_if_empty:true` when you want Orient to execute the promoted retry once and return `primary_retry_result` immediately.\n\
-Orient is local code search only and does not collect telemetry."
+Orient is local code search only and does not collect telemetry.",
+        rule_target = profile.rule_target
     )
+}
+
+#[derive(Debug, Clone, Copy)]
+struct AgentProfile {
+    name: &'static str,
+    rule_target: &'static str,
+    adapter_note: &'static str,
+}
+
+fn agent_profile(profile: Option<&str>) -> AgentProfile {
+    match profile
+        .unwrap_or("generic")
+        .trim()
+        .to_ascii_lowercase()
+        .replace(['_', '-'], "")
+        .as_str()
+    {
+        "codex" => AgentProfile {
+            name: "codex",
+            rule_target: "the repo-local AGENTS.md file or equivalent Codex rule surface",
+            adapter_note: "Selected profile: Codex; place the snippet in AGENTS.md for the repo.",
+        },
+        "claude" | "claudecode" => AgentProfile {
+            name: "claude",
+            rule_target: "the project CLAUDE.md file or equivalent Claude Code memory/rules surface",
+            adapter_note: "Selected profile: Claude Code; place the snippet in CLAUDE.md for the project.",
+        },
+        "amp" => AgentProfile {
+            name: "amp",
+            rule_target: "the local Amp project rules surface",
+            adapter_note: "Selected profile: Amp; place the snippet in the local project rules surface.",
+        },
+        _ => AgentProfile {
+            name: "generic",
+            rule_target: "the repo-local agent rule surface, such as AGENTS.md, CLAUDE.md, or a local Amp rules file",
+            adapter_note: "Selected profile: generic; place the snippet in the local rule surface your coding agent reads.",
+        },
+    }
 }
 
 pub fn retarget_client_cli_commands(value: &mut Value, client_command: &str) {
@@ -1635,6 +1681,7 @@ fn argument_default(tool_name: &str, name: &str) -> Option<Value> {
         (_, "scope") => Some(json!("exact")),
         (_, "snippet") => Some(json!("medium")),
         (_, "detail") => Some(json!("compact")),
+        ("agent_guide" | "agent_instructions", "profile") => Some(json!("generic")),
         (_, "context_lines") => Some(json!(0)),
         ("agent_guide" | "agent_instructions", "addr") => Some(json!("127.0.0.1:8796")),
         (
@@ -1651,6 +1698,7 @@ fn argument_enum(name: &str) -> Option<&'static [&'static str]> {
         "snippet" => Some(&["short", "medium", "block", "symbol"]),
         "scope" => Some(&["exact", "symbol"]),
         "detail" => Some(&["compact", "full"]),
+        "profile" => Some(&["generic", "codex", "claude", "amp"]),
         _ => None,
     }
 }
@@ -1713,6 +1761,9 @@ fn argument_description(tool_name: &str, name: &str) -> &'static str {
             "Path to a local multi-repo shard directory. Daemon tools may omit this when exactly one shard directory is registered."
         }
         "addr" => "Local TCP daemon address for generated setup and client commands.",
+        "profile" => {
+            "Agent-rule target profile for generated guidance: generic, codex, claude, or amp."
+        }
         "output_dir" => "Directory where shard indexes and manifest.json should be written.",
         "query" => "Agent query string with filters, quoted phrases, and normal search terms.",
         "queries" => "Agent query strings to run as one batch against the same search target.",
@@ -2521,6 +2572,7 @@ impl ToolRuntime {
                 optional_string_arg(&request.arguments, "index").as_deref(),
                 optional_string_arg(&request.arguments, "index_dir").as_deref(),
                 optional_string_arg(&request.arguments, "addr").as_deref(),
+                optional_string_arg(&request.arguments, "profile").as_deref(),
             )),
             "agent_instructions" => Ok(json!({
                 "instructions": agent_instructions(
@@ -2528,6 +2580,7 @@ impl ToolRuntime {
                     optional_string_arg(&request.arguments, "index").as_deref(),
                     optional_string_arg(&request.arguments, "index_dir").as_deref(),
                     optional_string_arg(&request.arguments, "addr").as_deref(),
+                    optional_string_arg(&request.arguments, "profile").as_deref(),
                 )
             })),
             "discover_repos" => {

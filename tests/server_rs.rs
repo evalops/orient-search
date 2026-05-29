@@ -685,10 +685,18 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         agent_guide_tool["input_schema"]["properties"]["addr"]["default"],
         "127.0.0.1:8796"
     );
+    assert_eq!(
+        agent_guide_tool["input_schema"]["properties"]["profile"]["enum"],
+        serde_json::json!(["generic", "codex", "claude", "amp"])
+    );
     assert_eq!(agent_instructions_tool["required"], serde_json::json!([]));
     assert_eq!(
         agent_instructions_tool["input_schema"]["properties"]["addr"]["default"],
         "127.0.0.1:8796"
+    );
+    assert_eq!(
+        agent_instructions_tool["input_schema"]["properties"]["profile"]["default"],
+        "generic"
     );
     assert_eq!(repo_map["required"], serde_json::json!([]));
     assert_eq!(
@@ -890,10 +898,18 @@ fn mcp_manifest_exposes_input_schema_for_adapter_wrappers() {
         agent_guide_tool["inputSchema"]["properties"]["addr"]["default"],
         "127.0.0.1:8796"
     );
+    assert_eq!(
+        agent_guide_tool["inputSchema"]["properties"]["profile"]["enum"],
+        serde_json::json!(["generic", "codex", "claude", "amp"])
+    );
     assert_eq!(agent_guide_tool["annotations"]["readOnlyHint"], true);
     assert_eq!(
         agent_instructions_tool["inputSchema"]["properties"]["addr"]["default"],
         "127.0.0.1:8796"
+    );
+    assert_eq!(
+        agent_instructions_tool["inputSchema"]["properties"]["profile"]["default"],
+        "generic"
     );
     assert_eq!(
         repo_map["inputSchema"]["properties"]["detail"]["enum"],
@@ -1002,6 +1018,12 @@ fn agent_guide_returns_local_agent_request_templates() {
         Some("/tmp/repo.index"),
         Some("/tmp/orient-shards"),
         Some("127.0.0.1:9999"),
+        Some("codex"),
+    );
+    assert_eq!(guide["profile"], "codex");
+    assert_eq!(
+        guide["rule_target"],
+        "the repo-local AGENTS.md file or equivalent Codex rule surface"
     );
     assert_eq!(
         guide["preferred_surfaces"]["many_local_repos"],
@@ -1043,6 +1065,10 @@ fn agent_guide_returns_local_agent_request_templates() {
             .any(|command| command.as_str().unwrap().contains(
                 "orient ensure-shards --discover-root /path/to/workspaces --output-dir /tmp/orient-shards"
             ))
+    );
+    assert_eq!(
+        guide["quickstart"]["agent_rules"],
+        "orient agent-instructions --profile codex --index-dir /tmp/orient-shards"
     );
     assert!(
         guide["quickstart"]["single_repo"]
@@ -1145,14 +1171,13 @@ fn agent_instructions_returns_copyable_local_agent_rules() {
         Some("/tmp/repo.index"),
         Some("/tmp/orient-shards"),
         Some("127.0.0.1:9999"),
+        Some("claude"),
     );
     for expected in [
         "## Orient Search",
         "Use Orient as the first local code-discovery step",
         "orient client-jsonl --addr 127.0.0.1:9999",
-        "AGENTS.md",
         "CLAUDE.md",
-        "local Amp rules",
         "Keep cache paths local",
         "orient ensure-shards --discover-root /path/to/workspaces --output-dir /tmp/orient-shards --family-limit 2",
         "orient ensure-index --repo /work/repo --index /tmp/repo.index",
@@ -1171,8 +1196,9 @@ fn agent_instructions_returns_copyable_local_agent_rules() {
 
 #[test]
 fn agent_guidance_defaults_use_neutral_cache_placeholders() {
-    let guide = agent_guide(None, None, None, None);
+    let guide = agent_guide(None, None, None, None, None);
     let guide_json = serde_json::to_string(&guide).unwrap();
+    assert_eq!(guide["profile"], "generic");
     assert!(guide_json.contains("/path/to/local/cache/orient.index"));
     assert!(guide_json.contains("/path/to/local/cache/orient-shards"));
     assert!(!guide_json.contains("/tmp/orient"));
@@ -1185,12 +1211,34 @@ fn agent_guidance_defaults_use_neutral_cache_placeholders() {
             .any(|item| item.as_str().unwrap().contains("private workspace layouts"))
     );
 
-    let instructions = agent_instructions(None, None, None, None);
+    let instructions = agent_instructions(None, None, None, None, None);
     assert!(instructions.contains("/path/to/local/cache/orient.index"));
     assert!(instructions.contains("/path/to/local/cache/orient-shards"));
     assert!(!instructions.contains("/tmp/orient"));
     assert!(!instructions.contains("/tmp/repo"));
     assert!(instructions.contains("private workspace layouts"));
+}
+
+#[test]
+fn agent_guidance_profiles_target_specific_rule_surfaces() {
+    let codex = agent_instructions(None, None, None, None, Some("codex"));
+    assert!(codex.contains("AGENTS.md"));
+    assert!(!codex.contains("CLAUDE.md"));
+
+    let claude = agent_instructions(None, None, None, None, Some("claude-code"));
+    assert!(claude.contains("CLAUDE.md"));
+    assert!(!claude.contains("AGENTS.md"));
+
+    let amp = agent_guide(None, None, None, None, Some("amp"));
+    assert_eq!(amp["profile"], "amp");
+    assert!(amp["rule_target"].as_str().unwrap().contains("Amp"));
+    assert!(
+        amp["adapter_notes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item.as_str().unwrap().contains("Selected profile: Amp"))
+    );
 }
 
 #[test]
@@ -1201,7 +1249,8 @@ fn runtime_serves_agent_guide_for_json_lines_wrappers() {
         tool: "agent_guide".to_string(),
         arguments: serde_json::json!({
             "repo": "/work/repo",
-            "index_dir": "/tmp/orient-shards"
+            "index_dir": "/tmp/orient-shards",
+            "profile": "codex"
         }),
     });
     assert!(response.error.is_none(), "{:?}", response.error);
@@ -1214,6 +1263,7 @@ fn runtime_serves_agent_guide_for_json_lines_wrappers() {
         guide["request_templates"]["shard_repo_map"]["arguments"]["index_dir"],
         "/tmp/orient-shards"
     );
+    assert_eq!(guide["profile"], "codex");
     let followups = guide["result_followups"].as_array().unwrap();
     for expected in [
         "Use search_auto.query_plan_result or a search_auto_batch item query_plan_result immediately when an automatic search is empty.",
@@ -1241,7 +1291,8 @@ fn runtime_serves_agent_instructions_for_local_rule_files() {
             "repo": "/work/repo",
             "index": "/tmp/repo.index",
             "index_dir": "/tmp/orient-shards",
-            "addr": "127.0.0.1:9999"
+            "addr": "127.0.0.1:9999",
+            "profile": "amp"
         }),
     });
     assert!(response.error.is_none(), "{:?}", response.error);
@@ -1251,6 +1302,7 @@ fn runtime_serves_agent_instructions_for_local_rule_files() {
     assert!(instructions.contains("search_auto"));
     assert!(instructions.contains("search_auto_default"));
     assert!(instructions.contains("read_batch_request"));
+    assert!(instructions.contains("local Amp project rules surface"));
     assert!(instructions.contains("does not collect telemetry"));
 }
 

@@ -35,7 +35,7 @@ Then verify the daemon and generate the short agent rule:
 
 ```bash
 orient doctor --index-dir "$ORIENT_SHARDS"
-orient agent-instructions --index-dir "$ORIENT_SHARDS"
+orient agent-instructions --profile codex --index-dir "$ORIENT_SHARDS"
 orient daemon-status
 orient daemon-status --format json
 ```

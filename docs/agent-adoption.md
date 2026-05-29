@@ -14,7 +14,7 @@ Generate the live rule with:
 ```bash
 export ORIENT_SHARDS=/path/to/local/cache/orient-shards
 
-orient agent-instructions --index-dir "$ORIENT_SHARDS"
+orient agent-instructions --profile codex --index-dir "$ORIENT_SHARDS"
 ```
 
 Keep that cache path local to the machine running the agents; the generated
@@ -26,6 +26,9 @@ project `CLAUDE.md`; for Amp or another coding agent, the local project rules
 surface. The snippet is intentionally tool-agnostic: it tells the agent to use
 JSON-lines/MCP calls and returned follow-up requests before repeated shell
 scans.
+Use `--profile codex`, `--profile claude`, `--profile amp`, or
+`--profile generic` to tailor the placement hint without changing the search
+protocol or generated tool calls.
 
 The rule should tell agents:
 
