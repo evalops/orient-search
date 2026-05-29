@@ -485,6 +485,7 @@ fn cli_search_auto_selects_live_indexed_and_shard_surfaces() {
         .assert()
         .success()
         .stdout(predicate::str::contains("\"query_plan_result\""))
+        .stdout(predicate::str::contains("\"primary_retry_request\""))
         .stdout(predicate::str::contains("drop_missing_terms"))
         .stdout(predicate::str::contains("\"tool\":\"search_code\""));
 
@@ -688,6 +689,7 @@ fn cli_search_auto_batch_returns_query_surfaces() {
         .assert()
         .success()
         .stdout(predicate::str::contains("\"query_plan_result\""))
+        .stdout(predicate::str::contains("\"primary_retry_request\""))
         .stdout(predicate::str::contains("\"tool\":\"indexed_search_code\""));
 
     let mut diagnosed_batch = Command::cargo_bin("orient").unwrap();
@@ -4124,6 +4126,66 @@ fn cli_reports_search_benchmarks() {
         .success()
         .stdout(predicate::str::contains("\"mode\":\"shards_cached\""))
         .stdout(predicate::str::contains("\"p95_ms\""));
+}
+
+#[test]
+fn cli_benchmarks_accept_query_flags() {
+    let repo = sample_repo();
+
+    let mut fallback = Command::cargo_bin("orient").unwrap();
+    fallback
+        .args([
+            "bench-search",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--runs",
+            "1",
+            "--warmup",
+            "0",
+            "--query",
+            "issue token",
+            "--limit",
+            "10",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"query\":\"issue token\""))
+        .stdout(predicate::str::contains("\"query\":\"--runs\"").not())
+        .stdout(predicate::str::contains("\"query\":\"--limit\"").not());
+
+    let shard_dir = tempfile::tempdir().unwrap();
+    let mut build_shards = Command::cargo_bin("orient").unwrap();
+    build_shards
+        .args([
+            "index-shards",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--output-dir",
+            shard_dir.path().to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let mut shards = Command::cargo_bin("orient").unwrap();
+    shards
+        .args([
+            "bench-shards",
+            "--index-dir",
+            shard_dir.path().to_str().unwrap(),
+            "--runs",
+            "1",
+            "--warmup",
+            "0",
+            "--query",
+            "issue token",
+            "--limit",
+            "10",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"query\":\"issue token\""))
+        .stdout(predicate::str::contains("\"query\":\"--runs\"").not())
+        .stdout(predicate::str::contains("\"query\":\"--limit\"").not());
 }
 
 #[test]

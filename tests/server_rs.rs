@@ -1597,6 +1597,10 @@ fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
         empty_indexed["query_plan_result"]["retry_requests"][0]["tool"],
         "indexed_search_code"
     );
+    assert_eq!(
+        empty_indexed["primary_retry_request"],
+        empty_indexed["query_plan_result"]["retry_requests"][0]
+    );
 
     let kind_typo = runtime.dispatch(ToolRequest {
         id: serde_json::json!("kind-typo"),
@@ -1615,6 +1619,10 @@ fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
     assert_eq!(
         kind_typo["query_plan_result"]["retry_requests"][0]["arguments"]["query"],
         "kind:function"
+    );
+    assert_eq!(
+        kind_typo["primary_retry_request"],
+        kind_typo["query_plan_result"]["retry_requests"][0]
     );
     assert!(
         kind_typo["query_plan_result"]["retry_requests"][0]["arguments"]

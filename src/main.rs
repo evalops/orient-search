@@ -717,7 +717,9 @@ enum Commands {
         write_baseline: Option<PathBuf>,
         #[arg(long, default_value_t = 0.25)]
         max_p95_regression: f64,
-        #[arg(required = true, allow_hyphen_values = true)]
+        #[arg(long = "query", value_name = "QUERY")]
+        query_args: Vec<String>,
+        #[arg(required_unless_present = "query_args", allow_hyphen_values = true)]
         queries: Vec<String>,
     },
     BenchShards {
@@ -745,7 +747,9 @@ enum Commands {
         write_baseline: Option<PathBuf>,
         #[arg(long, default_value_t = 0.25)]
         max_p95_regression: f64,
-        #[arg(required = true, allow_hyphen_values = true)]
+        #[arg(long = "query", value_name = "QUERY")]
+        query_args: Vec<String>,
+        #[arg(required_unless_present = "query_args", allow_hyphen_values = true)]
         queries: Vec<String>,
     },
     EvalAdoption {
@@ -2234,6 +2238,19 @@ fn attach_cli_shard_retry_requests_with_tool(
     }
 }
 
+fn primary_cli_retry_request_from_plan(plan: &QueryPlan) -> Option<Value> {
+    plan.retry_requests
+        .first()
+        .cloned()
+        .and_then(|request| serde_json::to_value(request).ok())
+}
+
+fn primary_cli_retry_request_from_shard_plans(plans: &[ShardQueryPlan]) -> Option<Value> {
+    plans
+        .iter()
+        .find_map(|shard_plan| primary_cli_retry_request_from_plan(&shard_plan.plan))
+}
+
 fn insert_optional_json_field(object: &mut Value, name: &str, value: Option<Value>) {
     if let (Value::Object(object), Some(value)) = (object, value) {
         object.insert(name.to_string(), value);
@@ -3013,12 +3030,15 @@ fn run() -> Result<()> {
                     Some(&query),
                     read_request_args("index_dir", &index_dir),
                 );
-                let query_plan_result = if diagnose || results.is_empty() {
+                let (query_plan_result, primary_retry_request) = if diagnose || results.is_empty() {
                     let mut plans = shard_query_plans(&index_dir, &query, &filters)?;
                     attach_cli_shard_retry_requests(&mut plans, &index_dir, &filters);
-                    Some(serde_json::to_value(plans)?)
+                    (
+                        Some(serde_json::to_value(&plans)?),
+                        primary_cli_retry_request_from_shard_plans(&plans),
+                    )
                 } else {
-                    None
+                    (None, None)
                 };
                 let mut output = serde_json::json!({
                     "query": query,
@@ -3037,6 +3057,11 @@ fn run() -> Result<()> {
                     "results": results
                 });
                 insert_optional_json_field(&mut output, "query_plan_result", query_plan_result);
+                insert_optional_json_field(
+                    &mut output,
+                    "primary_retry_request",
+                    primary_retry_request,
+                );
                 println!("{}", serde_json::to_string(&output)?);
             } else if let Some(index_path) = index {
                 let index = load_index_for_search(index_path.clone(), refresh_if_stale)?;
@@ -3069,16 +3094,20 @@ fn run() -> Result<()> {
                     Some(&query),
                     read_request_args("index", &index_path),
                 );
-                let query_plan_result = if diagnose || results.is_empty() {
-                    Some(serde_json::to_value(attach_cli_retry_requests(
+                let (query_plan_result, primary_retry_request) = if diagnose || results.is_empty() {
+                    let plan = attach_cli_retry_requests(
                         index.query_plan(&query, &filters)?,
                         "indexed_search_code",
                         "index",
                         &index_path,
                         &filters,
-                    ))?)
+                    );
+                    (
+                        Some(serde_json::to_value(&plan)?),
+                        primary_cli_retry_request_from_plan(&plan),
+                    )
                 } else {
-                    None
+                    (None, None)
                 };
                 let mut output = serde_json::json!({
                     "query": query,
@@ -3100,6 +3129,11 @@ fn run() -> Result<()> {
                     "results": results
                 });
                 insert_optional_json_field(&mut output, "query_plan_result", query_plan_result);
+                insert_optional_json_field(
+                    &mut output,
+                    "primary_retry_request",
+                    primary_retry_request,
+                );
                 println!("{}", serde_json::to_string(&output)?);
             } else {
                 let repo = repo.unwrap_or_else(|| PathBuf::from("."));
@@ -3125,17 +3159,21 @@ fn run() -> Result<()> {
                     Some(&query),
                     read_request_args("repo", &repo),
                 );
-                let query_plan_result = if diagnose || results.is_empty() {
+                let (query_plan_result, primary_retry_request) = if diagnose || results.is_empty() {
                     let index = FastIndex::build(&repo)?;
-                    Some(serde_json::to_value(attach_cli_retry_requests(
+                    let plan = attach_cli_retry_requests(
                         index.query_plan(&query, &filters)?,
                         "search_code",
                         "repo",
                         &index.root,
                         &filters,
-                    ))?)
+                    );
+                    (
+                        Some(serde_json::to_value(&plan)?),
+                        primary_cli_retry_request_from_plan(&plan),
+                    )
                 } else {
-                    None
+                    (None, None)
                 };
                 let mut output = serde_json::json!({
                     "query": query,
@@ -3157,6 +3195,11 @@ fn run() -> Result<()> {
                     "results": results
                 });
                 insert_optional_json_field(&mut output, "query_plan_result", query_plan_result);
+                insert_optional_json_field(
+                    &mut output,
+                    "primary_retry_request",
+                    primary_retry_request,
+                );
                 println!("{}", serde_json::to_string(&output)?);
             }
         }
@@ -3202,13 +3245,17 @@ fn run() -> Result<()> {
                         Some(&query),
                         read_request_args("index_dir", &index_dir),
                     );
-                    let query_plan_result = if diagnose || results.is_empty() {
-                        let mut plans = shard_query_plans(&index_dir, &query, &filters)?;
-                        attach_cli_shard_retry_requests(&mut plans, &index_dir, &filters);
-                        Some(serde_json::to_value(plans)?)
-                    } else {
-                        None
-                    };
+                    let (query_plan_result, primary_retry_request) =
+                        if diagnose || results.is_empty() {
+                            let mut plans = shard_query_plans(&index_dir, &query, &filters)?;
+                            attach_cli_shard_retry_requests(&mut plans, &index_dir, &filters);
+                            (
+                                Some(serde_json::to_value(&plans)?),
+                                primary_cli_retry_request_from_shard_plans(&plans),
+                            )
+                        } else {
+                            (None, None)
+                        };
                     let mut item = serde_json::json!({
                         "query": query,
                         "surface": "shards",
@@ -3226,6 +3273,11 @@ fn run() -> Result<()> {
                         "results": results
                     });
                     insert_optional_json_field(&mut item, "query_plan_result", query_plan_result);
+                    insert_optional_json_field(
+                        &mut item,
+                        "primary_retry_request",
+                        primary_retry_request,
+                    );
                     batch.push(item);
                 }
             } else if let Some(index_path) = index {
@@ -3260,17 +3312,22 @@ fn run() -> Result<()> {
                         Some(&query),
                         read_request_args("index", &index_path),
                     );
-                    let query_plan_result = if diagnose || results.is_empty() {
-                        Some(serde_json::to_value(attach_cli_retry_requests(
-                            index.query_plan(&query, &filters)?,
-                            "indexed_search_code",
-                            "index",
-                            &index_path,
-                            &filters,
-                        ))?)
-                    } else {
-                        None
-                    };
+                    let (query_plan_result, primary_retry_request) =
+                        if diagnose || results.is_empty() {
+                            let plan = attach_cli_retry_requests(
+                                index.query_plan(&query, &filters)?,
+                                "indexed_search_code",
+                                "index",
+                                &index_path,
+                                &filters,
+                            );
+                            (
+                                Some(serde_json::to_value(&plan)?),
+                                primary_cli_retry_request_from_plan(&plan),
+                            )
+                        } else {
+                            (None, None)
+                        };
                     let mut item = serde_json::json!({
                         "query": query,
                         "surface": "indexed",
@@ -3291,6 +3348,11 @@ fn run() -> Result<()> {
                         "results": results
                     });
                     insert_optional_json_field(&mut item, "query_plan_result", query_plan_result);
+                    insert_optional_json_field(
+                        &mut item,
+                        "primary_retry_request",
+                        primary_retry_request,
+                    );
                     batch.push(item);
                 }
             } else {
@@ -3318,18 +3380,23 @@ fn run() -> Result<()> {
                         Some(&query),
                         read_request_args("repo", &repo),
                     );
-                    let query_plan_result = if diagnose || results.is_empty() {
-                        let index = FastIndex::build(&repo)?;
-                        Some(serde_json::to_value(attach_cli_retry_requests(
-                            index.query_plan(&query, &filters)?,
-                            "search_code",
-                            "repo",
-                            &index.root,
-                            &filters,
-                        ))?)
-                    } else {
-                        None
-                    };
+                    let (query_plan_result, primary_retry_request) =
+                        if diagnose || results.is_empty() {
+                            let index = FastIndex::build(&repo)?;
+                            let plan = attach_cli_retry_requests(
+                                index.query_plan(&query, &filters)?,
+                                "search_code",
+                                "repo",
+                                &index.root,
+                                &filters,
+                            );
+                            (
+                                Some(serde_json::to_value(&plan)?),
+                                primary_cli_retry_request_from_plan(&plan),
+                            )
+                        } else {
+                            (None, None)
+                        };
                     let mut item = serde_json::json!({
                         "query": query,
                         "surface": "fallback",
@@ -3350,6 +3417,11 @@ fn run() -> Result<()> {
                         "results": results
                     });
                     insert_optional_json_field(&mut item, "query_plan_result", query_plan_result);
+                    insert_optional_json_field(
+                        &mut item,
+                        "primary_retry_request",
+                        primary_retry_request,
+                    );
                     batch.push(item);
                 }
             }
@@ -3975,8 +4047,10 @@ fn run() -> Result<()> {
             require_faster_than_baseline,
             write_baseline,
             max_p95_regression,
+            query_args,
             queries,
         } => {
+            let queries = cli_benchmark_queries(query_args, queries)?;
             let filters = search_filters_from_args(&filters, repo_filter)?;
             let report = bench_search(BenchConfig {
                 repo,
@@ -4017,8 +4091,10 @@ fn run() -> Result<()> {
             baseline,
             write_baseline,
             max_p95_regression,
+            query_args,
             queries,
         } => {
+            let queries = cli_benchmark_queries(query_args, queries)?;
             let filters = search_filters_from_args(&filters, repo)?;
             let report = bench_shards(ShardBenchConfig {
                 index_dir,
@@ -4936,6 +5012,18 @@ fn cli_batch_queries(queries: Vec<String>) -> Result<Vec<String>> {
         );
     }
     Ok(queries)
+}
+
+fn cli_benchmark_queries(query_args: Vec<String>, queries: Vec<String>) -> Result<Vec<String>> {
+    let queries = query_args
+        .into_iter()
+        .chain(queries)
+        .filter(|query| !query.is_empty())
+        .collect::<Vec<_>>();
+    if queries.is_empty() {
+        bail!("provide at least one query or --query QUERY");
+    }
+    cli_batch_queries(queries)
 }
 
 fn shard_bootstrap_output<T: Serialize>(
