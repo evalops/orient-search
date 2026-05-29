@@ -23,8 +23,9 @@ The rule should tell agents:
   query phrasings.
 - For CLI use, prefer bare `orient search-auto ...`; it uses the warm TCP
   daemon first when no explicit target is supplied and falls back locally when
-  no daemon is reachable. Use `--no-daemon` only when forcing current-directory
-  fallback.
+  no daemon is reachable. From inside a git checkout, bare CLI searches are
+  scoped to that checkout in the shared shard daemon. Use `--no-daemon` only
+  when forcing current-directory fallback.
 - Follow returned `read_*`, `related_*`, `repo_map_request`, and
   `query_plan_request` objects directly.
 - Use `refresh_if_stale:true` when indexed files may have changed.

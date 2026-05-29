@@ -75,10 +75,11 @@ tools are forgiving targeted entrypoints: pass `repo`, `index`, or `index_dir`
 and they use the matching live, indexed, or shard surface.
 The CLI equivalent for automatic target selection is `orient search-auto`. When
 no target flag is supplied, it first tries the warm TCP daemon at
-`127.0.0.1:8796`, then searches the current directory as a live repo if no
-daemon is reachable. Use `--daemon-addr` for another TCP daemon or
-`--no-daemon` to force current-directory fallback. `orient search-auto-batch`
-follows the same daemon-first rule.
+`127.0.0.1:8796`, infers the current git checkout as `repo_filter` when
+available, then searches the current directory as a live repo if no daemon is
+reachable. Use `--daemon-addr` for another TCP daemon or `--no-daemon` to force
+current-directory fallback. `orient search-auto-batch` follows the same
+daemon-first rule.
 The plain CLI `orient search` command also accepts `--index` and `--index-dir`
 as convenience target flags for agents that reach first for `search` and then
 add the available search surface.

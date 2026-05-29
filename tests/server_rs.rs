@@ -3,7 +3,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
 #[cfg(unix)]
 use std::os::unix::net::UnixStream;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::thread;
@@ -6528,6 +6528,90 @@ fn cli_search_auto_uses_warm_daemon_before_live_fallback() {
     let local: serde_json::Value = serde_json::from_slice(&local_output.stdout).unwrap();
     assert_eq!(local["surface"], serde_json::json!("fallback"));
     assert!(local["results"].as_array().unwrap().is_empty(), "{local}");
+}
+
+#[test]
+fn cli_search_auto_scopes_warm_shards_to_current_git_repo() {
+    let workspace = tempfile::tempdir().unwrap();
+    let current_repo = workspace.path().join("current-app");
+    let other_repo = workspace.path().join("other-app");
+    fs::create_dir_all(current_repo.join(".git")).unwrap();
+    fs::create_dir_all(other_repo.join(".git")).unwrap();
+    write(
+        &current_repo.join("src/lib.rs"),
+        "pub fn shared_lookup_token() -> &'static str { \"current\" }\n",
+    );
+    write(
+        &other_repo.join("src/lib.rs"),
+        "pub fn shared_lookup_token() -> &'static str { \"other\" }\n",
+    );
+    let shard_dir = workspace.path().join("shards");
+    build_shards(
+        &[PathBuf::from(&current_repo), PathBuf::from(&other_repo)],
+        &shard_dir,
+    )
+    .unwrap();
+
+    let binary = assert_cmd::cargo::cargo_bin("orient");
+    let mut child = Command::new(&binary)
+        .args([
+            "serve-tcp",
+            "--addr",
+            "127.0.0.1:0",
+            "--index-dir",
+            shard_dir.to_str().unwrap(),
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let stdout = child.stdout.take().unwrap();
+    let mut startup_reader = BufReader::new(stdout);
+    let mut startup = String::new();
+    startup_reader.read_line(&mut startup).unwrap();
+    let startup_json: serde_json::Value = serde_json::from_str(&startup).unwrap();
+    let addr = startup_json["addr"].as_str().unwrap();
+
+    let output = Command::new(&binary)
+        .current_dir(current_repo.join("src"))
+        .args(["search-auto", "--daemon-addr", addr, "shared_lookup_token"])
+        .output()
+        .unwrap();
+    let batch_output = Command::new(&binary)
+        .current_dir(current_repo.join("src"))
+        .args([
+            "search-auto-batch",
+            "--daemon-addr",
+            addr,
+            "shared_lookup_token",
+        ])
+        .output()
+        .unwrap();
+
+    child.kill().unwrap();
+    let _ = child.wait();
+
+    assert!(output.status.success(), "{output:?}");
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["surface"], serde_json::json!("shards"));
+    assert_eq!(
+        value["query_plan_request"]["arguments"]["repo_filter"],
+        serde_json::json!(current_repo.canonicalize().unwrap().to_string_lossy())
+    );
+    let serialized = serde_json::to_string(&value).unwrap();
+    assert!(serialized.contains("current-app/src/lib.rs"), "{value}");
+    assert!(!serialized.contains("other-app/src/lib.rs"), "{value}");
+
+    assert!(batch_output.status.success(), "{batch_output:?}");
+    let batch: serde_json::Value = serde_json::from_slice(&batch_output.stdout).unwrap();
+    assert_eq!(batch[0]["surface"], serde_json::json!("shards"));
+    assert_eq!(
+        batch[0]["query_plan_request"]["arguments"]["repo_filter"],
+        serde_json::json!(current_repo.canonicalize().unwrap().to_string_lossy())
+    );
+    let batch_serialized = serde_json::to_string(&batch).unwrap();
+    assert!(batch_serialized.contains("current-app/src/lib.rs"));
+    assert!(!batch_serialized.contains("other-app/src/lib.rs"));
 }
 
 #[test]

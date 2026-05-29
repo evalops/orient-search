@@ -49,7 +49,8 @@ The generated rule should keep agents on this loop:
 - From shell, bare `orient search-auto ...` and `orient search-auto-batch ...`
   use the TCP daemon first when no explicit target is supplied. Pass
   `--daemon-addr` for a non-default daemon or `--no-daemon` to force
-  current-directory fallback.
+  current-directory fallback. When the shell is inside a git checkout, the
+  daemon request is scoped to that checkout.
 - Follow returned `read_*`, `related_*`, `repo_map_request`, and
   `query_plan_request` objects directly.
 - Pass `refresh_if_stale:true` when live files may have changed.

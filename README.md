@@ -46,8 +46,10 @@ orient read-range --index /tmp/repo.index src/lib.rs:40:80
 
 With no explicit `--repo`, `--index`, or `--index-dir`, `search-auto` first
 uses the warm daemon at `127.0.0.1:8796` when available, then falls back to a
-live search of the current directory. Use `--daemon-addr` for another TCP
-daemon or `--no-daemon` to force local fallback.
+live search of the current directory. When run from inside a git checkout, the
+daemon request is scoped to that checkout so multi-repo shard daemons stay
+focused on the agent's current task. Use `--daemon-addr` for another TCP daemon
+or `--no-daemon` to force local fallback.
 
 Useful filters: `repo:`, `path:`/`dir:`, `file:`, `lang:`, `ext:`, `symbol:`,
 `kind:`/`type:`, `dep:`, `import:`, `test:`, `generated:`, `code:`,

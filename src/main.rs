@@ -3218,7 +3218,8 @@ fn run() -> Result<()> {
         } => {
             let query = cli_single_query(query, query_arg)?;
             if repo.is_none() && index.is_none() && index_dir.is_none() && !no_daemon {
-                let filters = search_filters_from_args(&filters, repo_filter.clone())?;
+                let mut filters = search_filters_from_args(&filters, repo_filter.clone())?;
+                infer_current_repo_filter_if_missing(&mut filters);
                 let arguments = daemon_search_auto_arguments(
                     &query,
                     limit,
@@ -3483,7 +3484,8 @@ fn run() -> Result<()> {
         } => {
             let queries = cli_batch_queries(queries)?;
             if repo.is_none() && index.is_none() && index_dir.is_none() && !no_daemon {
-                let filters = search_filters_from_args(&filters, repo_filter.clone())?;
+                let mut filters = search_filters_from_args(&filters, repo_filter.clone())?;
+                infer_current_repo_filter_if_missing(&mut filters);
                 let arguments = daemon_search_auto_batch_arguments(
                     &queries,
                     limit,
@@ -5120,6 +5122,24 @@ fn print_doctor_report(report: &DoctorReport) -> Result<()> {
 fn repo_has_git_metadata(path: &Path) -> bool {
     path.ancestors()
         .any(|ancestor| ancestor.join(".git").exists())
+}
+
+fn infer_current_repo_filter_if_missing(filters: &mut SearchFilters) {
+    if filters.repo.is_some() {
+        return;
+    }
+    let Some(root) = current_git_repo_root() else {
+        return;
+    };
+    filters.repo = Some(root.to_string_lossy().to_string());
+}
+
+fn current_git_repo_root() -> Option<PathBuf> {
+    let cwd = env::current_dir().ok()?;
+    let cwd = cwd.canonicalize().unwrap_or(cwd);
+    cwd.ancestors()
+        .find(|ancestor| ancestor.join(".git").exists())
+        .map(Path::to_path_buf)
 }
 
 fn command_in_path(name: &str) -> bool {

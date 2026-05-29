@@ -5743,20 +5743,21 @@ fn add_filter_signal(
 }
 
 pub(crate) fn repo_matches(root: &Path, filters: &SearchFilters) -> bool {
-    let repo = root
+    let repo_name = root
         .file_name()
         .map(|value| value.to_string_lossy().to_ascii_lowercase())
         .unwrap_or_else(|| root.display().to_string());
+    let repo_root = root.to_string_lossy().to_ascii_lowercase();
     if let Some(filter) = &filters.repo {
-        if !repo.contains(&filter.to_ascii_lowercase()) {
+        let filter = filter.to_ascii_lowercase();
+        if !repo_name.contains(&filter) && !repo_root.contains(&filter) {
             return false;
         }
     }
-    if filters
-        .exclude_repo
-        .iter()
-        .any(|filter| repo.contains(&filter.to_ascii_lowercase()))
-    {
+    if filters.exclude_repo.iter().any(|filter| {
+        let filter = filter.to_ascii_lowercase();
+        repo_name.contains(&filter) || repo_root.contains(&filter)
+    }) {
         return false;
     }
 
