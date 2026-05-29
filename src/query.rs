@@ -38,6 +38,7 @@ pub fn parse_query(input: &str) -> ParsedQuery {
         }
     }
 
+    infer_leading_location_term(&mut terms, &mut filters, explicit_content_terms);
     if terms.len() > 1 && !filters.match_any {
         filters.require_all = true;
     }
@@ -264,6 +265,85 @@ fn infer_path_like_single_term(
     }
 }
 
+fn infer_leading_location_term(
+    terms: &mut Vec<String>,
+    filters: &mut SearchFilters,
+    explicit_content_terms: bool,
+) {
+    if explicit_content_terms
+        || terms.is_empty()
+        || filters.file.is_some()
+        || filters.path.is_some()
+        || filters.symbol.is_some()
+    {
+        return;
+    }
+
+    let Some((path, target_line, trailing_term)) = split_leading_location_token(&terms[0]) else {
+        return;
+    };
+    let path = strip_leading_current_dir_segments(path);
+    if path.is_empty() || path.starts_with('.') {
+        return;
+    }
+
+    if path.contains('/') {
+        filters.path = Some(path);
+    } else if looks_like_file_name_query(&path) {
+        filters.file = Some(path);
+    } else {
+        return;
+    }
+    filters.target_line = Some(target_line);
+    if let Some(trailing_term) = trailing_term {
+        terms[0] = trailing_term;
+    } else {
+        terms.remove(0);
+    }
+    filters.require_all = false;
+}
+
+fn split_leading_location_token(token: &str) -> Option<(String, usize, Option<String>)> {
+    let normalized = token.trim().replace('\\', "/");
+    if normalized.is_empty() || normalized.contains("://") {
+        return None;
+    }
+
+    for (path_end, _) in normalized.match_indices(':') {
+        let path = &normalized[..path_end];
+        if !looks_like_location_path(path) {
+            continue;
+        }
+        let rest = &normalized[path_end + 1..];
+        let Some((line, after_line)) = split_leading_positive_number(rest) else {
+            continue;
+        };
+        if after_line.is_empty() {
+            return Some((path.to_string(), line, None));
+        }
+        let Some(after_line_colon) = after_line.strip_prefix(':') else {
+            continue;
+        };
+        if after_line_colon.is_empty() {
+            return Some((path.to_string(), line, None));
+        }
+        if let Some((_, after_column)) = split_leading_positive_number(after_line_colon) {
+            if after_column.is_empty() {
+                return Some((path.to_string(), line, None));
+            }
+            if let Some(text) = after_column.strip_prefix(':') {
+                return Some((path.to_string(), line, non_empty_location_tail(text)));
+            }
+        }
+        return Some((
+            path.to_string(),
+            line,
+            non_empty_location_tail(after_line_colon),
+        ));
+    }
+    None
+}
+
 fn strip_location_suffix(value: &str) -> (String, Option<usize>) {
     let normalized = value.trim().replace('\\', "/");
     let Some((prefix, column_or_line)) = split_numeric_suffix(&normalized) else {
@@ -291,6 +371,23 @@ fn split_numeric_suffix(value: &str) -> Option<(&str, usize)> {
     }
     let number = suffix.parse::<usize>().ok()?;
     (number > 0).then_some((prefix, number))
+}
+
+fn split_leading_positive_number(value: &str) -> Option<(usize, &str)> {
+    let digit_count = value
+        .bytes()
+        .take_while(|byte| byte.is_ascii_digit())
+        .count();
+    if digit_count == 0 {
+        return None;
+    }
+    let number = value[..digit_count].parse::<usize>().ok()?;
+    (number > 0).then_some((number, &value[digit_count..]))
+}
+
+fn non_empty_location_tail(value: &str) -> Option<String> {
+    let value = value.trim();
+    (!value.is_empty()).then(|| value.to_string())
 }
 
 fn looks_like_location_path(path: &str) -> bool {
@@ -765,6 +862,34 @@ mod tests {
             Some("src/server.rs")
         );
         assert_eq!(dot_source_location.filters.target_line, Some(42));
+
+        let copied_source_line = parse_query("src/server.rs:42: pub fn handle_request");
+        assert_eq!(
+            copied_source_line.terms,
+            vec!["pub", "fn", "handle_request"]
+        );
+        assert_eq!(
+            copied_source_line.filters.path.as_deref(),
+            Some("src/server.rs")
+        );
+        assert_eq!(copied_source_line.filters.target_line, Some(42));
+        assert!(copied_source_line.filters.require_all);
+
+        let copied_source_column_line = parse_query("src/server.rs:42:9:handle_request");
+        assert_eq!(copied_source_column_line.terms, vec!["handle_request"]);
+        assert_eq!(
+            copied_source_column_line.filters.path.as_deref(),
+            Some("src/server.rs")
+        );
+        assert_eq!(copied_source_column_line.filters.target_line, Some(42));
+
+        let copied_manifest_line = parse_query("Cargo.toml:12:name");
+        assert_eq!(copied_manifest_line.terms, vec!["name"]);
+        assert_eq!(
+            copied_manifest_line.filters.file.as_deref(),
+            Some("Cargo.toml")
+        );
+        assert_eq!(copied_manifest_line.filters.target_line, Some(12));
 
         let go_mod = parse_query("go.mod");
         assert!(go_mod.terms.is_empty());

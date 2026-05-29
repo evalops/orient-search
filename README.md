@@ -70,8 +70,9 @@ quoted phrases, negative filters like `-path:vendor`, and `mode:any` for broad
 orientation.
 Bare filename and path-like queries such as `Cargo.toml` or `src/lib.rs` use the
 same fast path filters. Use `content:Cargo.toml` when you want references to the
-string instead of the file itself. Pasted locations such as `src/lib.rs:42` or
-`src/lib.rs:42:9` also resolve to the file and anchor snippets near that line.
+string instead of the file itself. Pasted locations such as `src/lib.rs:42`,
+`src/lib.rs:42:9`, or copied `src/lib.rs:42: text` lines resolve to the file
+and anchor snippets near that line.
 
 Generated paths, including hashed JavaScript bundles, are demoted by default.
 Use `generated:true` / `is:generated` when you intentionally want generated
