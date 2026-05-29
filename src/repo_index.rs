@@ -324,6 +324,8 @@ pub struct QueryPlan {
     pub retry_requests: Vec<ResultToolRequest>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub primary_retry_request: Option<ResultToolRequest>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_action: Option<QueryPlanNextAction>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -339,10 +341,38 @@ pub struct QueryPlanDiagnosis {
     pub suggested_query: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct QueryPlanNextAction {
+    pub kind: String,
+    pub source: String,
+    pub summary: String,
+    pub request: ResultToolRequest,
+}
+
 impl QueryPlan {
     pub fn with_diagnosis(mut self) -> Self {
         self.diagnosis = Some(QueryPlanDiagnosis::from_plan(&self));
         self
+    }
+
+    pub fn set_retry_requests(&mut self, retry_requests: Vec<ResultToolRequest>) {
+        self.retry_requests = retry_requests;
+        self.primary_retry_request = self.retry_requests.first().cloned();
+        self.next_action = self
+            .primary_retry_request
+            .clone()
+            .map(QueryPlanNextAction::retry);
+    }
+}
+
+impl QueryPlanNextAction {
+    fn retry(request: ResultToolRequest) -> Self {
+        Self {
+            kind: "retry".to_string(),
+            source: "primary_retry_request".to_string(),
+            summary: "Run the promoted repaired search.".to_string(),
+            request,
+        }
     }
 }
 

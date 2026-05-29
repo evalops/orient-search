@@ -1455,9 +1455,8 @@ fn attach_cli_retry_requests<T: Serialize>(
     target_value: T,
     filters: &SearchFilters,
 ) -> QueryPlan {
-    plan.retry_requests =
-        cli_retry_requests(&plan, search_tool, target_name, target_value, filters);
-    plan.primary_retry_request = plan.retry_requests.first().cloned();
+    let retry_requests = cli_retry_requests(&plan, search_tool, target_name, target_value, filters);
+    plan.set_retry_requests(retry_requests);
     plan
 }
 

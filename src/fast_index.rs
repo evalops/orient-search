@@ -1738,6 +1738,7 @@ impl FastIndex {
                 repair_hints: repo_scope_mismatch_repair_hints(&filters, &retry_query),
                 retry_requests: Vec::new(),
                 primary_retry_request: None,
+                next_action: None,
             }
             .with_diagnosis());
         }
@@ -1766,6 +1767,7 @@ impl FastIndex {
                 )],
                 retry_requests: Vec::new(),
                 primary_retry_request: None,
+                next_action: None,
             }
             .with_diagnosis());
         }
@@ -1843,6 +1845,7 @@ impl FastIndex {
                     ),
                     retry_requests: Vec::new(),
                     primary_retry_request: None,
+                    next_action: None,
                 }
                 .with_diagnosis());
             }
@@ -1870,6 +1873,7 @@ impl FastIndex {
                 )],
                 retry_requests: Vec::new(),
                 primary_retry_request: None,
+                next_action: None,
             }
             .with_diagnosis());
         }
@@ -2140,6 +2144,7 @@ impl FastIndex {
                 ),
                 retry_requests: Vec::new(),
                 primary_retry_request: None,
+                next_action: None,
             }
             .with_diagnosis();
             for result in &mut results {
@@ -3353,6 +3358,7 @@ fn indexed_query_plan(
         repair_hints,
         retry_requests: Vec::new(),
         primary_retry_request: None,
+        next_action: None,
     }
     .with_diagnosis()
 }

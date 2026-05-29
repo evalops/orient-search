@@ -2250,14 +2250,14 @@ fn attach_retry_requests<T: Serialize>(
     target_value: T,
     source_arguments: &Value,
 ) -> QueryPlan {
-    plan.retry_requests = retry_search_requests(
+    let retry_requests = retry_search_requests(
         &plan,
         search_tool,
         target_name,
         target_value,
         source_arguments,
     );
-    plan.primary_retry_request = plan.retry_requests.first().cloned();
+    plan.set_retry_requests(retry_requests);
     plan
 }
 
@@ -2297,7 +2297,7 @@ fn primary_diagnosis_from_plan(plan: &QueryPlan) -> Option<Value> {
 fn primary_retry_request_from_shard_plans(plans: &[ShardQueryPlan]) -> Option<ResultToolRequest> {
     plans
         .iter()
-        .find_map(|shard_plan| shard_plan.plan.retry_requests.first().cloned())
+        .find_map(|shard_plan| primary_retry_request_from_plan(&shard_plan.plan))
 }
 
 fn primary_diagnosis_from_shard_plans(

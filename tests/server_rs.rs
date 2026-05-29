@@ -3417,6 +3417,14 @@ fn runtime_batches_searches_and_query_plans_against_repo_index_and_shards() {
         live_plan_result["retry_requests"][0]
     );
     assert_eq!(
+        live_plan_result["next_action"]["source"],
+        serde_json::json!("primary_retry_request")
+    );
+    assert_eq!(
+        live_plan_result["next_action"]["request"],
+        live_plan_result["primary_retry_request"]
+    );
+    assert_eq!(
         live_plan_result["retry_requests"][0]["arguments"]["query"],
         "session manager"
     );
