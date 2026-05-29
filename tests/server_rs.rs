@@ -7972,6 +7972,46 @@ fn runtime_shard_search_uses_route_before_manifest_cache() {
 }
 
 #[test]
+fn runtime_search_auto_diagnose_prefers_retry_next_action_for_noisy_hits() {
+    let repo = tempfile::tempdir().unwrap();
+    for index in 0..8 {
+        write(
+            &repo.path().join(format!("src/service_{index}.rs")),
+            &format!("pub fn needle_service_{index}() -> &'static str {{ \"needle\" }}\n"),
+        );
+        write(
+            &repo.path().join(format!("docs/service_{index}.md")),
+            "needle service documentation\n",
+        );
+    }
+
+    let runtime = ToolRuntime::default();
+    let response = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("diagnosed-noisy"),
+        tool: "search_auto".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "query": "needle",
+            "limit": 3,
+            "diagnose": true
+        }),
+    });
+    assert!(response.error.is_none(), "{:?}", response.error);
+    let value = response.result.unwrap();
+    assert!(!value["results"].as_array().unwrap().is_empty());
+    assert!(!value["read_batch_request"].is_null());
+    assert_eq!(
+        value["next_action"]["source"],
+        serde_json::json!("primary_retry_request")
+    );
+    assert_eq!(
+        value["next_action"]["request"],
+        value["primary_retry_request"]
+    );
+    assert!(value["primary_diagnosis"]["suggested_query"].is_string());
+}
+
+#[test]
 fn runtime_shard_query_plan_uses_route_before_manifest_cache() {
     let workspace = tempfile::tempdir().unwrap();
     let hit_repo = workspace.path().join("hit-service");

@@ -1872,23 +1872,55 @@ fn attach_cli_next_action(object: &mut Value) {
     let Some(fields) = object.as_object_mut() else {
         return;
     };
-    for (source, kind, summary) in [
-        (
-            "next_read_batch_request",
-            "read",
-            "Read the top available result ranges.",
-        ),
-        (
-            "primary_retry_request",
-            "retry",
-            "Run the promoted repaired search.",
-        ),
-        (
-            "repo_map_request",
-            "map",
-            "Open a compact repo map before broadening manually.",
-        ),
-    ] {
+    let prefer_retry = fields
+        .get("primary_retry_result")
+        .is_none_or(Value::is_null)
+        && fields
+            .get("primary_retry_request")
+            .is_some_and(|value| !value.is_null())
+        && fields
+            .get("primary_diagnosis")
+            .and_then(|diagnosis| diagnosis.get("suggested_query"))
+            .and_then(Value::as_str)
+            .is_some();
+    let ordered_actions = if prefer_retry {
+        [
+            (
+                "primary_retry_request",
+                "retry",
+                "Run the promoted repaired search.",
+            ),
+            (
+                "next_read_batch_request",
+                "read",
+                "Read the top available result ranges.",
+            ),
+            (
+                "repo_map_request",
+                "map",
+                "Open a compact repo map before broadening manually.",
+            ),
+        ]
+    } else {
+        [
+            (
+                "next_read_batch_request",
+                "read",
+                "Read the top available result ranges.",
+            ),
+            (
+                "primary_retry_request",
+                "retry",
+                "Run the promoted repaired search.",
+            ),
+            (
+                "repo_map_request",
+                "map",
+                "Open a compact repo map before broadening manually.",
+            ),
+        ]
+    };
+    for (source, kind, summary) in ordered_actions {
         let Some(request) = fields.get(source).filter(|value| !value.is_null()).cloned() else {
             continue;
         };

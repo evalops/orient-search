@@ -2394,6 +2394,7 @@ fn search_auto_next_action(
     next_read_batch_request: &Option<ResultToolRequest>,
     primary_retry_request: &Option<ResultToolRequest>,
     repo_map_request: &ResultToolRequest,
+    prefer_retry: bool,
 ) -> Option<Value> {
     if let Some(request) = refresh_request {
         return Some(json!({
@@ -2402,6 +2403,16 @@ fn search_auto_next_action(
             "summary": "Refresh the stale scoped index, then repeat the search.",
             "request": request
         }));
+    }
+    if prefer_retry {
+        if let Some(request) = primary_retry_request {
+            return Some(json!({
+                "kind": "retry",
+                "source": "primary_retry_request",
+                "summary": "Run the promoted repaired search.",
+                "request": request
+            }));
+        }
     }
     if let Some(request) = next_read_batch_request {
         return Some(json!({
@@ -2425,6 +2436,20 @@ fn search_auto_next_action(
         "summary": "Open a compact repo map before broadening manually.",
         "request": repo_map_request
     }))
+}
+
+fn should_prefer_retry_next_action(
+    primary_diagnosis: &Option<Value>,
+    primary_retry_request: &Option<ResultToolRequest>,
+    primary_retry_result: &Option<Value>,
+) -> bool {
+    primary_retry_result.is_none()
+        && primary_retry_request.is_some()
+        && primary_diagnosis
+            .as_ref()
+            .and_then(|diagnosis| diagnosis.get("suggested_query"))
+            .and_then(Value::as_str)
+            .is_some()
 }
 
 fn retry_read_base_arguments(request: &ResultToolRequest) -> Option<Map<String, Value>> {
@@ -5244,6 +5269,11 @@ impl ToolRuntime {
             &next_read_batch_request,
             &primary_retry_request,
             &repo_map_request,
+            should_prefer_retry_next_action(
+                &primary_diagnosis,
+                &primary_retry_request,
+                &primary_retry_result,
+            ),
         );
         Ok(SearchAutoResult {
             query: query.to_string(),
@@ -5355,6 +5385,11 @@ impl ToolRuntime {
             &next_read_batch_request,
             &primary_retry_request,
             &repo_map_request,
+            should_prefer_retry_next_action(
+                &primary_diagnosis,
+                &primary_retry_request,
+                &primary_retry_result,
+            ),
         );
         Ok(SearchAutoResult {
             query: query.to_string(),
@@ -5466,6 +5501,11 @@ impl ToolRuntime {
             &next_read_batch_request,
             &primary_retry_request,
             &repo_map_request,
+            should_prefer_retry_next_action(
+                &primary_diagnosis,
+                &primary_retry_request,
+                &primary_retry_result,
+            ),
         );
         Ok(SearchAutoResult {
             query: query.to_string(),

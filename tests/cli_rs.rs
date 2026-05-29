@@ -673,6 +673,48 @@ fn cli_search_auto_selects_live_indexed_and_shard_surfaces() {
 }
 
 #[test]
+fn cli_search_auto_diagnose_prefers_retry_next_action_for_noisy_hits() {
+    let repo = tempfile::tempdir().unwrap();
+    for index in 0..8 {
+        write(
+            &repo.path().join(format!("src/service_{index}.rs")),
+            &format!("pub fn needle_service_{index}() -> &'static str {{ \"needle\" }}\n"),
+        );
+        write(
+            &repo.path().join(format!("docs/service_{index}.md")),
+            "needle service documentation\n",
+        );
+    }
+
+    let output = Command::cargo_bin("orient")
+        .unwrap()
+        .args([
+            "search-auto",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--diagnose",
+            "--limit",
+            "3",
+            "needle",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(!value["results"].as_array().unwrap().is_empty());
+    assert!(!value["read_batch_request"].is_null());
+    assert_eq!(
+        value["next_action"]["source"],
+        serde_json::json!("primary_retry_request")
+    );
+    assert_eq!(
+        value["next_action"]["request"],
+        value["primary_retry_request"]
+    );
+    assert!(value["primary_diagnosis"]["suggested_query"].is_string());
+}
+
+#[test]
 fn cli_search_accepts_index_and_shard_targets() {
     let repo = sample_repo();
     let index_path = repo.path().join("orient.index");
