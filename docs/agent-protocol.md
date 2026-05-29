@@ -8,6 +8,7 @@ Run either a one-shot stdio server or a shared TCP daemon:
 
 ```bash
 target/release/orient serve-jsonl
+target/release/orient serve-mcp
 target/release/orient serve-tcp --addr 127.0.0.1:8796 --index-dir /tmp/orient-shards
 target/release/orient serve-tcp --addr 127.0.0.1:8796 --ensure-shards-dir /tmp/orient-shards --repo /path/to/repo-a --repo /path/to/repo-b
 target/release/orient daemon-status
@@ -24,7 +25,7 @@ Each request is one JSON object per line:
 ```
 
 Responses preserve `id` and return either `result` or `error`. Use `tool_manifest` for the complete tool list, argument metadata, daemon-default hints, defaults, enums, and JSON-schema-like input schemas.
-Adapters that want MCP-shaped definitions can call `mcp_manifest` or `orient mcp-manifest`; it returns `tools` entries with `name`, `description`, `inputSchema`, and `annotations`. Search, read, map, status, and plan tools are marked read-only. Index/shard build, refresh, and warm-cache tools are marked non-destructive but not read-only.
+Adapters that want MCP-shaped definitions can call `mcp_manifest` or `orient mcp-manifest`; it returns `tools` entries with `name`, `description`, `inputSchema`, and `annotations`. Search, read, map, status, and plan tools are marked read-only. Index/shard build, refresh, and warm-cache tools are marked non-destructive but not read-only. `orient serve-mcp` exposes the same runtime over stdio JSON-RPC for MCP clients, supporting `initialize`, `tools/list`, and `tools/call`; native JSON-lines remains available through `serve-jsonl`, TCP, or Unix sockets.
 Agents and wrappers that want a compact first-use recipe can call `agent_guide` or run `orient agent-guide`; it returns a `quickstart` block with install, shard bootstrap, daemon, client, status, one-shot search, and local-rule commands, plus the recommended search loop, request templates for live/indexed/shard modes, transport commands, query-language examples, and follow-up guidance without exposing any session analytics surface. For copyable local rule files, call `agent_instructions` or run `orient agent-instructions`; it emits an AGENTS.md/CLAUDE.md/Amp-ready instruction snippet.
 
 ## Bootstrap

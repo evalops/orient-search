@@ -18,8 +18,8 @@ use orient::repo_index::{
 use orient::server::{
     MAX_BATCH_QUERIES, MAX_BATCH_RANGES, ToolRuntime, agent_guide, agent_instructions,
     mcp_tool_manifest, retarget_client_cli_commands, serve_jsonl,
-    serve_jsonl_stream_with_client_command, serve_tcp, tcp_client_command, tool_manifest,
-    unix_client_command,
+    serve_jsonl_stream_with_client_command, serve_mcp, serve_tcp, tcp_client_command,
+    tool_manifest, unix_client_command,
 };
 use orient::shards::{
     ShardQueryPlan, build_shards, ensure_shards, find_shard_symbol, read_shard_range,
@@ -785,6 +785,7 @@ enum Commands {
         strict: bool,
     },
     ServeJsonl,
+    ServeMcp,
     ServeTcp {
         #[arg(long, default_value = "127.0.0.1:8796")]
         addr: String,
@@ -4005,6 +4006,11 @@ fn run() -> Result<()> {
             let stdin = io::stdin();
             let stdout = io::stdout();
             serve_jsonl(stdin.lock(), stdout.lock())?;
+        }
+        Commands::ServeMcp => {
+            let stdin = io::stdin();
+            let stdout = io::stdout();
+            serve_mcp(stdin.lock(), stdout.lock())?;
         }
         Commands::ServeTcp {
             addr,

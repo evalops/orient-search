@@ -15,7 +15,7 @@ use orient::repo_index::{
 };
 use orient::server::{
     MAX_BATCH_QUERIES, MAX_BATCH_RANGES, ToolRequest, ToolRuntime, agent_guide, agent_instructions,
-    mcp_tool_manifest, tool_manifest,
+    mcp_dispatch_value, mcp_tool_manifest, serve_mcp_with_runtime, tool_manifest,
 };
 use orient::shards::{build_shards, refresh_shards};
 
@@ -827,6 +827,77 @@ fn mcp_manifest_exposes_input_schema_for_adapter_wrappers() {
     assert_eq!(ensure_index["annotations"]["destructiveHint"], false);
     assert_eq!(ensure_index["annotations"]["idempotentHint"], false);
     assert_eq!(ensure_index["annotations"]["openWorldHint"], false);
+}
+
+#[test]
+fn mcp_stdio_serves_tool_list_and_calls_existing_runtime() {
+    let runtime = ToolRuntime::default();
+    let init = mcp_dispatch_value(
+        &runtime,
+        &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}),
+    )
+    .unwrap();
+    assert_eq!(init["result"]["serverInfo"]["name"], "orient-search");
+    assert_eq!(
+        init["result"]["capabilities"]["tools"],
+        serde_json::json!({})
+    );
+
+    let listed = mcp_dispatch_value(
+        &runtime,
+        &serde_json::json!({"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}),
+    )
+    .unwrap();
+    assert!(
+        listed["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|tool| tool["name"] == "search_code")
+    );
+
+    let called = mcp_dispatch_value(
+        &runtime,
+        &serde_json::json!({
+            "jsonrpc":"2.0",
+            "id":3,
+            "method":"tools/call",
+            "params":{"name":"list_tools","arguments":{}}
+        }),
+    )
+    .unwrap();
+    assert_eq!(called["result"]["isError"], false);
+    assert!(
+        called["result"]["structuredContent"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("search_code"))
+    );
+
+    let notification = mcp_dispatch_value(
+        &runtime,
+        &serde_json::json!({"jsonrpc":"2.0","method":"notifications/initialized","params":{}}),
+    );
+    assert!(notification.is_none());
+}
+
+#[test]
+fn mcp_stdio_loop_writes_json_rpc_lines() {
+    let runtime = ToolRuntime::default();
+    let input = concat!(
+        "{\"jsonrpc\":\"2.0\",\"id\":\"tools\",\"method\":\"tools/list\",\"params\":{}}\n",
+        "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\",\"params\":{}}\n",
+        "{\"jsonrpc\":\"2.0\",\"id\":\"call\",\"method\":\"tools/call\",\"params\":{\"name\":\"list_tools\",\"arguments\":{}}}\n",
+    );
+    let mut output = Vec::new();
+    serve_mcp_with_runtime(std::io::Cursor::new(input), &mut output, &runtime).unwrap();
+    let output = String::from_utf8(output).unwrap();
+    let lines = output.lines().collect::<Vec<_>>();
+    assert_eq!(lines.len(), 2);
+    assert!(lines[0].contains("\"id\":\"tools\""));
+    assert!(lines[0].contains("\"tools\""));
+    assert!(lines[1].contains("\"id\":\"call\""));
+    assert!(lines[1].contains("\"structuredContent\""));
 }
 
 #[test]

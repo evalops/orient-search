@@ -173,6 +173,12 @@ fn cli_help_shows_default_daemon_addr_for_agent_clients() {
         .success()
         .stdout(predicate::str::contains("[default: 127.0.0.1:8796]"))
         .stdout(predicate::str::contains("--index-dir"));
+
+    let mut mcp = Command::cargo_bin("orient").unwrap();
+    mcp.args(["serve-mcp", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("ServeMcp").not());
 }
 
 #[test]

@@ -105,7 +105,8 @@ printf '%s\n' \
 ```
 
 For adapter authors, `orient mcp-manifest` returns MCP-shaped tool definitions
-with input schemas and read-only annotations. Orient's native transport remains
+with input schemas and read-only annotations. `orient serve-mcp` exposes those
+tools over stdio JSON-RPC for MCP clients. Orient's native transport remains
 simple JSON-lines over stdio, TCP, or Unix sockets.
 
 ## Expected Agent Loop

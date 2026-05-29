@@ -104,6 +104,29 @@ pub fn serve_jsonl(reader: impl BufRead, mut writer: impl Write) -> Result<()> {
     serve_jsonl_with_runtime(reader, &mut writer, &mut runtime)
 }
 
+pub fn serve_mcp(reader: impl BufRead, mut writer: impl Write) -> Result<()> {
+    let runtime = ToolRuntime::default();
+    serve_mcp_with_runtime(reader, &mut writer, &runtime)
+}
+
+pub fn serve_mcp_with_runtime(
+    reader: impl BufRead,
+    mut writer: impl Write,
+    runtime: &ToolRuntime,
+) -> Result<()> {
+    for line in reader.lines() {
+        let line = line?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        if let Some(response) = mcp_dispatch_line(runtime, &line) {
+            writeln!(writer, "{}", serde_json::to_string(&response)?)?;
+            writer.flush()?;
+        }
+    }
+    Ok(())
+}
+
 pub fn serve_jsonl_with_runtime(
     reader: impl BufRead,
     mut writer: impl Write,
@@ -170,6 +193,99 @@ pub fn serve_jsonl_stream_with_client_command(
 
 pub fn dispatch(request: ToolRequest) -> ToolResponse {
     ToolRuntime::default().dispatch(request)
+}
+
+pub fn mcp_dispatch_line(runtime: &ToolRuntime, line: &str) -> Option<Value> {
+    let request = match serde_json::from_str::<Value>(line) {
+        Ok(request) => request,
+        Err(error) => {
+            return Some(mcp_error(Value::Null, -32700, error.to_string()));
+        }
+    };
+    mcp_dispatch_value(runtime, &request)
+}
+
+pub fn mcp_dispatch_value(runtime: &ToolRuntime, request: &Value) -> Option<Value> {
+    let id = request.get("id").cloned();
+    let method = request.get("method").and_then(Value::as_str);
+    if id.is_none() && method.is_some_and(|method| method.starts_with("notifications/")) {
+        return None;
+    }
+    let id = id.unwrap_or(Value::Null);
+    let Some(method) = method else {
+        return Some(mcp_error(id, -32600, "missing JSON-RPC method"));
+    };
+    match method {
+        "initialize" => Some(mcp_result(
+            id,
+            json!({
+                "protocolVersion": "2024-11-05",
+                "capabilities": {"tools": {}},
+                "serverInfo": {
+                    "name": "orient-search",
+                    "version": env!("CARGO_PKG_VERSION")
+                }
+            }),
+        )),
+        "tools/list" => Some(mcp_result(id, mcp_tool_manifest())),
+        "tools/call" => Some(mcp_tool_call(runtime, id, request)),
+        _ => Some(mcp_error(
+            id,
+            -32601,
+            format!("unknown MCP method: {method}"),
+        )),
+    }
+}
+
+fn mcp_tool_call(runtime: &ToolRuntime, id: Value, request: &Value) -> Value {
+    let params = request.get("params").unwrap_or(&Value::Null);
+    let Some(name) = params.get("name").and_then(Value::as_str) else {
+        return mcp_error(id, -32602, "tools/call params.name is required");
+    };
+    let arguments = params
+        .get("arguments")
+        .cloned()
+        .unwrap_or_else(|| json!({}));
+    let response = runtime.dispatch(ToolRequest {
+        id: id.clone(),
+        tool: name.to_string(),
+        arguments,
+    });
+    match response.result {
+        Some(result) => mcp_result(id, mcp_tool_result(result, false)),
+        None => mcp_result(
+            id,
+            mcp_tool_result(json!({"error": response.error.unwrap_or_default()}), true),
+        ),
+    }
+}
+
+fn mcp_tool_result(value: Value, is_error: bool) -> Value {
+    let text = serde_json::to_string(&value).unwrap_or_else(|_| "null".to_string());
+    json!({
+        "content": [{"type": "text", "text": text}],
+        "structuredContent": value,
+        "isError": is_error
+    })
+}
+
+fn mcp_result(id: Value, result: Value) -> Value {
+    json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "result": result
+    })
+}
+
+fn mcp_error(id: Value, code: i64, message: impl Into<String>) -> Value {
+    json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "error": {
+            "code": code,
+            "message": message.into()
+        }
+    })
 }
 
 #[derive(Default)]
