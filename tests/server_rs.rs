@@ -1129,6 +1129,13 @@ fn agent_guide_returns_local_agent_request_templates() {
             .iter()
             .any(|item| item.as_str().unwrap().contains("generated:true"))
     );
+    assert!(
+        guide["adapter_notes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item.as_str().unwrap().contains("AGENTS.md"))
+    );
 }
 
 #[test]
@@ -1143,6 +1150,10 @@ fn agent_instructions_returns_copyable_local_agent_rules() {
         "## Orient Search",
         "Use Orient as the first local code-discovery step",
         "orient client-jsonl --addr 127.0.0.1:9999",
+        "AGENTS.md",
+        "CLAUDE.md",
+        "local Amp rules",
+        "Keep cache paths local",
         "orient ensure-shards --discover-root /path/to/workspaces --output-dir /tmp/orient-shards --family-limit 2",
         "orient ensure-index --repo /work/repo --index /tmp/repo.index",
         "search_auto_batch",
@@ -1156,6 +1167,30 @@ fn agent_instructions_returns_copyable_local_agent_rules() {
             "missing instruction text: {expected}\n{instructions}"
         );
     }
+}
+
+#[test]
+fn agent_guidance_defaults_use_neutral_cache_placeholders() {
+    let guide = agent_guide(None, None, None, None);
+    let guide_json = serde_json::to_string(&guide).unwrap();
+    assert!(guide_json.contains("/path/to/local/cache/orient.index"));
+    assert!(guide_json.contains("/path/to/local/cache/orient-shards"));
+    assert!(!guide_json.contains("/tmp/orient"));
+    assert!(!guide_json.contains("/tmp/repo"));
+    assert!(
+        guide["adapter_notes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item.as_str().unwrap().contains("private workspace layouts"))
+    );
+
+    let instructions = agent_instructions(None, None, None, None);
+    assert!(instructions.contains("/path/to/local/cache/orient.index"));
+    assert!(instructions.contains("/path/to/local/cache/orient-shards"));
+    assert!(!instructions.contains("/tmp/orient"));
+    assert!(!instructions.contains("/tmp/repo"));
+    assert!(instructions.contains("private workspace layouts"));
 }
 
 #[test]

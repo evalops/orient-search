@@ -1047,8 +1047,8 @@ pub fn agent_guide(
     addr: Option<&str>,
 ) -> Value {
     let repo = repo.unwrap_or("/path/to/repo");
-    let index = index.unwrap_or("/tmp/orient.index");
-    let index_dir = index_dir.unwrap_or("/tmp/orient-shards");
+    let index = index.unwrap_or("/path/to/local/cache/orient.index");
+    let index_dir = index_dir.unwrap_or("/path/to/local/cache/orient-shards");
     let addr = addr.unwrap_or(DEFAULT_DAEMON_ADDR);
     let client_command = tcp_client_command(addr);
     let status_command = daemon_status_command(addr);
@@ -1078,6 +1078,12 @@ pub fn agent_guide(
             "Use repo_map, indexed_repo_map, or shard_repo_map before editing unfamiliar code.",
             "Search first, then use read_request, related_request, or related_symbols_request from results.",
             "Call a query-plan tool when results are empty, noisy, or overly broad."
+        ],
+        "adapter_notes": [
+            "Codex: add the instruction snippet to the repo-local AGENTS.md or equivalent local rule file.",
+            "Claude Code: add the instruction snippet to the project CLAUDE.md or equivalent local memory/rules surface.",
+            "Amp and other coding agents: add the instruction snippet to the local project rules surface and prefer JSON-lines/MCP tool calls over repeated shell scans.",
+            "Keep cache paths local to the machine running the agents; do not copy private workspace layouts into shared docs or reusable rules."
         ],
         "preferred_surfaces": {
             "one_live_repo": "search_code",
@@ -1208,14 +1214,16 @@ pub fn agent_instructions(
     addr: Option<&str>,
 ) -> String {
     let repo = repo.unwrap_or("/path/to/repo");
-    let index = index.unwrap_or("/tmp/orient.index");
-    let index_dir = index_dir.unwrap_or("/tmp/orient-shards");
+    let index = index.unwrap_or("/path/to/local/cache/orient.index");
+    let index_dir = index_dir.unwrap_or("/path/to/local/cache/orient-shards");
     let addr = addr.unwrap_or(DEFAULT_DAEMON_ADDR);
     let client_command = tcp_client_command(addr);
     format!(
         "## Orient Search\n\
 Use Orient as the first local code-discovery step before repeated `rg`, `find`, `ls`, or `cat`.\n\
 Prefer the shared daemon when it is running: `{client_command}`.\n\
+Copy this snippet into the repo-local agent rule surface, such as AGENTS.md, CLAUDE.md, or a local Amp rules file.\n\
+Keep cache paths local to the machine running the agents; do not copy private workspace layouts into shared docs or reusable rules.\n\
 For many local repos, bootstrap it with `orient ensure-shards --discover-root /path/to/workspaces --output-dir {index_dir} --family-limit 2` and `orient serve-tcp --addr {addr} --index-dir {index_dir}`.\n\
 For one repo, bootstrap it with `orient ensure-index --repo {repo} --index {index}` and `orient serve-tcp --addr {addr} --index {index}`.\n\
 Start each session with `daemon_status` or `agent_guide`, then use `search_auto` for normal lookup and `search_auto_batch` for alternate query phrasings.\n\

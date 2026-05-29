@@ -20,6 +20,13 @@ orient agent-instructions --index-dir "$ORIENT_SHARDS"
 Keep that cache path local to the machine running the agents; the generated
 rule should not contain private workspace layouts.
 
+Place the generated snippet in the repo-local rule surface for the agent that
+will use Orient. For Codex, that is usually `AGENTS.md`; for Claude Code, a
+project `CLAUDE.md`; for Amp or another coding agent, the local project rules
+surface. The snippet is intentionally tool-agnostic: it tells the agent to use
+JSON-lines/MCP calls and returned follow-up requests before repeated shell
+scans.
+
 The rule should tell agents:
 
 - Prefer Orient before `rg`, `find`, `ls`, or `cat` for code discovery.
