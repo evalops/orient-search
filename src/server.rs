@@ -1,5 +1,6 @@
 use crate::discover::{
     DiscoverOptions, DiscoverySelectionSummary, discover_repos, discovery_selection_summary,
+    git_metadata_for_repo,
 };
 use crate::fast_index::{FastIndex, IndexFreshness, RefreshStats};
 use crate::query::{merge_filters, normalize_symbol_kind, parse_query, query_text};
@@ -2187,9 +2188,40 @@ fn shard_freshness_roots_for_search(
             .map(|shard| shard.root.clone())
             .collect();
     }
+    if has_positive_selector {
+        if let Some(root) = live_cwd_shard_root_matching_filters(index_dir, arguments, filters)? {
+            roots.push(root);
+        }
+    }
     roots.sort();
     roots.dedup();
     Ok(roots)
+}
+
+fn live_cwd_shard_root_matching_filters(
+    index_dir: &Path,
+    arguments: &Value,
+    filters: &SearchFilters,
+) -> Result<Option<PathBuf>> {
+    let Some(repo_root) = git_root_from_client_cwd(arguments, "shard_refresh")? else {
+        return Ok(None);
+    };
+    let repo_key = canonical_cache_key(&repo_root);
+    let manifest = load_manifest(index_dir)?;
+    let Some(shard) = manifest
+        .shards
+        .iter()
+        .find(|shard| canonical_cache_key(&shard.root) == repo_key)
+    else {
+        return Ok(None);
+    };
+    let mut shard = shard.clone();
+    let git = git_metadata_for_repo(&repo_root, false);
+    shard.git = (git.origin.is_some() || git.git_common_dir.is_some()).then_some(git);
+    if shard_search_scopes(&shard, filters).is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(repo_root))
 }
 
 enum ShardRefreshSelection {

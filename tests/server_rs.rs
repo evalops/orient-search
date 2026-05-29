@@ -4592,6 +4592,7 @@ fn runtime_shard_repo_map_reports_git_metadata() {
 #[test]
 fn runtime_refresh_if_stale_picks_up_git_branch_metadata_changes() {
     let repo = tempfile::tempdir().unwrap();
+    let matching_repo = tempfile::tempdir().unwrap();
     let other_repo = tempfile::tempdir().unwrap();
     write(
         &repo.path().join("src/lib.rs"),
@@ -4606,6 +4607,14 @@ fn runtime_refresh_if_stale_picks_up_git_branch_metadata_changes() {
         "pub fn other_branch_switch_token() {}\n",
     );
     write(
+        &matching_repo.path().join("src/lib.rs"),
+        "pub fn already_on_new_branch_token() {}\n",
+    );
+    write(
+        &matching_repo.path().join("Cargo.toml"),
+        "[package]\nname='matching-branch-project'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    write(
         &other_repo.path().join("Cargo.toml"),
         "[package]\nname='other-branch-project'\nversion='0.1.0'\nedition='2024'\n",
     );
@@ -4613,6 +4622,20 @@ fn runtime_refresh_if_stale_picks_up_git_branch_metadata_changes() {
     git(repo.path(), &["add", "."]);
     git(
         repo.path(),
+        &[
+            "-c",
+            "user.name=Orient Tests",
+            "-c",
+            "user.email=orient@example.com",
+            "commit",
+            "-m",
+            "init",
+        ],
+    );
+    git(matching_repo.path(), &["init", "-b", "new-branch"]);
+    git(matching_repo.path(), &["add", "."]);
+    git(
+        matching_repo.path(),
         &[
             "-c",
             "user.name=Orient Tests",
@@ -4640,7 +4663,11 @@ fn runtime_refresh_if_stale_picks_up_git_branch_metadata_changes() {
 
     let shard_dir = tempfile::tempdir().unwrap();
     build_shards(
-        &[repo.path().to_path_buf(), other_repo.path().to_path_buf()],
+        &[
+            repo.path().to_path_buf(),
+            matching_repo.path().to_path_buf(),
+            other_repo.path().to_path_buf(),
+        ],
         shard_dir.path(),
     )
     .unwrap();
@@ -4653,6 +4680,15 @@ fn runtime_refresh_if_stale_picks_up_git_branch_metadata_changes() {
     assert!(stale.stale, "{stale:?}");
     assert_eq!(stale.stale_shards, 2);
     assert_eq!(stale.git_metadata_changed, 2);
+    assert!(
+        stale.shards.iter().any(|shard| !shard.git_metadata_stale
+            && shard
+                .indexed_git
+                .as_ref()
+                .and_then(|git| git.branch.as_deref())
+                == Some("new-branch")),
+        "{stale:?}"
+    );
     let stale_current = stale
         .shards
         .iter()
