@@ -1461,6 +1461,7 @@ impl FastIndex {
                 &self.files,
                 &facet_candidate_ids,
                 &self.symbol_postings,
+                &self.symbol_kind_postings,
                 filters.require_all,
                 candidate_count,
                 candidate_cap,
@@ -1959,6 +1960,7 @@ impl FastIndex {
             &self.files,
             &facet_candidate_ids,
             &self.symbol_postings,
+            &self.symbol_kind_postings,
             filters.require_all,
             candidate_count,
             candidate_cap,
@@ -3058,6 +3060,7 @@ fn indexed_query_plan(
     files: &[IndexedPath],
     facet_candidate_ids: &[u32],
     all_symbol_postings: &HashMap<String, Vec<Posting>>,
+    all_symbol_kind_postings: &HashMap<String, Vec<Posting>>,
     require_all: bool,
     candidate_count: usize,
     candidate_cap: usize,
@@ -3109,6 +3112,7 @@ fn indexed_query_plan(
         files,
         facet_candidate_ids,
         all_symbol_postings,
+        all_symbol_kind_postings,
         &active_filters,
         require_all,
         candidate_count,
@@ -3159,6 +3163,7 @@ fn query_plan_repair_hints(
     files: &[IndexedPath],
     facet_candidate_ids: &[u32],
     all_symbol_postings: &HashMap<String, Vec<Posting>>,
+    all_symbol_kind_postings: &HashMap<String, Vec<Posting>>,
     active_filters: &[QueryPlanFilter],
     require_all: bool,
     candidate_count: usize,
@@ -3210,6 +3215,29 @@ fn query_plan_repair_hints(
             };
             hints.push(repair_hint(
                 "replace_symbol_filter",
+                message,
+                suggested_query,
+            ));
+        }
+    }
+    if let Some(kind) = filters.symbol_kind.as_ref() {
+        if !all_symbol_kind_postings.contains_key(kind) {
+            let suggested_query = suggested_symbol_kind_replacement_query(
+                kind,
+                all_symbol_kind_postings,
+                query_tokens,
+            );
+            let available = available_symbol_kinds(all_symbol_kind_postings);
+            let message = if available.is_empty() {
+                format!("No indexed symbols use kind `{kind}`.")
+            } else {
+                format!(
+                    "No indexed symbols use kind `{kind}`. Available kinds: {}.",
+                    available.join(", ")
+                )
+            };
+            hints.push(repair_hint(
+                "replace_symbol_kind_filter",
                 message,
                 suggested_query,
             ));
@@ -3739,6 +3767,18 @@ fn suggested_symbol_kind_query(
     best.first()
         .filter(|(_, distance)| *distance <= 2)
         .map(|(kind, _)| format!("kind:{kind}"))
+}
+
+fn suggested_symbol_kind_replacement_query(
+    wanted: &str,
+    symbol_kind_postings: &HashMap<String, Vec<Posting>>,
+    query_tokens: &[String],
+) -> Option<String> {
+    let replacement = suggested_symbol_kind_query(wanted, symbol_kind_postings)?;
+    Some(match suggested_query_from_tokens(query_tokens) {
+        Some(query) => format!("{replacement} {query}"),
+        None => replacement,
+    })
 }
 
 fn suggested_symbol_query(wanted: &str, files: &[IndexedPath]) -> Option<String> {

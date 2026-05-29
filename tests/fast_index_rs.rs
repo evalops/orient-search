@@ -2431,6 +2431,28 @@ fn indexed_kind_filter_skips_trigram_only_false_positives() {
 }
 
 #[test]
+fn indexed_query_plan_suggests_replacement_for_misspelled_kind_with_terms() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/handler.rs"),
+        "pub fn sharedneedle_handler() {}\n",
+    );
+
+    let index = FastIndex::build(repo.path()).unwrap();
+    let plan = index
+        .query_plan("kind:functoin sharedneedle", &SearchFilters::default())
+        .unwrap();
+
+    assert_eq!(plan.candidate_count, 0);
+    assert_eq!(plan.final_match_count, 0);
+    assert!(plan.repair_hints.iter().any(|hint| {
+        hint.kind == "replace_symbol_kind_filter"
+            && hint.suggested_query.as_deref() == Some("kind:function sharedneedle")
+            && hint.message.contains("Available kinds: function")
+    }));
+}
+
+#[test]
 fn indexed_attribute_filters_intersect_before_scoring() {
     let repo = tempfile::tempdir().unwrap();
     write(
