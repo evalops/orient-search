@@ -2255,10 +2255,27 @@ fn primary_retry_request_from_shard_plans(plans: &[ShardQueryPlan]) -> Option<Re
         .find_map(|shard_plan| shard_plan.plan.retry_requests.first().cloned())
 }
 
-fn primary_diagnosis_from_shard_plans(plans: &[ShardQueryPlan]) -> Option<Value> {
-    plans
+fn primary_diagnosis_from_shard_plans(
+    plans: &[ShardQueryPlan],
+    results_empty: bool,
+) -> Option<Value> {
+    let diagnosis = plans
         .iter()
-        .find_map(|shard_plan| primary_diagnosis_from_plan(&shard_plan.plan))
+        .find_map(|shard_plan| primary_diagnosis_from_plan(&shard_plan.plan));
+    if results_empty
+        && diagnosis
+            .as_ref()
+            .and_then(|value| value.get("status"))
+            .and_then(Value::as_str)
+            .is_some_and(|status| matches!(status, "matched" | "candidate_cap_hit"))
+    {
+        return Some(json!({
+            "status": "result_plan_mismatch",
+            "summary": "Shard query plans reported matches, but shard search returned no final results after routing and finalization.",
+            "next_action": "Run the query_plan_request, then retry with a narrower query or refresh/rebuild shards if the plan and results still disagree."
+        }));
+    }
+    diagnosis
 }
 
 fn primary_retry_result_value(request: &ResultToolRequest, result: Value) -> Result<Value> {
@@ -5068,7 +5085,7 @@ impl ToolRuntime {
             attach_shard_retry_requests(&mut plans, &index_dir, arguments);
             Some((
                 serde_json::to_value(&plans)?,
-                primary_diagnosis_from_shard_plans(&plans),
+                primary_diagnosis_from_shard_plans(&plans, results.is_empty()),
                 primary_retry_request_from_shard_plans(&plans),
             ))
         } else {

@@ -3923,7 +3923,7 @@ fn shard_manifest_sketch_prunes_impossible_cold_shards() {
     let miss_repo = workspace.path().join("miss-service");
     write(
         &hit_repo.join("src/lib.rs"),
-        "pub struct SessionManager;\npub fn uniquehitneedle() -> &'static str { \"ok\" }\n",
+        "pub struct SessionManager;\npub fn uniquehitneedle() -> &'static str { \"ok\" }\npub fn read_batch_request_agent_guide_follow_up() { primary_retry_request(); refresh_request(); repo_map_request(); }\n",
     );
     write(
         &miss_repo.join("src/lib.rs"),
@@ -3994,6 +3994,18 @@ fn shard_manifest_sketch_prunes_impossible_cold_shards() {
     )
     .unwrap();
     assert!(absent_identifier_results.is_empty());
+
+    let multi_identifier_results = search_shards(
+        shard_dir.path(),
+        "read_batch_request primary_retry_request refresh_request repo_map_request agent guide follow-up",
+        10,
+        &SearchFilters::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        result_paths(&multi_identifier_results),
+        vec!["hit-service/src/lib.rs"]
+    );
 
     let plans = shard_query_plans(
         shard_dir.path(),

@@ -2254,6 +2254,9 @@ fn shard_query_identifier_prefilter(
     if filters.match_any || query_tokens.len() <= 1 || !shard_query.contains('_') {
         return None;
     }
+    if shard_query.split_whitespace().nth(1).is_some() {
+        return None;
+    }
     let normalized = normalize_token(shard_query);
     (normalized.chars().count() > SHARD_SUBSTRING_PREFILTER_MAX_TOKEN_CHARS).then_some(normalized)
 }
