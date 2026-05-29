@@ -22,7 +22,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 const SHARD_MANIFEST_VERSION: u32 = 1;
 const SHARD_MANIFEST_SIDECAR_VERSION: u32 = 1;
 const SHARD_MANIFEST_PREFILTER_VERSION: u32 = 1;
-const SHARD_MANIFEST_ROUTE_VERSION: u32 = 4;
+const SHARD_MANIFEST_ROUTE_VERSION: u32 = 5;
 const SHARD_MANIFEST_FILE: &str = "manifest.json";
 const SHARD_MANIFEST_SIDECAR_FILE: &str = "manifest.bin";
 const SHARD_MANIFEST_PREFILTER_FILE: &str = "manifest.prefilter.bin";
@@ -63,7 +63,9 @@ struct ShardManifestRoute {
     json_fingerprint: ManifestFileFingerprint,
     shards: Vec<ShardRouteEntry>,
     exact_terms: Vec<ShardRouteTerm>,
+    trigram_terms: Vec<ShardRouteTerm>,
     omitted_hashes: Vec<u32>,
+    omitted_trigram_hashes: Vec<u32>,
     shard_ids: Vec<u8>,
 }
 
@@ -104,6 +106,12 @@ enum ShardRouteLookup {
     MissingHash,
     Omitted,
     Corrupt,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct ShardRouteRequirements {
+    exact_hashes: Vec<u32>,
+    trigram_hashes: Vec<u32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1884,6 +1892,13 @@ fn shard_query_sketch(index: &FastIndex) -> ShardQuerySketch {
     for key in index.trigram_postings.keys() {
         sketch_insert(&mut trigram_bits, key);
     }
+    let mut trigram_hashes = index
+        .trigram_postings
+        .keys()
+        .map(|key| sketch_fingerprint(key))
+        .collect::<Vec<_>>();
+    trigram_hashes.sort_unstable();
+    trigram_hashes.dedup();
     for key in index.symbol_kind_postings.keys() {
         sketch_insert(&mut symbol_kind_bits, key);
     }
@@ -1893,7 +1908,7 @@ fn shard_query_sketch(index: &FastIndex) -> ShardQuerySketch {
 
     ShardQuerySketch {
         exact_hashes,
-        trigram_hashes: Vec::new(),
+        trigram_hashes,
         exact_bits: Vec::new(),
         trigram_bits,
         symbol_kind_bits,
@@ -2177,14 +2192,14 @@ pub(crate) fn shard_route_entries(
     shard_query: &str,
     filters: &SearchFilters,
 ) -> Result<Option<Vec<ShardEntry>>> {
-    let required_hashes = shard_prefilter_required_exact_hashes(shard_query, filters);
-    if required_hashes.is_empty() {
+    let requirements = shard_route_requirements(shard_query, filters);
+    if requirements.exact_hashes.is_empty() && requirements.trigram_hashes.is_empty() {
         return Ok(None);
     }
     let Some(route) = load_manifest_route(index_dir)? else {
         return Ok(None);
     };
-    let candidate_ids = match shard_route_candidate_ids(&route, &required_hashes) {
+    let candidate_ids = match shard_route_candidate_ids(&route, &requirements) {
         ShardRouteLookup::Candidates(candidate_ids) => candidate_ids,
         ShardRouteLookup::MissingHash => return Ok(Some(Vec::new())),
         ShardRouteLookup::Omitted => return Ok(None),
@@ -2210,24 +2225,40 @@ fn shard_entries_to_jobs(shards: Vec<ShardEntry>, filters: &SearchFilters) -> Ve
 
 fn shard_route_candidate_ids(
     route: &ShardManifestRoute,
-    required_hashes: &[u32],
+    requirements: &ShardRouteRequirements,
 ) -> ShardRouteLookup {
     let mut candidate_ids: Option<Vec<u16>> = None;
     let mut saw_omitted = false;
-    for hash in required_hashes {
-        let postings = match shard_route_postings(route, *hash) {
-            Ok(Some(postings)) => postings,
-            Ok(None) if route.omitted_hashes.binary_search(hash).is_ok() => {
-                saw_omitted = true;
-                continue;
+    for (terms, omitted_hashes, required_hashes) in [
+        (
+            route.exact_terms.as_slice(),
+            route.omitted_hashes.as_slice(),
+            requirements.exact_hashes.as_slice(),
+        ),
+        (
+            route.trigram_terms.as_slice(),
+            route.omitted_trigram_hashes.as_slice(),
+            requirements.trigram_hashes.as_slice(),
+        ),
+    ] {
+        for hash in required_hashes {
+            let postings = match shard_route_postings(route, terms, *hash) {
+                Ok(Some(postings)) => postings,
+                Ok(None) if omitted_hashes.binary_search(hash).is_ok() => {
+                    saw_omitted = true;
+                    continue;
+                }
+                Ok(None) => return ShardRouteLookup::MissingHash,
+                Err(()) => return ShardRouteLookup::Corrupt,
+            };
+            candidate_ids = Some(match candidate_ids {
+                Some(existing) => intersect_u16_sorted(&existing, &postings),
+                None => postings,
+            });
+            if candidate_ids.as_ref().is_some_and(Vec::is_empty) {
+                break;
             }
-            Ok(None) => return ShardRouteLookup::MissingHash,
-            Err(()) => return ShardRouteLookup::Corrupt,
-        };
-        candidate_ids = Some(match candidate_ids {
-            Some(existing) => intersect_u16_sorted(&existing, &postings),
-            None => postings,
-        });
+        }
         if candidate_ids.as_ref().is_some_and(Vec::is_empty) {
             break;
         }
@@ -2239,15 +2270,16 @@ fn shard_route_candidate_ids(
     }
 }
 
-fn shard_route_postings(route: &ShardManifestRoute, hash: u32) -> Result<Option<Vec<u16>>, ()> {
-    let index = route
-        .exact_terms
-        .binary_search_by_key(&hash, |term| term.hash)
-        .ok();
+fn shard_route_postings(
+    route: &ShardManifestRoute,
+    terms: &[ShardRouteTerm],
+    hash: u32,
+) -> Result<Option<Vec<u16>>, ()> {
+    let index = terms.binary_search_by_key(&hash, |term| term.hash).ok();
     let Some(index) = index else {
         return Ok(None);
     };
-    let term = route.exact_terms[index];
+    let term = terms[index];
     let start = term.start as usize;
     if start > route.shard_ids.len() {
         return Err(());
@@ -2255,6 +2287,28 @@ fn shard_route_postings(route: &ShardManifestRoute, hash: u32) -> Result<Option<
     decode_route_shard_ids(&route.shard_ids[start..], term.len as usize)
         .map(Some)
         .ok_or(())
+}
+
+fn shard_route_requirements(shard_query: &str, filters: &SearchFilters) -> ShardRouteRequirements {
+    let exact_hashes = shard_prefilter_required_exact_hashes(shard_query, filters);
+    let query_tokens = unique_query_tokens(shard_query);
+    let mut trigram_hashes = Vec::new();
+    if filters.symbol_kind.is_none()
+        && query_tokens.len() == 1
+        && shard_allows_substring_prefilter(&query_tokens[0])
+    {
+        trigram_hashes.extend(
+            shard_query_trigrams(&query_tokens[0])
+                .into_iter()
+                .map(|trigram| sketch_fingerprint(&trigram)),
+        );
+    }
+    trigram_hashes.sort_unstable();
+    trigram_hashes.dedup();
+    ShardRouteRequirements {
+        exact_hashes,
+        trigram_hashes,
+    }
 }
 
 fn intersect_u16_sorted(left: &[u16], right: &[u16]) -> Vec<u16> {
@@ -2678,6 +2732,7 @@ fn save_manifest_route(index_dir: &Path, manifest: &ShardManifest) -> Result<()>
     );
     let manifest_path = index_dir.join(SHARD_MANIFEST_FILE);
     let mut postings = HashMap::<u32, Vec<u16>>::new();
+    let mut trigram_postings = HashMap::<u32, Vec<u16>>::new();
     let shards = manifest
         .shards
         .iter()
@@ -2686,6 +2741,12 @@ fn save_manifest_route(index_dir: &Path, manifest: &ShardManifest) -> Result<()>
             if let Some(sketch) = &shard.sketch {
                 for hash in &sketch.exact_hashes {
                     postings.entry(*hash).or_default().push(shard_id as u16);
+                }
+                for hash in &sketch.trigram_hashes {
+                    trigram_postings
+                        .entry(*hash)
+                        .or_default()
+                        .push(shard_id as u16);
                 }
             }
             ShardRouteEntry::from_shard(shard)
@@ -2697,6 +2758,40 @@ fn save_manifest_route(index_dir: &Path, manifest: &ShardManifest) -> Result<()>
     let mut exact_terms = Vec::with_capacity(terms.len());
     let mut omitted_hashes = Vec::new();
     let mut shard_ids = Vec::new();
+    encode_route_terms(terms, &mut exact_terms, &mut omitted_hashes, &mut shard_ids);
+
+    let mut trigram_terms_input = trigram_postings.into_iter().collect::<Vec<_>>();
+    trigram_terms_input.sort_unstable_by_key(|(hash, _)| *hash);
+    let mut trigram_terms = Vec::with_capacity(trigram_terms_input.len());
+    let mut omitted_trigram_hashes = Vec::new();
+    encode_route_terms(
+        trigram_terms_input,
+        &mut trigram_terms,
+        &mut omitted_trigram_hashes,
+        &mut shard_ids,
+    );
+
+    let route = ShardManifestRoute {
+        version: SHARD_MANIFEST_ROUTE_VERSION,
+        json_fingerprint: manifest_file_fingerprint(&manifest_path)?,
+        shards,
+        exact_terms,
+        trigram_terms,
+        omitted_hashes,
+        omitted_trigram_hashes,
+        shard_ids,
+    };
+    let bytes = bincode::serialize(&route)?;
+    atomic_write(&index_dir.join(SHARD_MANIFEST_ROUTE_FILE), &bytes)
+        .with_context(|| format!("write shard manifest route {}", index_dir.display()))
+}
+
+fn encode_route_terms(
+    terms: Vec<(u32, Vec<u16>)>,
+    route_terms: &mut Vec<ShardRouteTerm>,
+    omitted_hashes: &mut Vec<u32>,
+    shard_ids: &mut Vec<u8>,
+) {
     for (hash, mut ids) in terms {
         ids.sort_unstable();
         ids.dedup();
@@ -2706,22 +2801,10 @@ fn save_manifest_route(index_dir: &Path, manifest: &ShardManifest) -> Result<()>
         }
         let start = shard_ids.len() as u32;
         let len = ids.len() as u16;
-        encode_route_shard_ids(&ids, &mut shard_ids);
-        exact_terms.push(ShardRouteTerm { hash, start, len });
+        encode_route_shard_ids(&ids, shard_ids);
+        route_terms.push(ShardRouteTerm { hash, start, len });
     }
     omitted_hashes.sort_unstable();
-
-    let route = ShardManifestRoute {
-        version: SHARD_MANIFEST_ROUTE_VERSION,
-        json_fingerprint: manifest_file_fingerprint(&manifest_path)?,
-        shards,
-        exact_terms,
-        omitted_hashes,
-        shard_ids,
-    };
-    let bytes = bincode::serialize(&route)?;
-    atomic_write(&index_dir.join(SHARD_MANIFEST_ROUTE_FILE), &bytes)
-        .with_context(|| format!("write shard manifest route {}", index_dir.display()))
 }
 
 fn guard_manifest_write_preserves_existing_roots(
@@ -3058,6 +3141,20 @@ mod tests {
         }
     }
 
+    fn exact_route_requirements(hashes: &[u32]) -> ShardRouteRequirements {
+        ShardRouteRequirements {
+            exact_hashes: hashes.to_vec(),
+            trigram_hashes: Vec::new(),
+        }
+    }
+
+    fn trigram_route_requirements(hashes: &[u32]) -> ShardRouteRequirements {
+        ShardRouteRequirements {
+            exact_hashes: Vec::new(),
+            trigram_hashes: hashes.to_vec(),
+        }
+    }
+
     #[test]
     fn manifest_writer_refuses_unexpected_shrink_without_explicit_mode() {
         let dir = tempfile::tempdir().unwrap();
@@ -3174,16 +3271,25 @@ mod tests {
         let route = load_manifest_route(dir.path()).unwrap().unwrap();
         assert_eq!(route.shards.len(), 2);
         assert_eq!(
-            shard_route_candidate_ids(&route, &[sketch_fingerprint("routeprobe")]),
+            shard_route_candidate_ids(
+                &route,
+                &exact_route_requirements(&[sketch_fingerprint("routeprobe")])
+            ),
             ShardRouteLookup::Candidates(vec![0])
         );
         assert_eq!(
-            shard_route_candidate_ids(&route, &[sketch_fingerprint("sharedrouteprobe")]),
+            shard_route_candidate_ids(
+                &route,
+                &exact_route_requirements(&[sketch_fingerprint("sharedrouteprobe")])
+            ),
             ShardRouteLookup::Candidates(vec![0, 1])
         );
         assert!(route.shard_ids.len() < 4);
 
-        let missing = shard_route_candidate_ids(&route, &[sketch_fingerprint("missingrouteprobe")]);
+        let missing = shard_route_candidate_ids(
+            &route,
+            &exact_route_requirements(&[sketch_fingerprint("missingrouteprobe")]),
+        );
         assert_eq!(missing, ShardRouteLookup::MissingHash);
 
         let mut corrupt = route.clone();
@@ -3193,7 +3299,10 @@ mod tests {
             .unwrap();
         corrupt.exact_terms[routeprobe_index].start = corrupt.shard_ids.len() as u32 + 1;
         assert_eq!(
-            shard_route_candidate_ids(&corrupt, &[sketch_fingerprint("routeprobe")]),
+            shard_route_candidate_ids(
+                &corrupt,
+                &exact_route_requirements(&[sketch_fingerprint("routeprobe")])
+            ),
             ShardRouteLookup::Corrupt
         );
     }
@@ -3239,11 +3348,60 @@ mod tests {
                 .is_err()
         );
         assert_eq!(
-            shard_route_candidate_ids(&route, &[broad_hash]),
+            shard_route_candidate_ids(&route, &exact_route_requirements(&[broad_hash])),
             ShardRouteLookup::Omitted
         );
         assert_eq!(
-            shard_route_candidate_ids(&route, &[broad_hash, narrow_hash]),
+            shard_route_candidate_ids(
+                &route,
+                &exact_route_requirements(&[broad_hash, narrow_hash])
+            ),
+            ShardRouteLookup::Candidates(vec![0])
+        );
+    }
+
+    #[test]
+    fn manifest_route_uses_trigrams_for_substring_queries() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut needle_hashes = shard_query_trigrams("needle")
+            .into_iter()
+            .map(|trigram| sketch_fingerprint(&trigram))
+            .collect::<Vec<_>>();
+        needle_hashes.sort_unstable();
+        let mut needle_hashes = needle_hashes;
+        needle_hashes.sort_unstable();
+        let other_hashes = shard_query_trigrams("other")
+            .into_iter()
+            .map(|trigram| sketch_fingerprint(&trigram))
+            .collect::<Vec<_>>();
+        let mut manifest =
+            test_manifest(&dir.path().join("needle"), Some(&dir.path().join("other")));
+        manifest.shards[0].sketch = Some(ShardQuerySketch {
+            exact_hashes: Vec::new(),
+            trigram_hashes: needle_hashes.clone(),
+            exact_bits: Vec::new(),
+            trigram_bits: Vec::new(),
+            symbol_kind_bits: Vec::new(),
+            filter_bits: Vec::new(),
+        });
+        manifest.shards[1].sketch = Some(ShardQuerySketch {
+            exact_hashes: Vec::new(),
+            trigram_hashes: other_hashes,
+            exact_bits: Vec::new(),
+            trigram_bits: Vec::new(),
+            symbol_kind_bits: Vec::new(),
+            filter_bits: Vec::new(),
+        });
+        save_manifest(dir.path(), &manifest).unwrap();
+
+        let route = load_manifest_route(dir.path()).unwrap().unwrap();
+        assert!(!route.trigram_terms.is_empty());
+        assert_eq!(
+            shard_route_requirements("needle", &SearchFilters::default()).trigram_hashes,
+            needle_hashes
+        );
+        assert_eq!(
+            shard_route_candidate_ids(&route, &trigram_route_requirements(&needle_hashes)),
             ShardRouteLookup::Candidates(vec![0])
         );
     }
@@ -3280,11 +3438,13 @@ mod tests {
                 len: 1,
             }],
             omitted_hashes: Vec::new(),
+            trigram_terms: Vec::new(),
+            omitted_trigram_hashes: Vec::new(),
             shard_ids: vec![0x80],
         };
 
         assert_eq!(
-            shard_route_candidate_ids(&route, &[42]),
+            shard_route_candidate_ids(&route, &exact_route_requirements(&[42])),
             ShardRouteLookup::Corrupt
         );
     }

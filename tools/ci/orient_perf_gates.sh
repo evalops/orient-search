@@ -18,6 +18,8 @@ index_path="${tmpdir}/orient.index"
 fallback_bench="${tmpdir}/orient-fallback-bench.json"
 indexed_bench="${tmpdir}/orient-indexed-bench.json"
 shard_dir="${tmpdir}/orient-shards"
+route_workspace="${tmpdir}/route-workspace"
+route_shard_dir="${tmpdir}/route-shards"
 
 target/release/orient bench-search \
   --repo . \
@@ -83,3 +85,34 @@ target/release/orient bench-shards \
   --fail-p95-ms 1000 \
   "indexed search symbol filters" \
   "file:Cargo.toml"
+
+mkdir -p "${route_workspace}"
+route_repos=()
+for index in $(seq 0 95); do
+  repo="${route_workspace}/route-repo-${index}"
+  route_repos+=(--repo "${repo}")
+  mkdir -p "${repo}/src"
+  cat > "${repo}/src/lib.rs" <<EOF
+pub fn commonroutegate() -> usize { ${index} }
+EOF
+done
+cat >> "${route_workspace}/route-repo-42/src/lib.rs" <<'EOF'
+pub fn unique42needle() -> usize { 42 }
+EOF
+
+target/release/orient ensure-shards \
+  "${route_repos[@]}" \
+  --output-dir "${route_shard_dir}"
+target/release/orient search \
+  --index-dir "${route_shard_dir}" \
+  --query "kind:function unique42needle" \
+  --limit 10 \
+  | grep -q "route-repo-42/src/lib.rs"
+target/release/orient bench-shards \
+  --index-dir "${route_shard_dir}" \
+  --cold \
+  --runs 5 \
+  --warmup 1 \
+  --limit 10 \
+  --fail-p95-ms 50 \
+  "kind:function unique42needle"

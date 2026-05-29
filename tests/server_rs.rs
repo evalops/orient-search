@@ -5732,6 +5732,53 @@ fn runtime_shard_search_uses_route_before_manifest_cache() {
 }
 
 #[test]
+fn runtime_shard_search_uses_trigram_route_before_manifest_cache() {
+    let workspace = tempfile::tempdir().unwrap();
+    let hit_repo = workspace.path().join("hit-service");
+    let miss_repo = workspace.path().join("miss-service");
+    write(
+        &hit_repo.join("src/lib.rs"),
+        "pub fn prefixruntime_trigramprobesuffix() -> bool { true }\n",
+    );
+    write(
+        &miss_repo.join("src/lib.rs"),
+        "pub fn unrelated_runtime_trigram_service() -> bool { false }\n",
+    );
+
+    let shard_dir = tempfile::tempdir().unwrap();
+    build_shards(&[hit_repo, miss_repo], shard_dir.path()).unwrap();
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(shard_dir.path().join("manifest.json")).unwrap()).unwrap();
+    let miss_index = manifest["shards"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|shard| shard["name"] == "miss-service")
+        .unwrap()["index"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    fs::remove_file(shard_dir.path().join(miss_index)).unwrap();
+
+    let runtime = ToolRuntime::default();
+    let response = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("search"),
+        tool: "search_shards".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": shard_dir.path(),
+            "query": "trigramprobe",
+            "limit": 10
+        }),
+    });
+    assert!(response.error.is_none(), "{:?}", response.error);
+    let result = serde_json::to_string(&response.result).unwrap();
+    assert!(result.contains("hit-service/src/lib.rs"), "{result}");
+    assert!(!result.contains("miss-service/src/lib.rs"), "{result}");
+    assert_eq!(runtime.cached_shard_manifest_count(), 0);
+    assert_eq!(runtime.cached_index_count(), 1);
+}
+
+#[test]
 fn runtime_serves_parallel_warm_shard_query_plans() {
     let root = tempfile::tempdir().unwrap();
     let mut repos = Vec::new();
