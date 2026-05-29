@@ -74,6 +74,9 @@ scope, `refresh_if_stale:true` refreshes only that repo's shard. Empty or
 diagnostic `search_auto` responses include a compact `freshness` object when
 the scoped index is stale, plus a top-level ready-to-run `refresh_request` that
 refreshes and repeats the search.
+When a JSON-lines or MCP client calls `daemon_status` with `cwd`, the returned
+`default_requests` also include that `cwd`, so copyable first map, search,
+batch, and query-plan calls stay scoped to the active checkout.
 
 Useful filters: `repo:`, `path:`/`dir:`, `file:`, `lang:`, `ext:`, `symbol:`,
 `kind:`/`type:`, `dep:`, `import:`, `test:`, `generated:`, `code:`,

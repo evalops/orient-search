@@ -70,6 +70,9 @@ The generated rule should keep agents on this loop. See
 - From JSON-lines or MCP-style clients, pass `cwd` on no-target search, map,
   plan, symbol, read, and related-file calls. The daemon scopes those requests
   to the active checkout.
+- Call `daemon_status` with `cwd` when you want copyable `default_requests`
+  for the active checkout; the returned map, search, batch, and query-plan
+  requests keep that same scope.
 - Follow returned `read_*`, `related_*`, `repo_map_request`, and
   `query_plan_request` objects directly.
 - Pass `refresh_if_stale:true` when live files may have changed. With `cwd`,

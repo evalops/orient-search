@@ -7346,6 +7346,84 @@ fn runtime_bounds_lazy_shard_index_cache() {
 }
 
 #[test]
+fn daemon_status_with_cwd_returns_checkout_scoped_default_requests() {
+    let workspace = tempfile::tempdir().unwrap();
+    let auth_repo = workspace.path().join("auth");
+    write(
+        &auth_repo.join("src/lib.rs"),
+        "pub struct AuthSession;\npub fn issue_token() -> AuthSession { AuthSession }\n",
+    );
+    write(&auth_repo.join("Cargo.toml"), "[package]\nname='auth'\n");
+    git(&auth_repo, &["init"]);
+
+    let billing_repo = workspace.path().join("billing");
+    write(
+        &billing_repo.join("src/lib.rs"),
+        "pub struct BillingInvoice;\npub fn invoice_total() -> BillingInvoice { BillingInvoice }\n",
+    );
+    write(
+        &billing_repo.join("Cargo.toml"),
+        "[package]\nname='billing'\n",
+    );
+    git(&billing_repo, &["init"]);
+
+    let shard_dir = tempfile::tempdir().unwrap();
+    build_shards(&[auth_repo.clone(), billing_repo], shard_dir.path()).unwrap();
+
+    let runtime = ToolRuntime::default();
+    runtime
+        .register_shards(shard_dir.path().to_path_buf())
+        .unwrap();
+
+    let cwd = auth_repo.join("src");
+    let status = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("status"),
+        tool: "daemon_status".to_string(),
+        arguments: serde_json::json!({
+            "cwd": cwd
+        }),
+    });
+    assert!(status.error.is_none(), "{:?}", status.error);
+    let status = status.result.unwrap();
+    assert_eq!(
+        status["client_scope"]["cwd"],
+        serde_json::json!(auth_repo.join("src"))
+    );
+    assert_eq!(
+        status["default_requests"]["repo_map"]["tool"],
+        serde_json::json!("repo_map")
+    );
+    assert_eq!(
+        status["default_requests"]["repo_map"]["arguments"]["cwd"],
+        serde_json::json!(auth_repo.join("src"))
+    );
+    assert!(status["default_requests"]["repo_map"]["arguments"]["index_dir"].is_null());
+    assert_eq!(
+        status["default_requests"]["search"]["arguments"]["cwd"],
+        serde_json::json!(auth_repo.join("src"))
+    );
+    assert_eq!(
+        status["default_requests"]["query_plan"]["tool"],
+        serde_json::json!("search_query_plan")
+    );
+    assert_eq!(
+        status["default_requests"]["query_plan"]["arguments"]["cwd"],
+        serde_json::json!(auth_repo.join("src"))
+    );
+
+    let map_request = &status["default_requests"]["repo_map"];
+    let map = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("map"),
+        tool: map_request["tool"].as_str().unwrap().to_string(),
+        arguments: map_request["arguments"].clone(),
+    });
+    assert!(map.error.is_none(), "{:?}", map.error);
+    let map = serde_json::to_string(&map.result).unwrap();
+    assert!(map.contains("AuthSession"), "{map}");
+    assert!(!map.contains("BillingInvoice"), "{map}");
+}
+
+#[test]
 fn runtime_shard_search_uses_global_prefilter_before_manifest_cache() {
     let workspace = tempfile::tempdir().unwrap();
     let repo = workspace.path().join("service");

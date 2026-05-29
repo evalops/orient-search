@@ -565,14 +565,23 @@ impl ToolRuntime {
     }
 
     pub fn daemon_status(&self) -> Value {
+        self.daemon_status_for_arguments(&Value::Object(Map::new()))
+    }
+
+    pub fn daemon_status_for_arguments(&self, arguments: &Value) -> Value {
         let search_auto_default = self.search_auto_default_status();
+        let client_cwd = optional_string_arg(arguments, "cwd");
         let cached_index_details = self.cached_index_details();
         let cached_shard_manifest_details = self.cached_shard_manifest_details();
         let footprint =
             daemon_footprint_summary(&cached_index_details, &cached_shard_manifest_details);
-        json!({
+        let default_requests = client_cwd.as_deref().map_or_else(
+            || daemon_default_requests(&search_auto_default),
+            daemon_default_cwd_requests,
+        );
+        let mut status = json!({
             "search_auto_default": search_auto_default.clone(),
-            "default_requests": daemon_default_requests(&search_auto_default),
+            "default_requests": default_requests,
             "max_cached_indexes": self.max_cached_indexes(),
             "cached_indexes": self.cached_index_count(),
             "cached_index_paths": self.cached_index_paths(),
@@ -581,7 +590,14 @@ impl ToolRuntime {
             "cached_shard_manifest_paths": self.cached_shard_manifest_paths(),
             "cached_shard_manifest_details": cached_shard_manifest_details,
             "footprint": footprint
-        })
+        });
+        if let Some(cwd) = client_cwd {
+            status["client_scope"] = json!({
+                "cwd": cwd,
+                "default_requests_scoped": true
+            });
+        }
+        status
     }
 
     pub fn dispatch_line(&self, line: &str) -> ToolResponse {
@@ -4706,7 +4722,7 @@ impl ToolRuntime {
                     "registered_shards": self.shard_manifest_detail(&index_dir)
                 }))
             }
-            "daemon_status" => Ok(self.daemon_status()),
+            "daemon_status" => Ok(self.daemon_status_for_arguments(&request.arguments)),
             "tool_manifest" => Ok(tool_manifest()),
             "mcp_manifest" => Ok(mcp_tool_manifest()),
             "list_tools" => Ok(tool_names()),
@@ -7954,6 +7970,55 @@ fn daemon_default_requests(search_auto_default: &Value) -> Value {
         ),
         "query_plan": daemon_default_query_plan_request(search_auto_default, target),
         "note": "Use search_auto without an explicit target when search_auto_default is trusted; use the targeted repo_map and query_plan requests when orienting or diagnosing. Each default request includes jsonl and client_cli for direct terminal use."
+    })
+}
+
+fn daemon_default_cwd_requests(cwd: &str) -> Value {
+    json!({
+        "manifest": daemon_default_request("tools", "tool_manifest", json!({})),
+        "agent_guide": daemon_default_request("guide", "agent_guide", json!({})),
+        "repo_map": daemon_default_request(
+            "map",
+            "repo_map",
+            json!({
+                "cwd": cwd,
+                "detail": "compact",
+                "read_limit": DEFAULT_REPO_MAP_READ_BATCH_RANGES
+            }),
+        ),
+        "search": daemon_default_request(
+            "search",
+            "search_auto",
+            json!({
+                "cwd": cwd,
+                "query": "symbol:SessionManager token",
+                "limit": 10,
+                "explain": true
+            }),
+        ),
+        "search_batch": daemon_default_request(
+            "searches",
+            "search_auto_batch",
+            json!({
+                "cwd": cwd,
+                "queries": [
+                    "symbol:SessionManager token",
+                    "path:src token"
+                ],
+                "limit": 10,
+                "explain": true
+            }),
+        ),
+        "query_plan": daemon_default_request(
+            "plan",
+            "search_query_plan",
+            json!({
+                "cwd": cwd,
+                "query": "symbol:SessionManager missingterm",
+                "require_all": true
+            }),
+        ),
+        "note": "These default requests include cwd so a shared daemon scopes no-target map, search, and query-plan calls to the active checkout. Each default request includes jsonl and client_cli for direct terminal use."
     })
 }
 

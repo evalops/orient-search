@@ -44,6 +44,9 @@ The rule should tell agents:
 - For JSON-lines or MCP-style clients, include `cwd` on no-target search, map,
   plan, symbol, read, and related-file calls so the shared daemon applies the
   same checkout scope.
+- Include `cwd` on `daemon_status` when asking for copyable default requests;
+  the returned map, search, batch, and query-plan calls will keep the active
+  checkout scope.
 - Follow returned `read_*`, `related_*`, `repo_map_request`, and
   `query_plan_request` objects directly.
 - When opening context manually from a line inside a definition, pass
@@ -62,7 +65,7 @@ The rule should tell agents:
 ```bash
 printf '%s\n' \
   '{"id":"guide","tool":"agent_guide","arguments":{}}' \
-  '{"id":"status","tool":"daemon_status","arguments":{}}' \
+  '{"id":"status","tool":"daemon_status","arguments":{"cwd":"/path/to/current/repo"}}' \
   | orient client-jsonl
 ```
 
