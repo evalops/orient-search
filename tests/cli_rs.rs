@@ -1651,6 +1651,40 @@ fn cli_search_surfaces_accept_structured_filters() {
         .stdout(predicate::str::contains("tests/auth_test.rs").not())
         .stdout(predicate::str::contains("docs/auth.md").not());
 
+    let mut fallback_code = Command::cargo_bin("orient").unwrap();
+    fallback_code
+        .args([
+            "search",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "issue token",
+            "--code",
+            "true",
+            "--limit",
+            "3",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("src/auth.rs"))
+        .stdout(predicate::str::contains("docs/auth.md").not());
+
+    let mut fallback_prose = Command::cargo_bin("orient").unwrap();
+    fallback_prose
+        .args([
+            "search",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "issue token",
+            "--code",
+            "false",
+            "--limit",
+            "3",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("docs/auth.md"))
+        .stdout(predicate::str::contains("src/auth.rs").not());
+
     let index_path = repo.path().join(".orient/index");
     let mut index = Command::cargo_bin("orient").unwrap();
     index
@@ -1714,6 +1748,23 @@ fn cli_search_surfaces_accept_structured_filters() {
         .stdout(predicate::str::contains("src/generated.rs").not())
         .stdout(predicate::str::contains("tests/auth_test.rs").not())
         .stdout(predicate::str::contains("docs/auth.md").not());
+
+    let mut indexed_prose = Command::cargo_bin("orient").unwrap();
+    indexed_prose
+        .args([
+            "indexed-search",
+            "--index",
+            index_path.to_str().unwrap(),
+            "issue token",
+            "--code",
+            "false",
+            "--limit",
+            "3",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("docs/auth.md"))
+        .stdout(predicate::str::contains("src/auth.rs").not());
 
     let mut related_symbols = Command::cargo_bin("orient").unwrap();
     related_symbols

@@ -104,6 +104,23 @@ fn language_for(path: &str) -> Option<&'static str> {
     }
 }
 
+fn is_source_code_language(path: &str) -> bool {
+    matches!(
+        language_for(path),
+        Some(
+            "python"
+                | "rust"
+                | "javascript"
+                | "typescript"
+                | "go"
+                | "ruby"
+                | "java"
+                | "kotlin"
+                | "swift"
+        )
+    )
+}
+
 fn is_test_path(path: &str) -> bool {
     let path = path.replace('\\', "/").to_ascii_lowercase();
     let mut file_name = path.as_str();
@@ -238,6 +255,14 @@ fn fallback_scoped_search_matches_rg_content_set_for_agent_filters() {
         (
             "generated:true MAGICNEEDLE",
             Box::new(|path| is_generated_path(path)),
+        ),
+        (
+            "code:true MAGICNEEDLE",
+            Box::new(|path| is_source_code_language(path)),
+        ),
+        (
+            "code:false MAGICNEEDLE",
+            Box::new(|path| !is_source_code_language(path)),
         ),
         (
             "path:src MAGICNEEDLE -path:generated",

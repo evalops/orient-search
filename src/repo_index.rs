@@ -370,6 +370,7 @@ pub struct SearchFilters {
     pub import: Option<String>,
     pub test: Option<bool>,
     pub generated: Option<bool>,
+    pub code: Option<bool>,
     pub require_all: bool,
     pub match_any: bool,
     pub snippet: SnippetMode,
@@ -407,6 +408,7 @@ pub(crate) struct PathFilterMatcher {
     exclude_extension: Vec<String>,
     test: Option<bool>,
     generated: Option<bool>,
+    code: Option<bool>,
 }
 
 #[derive(Debug, Clone)]
@@ -460,6 +462,7 @@ impl PathFilterMatcher {
                 .collect(),
             test: filters.test,
             generated: filters.generated,
+            code: filters.code,
         }
     }
 
@@ -509,6 +512,12 @@ impl PathFilterMatcher {
         if self
             .generated
             .is_some_and(|generated| is_generated_path(path_lower) != generated)
+        {
+            return false;
+        }
+        if self
+            .code
+            .is_some_and(|code| language.map(is_source_code_language).unwrap_or(false) != code)
         {
             return false;
         }
@@ -564,6 +573,7 @@ impl Default for SearchFilters {
             import: None,
             test: None,
             generated: None,
+            code: None,
             require_all: false,
             match_any: false,
             snippet: SnippetMode::Medium,
@@ -3356,6 +3366,21 @@ pub(crate) fn language_for(path: &Path) -> Option<String> {
     Some(language.to_string())
 }
 
+pub(crate) fn is_source_code_language(language: &str) -> bool {
+    matches!(
+        normalize_language_filter(language).as_str(),
+        "python"
+            | "rust"
+            | "javascript"
+            | "typescript"
+            | "go"
+            | "ruby"
+            | "java"
+            | "kotlin"
+            | "swift"
+    )
+}
+
 pub fn normalize_language_filter(value: &str) -> String {
     match value.trim().to_ascii_lowercase().as_str() {
         "py" | "python" => "python".to_string(),
@@ -4582,6 +4607,7 @@ fn append_related_filter_arguments(
     insert_optional_string(arguments, "import", filters.import.as_deref());
     insert_optional_bool(arguments, "test", filters.test);
     insert_optional_bool(arguments, "generated", filters.generated);
+    insert_optional_bool(arguments, "code", filters.code);
     insert_string_array(arguments, "exclude_file", &filters.exclude_file);
     insert_string_array(arguments, "exclude_path", &filters.exclude_path);
     insert_string_array(arguments, "exclude_language", &filters.exclude_language);
@@ -4793,6 +4819,7 @@ fn append_related_filter_cli_args(
     append_repeated_string_cli_arg(parts, args, "import", "--import");
     append_bool_value_cli_arg(parts, args, "test", "--test");
     append_bool_value_cli_arg(parts, args, "generated", "--generated");
+    append_bool_value_cli_arg(parts, args, "code", "--code");
     append_repeated_string_cli_arg(parts, args, "exclude_file", "--exclude-file");
     append_repeated_string_cli_arg(parts, args, "exclude_path", "--exclude-path");
     append_repeated_string_cli_arg(parts, args, "exclude_language", "--exclude-language");
@@ -4824,6 +4851,7 @@ fn append_search_filter_cli_args(
     append_repeated_string_cli_arg(parts, args, "import", "--import");
     append_bool_value_cli_arg(parts, args, "test", "--test");
     append_bool_value_cli_arg(parts, args, "generated", "--generated");
+    append_bool_value_cli_arg(parts, args, "code", "--code");
     append_bool_cli_arg(parts, args, "require_all", "--require-all");
     append_bool_cli_arg(parts, args, "any_terms", "--any-terms");
     append_string_cli_arg(parts, args, "snippet", "--snippet");
@@ -5326,6 +5354,7 @@ pub(crate) fn filter_only_query(filters: &SearchFilters) -> bool {
         || filters.import.is_some()
         || filters.test.is_some()
         || filters.generated.is_some()
+        || filters.code.is_some()
 }
 
 fn score_filter_only_path_with_lower(
@@ -5409,6 +5438,17 @@ pub(crate) fn score_filter_only_path_match(
         add_filter_signal(
             "generated_filter",
             if generated { "true" } else { "false" },
+            4.0,
+            explain,
+            &mut score,
+            &mut reasons,
+            &mut signals,
+        );
+    }
+    if let Some(code) = filters.code {
+        add_filter_signal(
+            "code_filter",
+            if code { "true" } else { "false" },
             4.0,
             explain,
             &mut score,
@@ -5730,6 +5770,63 @@ mod tests {
             Some("md"),
             Some("markdown"),
             &matcher
+        ));
+    }
+
+    #[test]
+    fn code_filter_splits_implementation_from_docs_and_config() {
+        let code_filters = SearchFilters {
+            code: Some(true),
+            ..SearchFilters::default()
+        };
+        let code_matcher = PathFilterMatcher::from_filters(&code_filters);
+        assert!(matches_filters_with_compiled_path_metadata(
+            "src/auth.rs",
+            "auth.rs",
+            Some("rs"),
+            Some("rust"),
+            &code_matcher
+        ));
+        assert!(!matches_filters_with_compiled_path_metadata(
+            "docs/auth.md",
+            "auth.md",
+            Some("md"),
+            Some("markdown"),
+            &code_matcher
+        ));
+        assert!(!matches_filters_with_compiled_path_metadata(
+            "Cargo.toml",
+            "cargo.toml",
+            Some("toml"),
+            Some("toml"),
+            &code_matcher
+        ));
+
+        let prose_filters = SearchFilters {
+            code: Some(false),
+            ..SearchFilters::default()
+        };
+        let prose_matcher = PathFilterMatcher::from_filters(&prose_filters);
+        assert!(matches_filters_with_compiled_path_metadata(
+            "docs/auth.md",
+            "auth.md",
+            Some("md"),
+            Some("markdown"),
+            &prose_matcher
+        ));
+        assert!(matches_filters_with_compiled_path_metadata(
+            "config/app.yaml",
+            "app.yaml",
+            Some("yaml"),
+            Some("yaml"),
+            &prose_matcher
+        ));
+        assert!(!matches_filters_with_compiled_path_metadata(
+            "src/auth.ts",
+            "auth.ts",
+            Some("ts"),
+            Some("typescript"),
+            &prose_matcher
         ));
     }
 

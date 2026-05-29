@@ -1036,7 +1036,7 @@ For many local repos, bootstrap it with `orient ensure-shards --discover-root ~/
 For one repo, bootstrap it with `orient ensure-index --repo {repo} --index {index}` and `orient serve-tcp --addr {addr} --index {index}`.\n\
 Start each session with `daemon_status` or `agent_guide`, then use `search_auto` for normal lookup and `search_auto_batch` for alternate query phrasings.\n\
 Trust `daemon_status.search_auto_default` to see whether no-target `search_auto` will use a warmed shard directory, warmed index, or the daemon current directory; use `daemon_status.default_requests` for copyable first repo-map/search/query-plan calls.\n\
-Use query filters directly: `file:`, `path:`, `lang:`, `ext:`, `symbol:`, `type:`, `repo:`, `test:`, `generated:`, quoted literals, and negative filters like `-path:vendor` or `-is:generated`.\n\
+Use query filters directly: `file:`, `path:`, `lang:`, `ext:`, `symbol:`, `type:`, `repo:`, `test:`, `generated:`, `code:`, `is:code`, `is:docs`, quoted literals, and negative filters like `-path:vendor` or `-is:generated`.\n\
 After search, follow returned `read_batch_request`, `read_request`, `related_request`, and `related_symbols_request`; each includes `jsonl` and `client_cli` for direct replay through `orient client-jsonl`.\n\
 When results are empty, noisy, or suspicious, use the returned `query_plan_request` or inline `query_plan_result` before broadening the search.\n\
 Orient is local code search only and exposes no session analytics."
@@ -1255,8 +1255,9 @@ fn argument_schema(tool_name: &str, name: &str) -> Value {
             schema.insert("type".to_string(), json!("array"));
             schema.insert("items".to_string(), json!({"type": "string"}));
         }
-        "test" | "generated" | "explain" | "require_all" | "any_terms" | "refresh_if_stale"
-        | "diagnose" | "git_metadata" | "tracked_files" | "nested_manifests" => {
+        "test" | "generated" | "code" | "explain" | "require_all" | "any_terms"
+        | "refresh_if_stale" | "diagnose" | "git_metadata" | "tracked_files"
+        | "nested_manifests" => {
             schema.insert("type".to_string(), json!("boolean"));
         }
         "limit" | "max_depth" | "discover_limit" | "family_limit" | "symbols" | "start"
@@ -1363,8 +1364,8 @@ fn argument_type(name: &str) -> &'static str {
     match name {
         "limit" | "max_depth" | "discover_limit" | "family_limit" | "symbols" | "start"
         | "lines" | "tests" | "context_lines" | "read_limit" => "integer",
-        "test" | "generated" | "explain" | "require_all" | "any_terms" | "refresh_if_stale"
-        | "git_metadata" | "tracked_files" | "nested_manifests" => "boolean",
+        "test" | "generated" | "code" | "explain" | "require_all" | "any_terms"
+        | "refresh_if_stale" | "git_metadata" | "tracked_files" | "nested_manifests" => "boolean",
         name if string_list_argument(name) => "string|string[]",
         "ranges" => "range|range[]",
         "repos" | "discover_roots" | "queries" => "string[]",
@@ -1545,6 +1546,9 @@ fn argument_description(tool_name: &str, name: &str) -> &'static str {
         "test" => "When true, include only test paths; when false, exclude test paths.",
         "generated" => {
             "When true, include only generated-code paths; when false, exclude generated-code paths."
+        }
+        "code" => {
+            "When true, include only implementation source-code paths; when false, exclude implementation source-code paths."
         }
         "snippet" => "Snippet mode: short, medium, block, or symbol.",
         "detail" => {
@@ -1869,6 +1873,7 @@ fn retry_relaxed_filter_field(kind: &str) -> Option<&'static str> {
         "relax_extension_filter" => Some("extension"),
         "relax_test_filter" => Some("test"),
         "relax_generated_filter" => Some("generated"),
+        "relax_code_filter" => Some("code"),
         "relax_symbol_kind_filter" => Some("symbol_kind"),
         "relax_repo_filter" => Some("repo"),
         "relax_branch_filter" => Some("branch"),
@@ -1889,6 +1894,7 @@ fn retry_source_arg_matches_filter(name: &str, field: Option<&str>) -> bool {
             | (Some("extension"), "extension" | "ext")
             | (Some("test"), "test" | "tests")
             | (Some("generated"), "generated")
+            | (Some("code"), "code")
             | (Some("symbol_kind"), "symbol_kind" | "kind" | "type")
             | (Some("repo"), "repo" | "repo_filter")
             | (Some("branch"), "branch" | "git_branch")
@@ -1942,11 +1948,7 @@ fn add_plan_filter_args(
 
 fn plan_filter_argument_value(filter: &QueryPlanFilter) -> Value {
     match filter.field.as_str() {
-        "test" => json!(matches!(
-            filter.value.to_ascii_lowercase().as_str(),
-            "1" | "true" | "yes" | "y"
-        )),
-        "generated" => json!(matches!(
+        "test" | "generated" | "code" => json!(matches!(
             filter.value.to_ascii_lowercase().as_str(),
             "1" | "true" | "yes" | "y"
         )),
@@ -4568,6 +4570,7 @@ const SEARCH_OPTIONAL_ARGS: &[&str] = &[
     "origin",
     "test",
     "generated",
+    "code",
     "snippet",
     "explain",
     "require_all",
@@ -4630,6 +4633,7 @@ const SEARCH_TARGET_OPTIONAL_ARGS: &[&str] = &[
     "origin",
     "test",
     "generated",
+    "code",
     "snippet",
     "explain",
     "require_all",
@@ -4708,6 +4712,7 @@ const RELATED_FILES_TARGET_OPTIONAL_ARGS: &[&str] = &[
     "origin",
     "test",
     "generated",
+    "code",
     "exclude_file",
     "exclude_path",
     "exclude_folder",
@@ -4762,6 +4767,7 @@ const RELATED_INDEX_FILES_OPTIONAL_ARGS: &[&str] = &[
     "origin",
     "test",
     "generated",
+    "code",
     "exclude_file",
     "exclude_path",
     "exclude_folder",
@@ -4822,6 +4828,7 @@ const RELATED_SYMBOLS_TARGET_OPTIONAL_ARGS: &[&str] = &[
     "origin",
     "test",
     "generated",
+    "code",
     "exclude_file",
     "exclude_language",
     "exclude_lang",
@@ -4876,6 +4883,7 @@ const RELATED_INDEX_SYMBOLS_OPTIONAL_ARGS: &[&str] = &[
     "origin",
     "test",
     "generated",
+    "code",
     "exclude_file",
     "exclude_language",
     "exclude_lang",
@@ -4929,6 +4937,7 @@ const RELATED_SHARD_SYMBOLS_OPTIONAL_ARGS: &[&str] = &[
     "origin",
     "test",
     "generated",
+    "code",
     "exclude_file",
     "exclude_language",
     "exclude_lang",
@@ -4985,6 +4994,7 @@ const SYMBOL_TARGET_OPTIONAL_ARGS: &[&str] = &[
     "origin",
     "test",
     "generated",
+    "code",
     "exclude_file",
     "exclude_path",
     "exclude_language",
@@ -5040,6 +5050,7 @@ const SYMBOL_INDEX_OPTIONAL_ARGS: &[&str] = &[
     "origin",
     "test",
     "generated",
+    "code",
     "exclude_file",
     "exclude_path",
     "exclude_language",
@@ -5097,6 +5108,7 @@ const SEARCH_AUTO_OPTIONAL_ARGS: &[&str] = &[
     "origin",
     "test",
     "generated",
+    "code",
     "snippet",
     "explain",
     "require_all",
@@ -5159,6 +5171,7 @@ const SEARCH_INDEX_OPTIONAL_ARGS: &[&str] = &[
     "origin",
     "test",
     "generated",
+    "code",
     "snippet",
     "explain",
     "require_all",
@@ -5218,6 +5231,7 @@ const PLAN_OPTIONAL_ARGS: &[&str] = &[
     "origin",
     "test",
     "generated",
+    "code",
     "require_all",
     "any_terms",
     "exclude_file",
@@ -5276,6 +5290,7 @@ const PLAN_TARGET_OPTIONAL_ARGS: &[&str] = &[
     "origin",
     "test",
     "generated",
+    "code",
     "require_all",
     "any_terms",
     "refresh_if_stale",
@@ -5333,6 +5348,7 @@ const PLAN_INDEX_OPTIONAL_ARGS: &[&str] = &[
     "origin",
     "test",
     "generated",
+    "code",
     "require_all",
     "any_terms",
     "refresh_if_stale",
@@ -5895,6 +5911,7 @@ fn search_filters(arguments: &Value, allow_repo_alias: bool) -> Result<SearchFil
         },
         test: arguments.get("test").and_then(Value::as_bool),
         generated: arguments.get("generated").and_then(Value::as_bool),
+        code: arguments.get("code").and_then(Value::as_bool),
         snippet: optional_string_arg(arguments, "snippet")
             .as_deref()
             .and_then(SnippetMode::parse)

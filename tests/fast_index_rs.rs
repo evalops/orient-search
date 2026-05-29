@@ -1388,6 +1388,44 @@ fn query_language_filters_fallback_and_indexed_search() {
     assert!(indexed_source_scope_paths.contains(&"docs/auth.md".to_string()));
     assert!(!indexed_source_scope_paths.contains(&"tests/auth_test.rs".to_string()));
 
+    let fallback_code_scope = search_repo_fast_filtered(
+        repo.path(),
+        "code:true SessionManager",
+        10,
+        &Default::default(),
+    )
+    .unwrap();
+    let fallback_code_scope_paths = result_paths(&fallback_code_scope);
+    assert!(fallback_code_scope_paths.contains(&"src/auth.rs".to_string()));
+    assert!(!fallback_code_scope_paths.contains(&"docs/auth.md".to_string()));
+    assert!(!fallback_code_scope_paths.contains(&"Cargo.toml".to_string()));
+
+    let indexed_code_scope = indexed
+        .search_filtered("is:code SessionManager", 10, &Default::default())
+        .unwrap();
+    let indexed_code_scope_paths = result_paths(&indexed_code_scope);
+    assert!(indexed_code_scope_paths.contains(&"src/auth.rs".to_string()));
+    assert!(!indexed_code_scope_paths.contains(&"docs/auth.md".to_string()));
+
+    let code_plan = indexed
+        .query_plan("is:code SessionManager", &Default::default())
+        .unwrap();
+    assert!(
+        code_plan
+            .active_filters
+            .iter()
+            .any(|filter| filter.field == "code" && filter.value == "true")
+    );
+
+    let indexed_prose_scope = indexed
+        .search_filtered("code:false content:SessionManager", 10, &Default::default())
+        .unwrap();
+    assert!(
+        result_paths(&indexed_prose_scope).contains(&"docs/auth.md".to_string()),
+        "{indexed_prose_scope:?}"
+    );
+    assert!(!result_paths(&indexed_prose_scope).contains(&"src/auth.rs".to_string()));
+
     let fallback_generated = search_repo_fast_filtered(
         repo.path(),
         "is:generated issue token",

@@ -9,7 +9,7 @@ use crate::repo_index::{
     dependency_filters_match, dependency_hints_from_manifest_texts, extract_symbols,
     filter_only_query, filter_value_matches, finalize_results, import_hints_from_source_texts,
     is_entrypoint_path, is_generated_path, is_ignored, is_important_file, is_manifest_file,
-    is_test_path, known_commands_from_hints, language_for,
+    is_source_code_language, is_test_path, known_commands_from_hints, language_for,
     matches_filters_with_compiled_path_metadata, normalize_language_filter, normalize_token,
     referenced_symbol_name, regular_file_metadata, related_query_terms_symbol_and_filters,
     related_stem_terms, repo_map_seed_paths, repo_matches, result_matches_all_tokens,
@@ -2322,6 +2322,9 @@ fn query_plan_filters(filters: &SearchFilters) -> Vec<QueryPlanFilter> {
     if let Some(value) = filters.generated {
         active.push(plan_filter("generated", &value.to_string(), false));
     }
+    if let Some(value) = filters.code {
+        active.push(plan_filter("code", &value.to_string(), false));
+    }
     for value in &filters.exclude_file {
         active.push(plan_filter("file", value, true));
     }
@@ -2436,6 +2439,13 @@ fn indexed_path_matches_plan_filter(file: &IndexedPath, filter: &QueryPlanFilter
                 "1" | "true" | "yes" | "y"
             );
             is_generated_path(&file.path_lower) == wanted
+        }
+        "code" => {
+            let wanted = matches!(
+                filter.value.to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "y"
+            );
+            crate::repo_index::is_source_code_language(&file.language) == wanted
         }
         _ => true,
     };
@@ -2887,7 +2897,7 @@ fn query_plan_repair_hints(
         hints.extend(filter_specific_repair_hints(active_filters, query_tokens));
         hints.push(repair_hint(
             "relax_filters",
-            "Posting candidates exist, but file/path/language/extension/test/generated filters rejected all of them.",
+            "Posting candidates exist, but file/path/language/extension/test/generated/code filters rejected all of them.",
             suggested_token_query(query_tokens),
         ));
     }
@@ -3062,6 +3072,24 @@ fn candidate_facet_repair_hints(
             ));
         }
     }
+    if filters.code.is_none() {
+        if let Some((value, count)) = meaningful_bool_facet(
+            candidate_ids
+                .iter()
+                .filter_map(|file_id| files.get(*file_id as usize))
+                .map(|file| is_source_code_language(&file.language)),
+            total,
+        ) {
+            hints.push(facet_hint(
+                "narrow_by_code",
+                "code",
+                if value { "true" } else { "false" },
+                count,
+                total,
+                query_tokens,
+            ));
+        }
+    }
     hints.truncate(4);
     hints
 }
@@ -3226,7 +3254,7 @@ fn filter_scan_repair_hints(
     let mut hints = filter_scan_specific_repair_hints(filters);
     hints.push(repair_hint(
         "relax_filters",
-        "No files matched the filter-only query. Relax file/path/language/extension/test/generated filters.",
+        "No files matched the filter-only query. Relax file/path/language/extension/test/generated/code filters.",
         None,
     ));
     hints
@@ -3281,6 +3309,9 @@ fn filter_scan_specific_repair_hints(filters: &SearchFilters) -> Vec<QueryPlanRe
     }
     if let Some(generated) = filters.generated {
         active.push(("generated", "generated", generated.to_string()));
+    }
+    if let Some(code) = filters.code {
+        active.push(("code", "code", code.to_string()));
     }
 
     active

@@ -134,10 +134,14 @@ fn apply_filter(filters: &mut SearchFilters, token: &str, negated: bool) -> bool
         (false, "is") => match test_filter_from_is_value(&value) {
             Some(IsFilter::Test(value)) => filters.test = Some(value),
             Some(IsFilter::Generated(value)) => filters.generated = Some(value),
+            Some(IsFilter::Code(value)) => filters.code = Some(value),
             None => return false,
         },
         (false, "generated" | "generated_code" | "generated-code") => {
             filters.generated = Some(parse_boolish(&value).unwrap_or(true))
+        }
+        (false, "code" | "source_code" | "source-code") => {
+            filters.code = Some(parse_boolish(&value).unwrap_or(true))
         }
         (true, "file" | "filename" | "file_name" | "basename") => filters.exclude_file.push(value),
         (true, "path" | "dir" | "directory" | "folder") => filters.exclude_path.push(value),
@@ -171,11 +175,13 @@ fn apply_filter(filters: &mut SearchFilters, token: &str, negated: bool) -> bool
         (true, "is") => match test_filter_from_is_value(&value) {
             Some(IsFilter::Test(value)) => filters.test = Some(!value),
             Some(IsFilter::Generated(value)) => filters.generated = Some(!value),
+            Some(IsFilter::Code(value)) => filters.code = Some(!value),
             None => return false,
         },
         (true, "generated" | "generated_code" | "generated-code") => {
             filters.generated = Some(false)
         }
+        (true, "code" | "source_code" | "source-code") => filters.code = Some(false),
         _ => return false,
     }
     true
@@ -184,14 +190,21 @@ fn apply_filter(filters: &mut SearchFilters, token: &str, negated: bool) -> bool
 enum IsFilter {
     Test(bool),
     Generated(bool),
+    Code(bool),
 }
 
 fn test_filter_from_is_value(value: &str) -> Option<IsFilter> {
     match value.to_ascii_lowercase().as_str() {
         "test" | "tests" | "spec" | "specs" => Some(IsFilter::Test(true)),
-        "source" | "src" | "code" | "prod" | "production" => Some(IsFilter::Test(false)),
+        "source" | "src" | "prod" | "production" => Some(IsFilter::Test(false)),
         "generated" | "gen" | "codegen" | "autogen" => Some(IsFilter::Generated(true)),
         "authored" | "manual" | "handwritten" => Some(IsFilter::Generated(false)),
+        "code" | "source-code" | "source_code" | "implementation" | "impl" => {
+            Some(IsFilter::Code(true))
+        }
+        "prose" | "docs" | "documentation" | "config" | "configuration" => {
+            Some(IsFilter::Code(false))
+        }
         _ => None,
     }
 }
@@ -307,6 +320,9 @@ pub fn query_with_filters_text(terms: &[String], filters: &SearchFilters) -> Str
     }
     if let Some(generated) = filters.generated {
         pieces.push(format!("generated:{generated}"));
+    }
+    if let Some(code) = filters.code {
+        pieces.push(format!("code:{code}"));
     }
     for value in &filters.exclude_file {
         push_query_filter(&mut pieces, "file", Some(value), true);
@@ -441,6 +457,9 @@ pub fn merge_filters(mut base: SearchFilters, parsed: SearchFilters) -> SearchFi
     if parsed.generated.is_some() {
         base.generated = parsed.generated;
     }
+    if parsed.code.is_some() {
+        base.code = parsed.code;
+    }
     if base.match_any || parsed.match_any {
         base.match_any |= parsed.match_any;
         base.require_all = false;
@@ -517,7 +536,7 @@ mod tests {
     #[test]
     fn serializes_query_text_with_filters_for_followups() {
         let parsed = parse_query(
-            r#"path:'src auth' lang:Rust symbol:SessionManager -branch:wip -origin:legacy "issue token""#,
+            r#"path:'src auth' lang:Rust symbol:SessionManager code:true -branch:wip -origin:legacy "issue token""#,
         );
 
         let text = query_with_filters_text(&parsed.terms, &parsed.filters);
@@ -526,6 +545,7 @@ mod tests {
         assert_eq!(reparsed.filters.path.as_deref(), Some("src auth"));
         assert_eq!(reparsed.filters.language.as_deref(), Some("rust"));
         assert_eq!(reparsed.filters.symbol.as_deref(), Some("SessionManager"));
+        assert_eq!(reparsed.filters.code, Some(true));
         assert_eq!(reparsed.filters.exclude_branch, vec!["wip"]);
         assert_eq!(reparsed.filters.exclude_origin, vec!["legacy"]);
     }
@@ -574,6 +594,15 @@ mod tests {
         let source = parse_query("is:source issue token");
         assert_eq!(source.terms, vec!["issue", "token"]);
         assert_eq!(source.filters.test, Some(false));
+        assert_eq!(source.filters.code, None);
+
+        let code = parse_query("is:code issue token");
+        assert_eq!(code.terms, vec!["issue", "token"]);
+        assert_eq!(code.filters.code, Some(true));
+
+        let prose = parse_query("is:docs issue token");
+        assert_eq!(prose.terms, vec!["issue", "token"]);
+        assert_eq!(prose.filters.code, Some(false));
 
         let negated = parse_query("-is:test issue token");
         assert_eq!(negated.filters.test, Some(false));
@@ -671,14 +700,16 @@ mod tests {
     fn merge_filters_keeps_base_and_extends_negatives() {
         let base = SearchFilters {
             path: Some("src/".to_string()),
+            code: Some(false),
             exclude_path: vec!["target".to_string()],
             ..SearchFilters::default()
         };
-        let parsed = parse_query(r#"lang:rust -path:fixtures token auth"#);
+        let parsed = parse_query(r#"lang:rust code:true -path:fixtures token auth"#);
         let merged = merge_filters(base, parsed.filters);
 
         assert_eq!(merged.path.as_deref(), Some("src/"));
         assert_eq!(merged.language.as_deref(), Some("rust"));
+        assert_eq!(merged.code, Some(true));
         assert_eq!(merged.exclude_path, vec!["target", "fixtures"]);
         assert!(merged.require_all);
     }

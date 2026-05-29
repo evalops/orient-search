@@ -227,6 +227,18 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         "Alias for import."
     );
     assert_eq!(
+        search["input_schema"]["properties"]["code"]["type"],
+        "boolean"
+    );
+    assert_eq!(
+        search["input_schema"]["properties"]["code"]["description"],
+        "When true, include only implementation source-code paths; when false, exclude implementation source-code paths."
+    );
+    assert_eq!(
+        search["input_schema"]["properties"]["code"].get("default"),
+        None
+    );
+    assert_eq!(
         search["input_schema"]["properties"]["exclude_lang"]["oneOf"][1]["items"]["type"],
         "string"
     );

@@ -8,8 +8,8 @@ use orient::fast_index::{FastIndex, RefreshStats};
 use orient::query::{merge_filters, normalize_symbol_kind, parse_query};
 use orient::repo_index::{
     DEFAULT_REPO_MAP_READ_BATCH_RANGES, MAX_READ_RANGE_LINES, MAX_RESULT_READ_BATCH_RANGES,
-    QueryPlan, RepoIndexer, RepoMapDetail, ResultToolRequest, SearchFilters, SearchResult,
-    SnippetMode, SymbolLookupResult, attach_repo_map_read_batch_request_with_limit,
+    QueryPlan, QueryPlanFilter, RepoIndexer, RepoMapDetail, ResultToolRequest, SearchFilters,
+    SearchResult, SnippetMode, SymbolLookupResult, attach_repo_map_read_batch_request_with_limit,
     attach_result_context, attach_result_read_requests, attach_result_related_requests,
     attach_result_related_symbol_requests, normalize_language_filter, read_file_range,
     related_file_lookup_results, related_symbol_lookup_results, result_read_batch_request,
@@ -901,6 +901,8 @@ struct CommonSearchArgs {
     #[arg(long)]
     generated: Option<bool>,
     #[arg(long)]
+    code: Option<bool>,
+    #[arg(long)]
     require_all: bool,
     #[arg(long, conflicts_with = "require_all")]
     any_terms: bool,
@@ -1026,6 +1028,8 @@ struct RelatedSymbolFilterArgs {
     test: Option<bool>,
     #[arg(long)]
     generated: Option<bool>,
+    #[arg(long)]
+    code: Option<bool>,
     #[arg(
         long = "exclude-file",
         alias = "exclude-filename",
@@ -1131,6 +1135,7 @@ fn search_filters_from_args(
         import: args.import.as_ref().map(|value| normalize_filter(value)),
         test: args.test,
         generated: args.generated,
+        code: args.code,
         require_all: args.require_all && !args.any_terms,
         match_any: args.any_terms,
         snippet: snippet_mode_arg(&args.snippet)?,
@@ -1200,6 +1205,7 @@ fn related_symbol_filters_from_args(
         import: args.import.as_ref().map(|value| normalize_filter(value)),
         test: args.test,
         generated: args.generated,
+        code: args.code,
         exclude_file: args.exclude_file.clone(),
         exclude_path: args.exclude_path.clone(),
         exclude_language: args
@@ -2035,6 +2041,7 @@ fn cli_relaxed_filter_field(kind: &str) -> Option<&'static str> {
         "relax_extension_filter" => Some("extension"),
         "relax_test_filter" => Some("test"),
         "relax_generated_filter" => Some("generated"),
+        "relax_code_filter" => Some("code"),
         "relax_symbol_kind_filter" => Some("symbol_kind"),
         "relax_repo_filter" => Some("repo"),
         "relax_branch_filter" => Some("branch"),
@@ -2093,6 +2100,11 @@ fn add_filter_retry_args(
         && let Some(generated) = filters.generated
     {
         arguments.insert("generated".to_string(), serde_json::json!(generated));
+    }
+    if skip_field != Some("code")
+        && let Some(code) = filters.code
+    {
+        arguments.insert("code".to_string(), serde_json::json!(code));
     }
     insert_string_array_arg(arguments, "exclude_file", &filters.exclude_file);
     insert_string_array_arg(arguments, "exclude_path", &filters.exclude_path);
@@ -2173,7 +2185,7 @@ fn add_plan_filter_retry_args(
             if filter.field == "repo" && target_name == "repo" {
                 continue;
             }
-            arguments.insert(filter.field.clone(), serde_json::json!(filter.value));
+            arguments.insert(filter.field.clone(), plan_filter_argument_value(filter));
             continue;
         }
         let key = format!("exclude_{}", filter.field);
@@ -2185,6 +2197,16 @@ fn add_plan_filter_retry_args(
         }
     }
     arguments.extend(negated);
+}
+
+fn plan_filter_argument_value(filter: &QueryPlanFilter) -> Value {
+    match filter.field.as_str() {
+        "test" | "generated" | "code" => serde_json::json!(matches!(
+            filter.value.to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "y"
+        )),
+        _ => serde_json::json!(filter.value),
+    }
 }
 
 fn attach_cli_shard_retry_requests(
