@@ -106,6 +106,7 @@ fn apply_filter(filters: &mut SearchFilters, token: &str, negated: bool) -> bool
     match (negated, key.as_str()) {
         (false, "file" | "filename" | "file_name" | "basename") => {
             let (value, target_line) = strip_location_suffix(&value);
+            let value = strip_leading_current_dir_segments(value);
             if target_line.is_some() && value.contains('/') {
                 filters.path = Some(value);
             } else {
@@ -115,6 +116,7 @@ fn apply_filter(filters: &mut SearchFilters, token: &str, negated: bool) -> bool
         }
         (false, "path" | "dir" | "directory" | "folder") => {
             let (value, target_line) = strip_location_suffix(&value);
+            let value = strip_leading_current_dir_segments(value);
             filters.path = Some(value);
             filters.target_line = target_line.or(filters.target_line);
         }
@@ -238,11 +240,11 @@ fn infer_path_like_single_term(
 
     let (term, target_line) = strip_location_suffix(&terms[0]);
     let term = term.trim().replace('\\', "/");
-    if term.is_empty()
-        || term.chars().any(char::is_whitespace)
-        || term.starts_with('.')
-        || term == "-"
-    {
+    if term.is_empty() || term.chars().any(char::is_whitespace) || term == "-" {
+        return;
+    }
+    let term = strip_leading_current_dir_segments(term);
+    if term.is_empty() || term.starts_with('.') {
         return;
     }
 
@@ -273,6 +275,13 @@ fn strip_location_suffix(value: &str) -> (String, Option<usize>) {
     } else {
         (normalized, None)
     }
+}
+
+fn strip_leading_current_dir_segments(mut value: String) -> String {
+    while let Some(stripped) = value.strip_prefix("./") {
+        value = stripped.to_string();
+    }
+    value
 }
 
 fn split_numeric_suffix(value: &str) -> Option<(&str, usize)> {
@@ -734,6 +743,13 @@ mod tests {
         assert_eq!(source_path.filters.path.as_deref(), Some("src/server.rs"));
         assert_eq!(source_path.filters.target_line, None);
 
+        let dot_source_path = parse_query("./src/server.rs");
+        assert!(dot_source_path.terms.is_empty());
+        assert_eq!(
+            dot_source_path.filters.path.as_deref(),
+            Some("src/server.rs")
+        );
+
         let source_location = parse_query("src/server.rs:42:9");
         assert!(source_location.terms.is_empty());
         assert_eq!(
@@ -741,6 +757,14 @@ mod tests {
             Some("src/server.rs")
         );
         assert_eq!(source_location.filters.target_line, Some(42));
+
+        let dot_source_location = parse_query("./src/server.rs:42:9");
+        assert!(dot_source_location.terms.is_empty());
+        assert_eq!(
+            dot_source_location.filters.path.as_deref(),
+            Some("src/server.rs")
+        );
+        assert_eq!(dot_source_location.filters.target_line, Some(42));
 
         let go_mod = parse_query("go.mod");
         assert!(go_mod.terms.is_empty());

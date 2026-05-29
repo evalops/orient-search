@@ -3008,7 +3008,15 @@ fn indexed_file_matches_filters(file: &IndexedPath, filters: &SearchFilters) -> 
 }
 
 fn indexed_exact_path_filter_id(files: &[IndexedPath], filters: &SearchFilters) -> Option<u32> {
-    let path = filters.path.as_deref()?.trim().replace('\\', "/");
+    let path = normalize_exact_index_path_filter(filters.path.as_deref()?)?;
+    files
+        .iter()
+        .position(|file| file.path_lower == path)
+        .map(|file_id| file_id as u32)
+}
+
+fn normalize_exact_index_path_filter(path: &str) -> Option<String> {
+    let path = strip_leading_current_dir_segments(path.trim().replace('\\', "/"));
     if path.is_empty()
         || path.contains('*')
         || path.contains('?')
@@ -3018,11 +3026,7 @@ fn indexed_exact_path_filter_id(files: &[IndexedPath], filters: &SearchFilters) 
     {
         return None;
     }
-    let path = path.to_ascii_lowercase();
-    files
-        .iter()
-        .position(|file| file.path_lower == path)
-        .map(|file_id| file_id as u32)
+    Some(path.to_ascii_lowercase())
 }
 
 fn indexed_file_matches_filters_compiled(
@@ -4446,11 +4450,19 @@ fn path_filter_trigram_keys(filters: &SearchFilters) -> Vec<String> {
 }
 
 fn push_filter_trigram_keys(filter: &str, keys: &mut Vec<String>) {
-    let value = filter.trim().replace('\\', "/").to_ascii_lowercase();
+    let value =
+        strip_leading_current_dir_segments(filter.trim().replace('\\', "/")).to_ascii_lowercase();
     if value.contains('*') || value.contains('?') {
         return;
     }
     keys.extend(query_trigrams(&value));
+}
+
+fn strip_leading_current_dir_segments(mut value: String) -> String {
+    while let Some(stripped) = value.strip_prefix("./") {
+        value = stripped.to_string();
+    }
+    value
 }
 
 fn filter_only_candidate_ids(

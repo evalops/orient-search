@@ -1121,16 +1121,16 @@ fn direct_location_filter_path(filters: &SearchFilters) -> Option<(String, bool)
 }
 
 fn exact_direct_path_filter(path: &str) -> bool {
-    let path = path.trim();
+    let path = strip_leading_current_dir_segments(path.trim().replace('\\', "/"));
     !path.is_empty()
         && !path.contains('*')
         && !path.contains('?')
         && !path.contains('\0')
-        && Path::new(&path.replace('\\', "/")).is_relative()
+        && Path::new(&path).is_relative()
 }
 
 fn normalize_direct_repo_relative_path(path: &str) -> Option<String> {
-    let normalized = path.trim().replace('\\', "/");
+    let normalized = strip_leading_current_dir_segments(path.trim().replace('\\', "/"));
     let requested = Path::new(&normalized);
     if !requested.is_relative()
         || requested.components().any(|component| {
@@ -5964,7 +5964,14 @@ pub(crate) fn filter_value_matches(haystack_lower: &str, filter: &str) -> bool {
 }
 
 fn normalize_path_filter(filter: &str) -> String {
-    filter.trim().replace('\\', "/").to_ascii_lowercase()
+    strip_leading_current_dir_segments(filter.trim().replace('\\', "/")).to_ascii_lowercase()
+}
+
+fn strip_leading_current_dir_segments(mut value: String) -> String {
+    while let Some(stripped) = value.strip_prefix("./") {
+        value = stripped.to_string();
+    }
+    value
 }
 
 fn normalize_extension_filter(filter: &str) -> String {
