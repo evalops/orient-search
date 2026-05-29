@@ -6170,19 +6170,10 @@ fn repo_map_read_ranges(map: &RepoMap) -> Vec<ResultReadRange> {
     let mut seen = HashSet::new();
 
     for path in map
-        .brief
-        .important_files
+        .entrypoints
         .iter()
-        .chain(map.brief.manifest_files.iter())
-        .chain(map.entrypoints.iter())
+        .filter(|path| !is_manifest_file(path))
         .chain(map.test_files.iter())
-        .chain(map.related_files.iter().map(|related| &related.source_path))
-        .chain(map.related_files.iter().map(|related| &related.path))
-        .chain(
-            map.related_symbols
-                .iter()
-                .map(|related| &related.source_path),
-        )
     {
         push_repo_map_range(
             &mut ranges,
@@ -6202,6 +6193,31 @@ fn repo_map_read_ranges(map: &RepoMap) -> Vec<ResultReadRange> {
         .chain(map.related_symbols.iter().map(|related| &related.symbol))
     {
         push_repo_map_range(&mut ranges, &mut seen, symbol_read_range(symbol));
+    }
+
+    for path in map
+        .brief
+        .important_files
+        .iter()
+        .chain(map.brief.manifest_files.iter())
+        .chain(map.related_files.iter().map(|related| &related.source_path))
+        .chain(map.related_files.iter().map(|related| &related.path))
+        .chain(
+            map.related_symbols
+                .iter()
+                .map(|related| &related.source_path),
+        )
+    {
+        push_repo_map_range(
+            &mut ranges,
+            &mut seen,
+            ResultReadRange {
+                path: path.clone(),
+                start: 1,
+                lines: DEFAULT_RELATED_FILE_READ_LINES,
+                scope: None,
+            },
+        );
     }
 
     ranges
@@ -7192,6 +7208,67 @@ mod tests {
         assert_eq!(
             request.arguments["ranges"][1]["path"],
             serde_json::json!("tests/auth.rs")
+        );
+    }
+
+    #[test]
+    fn repo_map_read_batches_prioritize_code_context_before_manifests() {
+        let mut map = RepoMap {
+            brief: RepoBrief {
+                root_name: "sample".to_string(),
+                file_count: 8,
+                language_counts: HashMap::new(),
+                known_commands: vec!["cargo test".to_string()],
+                command_hints: vec![CommandHint {
+                    command: "cargo test".to_string(),
+                    kind: "test".to_string(),
+                    source: "Cargo.toml".to_string(),
+                }],
+                dependency_hints: Vec::new(),
+                import_hints: Vec::new(),
+                manifest_files: vec![
+                    "Cargo.toml".to_string(),
+                    "package.json".to_string(),
+                    "pyproject.toml".to_string(),
+                ],
+                important_files: vec![
+                    "Cargo.toml".to_string(),
+                    "README.md".to_string(),
+                    "package.json".to_string(),
+                ],
+            },
+            entrypoints: vec!["Cargo.toml".to_string(), "src/main.rs".to_string()],
+            test_files: vec!["tests/auth_test.rs".to_string()],
+            top_symbols: vec![Symbol {
+                name: "issue_token".to_string(),
+                kind: "function".to_string(),
+                path: "src/auth.rs".to_string(),
+                line: 42,
+            }],
+            related_files: Vec::new(),
+            related_symbols: Vec::new(),
+            read_batch_request: None,
+        };
+
+        attach_repo_map_read_batch_request_with_limit(
+            &mut map,
+            "read_ranges",
+            serde_json::Map::new(),
+            3,
+        );
+
+        let request = map.read_batch_request.unwrap();
+        let ranges = request.arguments["ranges"].as_array().unwrap();
+        assert_eq!(ranges.len(), 3);
+        assert_eq!(ranges[0]["path"], serde_json::json!("src/main.rs"));
+        assert_eq!(ranges[1]["path"], serde_json::json!("tests/auth_test.rs"));
+        assert_eq!(ranges[2]["path"], serde_json::json!("src/auth.rs"));
+        assert_eq!(ranges[2]["scope"], serde_json::json!("symbol"));
+        assert!(
+            ranges
+                .iter()
+                .all(|range| range["path"] != serde_json::json!("Cargo.toml")),
+            "{ranges:?}"
         );
     }
 
