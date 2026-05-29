@@ -3,22 +3,28 @@ set -euo pipefail
 
 docs=(README.md docs)
 
-patterns=(
-  '/Users/'
-  '/private/tmp'
-  '/var/folders'
-  'Documents/Projects'
-  'C:\Users\'
-  'jonathanhaas'
-  'agent-jsonl-explorer'
+fixed_patterns=(
   'session analytics'
-  'codex jsonl'
-  'claude jsonl'
 )
 
-for pattern in "${patterns[@]}"; do
+regex_patterns=(
+  '/Users/[^[:space:])"]+'
+  '/private/tmp[^[:space:])"]*'
+  '/var/folders[^[:space:])"]*'
+  'Documents/Projects'
+  'C:\\Users\\[^[:space:])"]+'
+)
+
+for pattern in "${fixed_patterns[@]}"; do
   if rg -n --fixed-strings --ignore-case --glob '*.md' "$pattern" "${docs[@]}"; then
     echo "public docs contain private or out-of-scope wording: $pattern" >&2
+    exit 1
+  fi
+done
+
+for pattern in "${regex_patterns[@]}"; do
+  if rg -n --ignore-case --glob '*.md' "$pattern" "${docs[@]}"; then
+    echo "public docs contain private or machine-specific paths: $pattern" >&2
     exit 1
   fi
 done

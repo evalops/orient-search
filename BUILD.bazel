@@ -68,6 +68,13 @@ sh_test(
     data = glob(["docs/*.md"]) + ["README.md"],
 )
 
+sh_test(
+    name = "agent_surface_hygiene",
+    srcs = ["tools/ci/agent_surface_hygiene.sh"],
+    args = ["$(location :orient)"],
+    data = [":orient"],
+)
+
 sh_binary(
     name = "ci_fmt",
     srcs = ["tools/ci/cargo_fmt.sh"],
