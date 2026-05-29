@@ -57,6 +57,14 @@ def test_issue_token_round_trip():
         &temp.path().join("pnpm-lock.yaml"),
         "lockfileVersion: '9.0'\n",
     );
+    write(
+        &temp.path().join("Justfile"),
+        "test:\n    pytest\nfmt:\n    ruff format .\n",
+    );
+    write(
+        &temp.path().join("Makefile"),
+        "test:\n\tpytest\nlint:\n\truff check .\n",
+    );
 
     let index = RepoIndexer::new(temp.path()).build().unwrap();
 
@@ -192,6 +200,10 @@ def test_issue_token_round_trip():
             .contains(&"bazel test //...".to_string())
     );
     assert!(brief.known_commands.contains(&"pnpm test".to_string()));
+    assert!(brief.known_commands.contains(&"just test".to_string()));
+    assert!(brief.known_commands.contains(&"just fmt".to_string()));
+    assert!(brief.known_commands.contains(&"make test".to_string()));
+    assert!(brief.known_commands.contains(&"make lint".to_string()));
     assert!(brief.known_commands.contains(&"pnpm run lint".to_string()));
     assert!(
         brief
@@ -212,6 +224,15 @@ def test_issue_token_round_trip():
     }));
     assert!(brief.command_hints.iter().any(|hint| {
         hint.command == "bazel test //..." && hint.kind == "test" && hint.source == "MODULE.bazel"
+    }));
+    assert!(brief.command_hints.iter().any(|hint| {
+        hint.command == "just test" && hint.kind == "test" && hint.source == "Justfile"
+    }));
+    assert!(brief.command_hints.iter().any(|hint| {
+        hint.command == "just fmt" && hint.kind == "format" && hint.source == "Justfile"
+    }));
+    assert!(brief.command_hints.iter().any(|hint| {
+        hint.command == "make lint" && hint.kind == "lint" && hint.source == "Makefile"
     }));
     assert!(brief.dependency_hints.iter().any(|hint| {
         hint.name == "fastapi" && hint.kind == "dependency" && hint.source == "pyproject.toml"
@@ -242,6 +263,8 @@ def test_issue_token_round_trip():
             .contains(&"pyproject.toml".to_string())
     );
     assert!(brief.important_files.contains(&"MODULE.bazel".to_string()));
+    assert!(brief.important_files.contains(&"Justfile".to_string()));
+    assert!(brief.important_files.contains(&"Makefile".to_string()));
 
     let map = index.repo_map(10, 10);
     assert!(

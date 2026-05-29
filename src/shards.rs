@@ -2022,8 +2022,15 @@ pub(crate) fn filter_repo_map_by_prefix(map: &mut RepoMap, path_prefix: &str) {
 
     map.brief.file_count = retained_paths.len();
     map.brief.language_counts = language_counts_for_paths(&retained_paths);
-    map.brief.known_commands = known_commands_for_manifest_paths(&map.brief.manifest_files);
-    map.brief.command_hints = command_hints_for_manifest_paths(&map.brief.manifest_files);
+    let command_hint_paths = map
+        .brief
+        .manifest_files
+        .iter()
+        .chain(map.brief.important_files.iter())
+        .cloned()
+        .collect::<Vec<_>>();
+    map.brief.known_commands = known_commands_for_manifest_paths(&command_hint_paths);
+    map.brief.command_hints = command_hints_for_manifest_paths(&command_hint_paths);
 }
 
 fn language_counts_for_paths(paths: &[String]) -> HashMap<String, usize> {
@@ -2090,6 +2097,12 @@ fn command_hints_for_manifest_paths(paths: &[String]) -> Vec<CommandHint> {
     }
     if let Some(source) = manifest_path("Package.swift") {
         hints.push(command_hint("swift test", "test", source));
+    }
+    if let Some(source) = manifest_path("Justfile") {
+        hints.push(command_hint("just test", "test", source));
+    }
+    if let Some(source) = manifest_path("Makefile") {
+        hints.push(command_hint("make test", "test", source));
     }
     hints.sort_by(|left, right| {
         left.command

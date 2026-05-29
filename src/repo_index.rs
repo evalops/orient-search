@@ -3262,8 +3262,19 @@ pub(crate) fn command_hints_from_manifest_texts<'a>(
     if let Some(source) = manifest_path("Package.swift") {
         hints.push(command_hint("swift test", "test", source));
     }
-    if let Some(source) = manifest_path("Makefile") {
-        hints.push(command_hint("make test", "test", source));
+    for (path, text) in files.iter().filter(|(path, _)| {
+        Path::new(path).file_name().and_then(|value| value.to_str()) == Some("Justfile")
+    }) {
+        hints.extend(task_file_command_hints("just", path, text));
+    }
+    for (path, text) in files.iter().filter(|(path, _)| {
+        Path::new(path).file_name().and_then(|value| value.to_str()) == Some("Makefile")
+    }) {
+        let before = hints.len();
+        hints.extend(task_file_command_hints("make", path, text));
+        if hints.len() == before {
+            hints.push(command_hint("make test", "test", *path));
+        }
     }
     hints.sort_by(|left, right| {
         left.command
@@ -3273,6 +3284,63 @@ pub(crate) fn command_hints_from_manifest_texts<'a>(
     });
     hints.dedup_by(|left, right| left.command == right.command && left.source == right.source);
     hints
+}
+
+fn task_file_command_hints(tool: &str, source: &str, text: &str) -> Vec<CommandHint> {
+    let mut hints = Vec::new();
+    for task in task_file_targets(text) {
+        let kind = task_command_kind(&task);
+        hints.push(command_hint(format!("{tool} {task}"), kind, source));
+    }
+    hints
+}
+
+fn task_file_targets(text: &str) -> Vec<String> {
+    const ACTIONABLE_TASKS: &[&str] = &[
+        "test",
+        "lint",
+        "fmt",
+        "format",
+        "check",
+        "typecheck",
+        "build",
+        "bench",
+    ];
+    let mut targets = Vec::new();
+    for line in text.lines() {
+        let line = line.split('#').next().unwrap_or("").trim_end();
+        if line.is_empty()
+            || line.chars().next().is_some_and(char::is_whitespace)
+            || line.starts_with('.')
+        {
+            continue;
+        }
+        let Some((target, _)) = line.split_once(':') else {
+            continue;
+        };
+        let target = target.split_whitespace().next().unwrap_or("").trim();
+        if target.is_empty()
+            || target.contains('=')
+            || target.contains('%')
+            || target.contains('/')
+            || !target
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
+        {
+            continue;
+        }
+        if ACTIONABLE_TASKS.contains(&target) && !targets.iter().any(|seen| seen == target) {
+            targets.push(target.to_string());
+        }
+    }
+    targets
+}
+
+fn task_command_kind(task: &str) -> &str {
+    match task {
+        "fmt" | "format" => "format",
+        other => other,
+    }
 }
 
 pub(crate) fn known_commands_from_hints(hints: &[CommandHint]) -> Vec<String> {

@@ -4156,6 +4156,7 @@ fn runtime_shard_repo_map_reports_git_metadata() {
         &repo.path().join("MODULE.bazel"),
         "module(name = \"shard_project\")\n",
     );
+    write(&repo.path().join("Justfile"), "test:\n    cargo test\n");
     git(repo.path(), &["init", "-b", "shard-feature-branch"]);
     git(
         repo.path(),
@@ -4325,6 +4326,8 @@ fn runtime_shard_repo_map_reports_git_metadata() {
     );
     assert!(result.contains("bazel test //..."), "{result}");
     assert!(result.contains("MODULE.bazel"), "{result}");
+    assert!(result.contains("just test"), "{result}");
+    assert!(result.contains("Justfile"), "{result}");
 }
 
 #[test]
