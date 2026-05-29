@@ -71,7 +71,7 @@ The generated rule should keep agents on this loop. See
   to the active checkout.
 - Call `daemon_status` with `cwd` when you want copyable `default_requests`
   for the active checkout; the returned map, search, batch, and query-plan
-  requests keep that same scope.
+  requests keep that same scope and set `refresh_if_stale:true`.
 - Follow returned `read_*`, `related_*`, `repo_map_request`, and
   `query_plan_request` objects directly.
 - Pass `refresh_if_stale:true` when live files may have changed. With `cwd`,
@@ -98,7 +98,8 @@ orient daemon-status --format json
 ```
 
 The compact status is meant for humans. JSON status adds registered shard and
-warmed-index summaries plus copyable default requests.
+warmed-index summaries plus copyable default requests. When called with `cwd`,
+those requests are scoped to the active checkout and set `refresh_if_stale:true`.
 
 Refresh explicitly when needed:
 

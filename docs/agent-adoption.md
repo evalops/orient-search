@@ -43,7 +43,7 @@ The rule should tell agents:
   same checkout scope.
 - Include `cwd` on `daemon_status` when asking for copyable default requests;
   the returned map, search, batch, and query-plan calls will keep the active
-  checkout scope.
+  checkout scope and set `refresh_if_stale:true`.
 - Follow returned `read_*`, `related_*`, `repo_map_request`, and
   `query_plan_request` objects directly.
 - Prefer `next_read_batch_request` after `search_auto` or `search_auto_batch`;

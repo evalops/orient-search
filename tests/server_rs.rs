@@ -7734,6 +7734,10 @@ fn daemon_status_with_cwd_returns_checkout_scoped_default_requests() {
 
     let shard_dir = tempfile::tempdir().unwrap();
     build_shards(&[auth_repo.clone(), billing_repo.clone()], shard_dir.path()).unwrap();
+    write(
+        &auth_repo.join("src/session.rs"),
+        "pub struct SessionManager;\npub fn issue_token() -> SessionManager { SessionManager }\n",
+    );
 
     let runtime = ToolRuntime::default();
     runtime
@@ -7762,18 +7766,34 @@ fn daemon_status_with_cwd_returns_checkout_scoped_default_requests() {
         status["default_requests"]["repo_map"]["arguments"]["cwd"],
         serde_json::json!(auth_repo.join("src"))
     );
+    assert_eq!(
+        status["default_requests"]["repo_map"]["arguments"]["refresh_if_stale"],
+        serde_json::json!(true)
+    );
     assert!(status["default_requests"]["repo_map"]["arguments"]["index_dir"].is_null());
     assert_eq!(
         status["default_requests"]["search"]["arguments"]["cwd"],
         serde_json::json!(auth_repo.join("src"))
     );
     assert_eq!(
+        status["default_requests"]["search"]["arguments"]["refresh_if_stale"],
+        serde_json::json!(true)
+    );
+    assert_eq!(
+        status["default_requests"]["search_batch"]["arguments"]["refresh_if_stale"],
+        serde_json::json!(true)
+    );
+    assert_eq!(
         status["default_requests"]["query_plan"]["tool"],
-        serde_json::json!("search_query_plan")
+        serde_json::json!("search_plan")
     );
     assert_eq!(
         status["default_requests"]["query_plan"]["arguments"]["cwd"],
         serde_json::json!(auth_repo.join("src"))
+    );
+    assert_eq!(
+        status["default_requests"]["query_plan"]["arguments"]["refresh_if_stale"],
+        serde_json::json!(true)
     );
 
     let map_request = &status["default_requests"]["repo_map"];
@@ -7785,7 +7805,27 @@ fn daemon_status_with_cwd_returns_checkout_scoped_default_requests() {
     assert!(map.error.is_none(), "{:?}", map.error);
     let map = serde_json::to_string(&map.result).unwrap();
     assert!(map.contains("AuthSession"), "{map}");
+    assert!(map.contains("SessionManager"), "{map}");
     assert!(!map.contains("BillingInvoice"), "{map}");
+
+    let search_request = &status["default_requests"]["search"];
+    let search = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("search"),
+        tool: search_request["tool"].as_str().unwrap().to_string(),
+        arguments: search_request["arguments"].clone(),
+    });
+    assert!(search.error.is_none(), "{:?}", search.error);
+    let search = serde_json::to_string(&search.result).unwrap();
+    assert!(search.contains("auth/src/session.rs"), "{search}");
+    assert!(!search.contains("billing/src/lib.rs"), "{search}");
+
+    let plan_request = &status["default_requests"]["query_plan"];
+    let plan = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("plan"),
+        tool: plan_request["tool"].as_str().unwrap().to_string(),
+        arguments: plan_request["arguments"].clone(),
+    });
+    assert!(plan.error.is_none(), "{:?}", plan.error);
 
     let direct_plan = runtime.dispatch(ToolRequest {
         id: serde_json::json!("direct-plan"),

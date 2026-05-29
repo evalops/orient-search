@@ -65,7 +65,9 @@ for registered-target details, `search_auto_default`, and copyable
 `default_requests`.
 When protocol clients pass `cwd` to `daemon_status`, those `default_requests`
 include the same `cwd` and use target-aware no-target tools so a shared daemon
-scopes map, search, batch, and query-plan requests to the active checkout.
+scopes map, search, batch, and query-plan requests to the active checkout. They
+also set `refresh_if_stale:true`, which refreshes only the scoped shard before
+use.
 If `repair_requests` is present, run the provided request first; for example,
 it can register a shard manifest when only one shard index was warmed.
 

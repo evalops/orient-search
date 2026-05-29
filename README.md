@@ -76,7 +76,9 @@ refreshes and repeats the search. Shard freshness includes branch/origin
 metadata drift, so switching branches without touching files is still detected.
 When a JSON-lines or MCP client calls `daemon_status` with `cwd`, the returned
 `default_requests` also include that `cwd`, so copyable first map, search,
-batch, and query-plan calls stay scoped to the active checkout.
+batch, and query-plan calls stay scoped to the active checkout. Those scoped
+defaults also set `refresh_if_stale:true`, so they refresh only that checkout's
+shard before use.
 
 Useful filters: `repo:`, `path:`/`dir:`, `file:`, `lang:`, `ext:`, `symbol:`,
 `kind:`/`type:`, `dep:`, `import:`, `test:`, `generated:`, `code:`,

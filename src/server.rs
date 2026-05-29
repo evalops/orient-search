@@ -971,6 +971,10 @@ pub fn tool_manifest() -> Value {
                 "read_limit",
                 "repo",
                 "repo_filter",
+                "cwd",
+                "branch",
+                "origin",
+                "refresh_if_stale",
             ],
         ),
         tool_entry(
@@ -2858,20 +2862,30 @@ impl ToolRuntime {
                 if let Some(index_dir) =
                     optional_string_arg(&request.arguments, "index_dir").map(PathBuf::from)
                 {
+                    let filters = search_filters(&request.arguments, true)?;
+                    if bool_arg(&request.arguments, "refresh_if_stale") {
+                        self.refresh_shards_for_arguments_if_stale(
+                            &index_dir,
+                            &request.arguments,
+                            &filters,
+                        )?;
+                    }
                     return Ok(serde_json::to_value(self.shard_repo_maps_cached(
                         &index_dir,
                         symbol_limit,
                         test_limit,
                         detail,
                         read_limit,
-                        &search_filters(&request.arguments, true)?,
+                        &filters,
                         "read_ranges",
                     )?)?);
                 }
                 if let Some(index_path) =
                     optional_string_arg(&request.arguments, "index").map(PathBuf::from)
                 {
-                    let index = self.cached_index(index_path.clone())?;
+                    let refresh_if_stale = bool_arg(&request.arguments, "refresh_if_stale");
+                    let index =
+                        self.cached_index_maybe_refresh(index_path.clone(), refresh_if_stale)?;
                     let mut map = index.repo_map_with_detail(symbol_limit, test_limit, detail);
                     attach_repo_map_read_batch_request_with_limit(
                         &mut map,
@@ -2884,18 +2898,28 @@ impl ToolRuntime {
                 if optional_string_arg(&request.arguments, "cwd").is_some() {
                     let scoped_arguments = arguments_scoped_to_client_cwd(&request.arguments)?;
                     if let Ok(index_dir) = self.single_cached_shard_manifest_path() {
+                        let filters = search_filters(&scoped_arguments, true)?;
+                        if bool_arg(&request.arguments, "refresh_if_stale") {
+                            self.refresh_shards_for_arguments_if_stale(
+                                &index_dir,
+                                &scoped_arguments,
+                                &filters,
+                            )?;
+                        }
                         return Ok(serde_json::to_value(self.shard_repo_maps_cached(
                             &index_dir,
                             symbol_limit,
                             test_limit,
                             detail,
                             read_limit,
-                            &search_filters(&scoped_arguments, true)?,
+                            &filters,
                             "read_ranges",
                         )?)?);
                     }
                     if let Ok(index_path) = self.single_cached_index_path() {
-                        let index = self.cached_index(index_path.clone())?;
+                        let refresh_if_stale = bool_arg(&request.arguments, "refresh_if_stale");
+                        let index =
+                            self.cached_index_maybe_refresh(index_path.clone(), refresh_if_stale)?;
                         if index_matches_client_cwd(&index, &request.arguments)? {
                             let mut map =
                                 index.repo_map_with_detail(symbol_limit, test_limit, detail);
@@ -4255,13 +4279,22 @@ impl ToolRuntime {
                 let test_limit = positive_usize_arg(&request.arguments, "tests", 50)?;
                 let detail = repo_map_detail_arg(&request.arguments)?;
                 let read_limit = repo_map_read_limit_arg(&request.arguments)?;
+                let scoped_arguments = arguments_scoped_to_client_cwd(&request.arguments)?;
+                let filters = search_filters(&scoped_arguments, true)?;
+                if bool_arg(&request.arguments, "refresh_if_stale") {
+                    self.refresh_shards_for_arguments_if_stale(
+                        &index_dir,
+                        &scoped_arguments,
+                        &filters,
+                    )?;
+                }
                 Ok(serde_json::to_value(self.shard_repo_maps_cached(
                     &index_dir,
                     symbol_limit,
                     test_limit,
                     detail,
                     read_limit,
-                    &search_filters(&request.arguments, true)?,
+                    &filters,
                     "read_shard_ranges",
                 )?)?)
             }
@@ -6957,6 +6990,7 @@ const REPO_MAP_TARGET_OPTIONAL_ARGS: &[&str] = &[
     "repo_filter",
     "branch",
     "origin",
+    "refresh_if_stale",
 ];
 
 const RELATED_FILES_TARGET_OPTIONAL_ARGS: &[&str] = &[
@@ -8269,7 +8303,8 @@ fn daemon_default_cwd_requests(cwd: &str) -> Value {
             json!({
                 "cwd": cwd,
                 "detail": "compact",
-                "read_limit": DEFAULT_REPO_MAP_READ_BATCH_RANGES
+                "read_limit": DEFAULT_REPO_MAP_READ_BATCH_RANGES,
+                "refresh_if_stale": true
             }),
         ),
         "search": daemon_default_request(
@@ -8279,7 +8314,8 @@ fn daemon_default_cwd_requests(cwd: &str) -> Value {
                 "cwd": cwd,
                 "query": "symbol:SessionManager token",
                 "limit": 10,
-                "explain": true
+                "explain": true,
+                "refresh_if_stale": true
             }),
         ),
         "search_batch": daemon_default_request(
@@ -8292,19 +8328,21 @@ fn daemon_default_cwd_requests(cwd: &str) -> Value {
                     "path:src token"
                 ],
                 "limit": 10,
-                "explain": true
+                "explain": true,
+                "refresh_if_stale": true
             }),
         ),
         "query_plan": daemon_default_request(
             "plan",
-            "search_query_plan",
+            "search_plan",
             json!({
                 "cwd": cwd,
                 "query": "symbol:SessionManager missingterm",
-                "require_all": true
+                "require_all": true,
+                "refresh_if_stale": true
             }),
         ),
-        "note": "These default requests include cwd so a shared daemon scopes no-target map, search, and query-plan calls to the active checkout. Each default request includes jsonl and client_cli for direct terminal use."
+        "note": "These default requests include cwd and refresh_if_stale so a shared daemon scopes no-target map, search, and query-plan calls to the active checkout and refreshes that shard before use. Each default request includes jsonl and client_cli for direct terminal use."
     })
 }
 
