@@ -5812,6 +5812,22 @@ mod tests {
         assert_eq!(hosted.start, 12);
         assert_eq!(hosted.lines, 4);
 
+        let hosted_query = CliRangeSpec::from_str(
+            "https://github.com/evalops/orient-search/blob/main/src/auth.rs?plain=1#L12-L15",
+        )
+        .unwrap();
+        assert_eq!(hosted_query.path, "src/auth.rs");
+        assert_eq!(hosted_query.start, 12);
+        assert_eq!(hosted_query.lines, 4);
+
+        let sourcegraph = CliRangeSpec::from_str(
+            "https://sourcegraph.com/github.com/evalops/orient-search/-/blob/src/auth.rs?L12:7",
+        )
+        .unwrap();
+        assert_eq!(sourcegraph.path, "src/auth.rs");
+        assert_eq!(sourcegraph.start, 12);
+        assert_eq!(sourcegraph.lines, DEFAULT_CLI_READ_RANGE_LINES);
+
         let wrapped =
             CliRangeSpec::from_str("at Object.handle (src/auth.rs#L12-L15):symbol").unwrap();
         assert_eq!(wrapped.path, "src/auth.rs");

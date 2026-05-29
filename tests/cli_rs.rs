@@ -1542,6 +1542,33 @@ fn cli_outputs_repo_map_and_reads_ranges() {
         .stdout(predicate::str::contains("\"end_line\":6"))
         .stdout(predicate::str::contains("issue_token"));
 
+    let mut hosted_query_read_range = Command::cargo_bin("orient").unwrap();
+    hosted_query_read_range
+        .args([
+            "read-range",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "https://github.com/evalops/orient-search/blob/main/src/auth.rs?plain=1#L5-L6",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"start_line\":5"))
+        .stdout(predicate::str::contains("\"end_line\":6"))
+        .stdout(predicate::str::contains("issue_token"));
+
+    let mut sourcegraph_read_range = Command::cargo_bin("orient").unwrap();
+    sourcegraph_read_range
+        .args([
+            "read-range",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "https://sourcegraph.com/github.com/evalops/orient-search/-/blob/src/auth.rs?L5:9",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"start_line\":5"))
+        .stdout(predicate::str::contains("issue_token"));
+
     let mut oversized_compact_read_range = Command::cargo_bin("orient").unwrap();
     oversized_compact_read_range
         .args([

@@ -445,23 +445,67 @@ fn code_hosted_location_path(value: &str) -> Option<String> {
     if !value.contains("://") {
         return None;
     }
+    let query_start = value.find('?').unwrap_or(value.len());
     let anchor_start = value.find('#').unwrap_or(value.len());
-    let (base, anchor) = value.split_at(anchor_start);
+    let suffix_start = query_start.min(anchor_start);
+    let (base, suffix) = value.split_at(suffix_start);
+    let line_anchor = hosted_line_anchor_suffix(suffix);
     let lower_base = base.to_ascii_lowercase();
     for marker in ["/-/blob/", "/blob/", "/-/tree/", "/tree/"] {
         let Some(marker_start) = lower_base.find(marker) else {
             continue;
         };
         let after_marker = &base[marker_start + marker.len()..];
-        let Some(path_start) = after_marker.find('/') else {
-            continue;
+        let path = if lower_base.contains("sourcegraph.com/") && marker.starts_with("/-/") {
+            after_marker
+        } else {
+            let Some(path_start) = after_marker.find('/') else {
+                continue;
+            };
+            &after_marker[path_start + 1..]
         };
-        let path = &after_marker[path_start + 1..];
         if looks_like_location_path(path) {
-            return Some(format!("{path}{anchor}"));
+            return Some(format!("{path}{line_anchor}"));
         }
     }
     None
+}
+
+fn hosted_line_anchor_suffix(suffix: &str) -> String {
+    if suffix.is_empty() {
+        return String::new();
+    }
+    if let Some(anchor_start) = suffix.find('#') {
+        let anchor = &suffix[anchor_start..];
+        if anchor.to_ascii_lowercase().starts_with("#l") {
+            return anchor.to_string();
+        }
+    }
+    let Some(query_start) = suffix.find('?') else {
+        return String::new();
+    };
+    let query = &suffix[query_start + 1..suffix.find('#').unwrap_or(suffix.len())];
+    for part in query.split('&') {
+        let part = part.trim_start_matches(|ch| matches!(ch, '?' | '&'));
+        let Some(line_spec) = part.strip_prefix('L').or_else(|| part.strip_prefix('l')) else {
+            continue;
+        };
+        let Some((line, rest)) = split_leading_positive_number(line_spec) else {
+            continue;
+        };
+        let rest = rest.trim_start_matches(':');
+        if let Some(range) = rest.strip_prefix('-') {
+            let range = range
+                .strip_prefix('L')
+                .or_else(|| range.strip_prefix('l'))
+                .unwrap_or(range);
+            if let Some((end, _)) = split_leading_positive_number(range) {
+                return format!("#L{line}-L{end}");
+            }
+        }
+        return format!("#L{line}");
+    }
+    String::new()
 }
 
 fn trim_location_token_wrappers(token: &str) -> &str {
@@ -1035,6 +1079,26 @@ mod tests {
             Some("src/server.rs")
         );
         assert_eq!(hosted_source_location.filters.target_line, Some(42));
+
+        let hosted_query_source_location = parse_query(
+            "https://github.com/evalops/orient-search/blob/main/src/server.rs?plain=1#L42-L45",
+        );
+        assert!(hosted_query_source_location.terms.is_empty());
+        assert_eq!(
+            hosted_query_source_location.filters.path.as_deref(),
+            Some("src/server.rs")
+        );
+        assert_eq!(hosted_query_source_location.filters.target_line, Some(42));
+
+        let sourcegraph_source_location = parse_query(
+            "https://sourcegraph.com/github.com/evalops/orient-search/-/blob/src/server.rs?L42:9",
+        );
+        assert!(sourcegraph_source_location.terms.is_empty());
+        assert_eq!(
+            sourcegraph_source_location.filters.path.as_deref(),
+            Some("src/server.rs")
+        );
+        assert_eq!(sourcegraph_source_location.filters.target_line, Some(42));
 
         let copied_source_line = parse_query("src/server.rs:42: pub fn handle_request");
         assert_eq!(

@@ -91,7 +91,8 @@ string instead of the file itself. Pasted locations such as `src/lib.rs:42`,
 Markdown-style file links, common hosted code links, and stack-frame forms like
 `at fn (src/lib.rs:42:9)` resolve to the file and anchor snippets near that
 line. Absolute pasted paths are normalized when they are inside the selected
-repo or index root.
+repo or index root. Hosted links may carry fragment or query-string line
+anchors.
 `symbol:` accepts exact names plus strong multi-token identifier fragments, so
 `symbol:retry_result` can match `search_auto_retry_result`; single generic tokens
 stay exact to avoid broad matches such as `symbol:path` hitting every
@@ -125,7 +126,8 @@ definition instead of opening an exact line window.
 The `read_range` / `read_ranges` protocol tools and `read-range` /
 `read-ranges` CLIs accept the same copied file locations as search, including
 `src/lib.rs:42`, copied `src/lib.rs:42: text` lines, `src/lib.rs#L42-L45`,
-Markdown links, and common hosted code links.
+Markdown links, and common hosted code links with fragment or query-string line
+anchors.
 
 ## Footprint
 
