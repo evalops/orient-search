@@ -22,6 +22,7 @@ pub const MAX_READ_RANGE_LINES: usize = 1_000;
 pub const MAX_SEARCH_RESULTS: usize = 100;
 pub const MAX_RESULT_READ_BATCH_RANGES: usize = 64;
 pub const DEFAULT_REPO_MAP_READ_BATCH_RANGES: usize = 16;
+const READ_BATCH_MERGE_GAP_LINES: usize = 8;
 const MAX_REPO_BRIEF_IMPORT_HINTS: usize = 32;
 const DEFAULT_RESULT_READ_LINES: usize = 80;
 const DEFAULT_RELATED_FILE_READ_LINES: usize = 80;
@@ -5643,14 +5644,14 @@ fn read_batch_request_from_ranges_with_limit(
         if ranges.len() >= limit {
             break;
         }
-        let key = (
-            read_range.path.clone(),
-            read_range.start,
-            read_range.lines,
-            read_range.scope,
-        );
-        if !seen.insert(key) {
+        if !seen.insert(read_range_key(&read_range)) {
             continue;
+        }
+        if try_merge_batch_read_range(&mut ranges, &read_range) {
+            continue;
+        }
+        if ranges.len() >= limit {
+            break;
         }
         ranges.push(read_range);
     }
@@ -5682,6 +5683,56 @@ fn read_batch_request_from_ranges_with_limit(
         tool.to_string(),
         serde_json::Value::Object(base_arguments),
     ))
+}
+
+fn read_range_key(read_range: &ResultReadRange) -> (String, usize, usize, Option<RangeScope>) {
+    (
+        read_range.path.clone(),
+        read_range.start,
+        read_range.lines,
+        read_range.scope,
+    )
+}
+
+fn try_merge_batch_read_range(
+    ranges: &mut [ResultReadRange],
+    read_range: &ResultReadRange,
+) -> bool {
+    if read_range.scope.is_some() {
+        return false;
+    }
+    if let Some(existing) = ranges
+        .iter_mut()
+        .find(|existing| can_merge_read_ranges(existing, read_range))
+    {
+        let start = existing.start.min(read_range.start);
+        let end = read_range_end(existing).max(read_range_end(read_range));
+        existing.start = start;
+        existing.lines = end.saturating_sub(start).saturating_add(1);
+        true
+    } else {
+        false
+    }
+}
+
+fn can_merge_read_ranges(left: &ResultReadRange, right: &ResultReadRange) -> bool {
+    if left.scope.is_some() || right.scope.is_some() || left.path != right.path {
+        return false;
+    }
+    let start = left.start.min(right.start);
+    let end = read_range_end(left).max(read_range_end(right));
+    if end.saturating_sub(start).saturating_add(1) > MAX_READ_RANGE_LINES {
+        return false;
+    }
+    let left_end_with_gap = read_range_end(left).saturating_add(READ_BATCH_MERGE_GAP_LINES);
+    let right_end_with_gap = read_range_end(right).saturating_add(READ_BATCH_MERGE_GAP_LINES);
+    left.start <= right_end_with_gap && right.start <= left_end_with_gap
+}
+
+fn read_range_end(read_range: &ResultReadRange) -> usize {
+    read_range
+        .start
+        .saturating_add(read_range.lines.saturating_sub(1))
 }
 
 fn common_read_scope(ranges: &[ResultReadRange]) -> Option<RangeScope> {
@@ -5731,6 +5782,7 @@ pub fn attach_result_related_requests(
             append_related_filter_arguments(&mut arguments, filters);
         }
         arguments.insert("path".to_string(), serde_json::json!(result.path.clone()));
+        arguments.insert("include_read_batch".to_string(), serde_json::json!(true));
         result.related_request = Some(ResultToolRequest::new(
             tool.to_string(),
             serde_json::Value::Object(arguments),
@@ -5820,6 +5872,7 @@ pub fn attach_result_related_symbol_requests(
             arguments.insert("query".to_string(), serde_json::json!(query));
         }
         arguments.insert("path".to_string(), serde_json::json!(result.path.clone()));
+        arguments.insert("include_read_batch".to_string(), serde_json::json!(true));
         result.related_symbols_request = Some(ResultToolRequest::new(
             tool.to_string(),
             serde_json::Value::Object(arguments),
@@ -5947,6 +6000,12 @@ fn related_cli_command_for_request(
         parts.push("--limit".to_string());
         parts.push(limit.to_string());
     }
+    append_bool_cli_arg(
+        &mut parts,
+        args,
+        "include_read_batch",
+        "--include-read-batch",
+    );
     append_related_filter_cli_args(&mut parts, args);
     Some(parts.join(" "))
 }
@@ -7285,6 +7344,112 @@ mod tests {
     }
 
     #[test]
+    fn result_read_batches_merge_overlapping_exact_ranges() {
+        let results = vec![
+            SearchResult {
+                path: "src/auth.rs".to_string(),
+                score: 10.0,
+                reason: "test".to_string(),
+                snippet: "10: first".to_string(),
+                line_range: None,
+                match_lines: Vec::new(),
+                explanation: None,
+                query_plan: None,
+                duplicate_group: None,
+                context: None,
+                read_range: Some(ResultReadRange {
+                    path: "src/auth.rs".to_string(),
+                    start: 10,
+                    lines: 80,
+                    scope: None,
+                }),
+                read_request: None,
+                related_request: None,
+                related_symbols_request: None,
+            },
+            SearchResult {
+                path: "src/auth.rs".to_string(),
+                score: 9.0,
+                reason: "test".to_string(),
+                snippet: "70: second".to_string(),
+                line_range: None,
+                match_lines: Vec::new(),
+                explanation: None,
+                query_plan: None,
+                duplicate_group: None,
+                context: None,
+                read_range: Some(ResultReadRange {
+                    path: "src/auth.rs".to_string(),
+                    start: 70,
+                    lines: 80,
+                    scope: None,
+                }),
+                read_request: None,
+                related_request: None,
+                related_symbols_request: None,
+            },
+            SearchResult {
+                path: "src/auth.rs".to_string(),
+                score: 8.0,
+                reason: "test".to_string(),
+                snippet: "220: third".to_string(),
+                line_range: None,
+                match_lines: Vec::new(),
+                explanation: None,
+                query_plan: None,
+                duplicate_group: None,
+                context: None,
+                read_range: Some(ResultReadRange {
+                    path: "src/auth.rs".to_string(),
+                    start: 220,
+                    lines: 80,
+                    scope: None,
+                }),
+                read_request: None,
+                related_request: None,
+                related_symbols_request: None,
+            },
+        ];
+
+        let request =
+            result_read_batch_request(&results, "read_ranges", serde_json::Map::new()).unwrap();
+        let ranges = request.arguments["ranges"].as_array().unwrap();
+        assert_eq!(ranges.len(), 2);
+        assert_eq!(ranges[0]["path"], serde_json::json!("src/auth.rs"));
+        assert_eq!(ranges[0]["start"], serde_json::json!(10));
+        assert_eq!(ranges[0]["lines"], serde_json::json!(140));
+        assert_eq!(ranges[1]["start"], serde_json::json!(220));
+    }
+
+    #[test]
+    fn result_read_batches_keep_symbol_scoped_ranges_separate() {
+        let symbols = vec![
+            Symbol {
+                name: "first".to_string(),
+                kind: "function".to_string(),
+                path: "src/auth.rs".to_string(),
+                line: 40,
+            },
+            Symbol {
+                name: "second".to_string(),
+                kind: "function".to_string(),
+                path: "src/auth.rs".to_string(),
+                line: 80,
+            },
+        ];
+        let symbols = symbol_lookup_results(symbols, "read_range", serde_json::Map::new());
+
+        let request =
+            symbol_lookup_read_batch_request(&symbols, "read_ranges", serde_json::Map::new())
+                .unwrap();
+        let ranges = request.arguments["ranges"].as_array().unwrap();
+        assert_eq!(ranges.len(), 2);
+        assert_eq!(request.arguments["scope"], serde_json::json!("symbol"));
+        assert_eq!(ranges[0]["start"], serde_json::json!(40));
+        assert_eq!(ranges[1]["start"], serde_json::json!(80));
+    }
+
+    #[test]
     fn batch_read_tool_request_cli_preserves_per_range_scope() {
         let request = ResultToolRequest::new(
             "read_ranges",
@@ -7495,15 +7660,69 @@ mod tests {
             serde_json::json!({
                 "repo": "/tmp/my repo",
                 "path": "src/auth.rs",
-                "query": "symbol:SessionManager issue token"
+                "query": "symbol:SessionManager issue token",
+                "include_read_batch": true
             }),
         );
 
         assert_eq!(
             request.cli.as_deref(),
             Some(
-                "orient related-symbols --repo '/tmp/my repo' --path src/auth.rs --query 'symbol:SessionManager issue token'"
+                "orient related-symbols --repo '/tmp/my repo' --path src/auth.rs --query 'symbol:SessionManager issue token' --include-read-batch"
             )
+        );
+    }
+
+    #[test]
+    fn search_results_make_related_followups_batch_ready() {
+        let mut results = vec![SearchResult {
+            path: "src/auth.rs".to_string(),
+            score: 10.0,
+            reason: "test".to_string(),
+            snippet: "10: first".to_string(),
+            line_range: None,
+            match_lines: Vec::new(),
+            explanation: None,
+            query_plan: None,
+            duplicate_group: None,
+            context: None,
+            read_range: None,
+            read_request: None,
+            related_request: None,
+            related_symbols_request: None,
+        }];
+
+        attach_result_related_requests(&mut results, "related_files", serde_json::Map::new(), None);
+        attach_result_related_symbol_requests(
+            &mut results,
+            "related_symbols",
+            Some("symbol:SessionManager token"),
+            serde_json::Map::new(),
+        );
+
+        let related = results[0].related_request.as_ref().unwrap();
+        assert_eq!(
+            related.arguments["include_read_batch"],
+            serde_json::json!(true)
+        );
+        assert!(
+            related
+                .cli
+                .as_deref()
+                .unwrap()
+                .contains("--include-read-batch")
+        );
+        let related_symbols = results[0].related_symbols_request.as_ref().unwrap();
+        assert_eq!(
+            related_symbols.arguments["include_read_batch"],
+            serde_json::json!(true)
+        );
+        assert!(
+            related_symbols
+                .cli
+                .as_deref()
+                .unwrap()
+                .contains("--include-read-batch")
         );
     }
 

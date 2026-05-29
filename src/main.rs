@@ -656,6 +656,8 @@ enum Commands {
         path_arg: Option<String>,
         #[arg(long, default_value_t = 10)]
         limit: usize,
+        #[arg(long)]
+        include_read_batch: bool,
         #[command(flatten)]
         filters: RelatedSymbolFilterArgs,
     },
@@ -668,6 +670,8 @@ enum Commands {
         path_arg: Option<String>,
         #[arg(long, default_value_t = 10)]
         limit: usize,
+        #[arg(long)]
+        include_read_batch: bool,
         #[command(flatten)]
         filters: RelatedSymbolFilterArgs,
     },
@@ -680,6 +684,8 @@ enum Commands {
         path_arg: Option<String>,
         #[arg(long, default_value_t = 10)]
         limit: usize,
+        #[arg(long)]
+        include_read_batch: bool,
         #[command(flatten)]
         filters: RelatedSymbolFilterArgs,
     },
@@ -696,6 +702,8 @@ enum Commands {
         query: Option<String>,
         #[arg(long, default_value_t = 10)]
         limit: usize,
+        #[arg(long)]
+        include_read_batch: bool,
         #[command(flatten)]
         filters: RelatedSymbolFilterArgs,
     },
@@ -710,6 +718,8 @@ enum Commands {
         query: Option<String>,
         #[arg(long, default_value_t = 10)]
         limit: usize,
+        #[arg(long)]
+        include_read_batch: bool,
         #[command(flatten)]
         filters: RelatedSymbolFilterArgs,
     },
@@ -722,6 +732,8 @@ enum Commands {
         query: Option<String>,
         #[arg(long, default_value_t = 10)]
         limit: usize,
+        #[arg(long)]
+        include_read_batch: bool,
         #[command(flatten)]
         filters: RelatedSymbolFilterArgs,
     },
@@ -1433,6 +1445,38 @@ fn read_request_args<T: Serialize>(name: &str, value: T) -> Map<String, Value> {
     let mut arguments = Map::new();
     arguments.insert(name.to_string(), serde_json::json!(value));
     arguments
+}
+
+fn print_related_response<T: Serialize>(
+    results: Vec<T>,
+    include_read_batch: bool,
+    batch_tool: &str,
+    base_arguments: Map<String, Value>,
+    summary: &str,
+) -> Result<()> {
+    let results = serde_json::to_value(results)?;
+    if !include_read_batch {
+        println!("{}", serde_json::to_string(&results)?);
+        return Ok(());
+    }
+    let read_batch_request = result_value_read_batch_request(&results, batch_tool, base_arguments);
+    let next_action = read_batch_request.as_ref().map(|request| {
+        serde_json::json!({
+            "kind": "read",
+            "source": "read_batch_request",
+            "summary": summary,
+            "request": request
+        })
+    });
+    println!(
+        "{}",
+        serde_json::to_string(&serde_json::json!({
+            "results": results,
+            "read_batch_request": read_batch_request,
+            "next_action": next_action
+        }))?
+    );
+    Ok(())
 }
 
 fn repo_map_detail_from_cli(value: &str) -> Result<RepoMapDetail> {
@@ -3931,6 +3975,7 @@ fn run() -> Result<()> {
             path,
             path_arg,
             limit,
+            include_read_batch,
             filters,
         } => {
             let path = cli_single_path(path, path_arg)?;
@@ -3953,20 +3998,20 @@ fn run() -> Result<()> {
                     read_request_args("repo", &repo),
                 )
             };
-            println!(
-                "{}",
-                serde_json::to_string(&related_file_lookup_results(
-                    related,
-                    "read_range",
-                    base_args
-                ))?
-            );
+            print_related_response(
+                related_file_lookup_results(related, "read_range", base_args.clone()),
+                include_read_batch,
+                "read_ranges",
+                base_args,
+                "Read the related files in one bounded batch.",
+            )?;
         }
         Commands::RelatedIndex {
             index,
             path,
             path_arg,
             limit,
+            include_read_batch,
             filters,
         } => {
             let path = cli_single_path(path, path_arg)?;
@@ -3974,33 +4019,34 @@ fn run() -> Result<()> {
             let filters = related_symbol_filters_from_args(&filters, None);
             let index = FastIndex::load(&index_path)?;
             let related = index.related_files_filtered(&path, limit, &filters);
-            println!(
-                "{}",
-                serde_json::to_string(&related_file_lookup_results(
-                    related,
-                    "read_index_range",
-                    read_request_args("index", &index_path)
-                ))?
-            );
+            let base_args = read_request_args("index", &index_path);
+            print_related_response(
+                related_file_lookup_results(related, "read_index_range", base_args.clone()),
+                include_read_batch,
+                "read_index_ranges",
+                base_args,
+                "Read the related files in one bounded batch.",
+            )?;
         }
         Commands::RelatedShard {
             index_dir,
             path,
             path_arg,
             limit,
+            include_read_batch,
             filters,
         } => {
             let path = cli_single_path(path, path_arg)?;
             let filters = related_symbol_filters_from_args(&filters, None);
             let related = related_shard_files_filtered(&index_dir, &path, limit, &filters)?;
-            println!(
-                "{}",
-                serde_json::to_string(&related_file_lookup_results(
-                    related,
-                    "read_shard_range",
-                    read_request_args("index_dir", &index_dir)
-                ))?
-            );
+            let base_args = read_request_args("index_dir", &index_dir);
+            print_related_response(
+                related_file_lookup_results(related, "read_shard_range", base_args.clone()),
+                include_read_batch,
+                "read_shard_ranges",
+                base_args,
+                "Read the related files in one bounded batch.",
+            )?;
         }
         Commands::RelatedSymbols {
             repo,
@@ -4009,6 +4055,7 @@ fn run() -> Result<()> {
             path,
             query,
             limit,
+            include_read_batch,
             filters,
         } => {
             let filters = related_symbol_filters_from_args(&filters, None);
@@ -4052,20 +4099,20 @@ fn run() -> Result<()> {
                     read_request_args("repo", &repo),
                 )
             };
-            println!(
-                "{}",
-                serde_json::to_string(&related_symbol_lookup_results(
-                    related,
-                    "read_range",
-                    base_args
-                ))?
-            );
+            print_related_response(
+                related_symbol_lookup_results(related, "read_range", base_args.clone()),
+                include_read_batch,
+                "read_ranges",
+                base_args,
+                "Read the related symbol definitions in one bounded batch.",
+            )?;
         }
         Commands::RelatedIndexSymbols {
             index,
             path,
             query,
             limit,
+            include_read_batch,
             filters,
         } => {
             let index_path = index;
@@ -4073,14 +4120,14 @@ fn run() -> Result<()> {
             let index = FastIndex::load(&index_path)?;
             let related =
                 index.related_symbols_filtered(path.as_deref(), query.as_deref(), limit, &filters);
-            println!(
-                "{}",
-                serde_json::to_string(&related_symbol_lookup_results(
-                    related,
-                    "read_index_range",
-                    read_request_args("index", &index_path)
-                ))?
-            );
+            let base_args = read_request_args("index", &index_path);
+            print_related_response(
+                related_symbol_lookup_results(related, "read_index_range", base_args.clone()),
+                include_read_batch,
+                "read_index_ranges",
+                base_args,
+                "Read the related symbol definitions in one bounded batch.",
+            )?;
         }
         Commands::RelatedShardSymbols {
             index_dir,
@@ -4088,6 +4135,7 @@ fn run() -> Result<()> {
             path_arg,
             query,
             limit,
+            include_read_batch,
             filters,
         } => {
             let path = cli_single_path(path, path_arg)?;
@@ -4099,14 +4147,14 @@ fn run() -> Result<()> {
                 limit,
                 &filters,
             )?;
-            println!(
-                "{}",
-                serde_json::to_string(&related_symbol_lookup_results(
-                    related,
-                    "read_shard_range",
-                    read_request_args("index_dir", &index_dir)
-                ))?
-            );
+            let base_args = read_request_args("index_dir", &index_dir);
+            print_related_response(
+                related_symbol_lookup_results(related, "read_shard_range", base_args.clone()),
+                include_read_batch,
+                "read_shard_ranges",
+                base_args,
+                "Read the related symbol definitions in one bounded batch.",
+            )?;
         }
         Commands::BenchSearch {
             repo,

@@ -1554,21 +1554,29 @@ fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
         live["results"][0]["related_request"]["tool"],
         "related_files"
     );
+    assert_eq!(
+        live["results"][0]["related_request"]["arguments"]["include_read_batch"],
+        serde_json::json!(true)
+    );
     assert!(
         live["results"][0]["related_request"]["cli"]
             .as_str()
             .unwrap()
-            .contains("orient related --repo")
+            .contains("--include-read-batch")
     );
     assert_eq!(
         live["results"][0]["related_symbols_request"]["tool"],
         "related_symbols"
     );
+    assert_eq!(
+        live["results"][0]["related_symbols_request"]["arguments"]["include_read_batch"],
+        serde_json::json!(true)
+    );
     assert!(
         live["results"][0]["related_symbols_request"]["cli"]
             .as_str()
             .unwrap()
-            .contains("orient related-symbols --repo")
+            .contains("--include-read-batch")
     );
     assert!(
         live["results"][0]["read_request"]["cli"]
