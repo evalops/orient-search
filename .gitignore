@@ -1,4 +1,5 @@
 target/
+bazel-*
 data/
 *.db
 *.sqlite

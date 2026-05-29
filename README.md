@@ -20,6 +20,15 @@ orient serve-tcp \
   --index-dir /tmp/orient-shards
 ```
 
+## Build and test
+
+```bash
+bazel build -c opt //:orient
+bazel test //:orient_bazel_smoke
+bazel run //:ci_full_test
+bazel run //:ci_perf_gates
+```
+
 ## Give it to agents
 
 Give an agent the generated local rule snippet:

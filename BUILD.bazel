@@ -1,0 +1,79 @@
+load("@crate_index//:defs.bzl", "aliases", "all_crate_deps")
+load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library", "rust_test")
+load("@rules_shell//shell:sh_binary.bzl", "sh_binary")
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
+
+package(default_visibility = ["//visibility:public"])
+
+rust_library(
+    name = "orient_lib",
+    srcs = glob(
+        ["src/**/*.rs"],
+        exclude = ["src/main.rs"],
+    ),
+    aliases = aliases(),
+    crate_name = "orient",
+    edition = "2024",
+    proc_macro_deps = all_crate_deps(proc_macro = True),
+    deps = all_crate_deps(normal = True),
+)
+
+rust_binary(
+    name = "orient",
+    srcs = ["src/main.rs"],
+    aliases = aliases(),
+    crate_name = "orient",
+    edition = "2024",
+    proc_macro_deps = all_crate_deps(proc_macro = True),
+    deps = [
+        ":orient_lib",
+    ] + all_crate_deps(normal = True),
+)
+
+[
+    rust_test(
+        name = "{}_bazel_test".format(test_name),
+        srcs = ["tests/{}_rs.rs".format(test_name)],
+        aliases = aliases(),
+        crate_name = "{}_rs".format(test_name),
+        edition = "2024",
+        proc_macro_deps = all_crate_deps(proc_macro_dev = True),
+        tags = ["manual"],
+        deps = [
+            ":orient_lib",
+        ] + all_crate_deps(normal = True) + all_crate_deps(normal_dev = True),
+    )
+    for test_name in [
+        "fast_index",
+        "golden_retrieval",
+        "repo_index",
+        "rg_differential",
+    ]
+]
+
+sh_test(
+    name = "orient_bazel_smoke",
+    srcs = ["tools/ci/orient_bazel_smoke.sh"],
+    args = ["$(location :orient)"],
+    data = [":orient"],
+)
+
+sh_binary(
+    name = "ci_fmt",
+    srcs = ["tools/ci/cargo_fmt.sh"],
+)
+
+sh_binary(
+    name = "ci_full_test",
+    srcs = ["tools/ci/cargo_full_test.sh"],
+)
+
+sh_binary(
+    name = "ci_smoke",
+    srcs = ["tools/ci/orient_smoke.sh"],
+)
+
+sh_binary(
+    name = "ci_perf_gates",
+    srcs = ["tools/ci/orient_perf_gates.sh"],
+)

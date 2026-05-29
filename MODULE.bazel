@@ -1,0 +1,19 @@
+module(
+    name = "orient_search",
+    version = "0.1.0",
+)
+
+bazel_dep(name = "rules_rust", version = "0.70.0")
+bazel_dep(name = "rules_shell", version = "0.8.0")
+
+rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
+use_repo(rust, "rust_toolchains")
+register_toolchains("@rust_toolchains//:all")
+
+crate = use_extension("@rules_rust//crate_universe:extensions.bzl", "crate")
+crate.from_cargo(
+    name = "crate_index",
+    cargo_lockfile = "//:Cargo.lock",
+    manifests = ["//:Cargo.toml"],
+)
+use_repo(crate, "crate_index")
