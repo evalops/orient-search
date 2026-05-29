@@ -2596,6 +2596,9 @@ impl RepoIndex {
             .map(|file| {
                 file.symbols
                     .iter()
+                    .filter(|symbol| {
+                        related_file_reference_symbol_candidate(&symbol.name, &symbol.kind)
+                    })
                     .map(|symbol| (symbol.name.clone(), symbol.name.to_ascii_lowercase()))
                     .collect::<Vec<_>>()
             })
@@ -4681,6 +4684,62 @@ pub(crate) fn referenced_symbol_name<'a>(
         .iter()
         .find(|(symbol, _)| contains_ascii_case_insensitive(text, symbol))
         .map(|(symbol, _)| symbol.as_str())
+}
+
+pub(crate) fn related_file_reference_symbol_candidate(name: &str, kind: &str) -> bool {
+    let tokens = tokenize(name);
+    if tokens.is_empty() {
+        return false;
+    }
+    let normalized = tokens.join("");
+    if is_low_information_reference_symbol(&normalized) {
+        return false;
+    }
+    if matches!(kind, "let" | "var") {
+        return false;
+    }
+    if tokens.len() > 1 {
+        return true;
+    }
+    match kind {
+        "class" | "struct" | "enum" | "interface" | "trait" | "protocol" | "type" => {
+            normalized.len() >= 4
+        }
+        "const" => name.chars().any(|ch| ch == '_' || ch.is_ascii_uppercase()),
+        _ => normalized.len() >= 8,
+    }
+}
+
+fn is_low_information_reference_symbol(normalized: &str) -> bool {
+    matches!(
+        normalized,
+        "arguments"
+            | "build"
+            | "config"
+            | "default"
+            | "entry"
+            | "from"
+            | "get"
+            | "index"
+            | "into"
+            | "main"
+            | "new"
+            | "option"
+            | "options"
+            | "output"
+            | "read"
+            | "request"
+            | "response"
+            | "result"
+            | "results"
+            | "run"
+            | "set"
+            | "setup"
+            | "test"
+            | "tests"
+            | "value"
+            | "write"
+    )
 }
 
 pub(crate) fn query_token_overlap(

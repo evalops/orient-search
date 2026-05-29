@@ -235,6 +235,67 @@ def test_issue_token_round_trip():
 }
 
 #[test]
+fn related_files_ignore_low_information_reference_symbols() {
+    let temp = tempfile::tempdir().unwrap();
+    write(
+        &temp.path().join("src/main.rs"),
+        r#"
+struct SessionManager;
+
+impl From<String> for SessionManager {
+    fn from(value: String) -> Self {
+        let _ = value;
+        SessionManager
+    }
+}
+
+fn write() {}
+fn output() {}
+fn arguments() {}
+fn index() {}
+fn entry() {}
+fn value() {}
+"#,
+    );
+    write(
+        &temp.path().join("docs/noise.md"),
+        "This note talks about from, write, output, arguments, index, entry, and value.\n",
+    );
+    write(
+        &temp.path().join("docs/usage.md"),
+        "Use SessionManager when wiring the service.\n",
+    );
+
+    let index = RepoIndexer::new(temp.path()).build().unwrap();
+    let related = index.related_files("src/main.rs", 10);
+    assert!(
+        related.iter().any(|item| item.path == "docs/usage.md"
+            && item.reason.contains("references symbol SessionManager")),
+        "{related:?}"
+    );
+    assert!(
+        !related.iter().any(|item| item.path == "docs/noise.md"),
+        "{related:?}"
+    );
+
+    let fast_index = FastIndex::build(temp.path()).unwrap();
+    let indexed_related = fast_index.related_files("src/main.rs", 10);
+    assert!(
+        indexed_related
+            .iter()
+            .any(|item| item.path == "docs/usage.md"
+                && item.reason.contains("references symbol SessionManager")),
+        "{indexed_related:?}"
+    );
+    assert!(
+        !indexed_related
+            .iter()
+            .any(|item| item.path == "docs/noise.md"),
+        "{indexed_related:?}"
+    );
+}
+
+#[test]
 fn fallback_symbol_filter_finds_deep_private_definition_after_broad_hits() {
     let repo = tempfile::tempdir().unwrap();
     let mut source = String::new();
