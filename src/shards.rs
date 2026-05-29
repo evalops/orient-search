@@ -11,14 +11,19 @@ use crate::repo_index::{
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::fs;
+use std::fs::{self, OpenOptions};
+use std::io::ErrorKind;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process;
 use std::thread;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const SHARD_MANIFEST_VERSION: u32 = 1;
+const SHARD_WRITE_LOCK_FILE: &str = ".orient-shards.lock";
+const SHARD_WRITE_LOCK_TIMEOUT: Duration = Duration::from_secs(120);
+const SHARD_WRITE_LOCK_STALE_AFTER: Duration = Duration::from_secs(30 * 60);
+const SHARD_WRITE_LOCK_RETRY: Duration = Duration::from_millis(25);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ShardManifest {
@@ -152,6 +157,11 @@ pub struct ShardIndexFreshness {
 
 pub fn build_shards(repos: &[PathBuf], output_dir: impl AsRef<Path>) -> Result<ShardBuildStats> {
     let output_dir = output_dir.as_ref();
+    let _lock = ShardWriteLock::acquire(output_dir)?;
+    build_shards_unlocked(repos, output_dir)
+}
+
+fn build_shards_unlocked(repos: &[PathBuf], output_dir: &Path) -> Result<ShardBuildStats> {
     fs::create_dir_all(output_dir)?;
     let mut manifest = ShardManifest {
         version: SHARD_MANIFEST_VERSION,
@@ -202,8 +212,9 @@ pub fn build_shards(repos: &[PathBuf], output_dir: impl AsRef<Path>) -> Result<S
 
 pub fn ensure_shards(repos: &[PathBuf], output_dir: impl AsRef<Path>) -> Result<ShardEnsureStats> {
     let output_dir = output_dir.as_ref();
+    let _lock = ShardWriteLock::acquire(output_dir)?;
     if output_dir.join("manifest.json").exists() {
-        let stats = refresh_shards(output_dir)?;
+        let stats = refresh_shards_unlocked(output_dir)?;
         let mut total = ShardEnsureStats {
             version: stats.version,
             output_dir: stats.output_dir,
@@ -233,7 +244,7 @@ pub fn ensure_shards(repos: &[PathBuf], output_dir: impl AsRef<Path>) -> Result<
         !repos.is_empty(),
         "provide repos or discover roots when building a new shard directory"
     );
-    let stats = build_shards(repos, output_dir)?;
+    let stats = build_shards_unlocked(repos, output_dir)?;
     Ok(ShardEnsureStats {
         version: stats.version,
         output_dir: stats.output_dir,
@@ -258,6 +269,11 @@ pub fn ensure_shards(repos: &[PathBuf], output_dir: impl AsRef<Path>) -> Result<
 
 pub fn refresh_shards(index_dir: impl AsRef<Path>) -> Result<ShardRefreshStats> {
     let index_dir = index_dir.as_ref();
+    let _lock = ShardWriteLock::acquire(index_dir)?;
+    refresh_shards_unlocked(index_dir)
+}
+
+fn refresh_shards_unlocked(index_dir: &Path) -> Result<ShardRefreshStats> {
     let mut manifest = load_manifest(index_dir)?;
     let mut total = ShardRefreshStats {
         version: SHARD_MANIFEST_VERSION,
@@ -457,6 +473,69 @@ fn ensure_action(removed: usize, added: usize) -> String {
         (false, false) => "refresh",
     }
     .to_string()
+}
+
+struct ShardWriteLock {
+    path: PathBuf,
+}
+
+impl ShardWriteLock {
+    fn acquire(index_dir: &Path) -> Result<Self> {
+        fs::create_dir_all(index_dir)
+            .with_context(|| format!("create shard directory {}", index_dir.display()))?;
+        let path = index_dir.join(SHARD_WRITE_LOCK_FILE);
+        let started = Instant::now();
+        loop {
+            match OpenOptions::new().write(true).create_new(true).open(&path) {
+                Ok(mut file) => {
+                    writeln!(file, "pid={}", process::id())
+                        .with_context(|| format!("write shard lock {}", path.display()))?;
+                    writeln!(file, "created_nanos={}", current_nanos())
+                        .with_context(|| format!("write shard lock {}", path.display()))?;
+                    file.sync_all()
+                        .with_context(|| format!("sync shard lock {}", path.display()))?;
+                    return Ok(Self { path });
+                }
+                Err(error) if error.kind() == ErrorKind::AlreadyExists => {
+                    if shard_lock_is_stale(&path)? {
+                        let _ = fs::remove_file(&path);
+                        continue;
+                    }
+                    if started.elapsed() >= SHARD_WRITE_LOCK_TIMEOUT {
+                        anyhow::bail!(
+                            "timed out waiting for shard writer lock {} after {:?}",
+                            path.display(),
+                            SHARD_WRITE_LOCK_TIMEOUT
+                        );
+                    }
+                    thread::sleep(SHARD_WRITE_LOCK_RETRY);
+                }
+                Err(error) => {
+                    return Err(error)
+                        .with_context(|| format!("create shard lock {}", path.display()));
+                }
+            }
+        }
+    }
+}
+
+impl Drop for ShardWriteLock {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
+}
+
+fn shard_lock_is_stale(path: &Path) -> Result<bool> {
+    let Ok(metadata) = fs::metadata(path) else {
+        return Ok(false);
+    };
+    let modified = metadata
+        .modified()
+        .with_context(|| format!("stat shard lock {}", path.display()))?;
+    Ok(modified
+        .elapsed()
+        .map(|elapsed| elapsed >= SHARD_WRITE_LOCK_STALE_AFTER)
+        .unwrap_or(false))
 }
 
 fn add_missing_shards(

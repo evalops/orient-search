@@ -127,6 +127,7 @@ Engineering definition:
 - Persistent index has a versioned on-disk format with a cheap magic/version header before the encoded payload, and writes replace indexes atomically from same-directory temp files.
 - Persistent index stores separate content-token, path-token, and trigram postings, with sorted in-memory posting lists and compact delta-varint posting maps in saved indexes.
 - Multi-repo shard directories store a validated, atomically replaced manifest plus one versioned index per repo, and can refresh those indexes incrementally.
+- Shard-directory mutation is guarded by a bounded local writer lock so multiple local agents can share one warmed shard set without racing manifest and shard-index updates.
 - Persistent indexed files include line-offset tables, token-to-line tables, and bounded source snapshots for snippet and range retrieval.
 - Incremental refresh covers add/edit/delete and same-content rename detection.
 - Tests cover fallback search, indexed search, shard search/read tools, cross-surface golden retrieval, incremental refresh, corrupt index repair, filters, query parser stress cases, ranking explanations, duplicate suppression, JSON-lines server calls, path safety including symlink escapes, snippet modes, and a dedicated `rg` differential suite for scoped live fallback search.

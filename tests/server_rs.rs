@@ -7,6 +7,7 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::thread;
+use std::time::Duration;
 
 use orient::fast_index::FastIndex;
 use orient::repo_index::{
@@ -4893,6 +4894,37 @@ fn refresh_shards_repairs_corrupt_shard_index() {
         )
         .unwrap();
     assert_eq!(results[0].path, "src/billing.rs");
+}
+
+#[test]
+fn refresh_shards_waits_for_existing_writer_lock() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/billing.rs"),
+        "pub fn invoice_total() -> usize { 42 }\n",
+    );
+    write(
+        &repo.path().join("Cargo.toml"),
+        "[package]\nname='billing'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    let shard_dir = tempfile::tempdir().unwrap();
+    build_shards(&[repo.path().to_path_buf()], shard_dir.path()).unwrap();
+
+    let lock_path = shard_dir.path().join(".orient-shards.lock");
+    fs::write(&lock_path, b"held by test\n").unwrap();
+
+    let shard_dir_path = shard_dir.path().to_path_buf();
+    let handle = thread::spawn(move || refresh_shards(shard_dir_path));
+    thread::sleep(Duration::from_millis(75));
+    assert!(
+        !handle.is_finished(),
+        "refresh_shards should wait for the shard writer lock"
+    );
+
+    fs::remove_file(lock_path).unwrap();
+    let stats = handle.join().unwrap().unwrap();
+    assert_eq!(stats.shards, 1);
+    assert_eq!(stats.files, 2);
 }
 
 #[test]
