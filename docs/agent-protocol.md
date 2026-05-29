@@ -220,7 +220,8 @@ returns a target-aware read batch request for those hits. Set `diagnose:true`
 when results are noisy or suspicious to include inline diagnostics even when the
 search already returned hits. Batch search items from `search_batch`,
 `indexed_search_batch`, and `search_shards_batch` include the same
-`read_batch_request` shape. Repo-map responses include a top-level
+`read_batch_request` shape plus `next_action` pointing at that read when
+matches are present. Repo-map responses include a top-level
 `read_batch_request` covering source entrypoints, top symbol definitions, tests,
 manifests, important files, and related context in that order. Like single read
 requests, generated batch read requests include compact `path:start:lines`

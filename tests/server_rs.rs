@@ -1313,7 +1313,7 @@ fn runtime_serves_agent_guide_for_json_lines_wrappers() {
         "Use search_auto.query_plan_request or a search_auto_batch item query_plan_request when results are empty or noisy.",
         "Use search_auto.repo_map_request or a search_auto_batch item repo_map_request when the agent needs entrypoints, tests, commands, or top symbols for the chosen surface.",
         "Use search_auto.next_action or a search_auto_batch item next_action when the wrapper wants one prioritized follow-up request.",
-        "Use search_auto.read_batch_request, a search_auto_batch item read_batch_request, or a search batch item read_batch_request to read top ranges in one call.",
+        "Use search_auto.read_batch_request, a search_auto_batch item read_batch_request, or a search batch item next_action/read_batch_request to read top ranges in one call.",
         "Use read_batch_request.read_budget to keep batch reads under hard_limits.max_batch_read_lines; split large inspections instead of widening one call.",
         "Use result.read_request for one bounded file range.",
     ] {
@@ -2390,6 +2390,14 @@ fn runtime_search_alias_accepts_live_index_and_shard_targets() {
     let live_batch = live_batch.result.unwrap();
     assert_eq!(live_batch[0]["read_batch_request"]["tool"], "read_ranges");
     assert_eq!(
+        live_batch[0]["next_action"]["source"],
+        serde_json::json!("read_batch_request")
+    );
+    assert_eq!(
+        live_batch[0]["next_action"]["request"],
+        live_batch[0]["read_batch_request"]
+    );
+    assert_eq!(
         live_batch[0]["results"][0]["read_request"]["tool"],
         "read_range"
     );
@@ -2409,6 +2417,10 @@ fn runtime_search_alias_accepts_live_index_and_shard_targets() {
     assert_eq!(
         indexed_batch[0]["read_batch_request"]["tool"],
         "read_ranges"
+    );
+    assert_eq!(
+        indexed_batch[0]["next_action"]["request"],
+        indexed_batch[0]["read_batch_request"]
     );
     assert_eq!(
         indexed_batch[0]["results"][0]["read_request"]["tool"],
@@ -2432,6 +2444,10 @@ fn runtime_search_alias_accepts_live_index_and_shard_targets() {
     assert!(shard_batch.error.is_none(), "{:?}", shard_batch.error);
     let shard_batch = shard_batch.result.unwrap();
     assert_eq!(shard_batch[0]["read_batch_request"]["tool"], "read_ranges");
+    assert_eq!(
+        shard_batch[0]["next_action"]["request"],
+        shard_batch[0]["read_batch_request"]
+    );
     assert_eq!(
         shard_batch[0]["results"][0]["read_request"]["tool"],
         "read_range"

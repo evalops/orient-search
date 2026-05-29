@@ -1376,7 +1376,34 @@ struct SearchBatchResult {
     query: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     read_batch_request: Option<ResultToolRequest>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    next_action: Option<Value>,
     results: Vec<SearchResult>,
+}
+
+fn search_batch_result(
+    query: String,
+    read_batch_request: Option<ResultToolRequest>,
+    results: Vec<SearchResult>,
+) -> SearchBatchResult {
+    let next_action = read_batch_next_action(&read_batch_request);
+    SearchBatchResult {
+        query,
+        read_batch_request,
+        next_action,
+        results,
+    }
+}
+
+fn read_batch_next_action(read_batch_request: &Option<ResultToolRequest>) -> Option<Value> {
+    read_batch_request.as_ref().map(|request| {
+        serde_json::json!({
+            "kind": "read",
+            "source": "read_batch_request",
+            "summary": "Read the batch item's top matching ranges.",
+            "request": request
+        })
+    })
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -2331,11 +2358,7 @@ fn run() -> Result<()> {
                     "read_shard_ranges",
                     read_request_args("index_dir", &index_dir),
                 );
-                batch.push(SearchBatchResult {
-                    query,
-                    read_batch_request,
-                    results,
-                });
+                batch.push(search_batch_result(query, read_batch_request, results));
             }
             println!("{}", serde_json::to_string(&batch)?);
         }
@@ -3578,11 +3601,7 @@ fn run() -> Result<()> {
                         "read_ranges",
                         read_request_args("index_dir", &index_dir),
                     );
-                    batch.push(SearchBatchResult {
-                        query,
-                        read_batch_request,
-                        results,
-                    });
+                    batch.push(search_batch_result(query, read_batch_request, results));
                 }
             } else if let Some(index_path) = index {
                 let index = load_index_for_search(index_path.clone(), refresh_if_stale)?;
@@ -3620,11 +3639,7 @@ fn run() -> Result<()> {
                         "read_ranges",
                         read_request_args("index", &index_path),
                     );
-                    batch.push(SearchBatchResult {
-                        query,
-                        read_batch_request,
-                        results,
-                    });
+                    batch.push(search_batch_result(query, read_batch_request, results));
                 }
             } else {
                 for query in queries {
@@ -3654,11 +3669,7 @@ fn run() -> Result<()> {
                         "read_ranges",
                         read_request_args("repo", &repo),
                     );
-                    batch.push(SearchBatchResult {
-                        query,
-                        read_batch_request,
-                        results,
-                    });
+                    batch.push(search_batch_result(query, read_batch_request, results));
                 }
             }
             println!("{}", serde_json::to_string(&batch)?);
@@ -3755,11 +3766,7 @@ fn run() -> Result<()> {
                     "read_index_ranges",
                     read_request_args("index", &index_path),
                 );
-                batch.push(SearchBatchResult {
-                    query,
-                    read_batch_request,
-                    results,
-                });
+                batch.push(search_batch_result(query, read_batch_request, results));
             }
             println!("{}", serde_json::to_string(&batch)?);
         }

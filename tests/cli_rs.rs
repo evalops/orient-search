@@ -2565,7 +2565,11 @@ fn cli_batches_searches_across_fallback_indexed_and_shards() {
         .stdout(predicate::str::contains("\"query\":\"SessionManager\""))
         .stdout(predicate::str::contains("src/auth.rs"))
         .stdout(predicate::str::contains("\"query\":\"invoice total\""))
-        .stdout(predicate::str::contains("src/billing.rs"));
+        .stdout(predicate::str::contains("src/billing.rs"))
+        .stdout(predicate::str::contains("\"next_action\""))
+        .stdout(predicate::str::contains(
+            "\"source\":\"read_batch_request\"",
+        ));
 
     let index_path = repo.path().join(".orient/index");
     let mut index = Command::cargo_bin("orient").unwrap();
@@ -2617,6 +2621,7 @@ fn cli_batches_searches_across_fallback_indexed_and_shards() {
         .stdout(predicate::str::contains("src/billing.rs"))
         .stdout(predicate::str::contains("\"tool\":\"read_range\""))
         .stdout(predicate::str::contains("\"tool\":\"read_ranges\""))
+        .stdout(predicate::str::contains("\"next_action\""))
         .stdout(predicate::str::contains(&format!(
             "\"index\":\"{}\"",
             index_path.display()
@@ -2672,6 +2677,7 @@ fn cli_batches_searches_across_fallback_indexed_and_shards() {
         .stdout(predicate::str::contains("src/billing.rs"))
         .stdout(predicate::str::contains("\"tool\":\"read_range\""))
         .stdout(predicate::str::contains("\"tool\":\"read_ranges\""))
+        .stdout(predicate::str::contains("\"next_action\""))
         .stdout(predicate::str::contains("\"index_dir\""));
 
     let mut index_plan_batch = Command::cargo_bin("orient").unwrap();
