@@ -2247,6 +2247,7 @@ fn cli_reports_index_and_shard_freshness() {
         .assert()
         .success()
         .stdout(predicate::str::contains("\"stale\":false"))
+        .stdout(predicate::str::contains("\"index_bytes\""))
         .stdout(predicate::str::contains("\"source_bytes\""))
         .stdout(predicate::str::contains("\"posting_entries\""))
         .stdout(predicate::str::contains("\"compressed_posting_bytes\""));
@@ -2332,6 +2333,7 @@ fn cli_reports_index_and_shard_freshness() {
         .success()
         .stdout(predicate::str::contains("\"stale\":true"))
         .stdout(predicate::str::contains("\"stale_shards\":1"))
+        .stdout(predicate::str::contains("\"index_bytes\""))
         .stdout(predicate::str::contains("\"source_bytes\""))
         .stdout(predicate::str::contains("\"posting_entries\""))
         .stdout(predicate::str::contains("\"compressed_posting_bytes\""))
@@ -4031,4 +4033,132 @@ fn cli_benchmark_can_fail_against_saved_baseline() {
     .assert()
     .failure()
     .stderr(predicate::str::contains("exceeded baseline"));
+}
+
+#[test]
+fn cli_benchmark_can_compare_across_modes_without_python() {
+    let repo = sample_repo();
+    let baseline_path = repo.path().join(".orient/fallback.json");
+    write(
+        &baseline_path,
+        r#"{
+  "mode": "fallback",
+  "runs": 1,
+  "warmup": 0,
+  "limit": 10,
+  "queries": [
+    {
+      "query": "issue token",
+      "result_count": 1,
+      "min_ms": 999.0,
+      "p50_ms": 999.0,
+      "p95_ms": 999.0,
+      "max_ms": 999.0,
+      "samples_ms": [999.0]
+    }
+  ]
+}"#,
+    );
+
+    let index_path = repo.path().join(".orient/index");
+    let mut index = Command::cargo_bin("orient").unwrap();
+    index
+        .args([
+            "index",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--output",
+            index_path.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let mut faster = Command::cargo_bin("orient").unwrap();
+    faster
+        .args([
+            "bench-search",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--index",
+            index_path.to_str().unwrap(),
+            "--runs",
+            "1",
+            "--warmup",
+            "0",
+            "--baseline",
+            baseline_path.to_str().unwrap(),
+            "--allow-baseline-mode-mismatch",
+            "--require-faster-than-baseline",
+            "--max-p95-regression",
+            "0",
+            "issue token",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"mode\":\"indexed\""));
+
+    write(
+        &baseline_path,
+        r#"{
+  "mode": "fallback",
+  "runs": 1,
+  "warmup": 0,
+  "limit": 10,
+  "queries": [
+    {
+      "query": "issue token",
+      "result_count": 1,
+      "min_ms": 0.0,
+      "p50_ms": 0.0,
+      "p95_ms": 0.0,
+      "max_ms": 0.0,
+      "samples_ms": [0.0]
+    }
+  ]
+}"#,
+    );
+
+    let mut not_faster = Command::cargo_bin("orient").unwrap();
+    not_faster
+        .args([
+            "bench-search",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--index",
+            index_path.to_str().unwrap(),
+            "--runs",
+            "1",
+            "--warmup",
+            "0",
+            "--baseline",
+            baseline_path.to_str().unwrap(),
+            "--allow-baseline-mode-mismatch",
+            "--require-faster-than-baseline",
+            "--max-p95-regression",
+            "0",
+            "issue token",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("was not faster than baseline"));
+
+    let mut mode_mismatch = Command::cargo_bin("orient").unwrap();
+    mode_mismatch
+        .args([
+            "bench-search",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--index",
+            index_path.to_str().unwrap(),
+            "--runs",
+            "1",
+            "--warmup",
+            "0",
+            "--baseline",
+            baseline_path.to_str().unwrap(),
+            "issue token",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("does not match baseline mode"));
 }

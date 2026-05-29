@@ -696,6 +696,10 @@ enum Commands {
         #[arg(long)]
         baseline: Option<PathBuf>,
         #[arg(long)]
+        allow_baseline_mode_mismatch: bool,
+        #[arg(long)]
+        require_faster_than_baseline: bool,
+        #[arg(long)]
         write_baseline: Option<PathBuf>,
         #[arg(long, default_value_t = 0.25)]
         max_p95_regression: f64,
@@ -2239,8 +2243,12 @@ fn run() -> Result<()> {
             );
         }
         Commands::IndexStatus { index } => {
-            let index = FastIndex::load(index)?;
-            println!("{}", serde_json::to_string(&index.freshness()?)?);
+            let index_path = index;
+            let index = FastIndex::load(&index_path)?;
+            println!(
+                "{}",
+                serde_json::to_string(&index.freshness_at(index_path)?)?
+            );
         }
         Commands::IndexShards {
             repos,
@@ -3913,6 +3921,8 @@ fn run() -> Result<()> {
             filters,
             fail_p95_ms,
             baseline,
+            allow_baseline_mode_mismatch,
+            require_faster_than_baseline,
             write_baseline,
             max_p95_regression,
             queries,
@@ -3932,7 +3942,13 @@ fn run() -> Result<()> {
                 write_bench_baseline(&path, &report)?;
             }
             if let Some(path) = baseline {
-                compare_bench_baseline(&path, &report, max_p95_regression)?;
+                compare_bench_baseline(
+                    &path,
+                    &report,
+                    max_p95_regression,
+                    allow_baseline_mode_mismatch,
+                    require_faster_than_baseline,
+                )?;
             }
             if let Some(threshold) = fail_p95_ms {
                 fail_slow_bench_queries(&report, threshold)?;
@@ -3968,7 +3984,7 @@ fn run() -> Result<()> {
                 write_bench_baseline(&path, &report)?;
             }
             if let Some(path) = baseline {
-                compare_bench_baseline(&path, &report, max_p95_regression)?;
+                compare_bench_baseline(&path, &report, max_p95_regression, false, false)?;
             }
             if let Some(threshold) = fail_p95_ms {
                 fail_slow_bench_queries(&report, threshold)?;
@@ -5066,9 +5082,11 @@ fn compare_bench_baseline(
     path: &PathBuf,
     current: &BenchReport,
     max_regression: f64,
+    allow_mode_mismatch: bool,
+    require_faster: bool,
 ) -> Result<()> {
     let baseline = serde_json::from_slice::<BenchReport>(&fs::read(path)?)?;
-    if baseline.mode != current.mode {
+    if !allow_mode_mismatch && baseline.mode != current.mode {
         bail!(
             "benchmark mode {:?} does not match baseline mode {:?}",
             current.mode,
@@ -5084,6 +5102,14 @@ fn compare_bench_baseline(
         else {
             bail!("query {:?} is missing from benchmark baseline", query.query);
         };
+        if require_faster && query.p95_ms >= previous.p95_ms {
+            bail!(
+                "p95 {:.3}ms for query {:?} was not faster than baseline {:.3}ms",
+                query.p95_ms,
+                query.query,
+                previous.p95_ms
+            );
+        }
         let allowed = previous.p95_ms * (1.0 + max_regression.max(0.0));
         if query.p95_ms > allowed {
             bail!(

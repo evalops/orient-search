@@ -50,33 +50,13 @@ target/release/orient bench-search \
   --runs 7 \
   --warmup 2 \
   --limit 10 \
+  --baseline /tmp/orient-fallback-bench.json \
+  --allow-baseline-mode-mismatch \
+  --require-faster-than-baseline \
+  --max-p95-regression 0 \
   "indexed search symbol filters" \
   "read range tool manifest" \
   > /tmp/orient-indexed-bench.json
-python3 - <<'PY'
-import json
-import sys
-
-with open("/tmp/orient-fallback-bench.json", "r", encoding="utf-8") as handle:
-    fallback = json.load(handle)
-with open("/tmp/orient-indexed-bench.json", "r", encoding="utf-8") as handle:
-    indexed = json.load(handle)
-
-fallback_by_query = {item["query"]: item for item in fallback["queries"]}
-failures = []
-for item in indexed["queries"]:
-    query = item["query"]
-    fallback_item = fallback_by_query[query]
-    if item["p95_ms"] >= fallback_item["p95_ms"]:
-        failures.append(
-            f"{query}: indexed p95 {item['p95_ms']}ms >= fallback p95 {fallback_item['p95_ms']}ms"
-        )
-if failures:
-    print("indexed search did not beat fallback:", file=sys.stderr)
-    for failure in failures:
-        print(f"  {failure}", file=sys.stderr)
-    sys.exit(1)
-PY
 
 target/release/orient ensure-shards \
   --repo . \
