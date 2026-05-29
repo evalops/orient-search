@@ -5011,6 +5011,79 @@ fn runtime_reuses_cached_shard_manifest_after_initial_load() {
 }
 
 #[test]
+fn runtime_reloads_cached_shard_manifest_when_file_changes() {
+    let workspace = tempfile::tempdir().unwrap();
+    let auth_repo = workspace.path().join("auth");
+    write(
+        &auth_repo.join("src/lib.rs"),
+        "pub fn issue_token() -> usize { 1 }\n",
+    );
+    write(
+        &auth_repo.join("Cargo.toml"),
+        "[package]\nname='auth'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    let billing_repo = workspace.path().join("billing");
+    write(
+        &billing_repo.join("src/lib.rs"),
+        "pub fn invoice_total() -> usize { 42 }\n",
+    );
+    write(
+        &billing_repo.join("Cargo.toml"),
+        "[package]\nname='billing'\nversion='0.1.0'\nedition='2024'\n",
+    );
+
+    let shard_dir = tempfile::tempdir().unwrap();
+    build_shards(&[auth_repo.clone()], shard_dir.path()).unwrap();
+    let runtime = ToolRuntime::default();
+    let first = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("first"),
+        tool: "search_shards".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": shard_dir.path(),
+            "query": "issue token",
+            "require_all": true
+        }),
+    });
+    assert!(first.error.is_none(), "{:?}", first.error);
+    assert_eq!(runtime.cached_shard_manifest_count(), 1);
+    assert_eq!(runtime.cached_index_count(), 1);
+
+    write(
+        &auth_repo.join("src/lib.rs"),
+        "pub fn revoke_token() -> usize { 2 }\n",
+    );
+    build_shards(&[auth_repo, billing_repo], shard_dir.path()).unwrap();
+    let second = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("second"),
+        tool: "search_shards".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": shard_dir.path(),
+            "query": "invoice total",
+            "require_all": true
+        }),
+    });
+    assert!(second.error.is_none(), "{:?}", second.error);
+    let result = serde_json::to_string(&second.result).unwrap();
+    assert!(result.contains("billing/src/lib.rs"), "{result}");
+    assert_eq!(runtime.cached_shard_manifest_count(), 1);
+    assert_eq!(runtime.cached_index_count(), 2);
+
+    let third = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("third"),
+        tool: "search_shards".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": shard_dir.path(),
+            "query": "revoke token",
+            "require_all": true
+        }),
+    });
+    assert!(third.error.is_none(), "{:?}", third.error);
+    let result = serde_json::to_string(&third.result).unwrap();
+    assert!(result.contains("auth/src/lib.rs"), "{result}");
+    assert!(!result.contains("issue_token"), "{result}");
+}
+
+#[test]
 fn runtime_warms_shards_by_tool_request() {
     let repo = tempfile::tempdir().unwrap();
     write(

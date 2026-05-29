@@ -31,6 +31,7 @@ use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
+use std::time::SystemTime;
 
 pub const MAX_BATCH_QUERIES: usize = 32;
 pub const MAX_BATCH_RANGES: usize = 64;
@@ -297,12 +298,24 @@ fn mcp_error(id: Value, code: i64, message: impl Into<String>) -> Value {
 #[derive(Default)]
 pub struct ToolRuntime {
     indexes: Mutex<HashMap<PathBuf, Arc<IndexCacheEntry>>>,
-    shard_manifests: Mutex<HashMap<PathBuf, Arc<ShardManifest>>>,
+    shard_manifests: Mutex<HashMap<PathBuf, CachedShardManifest>>,
 }
 
 struct IndexCacheEntry {
     state: Mutex<IndexCacheState>,
     ready: Condvar,
+}
+
+#[derive(Clone)]
+struct CachedShardManifest {
+    manifest: Arc<ShardManifest>,
+    fingerprint: Option<ShardManifestFingerprint>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ShardManifestFingerprint {
+    len: u64,
+    modified: Option<SystemTime>,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -4063,22 +4076,37 @@ impl ToolRuntime {
 
     fn cached_shard_manifest(&self, index_dir: &Path) -> Result<Arc<ShardManifest>> {
         let key = canonical_cache_key(index_dir);
-        if let Some(manifest) = self
-            .shard_manifests
-            .lock()
-            .map_err(|_| anyhow!("shard manifest cache lock poisoned"))?
-            .get(&key)
-            .cloned()
-        {
-            return Ok(manifest);
-        }
+        let current_fingerprint = shard_manifest_fingerprint(&key);
+        let should_reload = {
+            let manifests = self
+                .shard_manifests
+                .lock()
+                .map_err(|_| anyhow!("shard manifest cache lock poisoned"))?;
+            if let Some(entry) = manifests.get(&key) {
+                if current_fingerprint.is_none() || entry.fingerprint == current_fingerprint {
+                    return Ok(Arc::clone(&entry.manifest));
+                }
+                true
+            } else {
+                false
+            }
+        };
 
-        let manifest = Arc::new(load_manifest(index_dir)?);
+        let manifest = Arc::new(load_manifest(&key)?);
+        let fingerprint = shard_manifest_fingerprint(&key);
+        if should_reload {
+            self.evict_cached_indexes_in_dir(&key)?;
+        }
         self.shard_manifests
             .lock()
             .map_err(|_| anyhow!("shard manifest cache lock poisoned"))?
-            .entry(key)
-            .or_insert_with(|| Arc::clone(&manifest));
+            .insert(
+                key.clone(),
+                CachedShardManifest {
+                    manifest: Arc::clone(&manifest),
+                    fingerprint,
+                },
+            );
         Ok(manifest)
     }
 
@@ -4105,7 +4133,7 @@ impl ToolRuntime {
             .map(|manifests| {
                 manifests
                     .iter()
-                    .map(|(path, manifest)| shard_manifest_detail(path, manifest, &footprints))
+                    .map(|(path, entry)| shard_manifest_detail(path, &entry.manifest, &footprints))
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
@@ -4124,7 +4152,7 @@ impl ToolRuntime {
             .lock()
             .ok()
             .and_then(|manifests| manifests.get(&key).cloned())
-            .map(|manifest| shard_manifest_detail(&key, &manifest, &footprints))
+            .map(|entry| shard_manifest_detail(&key, &entry.manifest, &footprints))
             .unwrap_or_else(|| {
                 json!({
                     "index_dir": key.to_string_lossy(),
@@ -4175,6 +4203,15 @@ impl ToolRuntime {
             .lock()
             .map_err(|_| anyhow!("shard manifest cache lock poisoned"))?
             .clear();
+        Ok(())
+    }
+
+    fn evict_cached_indexes_in_dir(&self, index_dir: &Path) -> Result<()> {
+        let index_dir = canonical_cache_key(index_dir);
+        self.indexes
+            .lock()
+            .map_err(|_| anyhow!("index cache lock poisoned"))?
+            .retain(|path, _| !path.starts_with(&index_dir));
         Ok(())
     }
 
@@ -4646,6 +4683,14 @@ fn canonical_cache_key(path: &Path) -> PathBuf {
         }
     }
     path.to_path_buf()
+}
+
+fn shard_manifest_fingerprint(index_dir: &Path) -> Option<ShardManifestFingerprint> {
+    let metadata = fs::metadata(index_dir.join("manifest.json")).ok()?;
+    Some(ShardManifestFingerprint {
+        len: metadata.len(),
+        modified: metadata.modified().ok(),
+    })
 }
 
 fn symbol_match_score(symbol: &Symbol, name: &str, needle: &str) -> u8 {
