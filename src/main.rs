@@ -1,6 +1,6 @@
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use anyhow::{Context, Result, bail};
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use orient::discover::{
     DiscoverOptions, DiscoverySelectionSummary, discover_repos, discovery_selection_summary,
 };
@@ -695,6 +695,8 @@ enum Commands {
         repo: PathBuf,
         #[arg(long)]
         index: Option<PathBuf>,
+        #[arg(long, value_enum, default_value = "auto")]
+        mode: BenchSearchMode,
         #[arg(long, default_value_t = 10)]
         runs: usize,
         #[arg(long, default_value_t = 3)]
@@ -859,6 +861,13 @@ enum Commands {
         #[arg(long, default_value = DEFAULT_DAEMON_ADDR)]
         addr: Option<String>,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum BenchSearchMode {
+    Auto,
+    Fallback,
+    Indexed,
 }
 
 #[derive(Debug, Clone, Args)]
@@ -4036,6 +4045,7 @@ fn run() -> Result<()> {
         Commands::BenchSearch {
             repo,
             index,
+            mode,
             runs,
             warmup,
             limit,
@@ -4055,6 +4065,7 @@ fn run() -> Result<()> {
             let report = bench_search(BenchConfig {
                 repo,
                 index,
+                mode,
                 runs,
                 warmup,
                 limit,
@@ -5043,6 +5054,7 @@ fn shard_bootstrap_output<T: Serialize>(
 struct BenchConfig {
     repo: PathBuf,
     index: Option<PathBuf>,
+    mode: BenchSearchMode,
     runs: usize,
     warmup: usize,
     limit: usize,
@@ -5062,7 +5074,16 @@ struct ShardBenchConfig {
 
 fn bench_search(config: BenchConfig) -> Result<BenchReport> {
     let runs = config.runs.max(1);
-    let indexed = config.index.as_ref().map(FastIndex::load).transpose()?;
+    let indexed = match (config.mode, config.index.as_ref()) {
+        (BenchSearchMode::Auto, Some(index)) | (BenchSearchMode::Indexed, Some(index)) => {
+            Some(FastIndex::load(index)?)
+        }
+        (BenchSearchMode::Auto | BenchSearchMode::Fallback, None) => None,
+        (BenchSearchMode::Fallback, Some(_)) => {
+            bail!("--mode fallback cannot be combined with --index")
+        }
+        (BenchSearchMode::Indexed, None) => Some(FastIndex::build(&config.repo)?),
+    };
     let mode = if indexed.is_some() {
         "indexed".to_string()
     } else {

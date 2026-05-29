@@ -4153,6 +4153,63 @@ fn cli_benchmarks_accept_query_flags() {
         .stdout(predicate::str::contains("\"query\":\"--runs\"").not())
         .stdout(predicate::str::contains("\"query\":\"--limit\"").not());
 
+    let mut indexed_without_saved_index = Command::cargo_bin("orient").unwrap();
+    indexed_without_saved_index
+        .args([
+            "bench-search",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--mode",
+            "indexed",
+            "--runs",
+            "1",
+            "--warmup",
+            "0",
+            "--query",
+            "issue token",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"mode\":\"indexed\""))
+        .stdout(predicate::str::contains("\"query\":\"issue token\""))
+        .stdout(predicate::str::contains("\"query\":\"--mode\"").not());
+
+    let index_path = repo.path().join(".orient/index");
+    let mut index = Command::cargo_bin("orient").unwrap();
+    index
+        .args([
+            "index",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--output",
+            index_path.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let mut fallback_with_index = Command::cargo_bin("orient").unwrap();
+    fallback_with_index
+        .args([
+            "bench-search",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--index",
+            index_path.to_str().unwrap(),
+            "--mode",
+            "fallback",
+            "--runs",
+            "1",
+            "--warmup",
+            "0",
+            "--query",
+            "issue token",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "--mode fallback cannot be combined with --index",
+        ));
+
     let shard_dir = tempfile::tempdir().unwrap();
     let mut build_shards = Command::cargo_bin("orient").unwrap();
     build_shards
