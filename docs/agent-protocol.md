@@ -119,11 +119,12 @@ add the available search surface.
 
 Query strings support filters such as `repo:service`, `branch:feature/auth`, `origin:example/service`, `path:src/auth` or `dir:src/auth` / `folder:src/auth`, `file:auth.rs` or `filename:auth.rs`, `file:*.rs`, `path:src/*gateway.rs`, `path:src\auth.rs`, `lang:rust` or shorthand `lang:rs` / `lang:ts` / `lang:py`, `ext:rs`, `symbol:SessionManager`, `kind:function`, `type:function`, `dep:react`, `import:crate::auth`, `test:false`, `is:test`, `is:source`, `code:true`, `code:false`, `is:code`, `is:docs`, `generated:false`, `is:generated`, positive content aliases like `content:"issue token"` or `text:gateway`, negative filters like `-path:docs`, `-file:*test.rs`, `-folder:vendor`, `-is:generated`, `-lang:md`, `-branch:wip`, `-origin:legacy`, `-kind:class`, `-dep:legacy`, or `-import:old_api`, and quoted phrases like `"issue token"`. Multi-token queries use AND behavior by default; use `mode:any` in the query or `any_terms:true` in JSON-lines calls for broad orientation searches. Indexed search plans `symbol:` and `kind:` filters through symbol postings and also treats identifier-shaped raw terms such as `SessionManager` and `agent_instructions` as symbol planning hints when a matching symbol exists, while ordinary spaced concept queries stay broad.
 Bare single-token filename and path-like queries such as `Cargo.toml`, `README.md`, or `src/lib.rs` are inferred as `file:` / `path:` filters so agents that type the file they want get the file, not references to its name. Use `content:Cargo.toml`, `text:README.md`, or `term:src/lib.rs` when the literal string is the target.
-Bare pasted locations such as `src/lib.rs:42`, `src/lib.rs:42:9`, copied lines
-such as `src/lib.rs:42: pub fn issue_token`, and stack-frame forms such as
-`at issueToken (src/lib.rs:42:9)` strip the line/column prefix for matching and
-anchor the returned snippet near the line. Absolute pasted paths are normalized
-when they are inside the selected repo or index root.
+Bare pasted locations such as `src/lib.rs:42`, `src/lib.rs:42:9`,
+`src/lib.rs#L42-L45`, copied lines such as `src/lib.rs:42: pub fn issue_token`,
+and stack-frame forms such as `at issueToken (src/lib.rs:42:9)` strip the
+line/column prefix for matching and anchor the returned snippet near the line.
+Absolute pasted paths are normalized when they are inside the selected repo or
+index root.
 Use `content:` / `text:` / `term:` when an identifier-shaped string should stay a content lookup instead of narrowing indexed search through implicit symbol postings.
 Positive non-code language scopes such as `lang:md` keep identifier-shaped terms as content searches instead of requiring symbol postings, so docs/prose lookups stay consistent with live fallback search.
 The same applies when positive `file:`, `path:`, or `ext:` scopes clearly target non-code files, such as `path:docs/*.md SessionManager` or `ext:md agent_instructions`.

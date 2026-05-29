@@ -357,6 +357,9 @@ fn split_leading_location_token(token: &str) -> Option<(String, usize, Option<St
     if normalized.is_empty() || normalized.contains("://") {
         return None;
     }
+    if let Some(location) = split_hash_line_anchor(&normalized) {
+        return Some(location);
+    }
 
     for (path_end, _) in normalized.match_indices(':') {
         let path = &normalized[..path_end];
@@ -393,6 +396,35 @@ fn split_leading_location_token(token: &str) -> Option<(String, usize, Option<St
     None
 }
 
+fn split_hash_line_anchor(value: &str) -> Option<(String, usize, Option<String>)> {
+    let lower = value.to_ascii_lowercase();
+    let anchor_start = lower.find("#l")?;
+    let path = &value[..anchor_start];
+    if !looks_like_location_path(path) {
+        return None;
+    }
+    let (line, rest) = split_leading_positive_number(&value[anchor_start + 2..])?;
+    let rest = strip_hash_line_range(rest);
+    let trailing = rest
+        .strip_prefix(':')
+        .and_then(non_empty_location_tail)
+        .or_else(|| non_empty_location_tail(rest));
+    Some((path.to_string(), line, trailing))
+}
+
+fn strip_hash_line_range(value: &str) -> &str {
+    let Some(rest) = value.strip_prefix('-') else {
+        return value;
+    };
+    let rest = rest
+        .strip_prefix('L')
+        .or_else(|| rest.strip_prefix('l'))
+        .unwrap_or(rest);
+    split_leading_positive_number(rest)
+        .map(|(_, after_range)| after_range)
+        .unwrap_or(value)
+}
+
 fn normalize_location_token(token: &str) -> Option<String> {
     let normalized = trim_location_token_wrappers(token).replace('\\', "/");
     (!normalized.is_empty()).then_some(normalized)
@@ -411,6 +443,9 @@ fn term_eq_ignore_ascii_punctuation(term: &str, expected: &str) -> bool {
 
 fn strip_location_suffix(value: &str) -> (String, Option<usize>) {
     let normalized = value.trim().replace('\\', "/");
+    if let Some((path, line, _)) = split_hash_line_anchor(&normalized) {
+        return (path, Some(line));
+    }
     let Some((prefix, column_or_line)) = split_numeric_suffix(&normalized) else {
         return (normalized, None);
     };
@@ -928,6 +963,22 @@ mod tests {
         );
         assert_eq!(dot_source_location.filters.target_line, Some(42));
 
+        let hash_source_location = parse_query("src/server.rs#L42");
+        assert!(hash_source_location.terms.is_empty());
+        assert_eq!(
+            hash_source_location.filters.path.as_deref(),
+            Some("src/server.rs")
+        );
+        assert_eq!(hash_source_location.filters.target_line, Some(42));
+
+        let hash_range_source_location = parse_query("src/server.rs#L42-L45");
+        assert!(hash_range_source_location.terms.is_empty());
+        assert_eq!(
+            hash_range_source_location.filters.path.as_deref(),
+            Some("src/server.rs")
+        );
+        assert_eq!(hash_range_source_location.filters.target_line, Some(42));
+
         let copied_source_line = parse_query("src/server.rs:42: pub fn handle_request");
         assert_eq!(
             copied_source_line.terms,
@@ -956,6 +1007,14 @@ mod tests {
         );
         assert_eq!(wrapped_source_location.filters.target_line, Some(42));
 
+        let wrapped_hash_source_location = parse_query("(src/server.rs#L42-L45)");
+        assert!(wrapped_hash_source_location.terms.is_empty());
+        assert_eq!(
+            wrapped_hash_source_location.filters.path.as_deref(),
+            Some("src/server.rs")
+        );
+        assert_eq!(wrapped_hash_source_location.filters.target_line, Some(42));
+
         let stack_source_location = parse_query("at Object.handle (src/server.rs:42:9)");
         assert!(stack_source_location.terms.is_empty());
         assert_eq!(
@@ -963,6 +1022,14 @@ mod tests {
             Some("src/server.rs")
         );
         assert_eq!(stack_source_location.filters.target_line, Some(42));
+
+        let stack_hash_source_location = parse_query("at Object.handle (src/server.rs#L42)");
+        assert!(stack_hash_source_location.terms.is_empty());
+        assert_eq!(
+            stack_hash_source_location.filters.path.as_deref(),
+            Some("src/server.rs")
+        );
+        assert_eq!(stack_hash_source_location.filters.target_line, Some(42));
 
         let python_source_location =
             parse_query(r#"File "src/server.rs", line 42, in handle_request"#);

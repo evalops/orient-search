@@ -2016,6 +2016,10 @@ fn bare_path_like_queries_use_filter_only_fast_paths() {
         search_repo_fast_filtered(repo.path(), "./src/lib.rs:40:9", 10, &filters).unwrap();
     assert_eq!(result_paths(&dot_location_fallback), vec!["src/lib.rs"]);
     assert_eq!(dot_location_fallback[0].match_lines, vec![40]);
+    let hash_location_fallback =
+        search_repo_fast_filtered(repo.path(), "src/lib.rs#L40-L45", 10, &filters).unwrap();
+    assert_eq!(result_paths(&hash_location_fallback), vec!["src/lib.rs"]);
+    assert_eq!(hash_location_fallback[0].match_lines, vec![40]);
     let copied_line_fallback = search_repo_fast_filtered(
         repo.path(),
         "src/lib.rs:40: pub fn target_entrypoint",
@@ -2062,6 +2066,18 @@ fn bare_path_like_queries_use_filter_only_fast_paths() {
     .unwrap();
     assert_eq!(result_paths(&stack_location_fallback), vec!["src/lib.rs"]);
     assert_eq!(stack_location_fallback[0].match_lines, vec![40]);
+    let stack_hash_location_fallback = search_repo_fast_filtered(
+        repo.path(),
+        &format!("at Object.target ({absolute_source_path}#L40-L45)"),
+        10,
+        &filters,
+    )
+    .unwrap();
+    assert_eq!(
+        result_paths(&stack_hash_location_fallback),
+        vec!["src/lib.rs"]
+    );
+    assert_eq!(stack_hash_location_fallback[0].match_lines, vec![40]);
     let python_location_fallback = search_repo_fast_filtered(
         repo.path(),
         r#"File "src/lib.rs", line 40, in target_entrypoint"#,
@@ -2143,6 +2159,11 @@ fn bare_path_like_queries_use_filter_only_fast_paths() {
         .unwrap();
     assert_eq!(dot_location_indexed[0].path, "src/lib.rs");
     assert_eq!(dot_location_indexed[0].match_lines, vec![40]);
+    let hash_location_indexed = index
+        .search_filtered("src/lib.rs#L40-L45", 10, &filters)
+        .unwrap();
+    assert_eq!(result_paths(&hash_location_indexed), vec!["src/lib.rs"]);
+    assert_eq!(hash_location_indexed[0].match_lines, vec![40]);
     let copied_line_indexed = index
         .search_filtered("src/lib.rs:40: pub fn target_entrypoint", 10, &filters)
         .unwrap();
@@ -2182,6 +2203,18 @@ fn bare_path_like_queries_use_filter_only_fast_paths() {
         .unwrap();
     assert_eq!(result_paths(&stack_location_indexed), vec!["src/lib.rs"]);
     assert_eq!(stack_location_indexed[0].match_lines, vec![40]);
+    let stack_hash_location_indexed = index
+        .search_filtered(
+            &format!("at Object.target ({absolute_source_path}#L40-L45)"),
+            10,
+            &filters,
+        )
+        .unwrap();
+    assert_eq!(
+        result_paths(&stack_hash_location_indexed),
+        vec!["src/lib.rs"]
+    );
+    assert_eq!(stack_hash_location_indexed[0].match_lines, vec![40]);
     let python_location_indexed = index
         .search_filtered(
             r#"File "src/lib.rs", line 40, in target_entrypoint"#,
