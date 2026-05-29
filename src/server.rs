@@ -1117,7 +1117,7 @@ pub fn agent_guide(
         "adapter_notes": [
             profile.adapter_note,
             "Codex: add the instruction snippet to the repo-local AGENTS.md or equivalent local rule file.",
-            "Claude Code: add the instruction snippet to the project CLAUDE.md or equivalent local memory/rules surface.",
+            "Claude Code: add the instruction snippet to the project CLAUDE.md or equivalent local rule file.",
             "Amp and other coding agents: add the instruction snippet to the local project rules surface and prefer JSON-lines/MCP tool calls over repeated shell scans.",
             "Keep cache paths local to the machine running the agents; do not copy private workspace layouts into shared docs or reusable rules."
         ],
@@ -1301,7 +1301,7 @@ fn agent_profile(profile: Option<&str>) -> AgentProfile {
         },
         "claude" | "claudecode" => AgentProfile {
             name: "claude",
-            rule_target: "the project CLAUDE.md file or equivalent Claude Code memory/rules surface",
+            rule_target: "the project CLAUDE.md file or equivalent Claude Code rule file",
             adapter_note: "Selected profile: Claude Code; place the snippet in CLAUDE.md for the project.",
         },
         "amp" => AgentProfile {

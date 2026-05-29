@@ -1,10 +1,9 @@
-# Memory and Footprint
+# Storage and Footprint
 
 Orient optimizes for local agent latency. Persisted indexes store source
 snapshots and line metadata so snippets and bounded reads do not need to reopen
 live files. This makes reads fast and makes index files larger than source.
-Indexes stay local; Orient does not collect telemetry, agent conversations,
-transcripts, or task-level analytics.
+Indexes stay local; Orient does not collect telemetry.
 
 ## What Gets Stored
 
@@ -27,8 +26,7 @@ there too.
 
 Daemon memory is just a hot cache for those code-search artifacts: loaded
 indexes, shard route data, repo metadata, and freshness checks. It is not a
-persistent memory system for agents, and it does not store prompts,
-transcripts, tool-call histories, task outcomes, or usage analytics.
+general agent state store.
 
 ## Inspect It
 

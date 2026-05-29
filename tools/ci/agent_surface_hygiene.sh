@@ -20,6 +20,12 @@ outputs+=("${scratch}/tool-manifest.json" "${scratch}/mcp-manifest.json")
 
 fixed_patterns=(
   'session analytics'
+  'session logs'
+  'agent transcripts'
+  'agent conversations'
+  'task outcomes'
+  'tool-call histories'
+  'memory/rules surface'
 )
 
 regex_patterns=(

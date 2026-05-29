@@ -5,8 +5,7 @@ agents share repo maps, indexes, query plans, and bounded reads without each one
 rescanning the same files. The daemon stays local and does not collect telemetry.
 
 In this doc, "shared" means shared by local clients on the same machine. Orient
-does not store agent conversations, transcripts, task outcomes, or usage
-analytics.
+is a local code-search service and does not collect telemetry.
 
 ## Start
 
@@ -121,8 +120,8 @@ place them in a cache directory, do not commit them, and do not copy them to
 shared storage unless the indexed source is allowed there too.
 
 The daemon cache contains code-search artifacts only: opened index files,
-derived postings, repo metadata, and freshness state. It is not an agent memory
-layer, task log, transcript store, or analytics sink.
+derived postings, repo metadata, and freshness state. It is not a general agent
+state store.
 
 Public docs and examples should use environment variables or neutral
 placeholders. Keep machine-specific paths, user names, and private workspace

@@ -20,13 +20,10 @@ orient agent-instructions --profile codex --index-dir "$ORIENT_SHARDS"
 Keep that cache path local to the machine running the agents; the generated
 rule should not contain private workspace layouts.
 
-Place the generated snippet in the repo-local rule surface for the agent that
-will use Orient. For Codex, that is usually `AGENTS.md`; for Claude Code, a
-project `CLAUDE.md`; for Amp or another coding agent, the local project rules
-surface. The snippet is intentionally tool-agnostic: it tells the agent to use
+Place the generated snippet in the local rule file read by the coding agent.
+The snippet is intentionally tool-agnostic: it tells the agent to use
 JSON-lines/MCP calls and returned follow-up requests before repeated shell
-scans.
-Use `--profile codex`, `--profile claude`, `--profile amp`, or
+scans. Use `--profile codex`, `--profile claude`, `--profile amp`, or
 `--profile generic` to tailor the placement hint without changing the search
 protocol or generated tool calls.
 
