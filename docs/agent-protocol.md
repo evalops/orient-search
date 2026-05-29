@@ -116,10 +116,12 @@ available, then searches the current directory as a live repo if no daemon is
 reachable. Use `--daemon-addr` for another TCP daemon or `--no-daemon` to force
 current-directory fallback. `orient search-auto-batch` follows the same
 daemon-first rule.
-Protocol clients should pass `cwd` on no-target search, map, plan, symbol, read,
-and related-file requests so a shared shard daemon scopes results to the active
-checkout. Explicit `repo`, `index`, `index_dir`, or `repo_filter` arguments still
-win. Returned follow-up requests already include an explicit target.
+`orient client-jsonl` automatically adds the shell's current working directory
+to no-target search, map, plan, symbol, read, and related-file requests. Other
+protocol clients should pass `cwd` explicitly so a shared shard daemon scopes
+results to the active checkout. Explicit `repo`, `index`, `index_dir`, or
+`repo_filter` arguments still win. Returned follow-up requests already include
+an explicit target.
 For manual context reads, add `"scope":"symbol"` to `read_range` or to a
 `read_ranges` request or range entry when the agent has a line inside a
 function, class, or type and wants the window anchored at that definition.

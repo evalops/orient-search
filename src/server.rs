@@ -4787,16 +4787,23 @@ impl ToolRuntime {
         }
         let scoped_arguments = arguments_scoped_to_client_cwd_for_query(arguments, query)?;
         if let Ok(index_dir) = self.single_cached_shard_manifest_path() {
-            return self.search_auto_shards(
-                index_dir,
+            if self.search_auto_shards_match_client_scope(
+                &index_dir,
+                arguments,
                 &scoped_arguments,
                 query,
-                limit,
-                context_lines,
-                refresh_if_stale,
-                diagnose,
-                retry_if_empty,
-            );
+            )? {
+                return self.search_auto_shards(
+                    index_dir,
+                    &scoped_arguments,
+                    query,
+                    limit,
+                    context_lines,
+                    refresh_if_stale,
+                    diagnose,
+                    retry_if_empty,
+                );
+            }
         }
         if let Ok(index_path) = self.single_cached_index_path() {
             return self.search_auto_index(
@@ -4820,6 +4827,29 @@ impl ToolRuntime {
             diagnose,
             retry_if_empty,
         )
+    }
+
+    fn search_auto_shards_match_client_scope(
+        &self,
+        index_dir: &Path,
+        arguments: &Value,
+        scoped_arguments: &Value,
+        query: &str,
+    ) -> Result<bool> {
+        if optional_string_arg(arguments, "cwd").is_none()
+            || optional_string_arg(scoped_arguments, "repo_filter").is_none()
+        {
+            return Ok(true);
+        }
+        let filters = merge_filters(
+            search_filters(scoped_arguments, true)?,
+            parse_query(query).filters,
+        );
+        let manifest = self.cached_shard_manifest(index_dir)?;
+        Ok(manifest
+            .shards
+            .iter()
+            .any(|shard| !shard_search_scopes(shard, &filters).is_empty()))
     }
 
     fn refresh_search_auto_batch_shards_if_stale(

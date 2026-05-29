@@ -4762,6 +4762,11 @@ fn shell_quote(value: &str) -> String {
 }
 
 fn client_jsonl_stream(stream: impl Read + Write) -> Result<()> {
+    let cwd = env::current_dir().ok();
+    client_jsonl_stream_with_cwd(stream, cwd.as_deref())
+}
+
+fn client_jsonl_stream_with_cwd(stream: impl Read + Write, cwd: Option<&Path>) -> Result<()> {
     let mut reader = BufReader::new(stream);
     let stdin = io::stdin();
     let mut stdout = io::stdout();
@@ -4772,6 +4777,7 @@ fn client_jsonl_stream(stream: impl Read + Write) -> Result<()> {
         if line.trim().is_empty() {
             continue;
         }
+        let line = client_jsonl_request_with_default_cwd(&line, cwd)?;
         writeln!(reader.get_mut(), "{line}")?;
         reader.get_mut().flush()?;
         response.clear();
@@ -4784,6 +4790,71 @@ fn client_jsonl_stream(stream: impl Read + Write) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn client_jsonl_request_with_default_cwd(line: &str, cwd: Option<&Path>) -> Result<String> {
+    let Some(cwd) = cwd else {
+        return Ok(line.to_string());
+    };
+    let mut request = match serde_json::from_str::<Value>(line) {
+        Ok(request) => request,
+        Err(_) => return Ok(line.to_string()),
+    };
+    let tool = request
+        .get("tool")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if !client_jsonl_tool_accepts_default_cwd(tool) {
+        return Ok(line.to_string());
+    }
+    let Some(request_object) = request.as_object_mut() else {
+        return Ok(line.to_string());
+    };
+    let arguments = request_object
+        .entry("arguments")
+        .or_insert_with(|| Value::Object(Map::new()));
+    if arguments.is_null() {
+        *arguments = Value::Object(Map::new());
+    }
+    let Some(arguments) = arguments.as_object_mut() else {
+        return Ok(line.to_string());
+    };
+    if client_jsonl_arguments_have_target(arguments) {
+        return Ok(line.to_string());
+    }
+    arguments.insert(
+        "cwd".to_string(),
+        Value::String(cwd.to_string_lossy().to_string()),
+    );
+    serde_json::to_string(&request).map_err(Into::into)
+}
+
+fn client_jsonl_tool_accepts_default_cwd(tool: &str) -> bool {
+    matches!(
+        tool,
+        "search"
+            | "search_code"
+            | "search_batch"
+            | "search_auto"
+            | "search_auto_batch"
+            | "repo_map"
+            | "search_plan"
+            | "search_plan_batch"
+            | "find_symbol"
+            | "find_symbol_batch"
+            | "read_range"
+            | "open_range"
+            | "read_ranges"
+            | "open_ranges"
+            | "related_files"
+            | "related_symbols"
+    )
+}
+
+fn client_jsonl_arguments_have_target(arguments: &Map<String, Value>) -> bool {
+    ["repo", "index", "index_dir", "cwd", "repo_filter"]
+        .iter()
+        .any(|key| arguments.get(*key).is_some_and(|value| !value.is_null()))
 }
 
 #[cfg(unix)]
@@ -5562,5 +5633,47 @@ mod tests {
     fn cli_range_spec_rejects_zero_start_or_lines() {
         assert!(CliRangeSpec::from_str("src/auth.rs:0:1").is_err());
         assert!(CliRangeSpec::from_str("src/auth.rs:1:0").is_err());
+    }
+
+    #[test]
+    fn client_jsonl_adds_cwd_to_target_aware_requests() {
+        let request = r#"{"id":"search","tool":"search_auto","arguments":{"query":"token"}}"#;
+        let updated =
+            client_jsonl_request_with_default_cwd(request, Some(Path::new("/tmp/current-repo")))
+                .unwrap();
+        let updated: Value = serde_json::from_str(&updated).unwrap();
+
+        assert_eq!(
+            updated["arguments"]["cwd"],
+            serde_json::json!("/tmp/current-repo")
+        );
+        assert_eq!(updated["arguments"]["query"], serde_json::json!("token"));
+    }
+
+    #[test]
+    fn client_jsonl_preserves_explicit_targets_and_non_target_tools() {
+        let explicit = r#"{"id":"search","tool":"search_auto","arguments":{"repo":"/tmp/repo","query":"token"}}"#;
+        assert_eq!(
+            client_jsonl_request_with_default_cwd(explicit, Some(Path::new("/tmp/current-repo")))
+                .unwrap(),
+            explicit
+        );
+
+        let repo_filter = r#"{"id":"search","tool":"search_auto","arguments":{"repo_filter":"api","query":"token"}}"#;
+        assert_eq!(
+            client_jsonl_request_with_default_cwd(
+                repo_filter,
+                Some(Path::new("/tmp/current-repo"))
+            )
+            .unwrap(),
+            repo_filter
+        );
+
+        let status = r#"{"id":"status","tool":"daemon_status","arguments":{}}"#;
+        assert_eq!(
+            client_jsonl_request_with_default_cwd(status, Some(Path::new("/tmp/current-repo")))
+                .unwrap(),
+            status
+        );
     }
 }

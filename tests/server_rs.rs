@@ -8315,6 +8315,87 @@ fn cli_search_auto_scopes_warm_shards_to_current_git_repo() {
 }
 
 #[test]
+fn client_jsonl_search_auto_falls_back_when_cwd_is_not_in_registered_shards() {
+    let workspace = tempfile::tempdir().unwrap();
+    let current_repo = workspace.path().join("current-app");
+    let other_repo = workspace.path().join("other-app");
+    fs::create_dir_all(current_repo.join(".git")).unwrap();
+    fs::create_dir_all(other_repo.join(".git")).unwrap();
+    write(
+        &current_repo.join("src/lib.rs"),
+        "pub fn local_only_client_jsonl_token() -> &'static str { \"current\" }\n",
+    );
+    write(
+        &other_repo.join("src/lib.rs"),
+        "pub fn local_only_client_jsonl_token() -> &'static str { \"other\" }\n",
+    );
+    let shard_dir = workspace.path().join("shards");
+    build_shards(&[PathBuf::from(&other_repo)], &shard_dir).unwrap();
+
+    let binary = assert_cmd::cargo::cargo_bin("orient");
+    let mut child = Command::new(&binary)
+        .args([
+            "serve-tcp",
+            "--addr",
+            "127.0.0.1:0",
+            "--index-dir",
+            shard_dir.to_str().unwrap(),
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let stdout = child.stdout.take().unwrap();
+    let mut startup_reader = BufReader::new(stdout);
+    let mut startup = String::new();
+    startup_reader.read_line(&mut startup).unwrap();
+    let startup_json: serde_json::Value = serde_json::from_str(&startup).unwrap();
+    let addr = startup_json["addr"].as_str().unwrap();
+
+    let mut client = Command::new(&binary)
+        .current_dir(current_repo.join("src"))
+        .args(["client-jsonl", "--addr", addr])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let request = serde_json::json!({
+        "id": "search",
+        "tool": "search_auto",
+        "arguments": {
+            "query": "local_only_client_jsonl_token",
+            "limit": 5
+        }
+    });
+    writeln!(client.stdin.as_mut().unwrap(), "{request}").unwrap();
+    drop(client.stdin.take());
+    let output = client.wait_with_output().unwrap();
+
+    child.kill().unwrap();
+    let _ = child.wait();
+
+    assert!(output.status.success(), "{output:?}");
+    let response: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(response["id"], serde_json::json!("search"));
+    let result = &response["result"];
+    assert_eq!(result["surface"], serde_json::json!("fallback"));
+    assert_eq!(
+        result["target"],
+        serde_json::json!(current_repo.canonicalize().unwrap().to_string_lossy())
+    );
+    let serialized = serde_json::to_string(result).unwrap();
+    assert!(serialized.contains("\"path\":\"src/lib.rs\""), "{result}");
+    assert!(
+        result["results"][0]["snippet"]
+            .as_str()
+            .unwrap()
+            .contains("current"),
+        "{result}"
+    );
+    assert!(!serialized.contains("other-app/src/lib.rs"), "{result}");
+}
+
+#[test]
 fn tcp_client_uses_default_addr_when_omitted() {
     let binary = assert_cmd::cargo::cargo_bin("orient");
     let mut child = Command::new(&binary)
