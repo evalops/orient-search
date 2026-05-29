@@ -1663,6 +1663,10 @@ fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
         serde_json::json!("drop_missing_terms")
     );
     assert_eq!(
+        empty_live["primary_diagnosis"]["primary_hint_action"],
+        serde_json::json!("drop_terms")
+    );
+    assert_eq!(
         empty_live["query_plan_result"]["retry_requests"][0]["tool"],
         "search_code"
     );
@@ -1926,6 +1930,10 @@ fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
         serde_json::json!("replace_symbol_filter")
     );
     assert_eq!(
+        symbol_typo["primary_diagnosis"]["primary_hint_action"],
+        serde_json::json!("replace_filter")
+    );
+    assert_eq!(
         symbol_typo["query_plan_result"]["retry_requests"][0]["arguments"]["query"],
         "symbol:SessionManager"
     );
@@ -1949,6 +1957,53 @@ fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
         serde_json::to_string(&symbol_retry.result)
             .unwrap()
             .contains("SessionManager")
+    );
+
+    let symbol_typo_terms = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("symbol-typo-terms"),
+        tool: "search_auto".to_string(),
+        arguments: serde_json::json!({
+            "query": "symbol:SessionManger issue_token",
+            "limit": 5
+        }),
+    });
+    assert!(
+        symbol_typo_terms.error.is_none(),
+        "{:?}",
+        symbol_typo_terms.error
+    );
+    let symbol_typo_terms = symbol_typo_terms.result.unwrap();
+    let symbol_drop_terms_retry = symbol_typo_terms["query_plan_result"]["retry_requests"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|request| {
+            request["arguments"]["query"]
+                .as_str()
+                .is_some_and(|query| query == "issue token session")
+        })
+        .expect("expected symbol typo drop-terms retry");
+    assert!(
+        symbol_drop_terms_retry["arguments"].get("symbol").is_none(),
+        "{symbol_drop_terms_retry:?}"
+    );
+    let symbol_drop_terms_retry_result = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("symbol-typo-drop-terms-retry"),
+        tool: symbol_drop_terms_retry["tool"]
+            .as_str()
+            .unwrap()
+            .to_string(),
+        arguments: symbol_drop_terms_retry["arguments"].clone(),
+    });
+    assert!(
+        symbol_drop_terms_retry_result.error.is_none(),
+        "{:?}",
+        symbol_drop_terms_retry_result.error
+    );
+    assert!(
+        serde_json::to_string(&symbol_drop_terms_retry_result.result)
+            .unwrap()
+            .contains("issue_token")
     );
 
     let path_typo = runtime.dispatch(ToolRequest {

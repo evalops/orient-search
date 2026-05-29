@@ -1489,6 +1489,11 @@ fn cli_retry_requests<T: Serialize>(
 ) -> Vec<ResultToolRequest> {
     let mut requests = Vec::new();
     let mut seen_queries = HashSet::new();
+    let replaced_filter_fields = plan
+        .repair_hints
+        .iter()
+        .filter_map(|hint| cli_replaced_filter_field(&hint.kind))
+        .collect::<Vec<_>>();
     let repair_filter_fields = plan
         .repair_hints
         .iter()
@@ -1510,7 +1515,13 @@ fn cli_retry_requests<T: Serialize>(
             let suggested_filters = parse_query(query).filters;
             add_filter_retry_args(&mut arguments, filters, target_name, skip_field);
             add_plan_filter_retry_args(&mut arguments, plan, target_name, skip_field);
-            if skip_field.is_none() && hint.kind == "try_any_terms" {
+            if skip_field.is_none() && retry_hint_drops_replaced_filters(&hint.action) {
+                remove_repair_filter_retry_args(
+                    &mut arguments,
+                    &replaced_filter_fields,
+                    &suggested_filters,
+                );
+            } else if skip_field.is_none() && retry_hint_drops_repaired_filters(&hint.action) {
                 remove_repair_filter_retry_args(
                     &mut arguments,
                     &repair_filter_fields,
@@ -1527,6 +1538,14 @@ fn cli_retry_requests<T: Serialize>(
         ));
     }
     requests
+}
+
+fn retry_hint_drops_replaced_filters(action: &str) -> bool {
+    action == "drop_terms"
+}
+
+fn retry_hint_drops_repaired_filters(action: &str) -> bool {
+    matches!(action, "broaden_terms" | "relax_query" | "broaden_query")
 }
 
 fn remove_repair_filter_retry_args(

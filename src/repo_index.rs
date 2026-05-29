@@ -332,6 +332,8 @@ pub struct QueryPlanDiagnosis {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub primary_hint_kind: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub primary_hint_action: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub suggested_query: Option<String>,
 }
 
@@ -390,6 +392,7 @@ impl QueryPlanDiagnosis {
             .iter()
             .find_map(|hint| hint.suggested_query.clone());
         let primary_hint_kind = primary_hint.map(|hint| hint.kind.clone());
+        let primary_hint_action = primary_hint.map(|hint| hint.action.clone());
         let next_action = if let Some(query) = suggested_query.as_ref() {
             format!("Run the first retry request or retry with query `{query}`.")
         } else if plan.final_match_count > 0 && plan.candidate_cap_hit {
@@ -497,6 +500,7 @@ impl QueryPlanDiagnosis {
             summary,
             next_action,
             primary_hint_kind,
+            primary_hint_action,
             suggested_query,
         }
     }

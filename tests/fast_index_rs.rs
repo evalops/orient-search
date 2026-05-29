@@ -905,6 +905,7 @@ fn indexed_query_plan_reports_missing_terms_without_results() {
         diagnosis.primary_hint_kind.as_deref(),
         Some("drop_missing_terms")
     );
+    assert_eq!(diagnosis.primary_hint_action.as_deref(), Some("drop_terms"));
     assert_eq!(
         diagnosis.suggested_query.as_deref(),
         Some("session manager")
@@ -934,6 +935,10 @@ fn indexed_query_plan_reports_missing_terms_without_results() {
     assert_eq!(
         diagnosis.primary_hint_kind.as_deref(),
         Some("replace_symbol_filter")
+    );
+    assert_eq!(
+        diagnosis.primary_hint_action.as_deref(),
+        Some("replace_filter")
     );
     assert_eq!(
         diagnosis.suggested_query.as_deref(),
