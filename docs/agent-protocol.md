@@ -181,7 +181,7 @@ orient read-shard-ranges --index-dir /tmp/orient-shards --range service/src/auth
 ```
 
 Range reads follow manifest bounds: `start >= 1`, `1 <= lines <= lines.maximum`, non-empty batch arrays, and `ranges.maxItems`, so a mistaken request cannot dump unbounded file content.
-For CLI adapters, `read-range` and positional `read-ranges` entries accept compact `path:start:lines` specs as well as `--path`, `--start`, and `--lines`; parsing splits from the right so paths containing `:` still work when the trailing range fields are present.
+For CLI adapters, `read-range` and positional `read-ranges` entries accept compact `path:start:lines` specs as well as `--path`, `--start`, and `--lines`; add a trailing `:symbol` or `:exact` when one range in a batch needs its own scope. Parsing splits from the right so paths containing `:` still work when the trailing range fields are present.
 
 ## Orientation And Repair
 
