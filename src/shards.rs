@@ -21,8 +21,10 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const SHARD_MANIFEST_VERSION: u32 = 1;
 const SHARD_MANIFEST_SIDECAR_VERSION: u32 = 1;
+const SHARD_MANIFEST_PREFILTER_VERSION: u32 = 1;
 const SHARD_MANIFEST_FILE: &str = "manifest.json";
 const SHARD_MANIFEST_SIDECAR_FILE: &str = "manifest.bin";
+const SHARD_MANIFEST_PREFILTER_FILE: &str = "manifest.prefilter.bin";
 const SHARD_WRITE_LOCK_FILE: &str = ".orient-shards.lock";
 const SHARD_WRITE_LOCK_TIMEOUT: Duration = Duration::from_secs(120);
 const SHARD_WRITE_LOCK_STALE_AFTER: Duration = Duration::from_secs(30 * 60);
@@ -43,6 +45,13 @@ struct ShardManifestSidecar {
     version: u32,
     json_fingerprint: ManifestFileFingerprint,
     manifest: ShardManifest,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct ShardManifestPrefilter {
+    version: u32,
+    json_fingerprint: ManifestFileFingerprint,
+    exact_hashes: Vec<u32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -717,10 +726,13 @@ pub fn search_shards(
     filters: &SearchFilters,
 ) -> Result<Vec<SearchResult>> {
     let index_dir = index_dir.as_ref();
-    let manifest = load_manifest(index_dir)?;
     let parsed = parse_query(query);
     let filters = merge_filters(filters.clone(), parsed.filters);
     let shard_query = query_text(&parsed.terms, &filters);
+    if shard_prefilter_query_impossible(index_dir, &shard_query, &filters)? {
+        return Ok(Vec::new());
+    }
+    let manifest = load_manifest(index_dir)?;
     let jobs = manifest
         .shards
         .into_iter()
@@ -2028,6 +2040,68 @@ pub(crate) fn load_manifest(index_dir: &Path) -> Result<ShardManifest> {
     Ok(manifest)
 }
 
+fn shard_prefilter_query_impossible(
+    index_dir: &Path,
+    shard_query: &str,
+    filters: &SearchFilters,
+) -> Result<bool> {
+    let required_hashes = shard_prefilter_required_exact_hashes(shard_query, filters);
+    if required_hashes.is_empty() {
+        return Ok(false);
+    }
+    let Some(prefilter) = load_manifest_prefilter(index_dir)? else {
+        return Ok(false);
+    };
+    Ok(required_hashes
+        .iter()
+        .any(|hash| prefilter.exact_hashes.binary_search(hash).is_err()))
+}
+
+fn shard_prefilter_required_exact_hashes(shard_query: &str, filters: &SearchFilters) -> Vec<u32> {
+    let query_tokens = unique_query_tokens(shard_query);
+    let mut hashes = Vec::new();
+    if let Some(identifier) = shard_query_identifier_prefilter(shard_query, &query_tokens, filters)
+    {
+        hashes.push(sketch_fingerprint(&identifier));
+    }
+
+    let require_all = filters.require_all || (query_tokens.len() > 1 && !filters.match_any);
+    if require_all || query_tokens.len() == 1 {
+        hashes.extend(
+            query_tokens
+                .iter()
+                .filter(|token| !shard_allows_substring_prefilter(token))
+                .map(|token| sketch_fingerprint(token)),
+        );
+    }
+    hashes.sort_unstable();
+    hashes.dedup();
+    hashes
+}
+
+fn load_manifest_prefilter(index_dir: &Path) -> Result<Option<ShardManifestPrefilter>> {
+    let json_fingerprint = manifest_file_fingerprint(&index_dir.join(SHARD_MANIFEST_FILE)).ok();
+    let Some(json_fingerprint) = json_fingerprint else {
+        return Ok(None);
+    };
+    let prefilter_path = index_dir.join(SHARD_MANIFEST_PREFILTER_FILE);
+    let bytes = match fs::read(&prefilter_path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
+        Err(_) => return Ok(None),
+    };
+    let prefilter = match bincode::deserialize::<ShardManifestPrefilter>(&bytes) {
+        Ok(prefilter) => prefilter,
+        Err(_) => return Ok(None),
+    };
+    if prefilter.version != SHARD_MANIFEST_PREFILTER_VERSION
+        || prefilter.json_fingerprint != json_fingerprint
+    {
+        return Ok(None);
+    }
+    Ok(Some(prefilter))
+}
+
 fn load_manifest_sidecar(
     index_dir: &Path,
     json_fingerprint: Option<ManifestFileFingerprint>,
@@ -2258,7 +2332,8 @@ fn save_manifest_with_mode(
     let bytes = serde_json::to_vec_pretty(manifest)?;
     atomic_write(&manifest_path, &bytes)
         .with_context(|| format!("write shard manifest {}", index_dir.display()))?;
-    save_manifest_sidecar(index_dir, manifest)
+    save_manifest_sidecar(index_dir, manifest)?;
+    save_manifest_prefilter(index_dir, manifest)
 }
 
 fn save_manifest_sidecar(index_dir: &Path, manifest: &ShardManifest) -> Result<()> {
@@ -2271,6 +2346,26 @@ fn save_manifest_sidecar(index_dir: &Path, manifest: &ShardManifest) -> Result<(
     let bytes = bincode::serialize(&sidecar)?;
     atomic_write(&index_dir.join(SHARD_MANIFEST_SIDECAR_FILE), &bytes)
         .with_context(|| format!("write shard manifest sidecar {}", index_dir.display()))
+}
+
+fn save_manifest_prefilter(index_dir: &Path, manifest: &ShardManifest) -> Result<()> {
+    let manifest_path = index_dir.join(SHARD_MANIFEST_FILE);
+    let mut exact_hashes = manifest
+        .shards
+        .iter()
+        .filter_map(|shard| shard.sketch.as_ref())
+        .flat_map(|sketch| sketch.exact_hashes.iter().copied())
+        .collect::<Vec<_>>();
+    exact_hashes.sort_unstable();
+    exact_hashes.dedup();
+    let prefilter = ShardManifestPrefilter {
+        version: SHARD_MANIFEST_PREFILTER_VERSION,
+        json_fingerprint: manifest_file_fingerprint(&manifest_path)?,
+        exact_hashes,
+    };
+    let bytes = bincode::serialize(&prefilter)?;
+    atomic_write(&index_dir.join(SHARD_MANIFEST_PREFILTER_FILE), &bytes)
+        .with_context(|| format!("write shard manifest prefilter {}", index_dir.display()))
 }
 
 fn guard_manifest_write_preserves_existing_roots(

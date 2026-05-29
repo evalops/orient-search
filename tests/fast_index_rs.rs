@@ -3060,8 +3060,18 @@ fn shard_manifest_sketch_prunes_impossible_cold_shards() {
     build_shards(&[hit_repo.clone(), miss_repo], shard_dir.path()).unwrap();
     let manifest: serde_json::Value =
         serde_json::from_slice(&fs::read(shard_dir.path().join("manifest.json")).unwrap()).unwrap();
+    assert!(shard_dir.path().join("manifest.prefilter.bin").exists());
     assert!(manifest["shards"][0]["sketch"]["exact_hashes"].is_array());
     assert!(manifest["shards"][0]["sketch"]["trigram_bits"].is_array());
+    let hit_index = manifest["shards"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|shard| shard["name"] == "hit-service")
+        .unwrap()["index"]
+        .as_str()
+        .unwrap()
+        .to_string();
     let miss_index = manifest["shards"]
         .as_array()
         .unwrap()
@@ -3112,6 +3122,16 @@ fn shard_manifest_sketch_prunes_impossible_cold_shards() {
             .missing_terms
             .contains(&"missingterm".to_string())
     );
+
+    fs::remove_file(shard_dir.path().join(hit_index)).unwrap();
+    let globally_absent_results = search_shards(
+        shard_dir.path(),
+        "globally_missing_prefilter_probe_token_xyz",
+        10,
+        &SearchFilters::default(),
+    )
+    .unwrap();
+    assert!(globally_absent_results.is_empty());
 }
 
 #[test]
