@@ -169,7 +169,23 @@ struct SymbolBatchResult {
     name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     read_batch_request: Option<ResultToolRequest>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    next_action: Option<Value>,
     symbols: Vec<SymbolLookupResult>,
+}
+
+fn symbol_batch_result(
+    name: String,
+    read_batch_request: Option<ResultToolRequest>,
+    symbols: Vec<SymbolLookupResult>,
+) -> SymbolBatchResult {
+    let next_action = read_batch_next_action(&read_batch_request);
+    SymbolBatchResult {
+        name,
+        read_batch_request,
+        next_action,
+        symbols,
+    }
 }
 
 pub fn serve_jsonl(reader: impl BufRead, mut writer: impl Write) -> Result<()> {
@@ -1270,6 +1286,7 @@ pub fn agent_guide(
             "Use search_auto.next_read_batch_request or a search_auto_batch item next_read_batch_request as the preferred immediate read follow-up after automatic retries.",
             "Use search_auto.next_action or a search_auto_batch item next_action when the wrapper wants one prioritized follow-up request.",
             "Use search_auto.read_batch_request, a search_auto_batch item read_batch_request, or a search batch item next_action/read_batch_request to read top ranges in one call.",
+            "Use symbol batch item next_action/read_batch_request to read candidate definitions for one requested symbol name.",
             "Use read_batch_request.read_budget to keep batch reads under hard_limits.max_batch_read_lines; split large inspections instead of widening one call.",
             "Use result.read_request for one bounded file range.",
             "Batch several result.read_range objects with read_ranges, read_index_ranges, or read_shard_ranges.",
@@ -4404,11 +4421,7 @@ impl ToolRuntime {
                         "read_shard_ranges",
                         read_request_args("index_dir", &index_dir),
                     );
-                    batch.push(SymbolBatchResult {
-                        name,
-                        read_batch_request,
-                        symbols,
-                    });
+                    batch.push(symbol_batch_result(name, read_batch_request, symbols));
                 }
                 Ok(serde_json::to_value(batch)?)
             }
@@ -4520,11 +4533,7 @@ impl ToolRuntime {
                             "read_ranges",
                             read_request_args("index_dir", &index_dir),
                         );
-                        batch.push(SymbolBatchResult {
-                            name,
-                            read_batch_request,
-                            symbols,
-                        });
+                        batch.push(symbol_batch_result(name, read_batch_request, symbols));
                     }
                     return Ok(serde_json::to_value(batch)?);
                 }
@@ -4546,11 +4555,7 @@ impl ToolRuntime {
                                 "read_ranges",
                                 read_request_args("index", &index_path),
                             );
-                            SymbolBatchResult {
-                                name,
-                                read_batch_request,
-                                symbols,
-                            }
+                            symbol_batch_result(name, read_batch_request, symbols)
                         })
                         .collect::<Vec<_>>();
                     return Ok(serde_json::to_value(batch)?);
@@ -4573,11 +4578,7 @@ impl ToolRuntime {
                                 "read_ranges",
                                 read_request_args("index_dir", &index_dir),
                             );
-                            batch.push(SymbolBatchResult {
-                                name,
-                                read_batch_request,
-                                symbols,
-                            });
+                            batch.push(symbol_batch_result(name, read_batch_request, symbols));
                         }
                         return Ok(serde_json::to_value(batch)?);
                     }
@@ -4598,11 +4599,7 @@ impl ToolRuntime {
                                         "read_ranges",
                                         read_request_args("index", &index_path),
                                     );
-                                    SymbolBatchResult {
-                                        name,
-                                        read_batch_request,
-                                        symbols,
-                                    }
+                                    symbol_batch_result(name, read_batch_request, symbols)
                                 })
                                 .collect::<Vec<_>>();
                             return Ok(serde_json::to_value(batch)?);
@@ -4630,11 +4627,7 @@ impl ToolRuntime {
                             "read_ranges",
                             read_request_args("repo", &repo),
                         );
-                        SymbolBatchResult {
-                            name,
-                            read_batch_request,
-                            symbols,
-                        }
+                        symbol_batch_result(name, read_batch_request, symbols)
                     })
                     .collect::<Vec<_>>();
                 Ok(serde_json::to_value(batch)?)
@@ -4671,11 +4664,7 @@ impl ToolRuntime {
                             "read_index_ranges",
                             read_request_args("index", &index_path),
                         );
-                        SymbolBatchResult {
-                            name,
-                            read_batch_request,
-                            symbols,
-                        }
+                        symbol_batch_result(name, read_batch_request, symbols)
                     })
                     .collect::<Vec<_>>();
                 Ok(serde_json::to_value(batch)?)

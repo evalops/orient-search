@@ -3104,6 +3104,10 @@ fn cli_builds_and_searches_persistent_index() {
         .stdout(predicate::str::contains("\"read_request\""))
         .stdout(predicate::str::contains("\"tool\":\"read_index_range\""))
         .stdout(predicate::str::contains("\"read_batch_request\""))
+        .stdout(predicate::str::contains("\"next_action\""))
+        .stdout(predicate::str::contains(
+            "\"source\":\"read_batch_request\"",
+        ))
         .stdout(predicate::str::contains("\"tool\":\"read_index_ranges\""));
 
     let mut generic_index_symbol_batch = Command::cargo_bin("orient").unwrap();
@@ -3126,6 +3130,7 @@ fn cli_builds_and_searches_persistent_index() {
         .stdout(predicate::str::contains("\"read_request\""))
         .stdout(predicate::str::contains("\"tool\":\"read_range\""))
         .stdout(predicate::str::contains("\"read_batch_request\""))
+        .stdout(predicate::str::contains("\"next_action\""))
         .stdout(predicate::str::contains("\"tool\":\"read_ranges\""));
 
     let mut index_map = Command::cargo_bin("orient").unwrap();

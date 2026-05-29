@@ -1429,7 +1429,23 @@ struct SymbolBatchResult {
     name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     read_batch_request: Option<ResultToolRequest>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    next_action: Option<Value>,
     symbols: Vec<SymbolLookupResult>,
+}
+
+fn symbol_batch_result(
+    name: String,
+    read_batch_request: Option<ResultToolRequest>,
+    symbols: Vec<SymbolLookupResult>,
+) -> SymbolBatchResult {
+    let next_action = read_batch_next_action(&read_batch_request);
+    SymbolBatchResult {
+        name,
+        read_batch_request,
+        next_action,
+        symbols,
+    }
 }
 
 fn main() {
@@ -2479,11 +2495,7 @@ fn run() -> Result<()> {
                     "read_shard_ranges",
                     read_request_args("index_dir", &index_dir),
                 );
-                batch.push(SymbolBatchResult {
-                    name,
-                    read_batch_request,
-                    symbols,
-                });
+                batch.push(symbol_batch_result(name, read_batch_request, symbols));
             }
             println!("{}", serde_json::to_string(&batch)?);
         }
@@ -3869,11 +3881,7 @@ fn run() -> Result<()> {
                         "read_ranges",
                         read_request_args("index_dir", &index_dir),
                     );
-                    batch.push(SymbolBatchResult {
-                        name,
-                        read_batch_request,
-                        symbols,
-                    });
+                    batch.push(symbol_batch_result(name, read_batch_request, symbols));
                 }
                 batch
             } else if let Some(index_path) = index {
@@ -3891,11 +3899,7 @@ fn run() -> Result<()> {
                             "read_ranges",
                             read_request_args("index", &index_path),
                         );
-                        SymbolBatchResult {
-                            name,
-                            read_batch_request,
-                            symbols,
-                        }
+                        symbol_batch_result(name, read_batch_request, symbols)
                     })
                     .collect::<Vec<_>>()
             } else {
@@ -3913,11 +3917,7 @@ fn run() -> Result<()> {
                             "read_ranges",
                             read_request_args("repo", &repo),
                         );
-                        SymbolBatchResult {
-                            name,
-                            read_batch_request,
-                            symbols,
-                        }
+                        symbol_batch_result(name, read_batch_request, symbols)
                     })
                     .collect::<Vec<_>>()
             };
@@ -3966,11 +3966,7 @@ fn run() -> Result<()> {
                         "read_index_ranges",
                         read_request_args("index", &index_path),
                     );
-                    SymbolBatchResult {
-                        name,
-                        read_batch_request,
-                        symbols,
-                    }
+                    symbol_batch_result(name, read_batch_request, symbols)
                 })
                 .collect::<Vec<_>>();
             println!("{}", serde_json::to_string(&batch)?);
