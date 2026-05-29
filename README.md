@@ -67,6 +67,9 @@ Useful filters: `repo:`, `path:`/`dir:`, `file:`, `lang:`, `ext:`, `symbol:`,
 `is:test`, `is:source`, `is:code`, `is:docs`, `is:generated`, `content:`,
 quoted phrases, negative filters like `-path:vendor`, and `mode:any` for broad
 orientation.
+Bare filename and path-like queries such as `Cargo.toml` or `src/lib.rs` use the
+same fast path filters. Use `content:Cargo.toml` when you want references to the
+string instead of the file itself.
 
 Generated paths, including hashed JavaScript bundles, are demoted by default.
 Use `generated:true` / `is:generated` when you intentionally want generated
