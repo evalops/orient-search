@@ -3889,7 +3889,8 @@ impl ToolRuntime {
                     .filter_map(|(path, entry)| {
                         entry.ready_index().map(|index| {
                             let stats = index.stats();
-                            let index_bytes = fs::metadata(path).map(|metadata| metadata.len()).ok();
+                            let index_bytes =
+                                fs::metadata(path).map(|metadata| metadata.len()).ok();
                             json!({
                                 "index": path.to_string_lossy(),
                                 "root": stats.root.to_string_lossy(),

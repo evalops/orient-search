@@ -4133,6 +4133,12 @@ fn runtime_warms_index_by_tool_request() {
         serde_json::json!(2)
     );
     assert!(
+        result["cached_index_details"][0]["index_bytes"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
+    assert!(
         result["cached_index_details"][0]["index"]
             .as_str()
             .unwrap()
@@ -4810,6 +4816,18 @@ fn runtime_reuses_cached_shard_manifest_after_initial_load() {
     assert_eq!(
         result["cached_shard_manifest_details"][0]["shards"],
         serde_json::json!(1)
+    );
+    assert!(
+        result["cached_shard_manifest_details"][0]["index_bytes"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
+    assert!(
+        result["cached_shard_manifest_details"][0]["repos"][0]["index_bytes"]
+            .as_u64()
+            .unwrap()
+            > 0
     );
     assert_eq!(
         result["cached_shard_manifest_details"][0]["repos"][0]["name"],
