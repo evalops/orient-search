@@ -159,6 +159,12 @@ fn apply_filter(filters: &mut SearchFilters, token: &str, negated: bool) -> bool
         (false, "code" | "source_code" | "source-code") => {
             filters.code = Some(parse_boolish(&value).unwrap_or(true))
         }
+        (false, "line" | "line_number" | "line-number" | "target_line" | "target-line") => {
+            let Some(line) = parse_positive_usize(&value) else {
+                return false;
+            };
+            filters.target_line = Some(line);
+        }
         (true, "file" | "filename" | "file_name" | "basename") => filters.exclude_file.push(value),
         (true, "path" | "dir" | "directory" | "folder") => filters.exclude_path.push(value),
         (true, "lang" | "language") => filters
@@ -671,6 +677,14 @@ fn parse_boolish(value: &str) -> Option<bool> {
     }
 }
 
+fn parse_positive_usize(value: &str) -> Option<usize> {
+    value
+        .trim()
+        .parse::<usize>()
+        .ok()
+        .filter(|value| *value > 0)
+}
+
 fn split_query(input: &str) -> Vec<String> {
     let mut tokens = Vec::new();
     let mut current = String::new();
@@ -744,6 +758,9 @@ pub fn query_with_filters_text(terms: &[String], filters: &SearchFilters) -> Str
     }
     if let Some(code) = filters.code {
         pieces.push(format!("code:{code}"));
+    }
+    if let Some(line) = filters.target_line {
+        pieces.push(format!("line:{line}"));
     }
     for value in &filters.exclude_file {
         push_query_filter(&mut pieces, "file", Some(value), true);
@@ -960,13 +977,14 @@ mod tests {
     #[test]
     fn serializes_query_text_with_filters_for_followups() {
         let parsed = parse_query(
-            r#"path:'src auth' lang:Rust symbol:SessionManager code:true -branch:wip -origin:legacy "issue token""#,
+            r#"path:'src auth' line:42 lang:Rust symbol:SessionManager code:true -branch:wip -origin:legacy "issue token""#,
         );
 
         let text = query_with_filters_text(&parsed.terms, &parsed.filters);
         let reparsed = parse_query(&text);
         assert_eq!(reparsed.terms, vec!["issue token"]);
         assert_eq!(reparsed.filters.path.as_deref(), Some("src auth"));
+        assert_eq!(reparsed.filters.target_line, Some(42));
         assert_eq!(reparsed.filters.language.as_deref(), Some("rust"));
         assert_eq!(reparsed.filters.symbol.as_deref(), Some("SessionManager"));
         assert_eq!(reparsed.filters.code, Some(true));
@@ -987,6 +1005,26 @@ mod tests {
         assert_eq!(parsed.filters.exclude_language, vec!["markdown"]);
         assert_eq!(parsed.filters.exclude_file, vec!["generated.rs"]);
         assert_eq!(parsed.filters.exclude_path, vec!["vendor"]);
+    }
+
+    #[test]
+    fn parses_explicit_line_filters_for_query_anchors() {
+        let parsed = parse_query("path:src/auth.rs line:42 issue token");
+
+        assert_eq!(parsed.terms, vec!["issue", "token"]);
+        assert_eq!(parsed.filters.path.as_deref(), Some("src/auth.rs"));
+        assert_eq!(parsed.filters.target_line, Some(42));
+        assert!(parsed.filters.require_all);
+
+        let target_line = parse_query("file:auth.rs target_line:7 token");
+        assert_eq!(target_line.terms, vec!["token"]);
+        assert_eq!(target_line.filters.file.as_deref(), Some("auth.rs"));
+        assert_eq!(target_line.filters.target_line, Some(7));
+
+        let invalid = parse_query("path:src/auth.rs line:0 token");
+        assert_eq!(invalid.terms, vec!["line:0", "token"]);
+        assert_eq!(invalid.filters.path.as_deref(), Some("src/auth.rs"));
+        assert_eq!(invalid.filters.target_line, None);
     }
 
     #[test]

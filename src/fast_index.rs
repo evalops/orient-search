@@ -1473,6 +1473,7 @@ impl FastIndex {
                     &path_lists,
                     &trigram_lists,
                     filters.snippet,
+                    filters.target_line,
                     filters.explain,
                     filters.symbol.as_deref(),
                     allow_implicit_symbol_score,
@@ -2035,6 +2036,7 @@ impl FastIndex {
                     &path_lists,
                     &trigram_lists,
                     filters.snippet,
+                    filters.target_line,
                     false,
                     filters.symbol.as_deref(),
                     allow_implicit_symbol_score,
@@ -2165,6 +2167,7 @@ impl FastIndex {
         path_lists: &[(&str, &[Posting])],
         trigram_lists: &[(&str, &[Posting])],
         snippet_mode: SnippetMode,
+        target_line: Option<usize>,
         explain: bool,
         symbol_filter: Option<&str>,
         allow_implicit_symbol_score: bool,
@@ -2261,11 +2264,18 @@ impl FastIndex {
         }
 
         let symbol_line = symbol_filter.and_then(|wanted| indexed_symbol_filter_line(file, wanted));
-        let snippet = symbol_line
+        let snippet_line = target_line.or(symbol_line);
+        let snippet = snippet_line
             .and_then(|line| indexed_symbol_filter_snippet(file, line, snippet_mode))
             .unwrap_or_else(|| indexed_snippet(file, query_tokens, query_phrases, snippet_mode));
         let mut match_lines = indexed_match_lines(file, query_tokens, query_phrases, 16);
-        if let Some(line) = symbol_line {
+        if let Some(line) = target_line {
+            match_lines.retain(|match_line| *match_line != line);
+            match_lines.insert(0, line);
+        }
+        if target_line.is_none()
+            && let Some(line) = symbol_line
+        {
             match_lines.retain(|match_line| *match_line != line);
             match_lines.insert(0, line);
         }

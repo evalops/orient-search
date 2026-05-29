@@ -2067,6 +2067,7 @@ fn search_repo_ripgrep(
             filters.explain,
         );
     }
+    anchor_results_on_target_line(root, &mut results, filters);
     Ok(Some(finalize_results_for_filters(results, limit, filters)))
 }
 
@@ -2249,7 +2250,36 @@ fn search_repo_streaming_until(
     if filters.require_all {
         results.retain(|result| result_matches_all_tokens(result, query_tokens));
     }
+    anchor_results_on_target_line(root, &mut results, filters);
     Ok(finalize_results_for_filters(results, limit, filters))
+}
+
+fn anchor_results_on_target_line(
+    root: &Path,
+    results: &mut [SearchResult],
+    filters: &SearchFilters,
+) {
+    let Some(line) = filters.target_line else {
+        return;
+    };
+    if filters.file.is_none() && filters.path.is_none() {
+        return;
+    }
+
+    for result in results {
+        let text = fs::read_to_string(root.join(&result.path)).unwrap_or_default();
+        if text.contains('\0') {
+            continue;
+        }
+        let snippet = best_snippet_at_line(&text, line, filters.snippet);
+        if snippet.is_empty() {
+            continue;
+        }
+        result.snippet = snippet;
+        result.line_range = None;
+        result.match_lines.retain(|match_line| *match_line != line);
+        result.match_lines.insert(0, line);
+    }
 }
 
 fn retain_results_matching_file_symbol_filters(

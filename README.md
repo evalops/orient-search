@@ -81,7 +81,7 @@ defaults also set `refresh_if_stale:true`, so they refresh only that checkout's
 shard before use.
 
 Useful filters: `repo:`, `path:`/`dir:`, `file:`, `lang:`, `ext:`, `symbol:`,
-`kind:`/`type:`, `dep:`, `import:`, `test:`, `generated:`, `code:`,
+`kind:`/`type:`, `line:`, `dep:`, `import:`, `test:`, `generated:`, `code:`,
 `is:test`, `is:source`, `is:code`, `is:docs`, `is:generated`, `content:`,
 quoted phrases, negative filters like `-path:vendor`, and `mode:any` for broad
 orientation.

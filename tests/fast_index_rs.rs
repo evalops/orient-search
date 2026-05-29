@@ -1715,6 +1715,27 @@ fn query_language_filters_fallback_and_indexed_search() {
     assert_eq!(indexed_results.len(), 1);
     assert_eq!(indexed_results[0].path, "src/auth.rs");
 
+    let line_query = "path:src/auth.rs line:1 issue token";
+    let fallback_line =
+        search_repo_fast_filtered(repo.path(), line_query, 10, &SearchFilters::default()).unwrap();
+    assert_eq!(result_paths(&fallback_line), vec!["src/auth.rs"]);
+    assert_eq!(fallback_line[0].match_lines[0], 1);
+    assert!(
+        fallback_line[0]
+            .snippet
+            .contains("1: pub struct SessionManager")
+    );
+    let indexed_line = indexed
+        .search_filtered(line_query, 10, &SearchFilters::default())
+        .unwrap();
+    assert_eq!(result_paths(&indexed_line), vec!["src/auth.rs"]);
+    assert_eq!(indexed_line[0].match_lines[0], 1);
+    assert!(
+        indexed_line[0]
+            .snippet
+            .contains("1: pub struct SessionManager")
+    );
+
     let fallback_ts = search_repo_fast_filtered(
         repo.path(),
         "lang:ts SessionManager",
