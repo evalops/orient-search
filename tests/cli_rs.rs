@@ -398,6 +398,19 @@ fn cli_search_auto_selects_live_indexed_and_shard_surfaces() {
     .stdout(predicate::str::contains("\"tool\":\"read_ranges\""))
     .stdout(predicate::str::contains("\"tool\":\"read_range\""));
 
+    let mut live_json_compat = Command::cargo_bin("orient").unwrap();
+    live_json_compat
+        .args([
+            "search-auto",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--json",
+            "issue_token",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"surface\":\"fallback\""));
+
     let mut live_default = Command::cargo_bin("orient").unwrap();
     live_default
         .current_dir(repo.path())

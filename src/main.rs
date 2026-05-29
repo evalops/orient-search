@@ -53,6 +53,8 @@ const DEFAULT_CLI_READ_RANGE_LINES: usize = 80;
 #[command(name = "orient")]
 #[command(about = "Fast local code search for coding agents")]
 struct Cli {
+    #[arg(long, global = true, hide = true)]
+    _json: bool,
     #[command(subcommand)]
     command: Commands,
 }
