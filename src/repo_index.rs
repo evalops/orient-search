@@ -4349,26 +4349,32 @@ fn read_batch_request_from_ranges(
 }
 
 fn read_batch_request_from_ranges_with_limit(
-    ranges: Vec<ResultReadRange>,
+    read_ranges: Vec<ResultReadRange>,
     tool: &str,
     mut base_arguments: serde_json::Map<String, serde_json::Value>,
     read_limit: usize,
 ) -> Option<ResultToolRequest> {
-    let ranges = ranges
-        .into_iter()
-        .take(read_limit.min(MAX_RESULT_READ_BATCH_RANGES))
-        .map(|read_range| {
-            serde_json::json!({
-                "path": read_range.path,
-                "start": read_range.start,
-                "lines": read_range.lines
-            })
-        })
-        .collect::<Vec<_>>();
-    if ranges.is_empty() {
+    let limit = read_limit.min(MAX_RESULT_READ_BATCH_RANGES);
+    let mut seen = HashSet::new();
+    let mut range_values = Vec::new();
+    for read_range in read_ranges {
+        if range_values.len() >= limit {
+            break;
+        }
+        let key = (read_range.path.clone(), read_range.start, read_range.lines);
+        if !seen.insert(key) {
+            continue;
+        }
+        range_values.push(serde_json::json!({
+            "path": read_range.path,
+            "start": read_range.start,
+            "lines": read_range.lines
+        }));
+    }
+    if range_values.is_empty() {
         return None;
     }
-    base_arguments.insert("ranges".to_string(), serde_json::Value::Array(ranges));
+    base_arguments.insert("ranges".to_string(), serde_json::Value::Array(range_values));
     Some(ResultToolRequest::new(
         tool.to_string(),
         serde_json::Value::Object(base_arguments),
@@ -5635,6 +5641,45 @@ mod tests {
             Some(
                 "orient read-index-ranges --index /tmp/orient.index src/lib.rs:1:80 'tests/auth test.rs:3:4'"
             )
+        );
+    }
+
+    #[test]
+    fn batch_read_tool_requests_dedupe_ranges_before_limit() {
+        let mut base_arguments = serde_json::Map::new();
+        base_arguments.insert("index".to_string(), serde_json::json!("/tmp/orient.index"));
+        let request = read_batch_request_from_ranges_with_limit(
+            vec![
+                ResultReadRange {
+                    path: "src/lib.rs".to_string(),
+                    start: 1,
+                    lines: 80,
+                },
+                ResultReadRange {
+                    path: "src/lib.rs".to_string(),
+                    start: 1,
+                    lines: 80,
+                },
+                ResultReadRange {
+                    path: "tests/auth.rs".to_string(),
+                    start: 5,
+                    lines: 40,
+                },
+            ],
+            "read_index_ranges",
+            base_arguments,
+            2,
+        )
+        .unwrap();
+
+        assert_eq!(request.arguments["ranges"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            request.arguments["ranges"][0]["path"],
+            serde_json::json!("src/lib.rs")
+        );
+        assert_eq!(
+            request.arguments["ranges"][1]["path"],
+            serde_json::json!("tests/auth.rs")
         );
     }
 
