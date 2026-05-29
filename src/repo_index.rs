@@ -957,6 +957,8 @@ fn filter_only_candidates_from_fd_files(
         .arg("coverage")
         .arg("--exclude")
         .arg("target")
+        .arg("--max-results")
+        .arg(fd_max_results(filters, candidate_cap))
         .arg(pattern);
     add_generated_filter_fd_excludes(&mut command, filters);
 
@@ -1152,6 +1154,52 @@ fn fd_positive_file_pattern(filters: &SearchFilters) -> Option<String> {
         return Some(regex::escape(&file));
     }
     code_fd_file_pattern(filters).map(ToString::to_string)
+}
+
+fn fd_max_results(filters: &SearchFilters, candidate_cap: usize) -> String {
+    if fd_can_self_limit(filters) {
+        candidate_cap.to_string()
+    } else {
+        "0".to_string()
+    }
+}
+
+fn fd_can_self_limit(filters: &SearchFilters) -> bool {
+    filters.file.as_deref().is_some_and(simple_fd_file_pattern)
+        && filters.path.is_none()
+        && filters.language.is_none()
+        && filters.extension.is_none()
+        && filters.symbol.is_none()
+        && filters.symbol_kind.is_none()
+        && filters.repo.is_none()
+        && filters.branch.is_none()
+        && filters.origin.is_none()
+        && filters.dependency.is_none()
+        && filters.import.is_none()
+        && filters.test.is_none()
+        && filters.generated.is_none()
+        && filters.code.is_none()
+        && filters.exclude_file.is_empty()
+        && filters.exclude_path.is_empty()
+        && filters.exclude_language.is_empty()
+        && filters.exclude_extension.is_empty()
+        && filters.exclude_symbol.is_empty()
+        && filters.exclude_symbol_kind.is_empty()
+        && filters.exclude_repo.is_empty()
+        && filters.exclude_branch.is_empty()
+        && filters.exclude_origin.is_empty()
+        && filters.exclude_dependency.is_empty()
+        && filters.exclude_import.is_empty()
+        && filters.exclude_content.is_empty()
+}
+
+fn simple_fd_file_pattern(file: &str) -> bool {
+    let file = file.trim();
+    !file.is_empty()
+        && !file.contains('/')
+        && !file.contains('\\')
+        && !file.contains('*')
+        && !file.contains('?')
 }
 
 fn prefer_rg_files_for_positive_structural_scope(filters: &SearchFilters) -> bool {
@@ -6788,6 +6836,54 @@ mod tests {
                 ..SearchFilters::default()
             })
             .is_none()
+        );
+    }
+
+    #[test]
+    fn fd_self_limit_only_for_plain_file_filters() {
+        assert!(fd_can_self_limit(&SearchFilters {
+            file: Some("Cargo.toml".to_string()),
+            ..SearchFilters::default()
+        }));
+        assert!(!fd_can_self_limit(&SearchFilters {
+            file: Some("Cargo.toml".to_string()),
+            path: Some("crates".to_string()),
+            ..SearchFilters::default()
+        }));
+        assert!(!fd_can_self_limit(&SearchFilters {
+            file: Some("Cargo.toml".to_string()),
+            exclude_content: vec!["skipme".to_string()],
+            ..SearchFilters::default()
+        }));
+        assert!(!fd_can_self_limit(&SearchFilters {
+            file: Some("Cargo.toml".to_string()),
+            extension: Some("toml".to_string()),
+            ..SearchFilters::default()
+        }));
+        assert!(!fd_can_self_limit(&SearchFilters {
+            file: Some("Cargo.*".to_string()),
+            ..SearchFilters::default()
+        }));
+        assert_eq!(
+            fd_max_results(
+                &SearchFilters {
+                    file: Some("Cargo.toml".to_string()),
+                    ..SearchFilters::default()
+                },
+                10
+            ),
+            "10"
+        );
+        assert_eq!(
+            fd_max_results(
+                &SearchFilters {
+                    file: Some("Cargo.toml".to_string()),
+                    exclude_path: vec!["vendor".to_string()],
+                    ..SearchFilters::default()
+                },
+                10
+            ),
+            "0"
         );
     }
 }

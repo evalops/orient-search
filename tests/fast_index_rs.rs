@@ -2052,6 +2052,33 @@ fn path_filter_only_queries_use_path_trigram_prefilter_after_load() {
 }
 
 #[test]
+fn filter_only_file_queries_keep_scanning_after_content_rejections() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("aaa-rejected/Cargo.toml"),
+        "[package]\nname='skipme-one'\n",
+    );
+    write(
+        &repo.path().join("bbb-rejected/Cargo.toml"),
+        "[package]\nname='skipme-two'\n",
+    );
+    write(
+        &repo.path().join("zzz-valid/Cargo.toml"),
+        "[package]\nname='wanted'\n",
+    );
+
+    let results = search_repo_fast_filtered(
+        repo.path(),
+        "file:Cargo.toml -content:skipme",
+        1,
+        &SearchFilters::default(),
+    )
+    .unwrap();
+
+    assert_eq!(result_paths(&results), vec!["zzz-valid/Cargo.toml"]);
+}
+
+#[test]
 fn quoted_phrases_require_exact_matches_and_explain_phrase_signals() {
     let repo = tempfile::tempdir().unwrap();
     write(
