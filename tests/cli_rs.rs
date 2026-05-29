@@ -165,6 +165,77 @@ fn cli_help_shows_default_daemon_addr_for_agent_clients() {
         .assert()
         .success()
         .stdout(predicate::str::contains("[default: 127.0.0.1:8796]"));
+
+    let mut doctor = Command::cargo_bin("orient").unwrap();
+    doctor
+        .args(["doctor", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("[default: 127.0.0.1:8796]"))
+        .stdout(predicate::str::contains("--index-dir"));
+}
+
+#[test]
+fn cli_doctor_reports_local_agent_health() {
+    let repo = sample_repo();
+    let index_path = repo.path().join(".orient/index");
+
+    let mut index = Command::cargo_bin("orient").unwrap();
+    index
+        .args([
+            "index",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--output",
+            index_path.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let mut doctor = Command::cargo_bin("orient").unwrap();
+    doctor
+        .args([
+            "doctor",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--index",
+            index_path.to_str().unwrap(),
+            "--addr",
+            "127.0.0.1:1",
+            "--format",
+            "json",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"ok\":true"))
+        .stdout(predicate::str::contains("\"name\":\"index\""))
+        .stdout(predicate::str::contains("\"index_status\""))
+        .stdout(predicate::str::contains("\"stale\":false"))
+        .stdout(predicate::str::contains("\"name\":\"daemon\""))
+        .stdout(predicate::str::contains("daemon is not reachable"));
+}
+
+#[test]
+fn cli_doctor_strict_fails_on_unreadable_index() {
+    let repo = sample_repo();
+    let missing_index = repo.path().join(".orient/missing-index");
+
+    let mut doctor = Command::cargo_bin("orient").unwrap();
+    doctor
+        .args([
+            "doctor",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--index",
+            missing_index.to_str().unwrap(),
+            "--format",
+            "json",
+            "--strict",
+        ])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("\"ok\":false"))
+        .stderr(predicate::str::contains("doctor found unhealthy checks"));
 }
 
 #[test]

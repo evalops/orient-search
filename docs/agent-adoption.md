@@ -69,6 +69,11 @@ If Orient is unavailable or returns no useful plan, fall back to normal shell
 search.
 ```
 
+Use `orient doctor --index-dir /tmp/orient-shards` when a fresh local agent
+session needs a compact health check. It verifies the repo path, local tool
+availability, shard or index freshness, daemon reachability, and emits copyable
+repair/start commands without collecting session analytics.
+
 For one-shot CLI use from inside a repo, start with
 `orient search-auto "query"` or `orient search-auto-batch "query one" "query two"`.
 Pass `--index`, `--index-dir`, or `--repo` only when the current directory is

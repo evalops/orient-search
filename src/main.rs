@@ -29,6 +29,7 @@ use orient::shards::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::any::Any;
+use std::env;
 use std::fs;
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -756,6 +757,22 @@ enum Commands {
         socket: Option<PathBuf>,
         #[arg(long, default_value = DEFAULT_DAEMON_ADDR)]
         addr: Option<String>,
+    },
+    Doctor {
+        #[arg(long, default_value = ".")]
+        repo: PathBuf,
+        #[arg(long)]
+        index: Option<PathBuf>,
+        #[arg(long = "index-dir")]
+        index_dir: Option<PathBuf>,
+        #[arg(long)]
+        socket: Option<PathBuf>,
+        #[arg(long, default_value = DEFAULT_DAEMON_ADDR)]
+        addr: Option<String>,
+        #[arg(long, default_value = "text", value_parser = ["text", "json"])]
+        format: String,
+        #[arg(long)]
+        strict: bool,
     },
     ServeJsonl,
     ServeTcp {
@@ -3331,6 +3348,30 @@ fn run() -> Result<()> {
             retarget_client_cli_commands(&mut status, &client_command);
             println!("{}", serde_json::to_string(&status)?);
         }
+        Commands::Doctor {
+            repo,
+            index,
+            index_dir,
+            socket,
+            addr,
+            format,
+            strict,
+        } => {
+            let report = doctor_report(DoctorConfig {
+                repo,
+                index,
+                index_dir,
+                socket,
+                addr: addr.unwrap_or_else(|| DEFAULT_DAEMON_ADDR.to_string()),
+            });
+            match format.as_str() {
+                "json" => println!("{}", serde_json::to_string(&report)?),
+                _ => print_doctor_report(&report)?,
+            }
+            if strict && !report.ok {
+                bail!("doctor found unhealthy checks");
+            }
+        }
         Commands::ServeJsonl => {
             let stdin = io::stdin();
             let stdout = io::stdout();
@@ -3508,6 +3549,369 @@ fn daemon_status_stream(stream: impl Read + Write) -> Result<Value> {
         .get("result")
         .cloned()
         .ok_or_else(|| anyhow::anyhow!("daemon response did not include result"))
+}
+
+#[derive(Debug, Serialize)]
+struct DoctorReport {
+    ok: bool,
+    checks: Vec<DoctorCheck>,
+    recommendations: Vec<String>,
+    commands: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    daemon_status: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    index_status: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    shard_status: Option<Value>,
+}
+
+#[derive(Debug, Serialize)]
+struct DoctorCheck {
+    name: String,
+    status: DoctorCheckStatus,
+    message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    details: Option<Value>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum DoctorCheckStatus {
+    Ok,
+    Warn,
+    Error,
+}
+
+struct DoctorConfig {
+    repo: PathBuf,
+    index: Option<PathBuf>,
+    index_dir: Option<PathBuf>,
+    socket: Option<PathBuf>,
+    addr: String,
+}
+
+fn doctor_report(config: DoctorConfig) -> DoctorReport {
+    let mut checks = Vec::new();
+    let mut recommendations = Vec::new();
+    let mut commands = Vec::new();
+    let mut daemon_status = None;
+    let mut index_status = None;
+    let mut shard_status_value = None;
+
+    let repo = config.repo;
+    match repo.canonicalize() {
+        Ok(canonical) => {
+            if repo_has_git_metadata(&canonical) {
+                checks.push(doctor_check(
+                    "repo",
+                    DoctorCheckStatus::Ok,
+                    format!("repo exists: {}", canonical.display()),
+                    None,
+                ));
+            } else {
+                checks.push(doctor_check(
+                    "repo",
+                    DoctorCheckStatus::Warn,
+                    format!(
+                        "repo path exists but no .git metadata was found: {}",
+                        canonical.display()
+                    ),
+                    None,
+                ));
+            }
+        }
+        Err(error) => checks.push(doctor_check(
+            "repo",
+            DoctorCheckStatus::Error,
+            format!("repo path is not readable: {} ({error})", repo.display()),
+            None,
+        )),
+    }
+
+    for tool in ["orient", "rg", "fd"] {
+        let found = command_in_path(tool);
+        let status = if found {
+            DoctorCheckStatus::Ok
+        } else if tool == "orient" {
+            DoctorCheckStatus::Warn
+        } else {
+            DoctorCheckStatus::Warn
+        };
+        let message = if found {
+            format!("{tool} is on PATH")
+        } else if tool == "orient" {
+            "orient is not on PATH for new shell-native agents".to_string()
+        } else {
+            format!("{tool} is not on PATH; live fallback search may be less capable")
+        };
+        checks.push(doctor_check(format!("tool:{tool}"), status, message, None));
+    }
+
+    if let Some(index) = config.index.as_ref() {
+        match FastIndex::load(index) {
+            Ok(index_data) => match index_data.freshness() {
+                Ok(freshness) => {
+                    let stale = freshness.stale;
+                    let status_value = serde_json::to_value(&freshness).ok();
+                    checks.push(doctor_check(
+                        "index",
+                        if stale {
+                            DoctorCheckStatus::Warn
+                        } else {
+                            DoctorCheckStatus::Ok
+                        },
+                        if stale {
+                            format!("index is stale: {}", index.display())
+                        } else {
+                            format!("index is fresh: {}", index.display())
+                        },
+                        status_value.clone(),
+                    ));
+                    if stale {
+                        commands.push(format!(
+                            "orient refresh-index --repo {} --index {}",
+                            shell_quote_path(&index_data.root),
+                            shell_quote_path(index)
+                        ));
+                    }
+                    index_status = status_value;
+                }
+                Err(error) => checks.push(doctor_check(
+                    "index",
+                    DoctorCheckStatus::Error,
+                    format!(
+                        "index freshness check failed for {}: {error}",
+                        index.display()
+                    ),
+                    None,
+                )),
+            },
+            Err(error) => checks.push(doctor_check(
+                "index",
+                DoctorCheckStatus::Error,
+                format!("index could not be loaded: {} ({error})", index.display()),
+                None,
+            )),
+        }
+    }
+
+    if let Some(index_dir) = config.index_dir.as_ref() {
+        match shard_status(index_dir) {
+            Ok(status) => {
+                let stale = status.stale;
+                let status_value = serde_json::to_value(&status).ok();
+                checks.push(doctor_check(
+                    "shards",
+                    if stale {
+                        DoctorCheckStatus::Warn
+                    } else {
+                        DoctorCheckStatus::Ok
+                    },
+                    if stale {
+                        format!("shard directory is stale: {}", index_dir.display())
+                    } else {
+                        format!("shard directory is fresh: {}", index_dir.display())
+                    },
+                    status_value.clone(),
+                ));
+                if stale {
+                    commands.push(format!(
+                        "orient refresh-shards --index-dir {}",
+                        shell_quote_path(index_dir)
+                    ));
+                }
+                shard_status_value = status_value;
+            }
+            Err(error) => checks.push(doctor_check(
+                "shards",
+                DoctorCheckStatus::Error,
+                format!(
+                    "shard directory could not be inspected: {} ({error})",
+                    index_dir.display()
+                ),
+                None,
+            )),
+        }
+    }
+
+    let daemon_result = if let Some(socket) = config.socket.as_ref() {
+        daemon_status_unix(socket).map(|status| (status, unix_client_command(socket)))
+    } else {
+        daemon_status_tcp(&config.addr).map(|status| (status, tcp_client_command(&config.addr)))
+    };
+    match daemon_result {
+        Ok((mut status, client_command)) => {
+            retarget_client_cli_commands(&mut status, &client_command);
+            let default_surface = status
+                .get("search_auto_default")
+                .and_then(|value| value.get("surface"))
+                .and_then(Value::as_str)
+                .unwrap_or("unknown");
+            checks.push(doctor_check(
+                "daemon",
+                DoctorCheckStatus::Ok,
+                format!("daemon reachable; search_auto default surface is {default_surface}"),
+                Some(status.clone()),
+            ));
+            daemon_status = Some(status);
+        }
+        Err(error) => {
+            checks.push(doctor_check(
+                "daemon",
+                DoctorCheckStatus::Warn,
+                format!("daemon is not reachable: {error}"),
+                None,
+            ));
+            if let Some(socket) = config.socket.as_ref() {
+                if let Some(index_dir) = config.index_dir.as_ref() {
+                    commands.push(format!(
+                        "orient serve-unix --socket {} --index-dir {}",
+                        shell_quote_path(socket),
+                        shell_quote_path(index_dir)
+                    ));
+                } else if let Some(index) = config.index.as_ref() {
+                    commands.push(format!(
+                        "orient serve-unix --socket {} --index {}",
+                        shell_quote_path(socket),
+                        shell_quote_path(index)
+                    ));
+                }
+            } else if let Some(index_dir) = config.index_dir.as_ref() {
+                commands.push(format!(
+                    "orient serve-tcp --addr {} --index-dir {}",
+                    shell_quote(&config.addr),
+                    shell_quote_path(index_dir)
+                ));
+            } else if let Some(index) = config.index.as_ref() {
+                commands.push(format!(
+                    "orient serve-tcp --addr {} --index {}",
+                    shell_quote(&config.addr),
+                    shell_quote_path(index)
+                ));
+            }
+        }
+    }
+
+    if config.index.is_none() && config.index_dir.is_none() {
+        recommendations.push(
+            "pass --index or --index-dir to verify the exact shared search target".to_string(),
+        );
+        commands.push(
+            "orient ensure-shards --discover-root ~/Documents/Projects --output-dir /tmp/orient-shards --family-limit 2".to_string(),
+        );
+        commands.push(format!(
+            "orient serve-tcp --addr {} --index-dir /tmp/orient-shards",
+            shell_quote(&config.addr)
+        ));
+    }
+    if daemon_status.is_some() {
+        commands.push(if config.socket.is_some() {
+            "orient client-jsonl --socket <socket>".to_string()
+        } else {
+            format!("orient client-jsonl --addr {}", shell_quote(&config.addr))
+        });
+    }
+
+    recommendations.push(
+        "agents should call daemon_status or search_auto before falling back to scattered shell search"
+            .to_string(),
+    );
+
+    let ok = !checks
+        .iter()
+        .any(|check| check.status == DoctorCheckStatus::Error);
+    commands.sort();
+    commands.dedup();
+    DoctorReport {
+        ok,
+        checks,
+        recommendations,
+        commands,
+        daemon_status,
+        index_status,
+        shard_status: shard_status_value,
+    }
+}
+
+fn doctor_check(
+    name: impl Into<String>,
+    status: DoctorCheckStatus,
+    message: impl Into<String>,
+    details: Option<Value>,
+) -> DoctorCheck {
+    DoctorCheck {
+        name: name.into(),
+        status,
+        message: message.into(),
+        details,
+    }
+}
+
+fn print_doctor_report(report: &DoctorReport) -> Result<()> {
+    println!(
+        "Orient doctor: {}",
+        if report.ok {
+            "healthy"
+        } else {
+            "needs attention"
+        }
+    );
+    for check in &report.checks {
+        let label = match check.status {
+            DoctorCheckStatus::Ok => "ok",
+            DoctorCheckStatus::Warn => "warn",
+            DoctorCheckStatus::Error => "error",
+        };
+        println!("[{label}] {}: {}", check.name, check.message);
+    }
+    if !report.recommendations.is_empty() {
+        println!();
+        println!("Recommendations:");
+        for recommendation in &report.recommendations {
+            println!("- {recommendation}");
+        }
+    }
+    if !report.commands.is_empty() {
+        println!();
+        println!("Commands:");
+        for command in &report.commands {
+            println!("- {command}");
+        }
+    }
+    Ok(())
+}
+
+fn repo_has_git_metadata(path: &Path) -> bool {
+    path.ancestors()
+        .any(|ancestor| ancestor.join(".git").exists())
+}
+
+fn command_in_path(name: &str) -> bool {
+    let Some(path) = env::var_os("PATH") else {
+        return false;
+    };
+    env::split_paths(&path).any(|dir| {
+        let candidate = dir.join(name);
+        if candidate.is_file() {
+            return true;
+        }
+        #[cfg(windows)]
+        {
+            dir.join(format!("{name}.exe")).is_file()
+        }
+        #[cfg(not(windows))]
+        {
+            false
+        }
+    })
+}
+
+fn shell_quote_path(path: &Path) -> String {
+    shell_quote(&path.to_string_lossy())
+}
+
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 fn client_jsonl_stream(stream: impl Read + Write) -> Result<()> {

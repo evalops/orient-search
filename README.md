@@ -36,6 +36,7 @@ Give an agent the generated local rule snippet:
 ```bash
 orient agent-instructions --index-dir /tmp/orient-shards
 orient agent-guide --index-dir /tmp/orient-shards
+orient doctor --index-dir /tmp/orient-shards
 orient client-jsonl
 ```
 
