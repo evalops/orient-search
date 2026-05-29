@@ -24,22 +24,18 @@ The rule should tell agents:
 - For CLI use, prefer bare `orient search-auto ...`; it uses the warm TCP
   daemon first when no explicit target is supplied and falls back locally when
   no daemon is reachable. From inside a git checkout, bare CLI searches are
-  scoped to that checkout in the shared shard daemon. Use `--no-daemon` only
-  when forcing current-directory fallback.
-- For JSON-lines or MCP-style clients, include `"cwd"` on no-target
-  `search`, `search_batch`, `search_auto`, `search_auto_batch`, `repo_map`,
-  `search_plan`, and `find_symbol` calls so the shared daemon applies the same
-  current-checkout scope. Include it on no-target `read_range`, `read_ranges`,
-  `related_files`, and `related_symbols` when opening context manually rather
-  than following a returned request.
+  scoped to that checkout. Use `--no-daemon` only when forcing
+  current-directory fallback.
+- For JSON-lines or MCP-style clients, include `cwd` on no-target search, map,
+  plan, symbol, read, and related-file calls so the shared daemon applies the
+  same checkout scope.
 - Follow returned `read_*`, `related_*`, `repo_map_request`, and
   `query_plan_request` objects directly.
 - When opening context manually from a line inside a definition, pass
   `scope:"symbol"` on `read_range` or `read_ranges` so the returned window
   starts from the nearest enclosing function, class, or type definition.
-- Use `refresh_if_stale:true` when indexed files may have changed. With `cwd`
-  on a shared shard daemon, Orient refreshes the active checkout's shard rather
-  than rebuilding every warmed repo.
+- Use `refresh_if_stale:true` when indexed files may have changed. With `cwd`,
+  Orient refreshes only the active checkout's shard.
 - Treat generated hits as searchable but lower-priority by default; use
   `generated:true` / `is:generated` only when intentionally inspecting
   generated output.

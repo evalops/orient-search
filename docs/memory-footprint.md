@@ -19,6 +19,9 @@ Each index contains:
 That tradeoff is intentional: agents can inspect search hits quickly while a
 shared daemon amortizes load cost across local clients.
 
+Indexes contain source text. Treat them like local build artifacts for the
+repositories they represent.
+
 ## Inspect It
 
 ```bash
@@ -44,10 +47,9 @@ Useful counters:
   shard indexes
 - `largest_shards`: largest shard indexes in a shard directory
 
-`manifest.json` is intentionally slim and keeps only repo identity, roots,
-aliases, git metadata, and index filenames. Dense sketches and route filters
-live in binary sidecars so agents do not pay JSON parse costs for hot-path
-searches.
+`manifest.json` is intentionally slim and keeps repo identity, aliases, git
+metadata, and index filenames. Dense sketches and route filters live in binary
+sidecars so agents do not pay JSON parse costs for hot-path searches.
 
 ## Operating Defaults
 
@@ -65,7 +67,8 @@ Use `--family-limit 1` for a smaller representative shard set. Increase it when
 multiple active worktrees matter.
 
 Keep generated indexes outside the repo, such as under `/tmp` or another local
-cache directory. Do not commit them.
+cache directory. Do not commit them or sync them to locations where the source
+itself would not belong.
 
 Generated source and bundle files are still indexed so agents can inspect them
 when needed, but they are demoted in normal ranking. Use `generated:true` or

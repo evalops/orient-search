@@ -6,7 +6,7 @@ code quickly without repeated filesystem scans.
 
 ## Shared Daemon
 
-Run one warmed daemon for a repo set, then point local agents at it:
+Run one warmed daemon for the repos an agent is likely to touch:
 
 ```bash
 cargo install --git https://github.com/evalops/orient-search
@@ -21,7 +21,7 @@ orient serve-tcp \
   --index-dir /tmp/orient-shards
 ```
 
-For each client:
+Then verify the daemon and generate the short agent rule:
 
 ```bash
 orient doctor --index-dir /tmp/orient-shards
@@ -30,8 +30,8 @@ orient daemon-status
 orient daemon-status --format json
 ```
 
-`daemon-status` reports a compact warmed-cache summary. Add `--format json` for
-copyable first requests and target details.
+`daemon-status` reports what is warmed. Add `--format json` for copyable
+first requests and target details.
 
 ## Search
 
@@ -51,16 +51,11 @@ daemon request is scoped to that checkout so multi-repo shard daemons stay
 focused on the agent's current task. Use `--daemon-addr` for another TCP daemon
 or `--no-daemon` to force local fallback.
 
-JSON-lines and MCP-style clients can pass `"cwd": "/path/inside/checkout"` to
-no-target `search`, `search_batch`, `search_auto`, `search_auto_batch`,
-`repo_map`, `search_plan`, or `find_symbol` calls for the same scoped-daemon
-behavior. No-target
-`read_range`, `read_ranges`, `related_files`, and `related_symbols` also accept
-`cwd` so manual context calls resolve inside the agent's active checkout.
-When `cwd` scopes a warmed shard daemon to one checkout, `refresh_if_stale:true`
-refreshes that checkout's shard instead of rebuilding every warmed repo.
-`shard_status` also accepts `cwd` or an absolute `repo_filter` so shared
-daemons can answer freshness for one checkout without opening unrelated shards.
+JSON-lines and MCP-style clients can pass `cwd` on no-target search, map, plan,
+symbol, read, and related-file calls. The daemon uses that checkout as the
+default scope, which keeps shared multi-repo daemons focused on the current
+task. With the same scope, `refresh_if_stale:true` refreshes only that repo's
+shard.
 
 Useful filters: `repo:`, `path:`/`dir:`, `file:`, `lang:`, `ext:`, `symbol:`,
 `kind:`/`type:`, `dep:`, `import:`, `test:`, `generated:`, `code:`,
@@ -96,8 +91,8 @@ definition instead of opening an exact line window.
 ## Footprint
 
 Orient stores source snapshots and line offsets in persisted indexes so bounded
-reads stay fast even when served by a shared daemon. This is local-only data:
-Orient does not collect telemetry.
+reads stay fast even when served by a shared daemon. Keep indexes in a local
+cache and out of source control. Orient does not collect telemetry.
 
 Use:
 
@@ -105,10 +100,10 @@ Use:
 orient shard-status --index-dir /tmp/orient-shards --summary
 ```
 
-The summary reports persisted index size, represented source size, snapshot
-bytes, line-offset bytes, posting counts, compressed posting bytes, and largest
-shards. Indexes are usually larger than source because they keep enough local
-state for fast snippets and reads.
+The summary reports index size, represented source size, snapshot bytes,
+line-offset bytes, posting counts, compressed posting bytes, and largest shards.
+Indexes are usually larger than source because they keep enough local state for
+fast snippets and reads.
 
 ## Build And Test
 

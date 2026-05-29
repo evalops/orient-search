@@ -1,8 +1,8 @@
 # Shared Daemon
 
-Run one warmed Orient daemon for a repo set so local agents share the same repo
-maps, indexes, query plans, and bounded reads. The daemon is local-only and does
-not collect telemetry.
+Run one warmed Orient daemon for the repos agents are actively editing. Local
+agents share repo maps, indexes, query plans, and bounded reads without each one
+rescanning the same files. The daemon stays local and does not collect telemetry.
 
 ## Start
 
@@ -46,25 +46,18 @@ The generated rule should keep agents on this loop:
 - Start with `daemon_status` or `agent_guide`.
 - Use `search_auto` for normal lookup and `search_auto_batch` for alternate
   query phrasings.
-- From shell, bare `orient search-auto ...` and `orient search-auto-batch ...`
-  use the TCP daemon first when no explicit target is supplied. Pass
-  `--daemon-addr` for a non-default daemon or `--no-daemon` to force
-  current-directory fallback. When the shell is inside a git checkout, the
-  daemon request is scoped to that checkout.
-- From JSON-lines or MCP-style clients, pass `"cwd"` on no-target
-  `search`, `search_batch`, `search_auto`, `search_auto_batch`, `repo_map`,
-  `search_plan`, and `find_symbol` requests to get the same current-checkout
-  scope against the shared daemon. No-target `read_range`, `read_ranges`,
-  `related_files`, and `related_symbols` requests also accept `cwd` for manual
-  context calls.
+- From shell, use bare `orient search-auto ...` or `orient search-auto-batch
+  ...`. They try the default TCP daemon first and fall back to the current
+  directory when no daemon is reachable.
+- From JSON-lines or MCP-style clients, pass `cwd` on no-target search, map,
+  plan, symbol, read, and related-file calls. The daemon scopes those requests
+  to the active checkout.
 - Follow returned `read_*`, `related_*`, `repo_map_request`, and
   `query_plan_request` objects directly.
-- Pass `refresh_if_stale:true` when live files may have changed. With `cwd`
-  scoped to the active checkout, this refreshes that checkout's shard instead
-  of rebuilding every warmed repo.
-- Call `shard_status` with `cwd` or an absolute `repo_filter` when several
-  agents share one shard daemon and only the active checkout's freshness
-  matters.
+- Pass `refresh_if_stale:true` when live files may have changed. With `cwd`,
+  Orient refreshes only the active checkout's shard.
+- Call `shard_status` with `cwd` or `repo_filter` when only one repo's
+  freshness matters.
 - Treat generated bundle output as searchable but lower-priority by default;
   use `generated:true` only when intentionally inspecting generated files.
 - Fall back to shell search only when Orient is unavailable or unhelpful.
@@ -93,3 +86,10 @@ orient refresh-shards --index-dir /tmp/orient-shards
 repos and refreshes existing shards without shrinking the shard set. Use
 `index-shards --force` only when intentionally replacing a shard directory.
 Keep shard directories in a local cache, not in source control.
+
+## Local Data
+
+Shard directories contain source snapshots and line tables so reads can be
+served without reopening every file. Treat them like local build artifacts:
+place them in a cache directory, do not commit them, and do not copy them to
+shared storage unless the indexed source is allowed there too.

@@ -48,11 +48,32 @@ For many repos:
 {"id":"guide","tool":"agent_guide","arguments":{"index_dir":"/tmp/orient-shards"}}
 ```
 
-`daemon_status`, or the direct CLI wrapper `orient daemon-status`, reports warmed index and shard status so multiple local agents can confirm they share the intended codebase set. The default CLI output is compact; use `orient daemon-status --format json` for warmed-target details, `search_auto_default`, and copyable `default_requests`. When exactly one index or shard directory is warmed, indexed and shard tools marked with `daemon_default.source` may omit `index` or `index_dir`; otherwise pass the target explicitly. `search_auto` and `search_auto_batch` use an explicit `index_dir`, `index`, or `repo` first, then one warmed daemon target, then live fallback search from the daemon runtime.
+`daemon_status`, or the direct CLI wrapper `orient daemon-status`, reports the
+daemon's warmed indexes and shard directories. The default CLI output is compact;
+use `orient daemon-status --format json` for warmed-target details,
+`search_auto_default`, and copyable `default_requests`.
+
+When exactly one index or shard directory is warmed, indexed and shard tools
+marked with `daemon_default.source` may omit `index` or `index_dir`; otherwise
+pass the target explicitly. `search_auto` and `search_auto_batch` use an
+explicit `index_dir`, `index`, or `repo` first, then one warmed daemon target,
+then live fallback search from the daemon runtime.
 
 Generated follow-up objects such as `read_request`, `read_batch_request`, `related_request`, `related_symbols_request`, `repo_map_request`, `query_plan_request`, and query-plan `retry_requests` are complete tool requests. They include an `id`, `tool`, `arguments`, raw `jsonl`, a shell-native `client_cli` pipe for `orient client-jsonl`, and, when there is a compact human CLI equivalent, a `cli` hint.
 
-Use `index_status` or `shard_status` when live files may have changed since indexing. They report added, changed, and deleted files so an agent can call `refresh_index` or `refresh_shards` before trusting indexed results. `indexed_search_code` and `search_shards` also accept `refresh_if_stale:true` for a one-call freshness check and refresh before search. When a no-target daemon request includes `cwd` and scopes to one warmed shard repo, `refresh_if_stale:true` refreshes only that repo's shard. `shard_status` accepts `cwd` or an absolute `repo_filter` for the same current-checkout status check, avoiding unrelated shard loads in large shared daemons. Index, shard, and daemon status outputs include footprint counters such as `index_bytes`, `source_bytes`, `content_snapshot_bytes`, `line_offset_bytes`, `posting_entries`, and `compressed_posting_bytes`; shard status also reports compact route-sidecar bytes, routeable exact/trigram term counts, and the number of shards with long-substring route filters. Use `shard_status --summary` for large shared shard sets. See [Memory and footprint](memory-footprint.md) for the disk/memory tradeoffs behind those counters.
+Use `index_status` or `shard_status` when live files may have changed since
+indexing. They report added, changed, and deleted files so an agent can refresh
+before trusting indexed results. `indexed_search_code` and `search_shards` also
+accept `refresh_if_stale:true` for a one-call freshness check and refresh before
+search.
+
+For shared shard daemons, pass `cwd` or `repo_filter` when the agent only needs
+freshness for one checkout. Status outputs include footprint counters such as
+`index_bytes`, `source_bytes`, `content_snapshot_bytes`, `line_offset_bytes`,
+`posting_entries`, and `compressed_posting_bytes`; shard status also reports
+route-sidecar counters. Use `shard_status --summary` for large shared shard
+sets. See [Memory and footprint](memory-footprint.md) for the disk/memory
+tradeoffs behind those counters.
 
 Use `ensure_shards` for shard directories shared by several local agents. The lower-level `index_shards` rebuild path refuses to overwrite an existing shard directory when the requested repo set would remove existing shards; pass `force:true` or `orient index-shards --force` only when intentionally replacing that directory.
 
@@ -80,14 +101,10 @@ available, then searches the current directory as a live repo if no daemon is
 reachable. Use `--daemon-addr` for another TCP daemon or `--no-daemon` to force
 current-directory fallback. `orient search-auto-batch` follows the same
 daemon-first rule.
-Protocol clients should pass `"cwd": "/path/inside/checkout"` on no-target
-`search`, `search_batch`, `search_auto`, `search_auto_batch`, `repo_map`,
-`search_plan`, and `find_symbol` requests so a shared shard daemon scopes
-results to the agent's active checkout. Explicit `repo`, `index`, `index_dir`,
-or `repo_filter` arguments still win.
-No-target `read_range`, `read_ranges`, `related_files`, and `related_symbols`
-requests also accept `cwd` for manual context calls; returned follow-up
-requests already include an explicit target.
+Protocol clients should pass `cwd` on no-target search, map, plan, symbol, read,
+and related-file requests so a shared shard daemon scopes results to the active
+checkout. Explicit `repo`, `index`, `index_dir`, or `repo_filter` arguments still
+win. Returned follow-up requests already include an explicit target.
 For manual context reads, add `"scope":"symbol"` to `read_range` or to a
 `read_ranges` request or range entry when the agent has a line inside a
 function, class, or type and wants the window anchored at that definition.
