@@ -1025,9 +1025,7 @@ fn collect_filter_only_candidates_from_path_command(
         let line = match lines_rx.recv_timeout(wait_for) {
             Ok(line) => line?,
             Err(mpsc::RecvTimeoutError::Timeout) => {
-                if child.try_wait()?.is_some() {
-                    break;
-                }
+                let _ = child.try_wait()?;
                 continue;
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
@@ -1490,9 +1488,7 @@ fn search_repo_ripgrep(
         let line = match lines_rx.recv_timeout(wait_for) {
             Ok(line) => line?,
             Err(mpsc::RecvTimeoutError::Timeout) => {
-                if child.try_wait()?.is_some() {
-                    break;
-                }
+                let _ = child.try_wait()?;
                 continue;
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
