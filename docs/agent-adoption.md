@@ -49,6 +49,8 @@ The rule should tell agents:
   checkout scope.
 - Follow returned `read_*`, `related_*`, `repo_map_request`, and
   `query_plan_request` objects directly.
+- Prefer `next_read_batch_request` after `search_auto` or `search_auto_batch`;
+  it points at normal hits when present and retry hits after automatic repair.
 - When opening context manually from a line inside a definition, pass
   `scope:"symbol"` on `read_range` or `read_ranges` so the returned window
   starts from the nearest enclosing function, class, or type definition.

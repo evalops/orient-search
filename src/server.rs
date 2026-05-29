@@ -90,6 +90,8 @@ struct SearchAutoResult {
     repo_map_request: ResultToolRequest,
     #[serde(skip_serializing_if = "Option::is_none")]
     read_batch_request: Option<ResultToolRequest>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    next_read_batch_request: Option<ResultToolRequest>,
     results: Vec<SearchResult>,
 }
 
@@ -1214,6 +1216,7 @@ pub fn agent_guide(
             "Set retry_if_empty:true on search_auto or search_auto_batch to run primary_retry_request once and receive primary_retry_result in the same call.",
             "Use search_auto.query_plan_request or a search_auto_batch item query_plan_request when results are empty or noisy.",
             "Use search_auto.repo_map_request or a search_auto_batch item repo_map_request when the agent needs entrypoints, tests, commands, or top symbols for the chosen surface.",
+            "Use search_auto.next_read_batch_request or a search_auto_batch item next_read_batch_request as the preferred immediate read follow-up after automatic retries.",
             "Use search_auto.read_batch_request, a search_auto_batch item read_batch_request, or a search batch item read_batch_request to read top ranges in one call.",
             "Use result.read_request for one bounded file range.",
             "Batch several result.read_range objects with read_ranges, read_index_ranges, or read_shard_ranges.",
@@ -1257,7 +1260,7 @@ Trust `daemon_status.search_auto_default` to see whether no-target `search_auto`
 When calling `search`, `search_batch`, `search_auto`, `search_auto_batch`, `repo_map`, `search_plan`, `find_symbol`, `read_range`, `read_ranges`, `related_files`, or `related_symbols` through JSON-lines/MCP without an explicit target, pass `cwd` so shared shard daemons scope results to the current git checkout.\n\
 Use query filters directly: `file:`, `path:`, `lang:`, `ext:`, `symbol:`, `type:`, `repo:`, `test:`, `generated:`, `code:`, `is:code`, `is:docs`, quoted literals, and negative filters like `-path:vendor` or `-is:generated`.\n\
 Generated paths, including hashed JavaScript bundles, are demoted by default; use `generated:true` or `is:generated` when intentionally inspecting generated output.\n\
-After search, follow returned `read_batch_request`, `read_request`, `related_request`, and `related_symbols_request`; each includes `jsonl` and `client_cli` for direct replay through `orient client-jsonl`.\n\
+After search, follow returned `next_read_batch_request`, `read_batch_request`, `read_request`, `related_request`, and `related_symbols_request`; each includes `jsonl` and `client_cli` for direct replay through `orient client-jsonl`.\n\
 For manual context reads from a line inside a definition, pass `scope:\"symbol\"` so `read_range` or `read_ranges` anchors at the nearest function, class, or type definition.\n\
 When results are empty, noisy, or suspicious, use the returned `query_plan_request` or inline `query_plan_result` before broadening the search; pass `retry_if_empty:true` when you want Orient to execute the promoted retry once and return `primary_retry_result` immediately.\n\
 Orient is local code search only and does not collect telemetry.",
@@ -2312,6 +2315,16 @@ fn primary_retry_read_batch_request(
 ) -> Option<ResultToolRequest> {
     let base_arguments = retry_read_base_arguments(request)?;
     result_value_read_batch_request(result, "read_ranges", base_arguments)
+}
+
+fn promoted_next_read_batch_request(
+    read_batch_request: &Option<ResultToolRequest>,
+    primary_retry_result: &Option<Value>,
+) -> Option<ResultToolRequest> {
+    read_batch_request.clone().or_else(|| {
+        let value = primary_retry_result.as_ref()?.get("read_batch_request")?;
+        serde_json::from_value(value.clone()).ok()
+    })
 }
 
 fn retry_read_base_arguments(request: &ResultToolRequest) -> Option<Map<String, Value>> {
@@ -5017,6 +5030,10 @@ impl ToolRuntime {
             results.is_empty(),
             primary_retry_request.as_ref(),
         )?;
+        let read_batch_request =
+            result_read_batch_request(&results, "read_ranges", read_request_args("repo", &repo));
+        let next_read_batch_request =
+            promoted_next_read_batch_request(&read_batch_request, &primary_retry_result);
         Ok(SearchAutoResult {
             query: query.to_string(),
             surface: "fallback".to_string(),
@@ -5035,11 +5052,8 @@ impl ToolRuntime {
             primary_retry_request,
             primary_retry_result,
             repo_map_request: auto_repo_map_request("repo_map", "repo", &repo, arguments, None),
-            read_batch_request: result_read_batch_request(
-                &results,
-                "read_ranges",
-                read_request_args("repo", &repo),
-            ),
+            read_batch_request,
+            next_read_batch_request,
             results,
         })
     }
@@ -5109,6 +5123,13 @@ impl ToolRuntime {
             &shard_scope_filters,
             query,
         )?;
+        let read_batch_request = result_read_batch_request(
+            &results,
+            "read_ranges",
+            read_request_args("index_dir", &index_dir),
+        );
+        let next_read_batch_request =
+            promoted_next_read_batch_request(&read_batch_request, &primary_retry_result);
         Ok(SearchAutoResult {
             query: query.to_string(),
             surface: "shards".to_string(),
@@ -5133,11 +5154,8 @@ impl ToolRuntime {
                 arguments,
                 Some(&shard_scope_filters),
             ),
-            read_batch_request: result_read_batch_request(
-                &results,
-                "read_ranges",
-                read_request_args("index_dir", &index_dir),
-            ),
+            read_batch_request,
+            next_read_batch_request,
             results,
         })
     }
@@ -5212,6 +5230,13 @@ impl ToolRuntime {
             arguments,
             query,
         )?;
+        let read_batch_request = result_read_batch_request(
+            &results,
+            "read_ranges",
+            read_request_args("index", &index_path),
+        );
+        let next_read_batch_request =
+            promoted_next_read_batch_request(&read_batch_request, &primary_retry_result);
         Ok(SearchAutoResult {
             query: query.to_string(),
             surface: "indexed".to_string(),
@@ -5236,11 +5261,8 @@ impl ToolRuntime {
                 arguments,
                 None,
             ),
-            read_batch_request: result_read_batch_request(
-                &results,
-                "read_ranges",
-                read_request_args("index", &index_path),
-            ),
+            read_batch_request,
+            next_read_batch_request,
             results,
         })
     }

@@ -113,6 +113,9 @@ JSON-lines requests look like this:
 
 Every search result includes ready-to-send read, related-file, related-symbol,
 and query-plan follow-ups with `jsonl`, `client_cli`, and compact CLI hints.
+`search_auto` and `search_auto_batch` also expose `next_read_batch_request`,
+which points to the best immediate batch read after normal results or an
+automatic retry.
 For manual context reads, pass `scope:"symbol"` or `orient read-range --scope
 symbol` to anchor the returned window at the nearest function, class, or type
 definition instead of opening an exact line window.

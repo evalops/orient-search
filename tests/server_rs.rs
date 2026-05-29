@@ -1724,6 +1724,10 @@ fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
         auto_retry["primary_retry_result"]["read_batch_request"]["arguments"]["ranges"][0]["path"],
         serde_json::json!("src/auth.rs")
     );
+    assert_eq!(
+        auto_retry["next_read_batch_request"],
+        auto_retry["primary_retry_result"]["read_batch_request"]
+    );
 
     let git_scope_miss = runtime.dispatch(ToolRequest {
         id: serde_json::json!("git-scope-miss"),
@@ -1882,6 +1886,10 @@ fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
         auto_retry_indexed["primary_retry_result"]["read_batch_request"]["arguments"]["ranges"][0]
             ["path"],
         serde_json::json!("src/auth.rs")
+    );
+    assert_eq!(
+        auto_retry_indexed["next_read_batch_request"],
+        auto_retry_indexed["primary_retry_result"]["read_batch_request"]
     );
 
     let kind_typo = runtime.dispatch(ToolRequest {
@@ -6187,6 +6195,10 @@ fn runtime_search_auto_scopes_warmed_shards_to_client_cwd() {
     assert_eq!(
         retry["primary_retry_result"]["read_batch_request"]["arguments"]["ranges"][0]["path"],
         serde_json::json!("current-app/src/lib.rs")
+    );
+    assert_eq!(
+        retry["next_read_batch_request"],
+        retry["primary_retry_result"]["read_batch_request"]
     );
     let retry_read = runtime.dispatch(ToolRequest {
         id: serde_json::json!("search-auto-cwd-retry-read"),

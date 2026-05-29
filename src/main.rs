@@ -1866,6 +1866,21 @@ fn insert_optional_json_field(object: &mut Value, name: &str, value: Option<Valu
     }
 }
 
+fn promoted_cli_next_read_batch_request(
+    read_batch_request: &Option<ResultToolRequest>,
+    primary_retry_result: &Option<Value>,
+) -> Option<Value> {
+    read_batch_request
+        .as_ref()
+        .and_then(|request| serde_json::to_value(request).ok())
+        .or_else(|| {
+            primary_retry_result
+                .as_ref()?
+                .get("read_batch_request")
+                .cloned()
+        })
+}
+
 fn daemon_search_auto_arguments(
     query: &str,
     limit: usize,
@@ -2861,6 +2876,15 @@ fn run() -> Result<()> {
                     results.is_empty(),
                     primary_retry_request.as_ref(),
                 )?;
+                let read_batch_request = result_read_batch_request(
+                    &results,
+                    "read_shard_ranges",
+                    read_request_args("index_dir", &index_dir),
+                );
+                let next_read_batch_request = promoted_cli_next_read_batch_request(
+                    &read_batch_request,
+                    &primary_retry_result,
+                );
                 let mut output = serde_json::json!({
                     "query": query,
                     "surface": "shards",
@@ -2870,11 +2894,7 @@ fn run() -> Result<()> {
                         "arguments": {"index_dir": index_dir, "query": query}
                     },
                     "repo_map_request": shard_repo_map_request(&index_dir, &shard_scope_filters),
-                    "read_batch_request": result_read_batch_request(
-                        &results,
-                        "read_shard_ranges",
-                        read_request_args("index_dir", &index_dir)
-                    ),
+                    "read_batch_request": read_batch_request,
                     "results": results
                 });
                 insert_optional_json_field(&mut output, "query_plan_result", query_plan_result);
@@ -2888,6 +2908,11 @@ fn run() -> Result<()> {
                     &mut output,
                     "primary_retry_result",
                     primary_retry_result,
+                );
+                insert_optional_json_field(
+                    &mut output,
+                    "next_read_batch_request",
+                    next_read_batch_request,
                 );
                 println!("{}", serde_json::to_string(&output)?);
             } else if let Some(index_path) = index {
@@ -2942,6 +2967,15 @@ fn run() -> Result<()> {
                     results.is_empty(),
                     primary_retry_request.as_ref(),
                 )?;
+                let read_batch_request = result_read_batch_request(
+                    &results,
+                    "read_index_ranges",
+                    read_request_args("index", &index_path),
+                );
+                let next_read_batch_request = promoted_cli_next_read_batch_request(
+                    &read_batch_request,
+                    &primary_retry_result,
+                );
                 let mut output = serde_json::json!({
                     "query": query,
                     "surface": "indexed",
@@ -2954,11 +2988,7 @@ fn run() -> Result<()> {
                         "tool": "indexed_repo_map",
                         "arguments": {"index": index_path, "detail": "compact", "read_limit": DEFAULT_REPO_MAP_READ_BATCH_RANGES}
                     },
-                    "read_batch_request": result_read_batch_request(
-                        &results,
-                        "read_index_ranges",
-                        read_request_args("index", &index_path)
-                    ),
+                    "read_batch_request": read_batch_request,
                     "results": results
                 });
                 insert_optional_json_field(&mut output, "query_plan_result", query_plan_result);
@@ -2972,6 +3002,11 @@ fn run() -> Result<()> {
                     &mut output,
                     "primary_retry_result",
                     primary_retry_result,
+                );
+                insert_optional_json_field(
+                    &mut output,
+                    "next_read_batch_request",
+                    next_read_batch_request,
                 );
                 println!("{}", serde_json::to_string(&output)?);
             } else {
@@ -3020,6 +3055,15 @@ fn run() -> Result<()> {
                     results.is_empty(),
                     primary_retry_request.as_ref(),
                 )?;
+                let read_batch_request = result_read_batch_request(
+                    &results,
+                    "read_ranges",
+                    read_request_args("repo", &repo),
+                );
+                let next_read_batch_request = promoted_cli_next_read_batch_request(
+                    &read_batch_request,
+                    &primary_retry_result,
+                );
                 let mut output = serde_json::json!({
                     "query": query,
                     "surface": "fallback",
@@ -3032,11 +3076,7 @@ fn run() -> Result<()> {
                         "tool": "repo_map",
                         "arguments": {"repo": repo, "detail": "compact", "read_limit": DEFAULT_REPO_MAP_READ_BATCH_RANGES}
                     },
-                    "read_batch_request": result_read_batch_request(
-                        &results,
-                        "read_ranges",
-                        read_request_args("repo", &repo)
-                    ),
+                    "read_batch_request": read_batch_request,
                     "results": results
                 });
                 insert_optional_json_field(&mut output, "query_plan_result", query_plan_result);
@@ -3050,6 +3090,11 @@ fn run() -> Result<()> {
                     &mut output,
                     "primary_retry_result",
                     primary_retry_result,
+                );
+                insert_optional_json_field(
+                    &mut output,
+                    "next_read_batch_request",
+                    next_read_batch_request,
                 );
                 println!("{}", serde_json::to_string(&output)?);
             }
@@ -3136,6 +3181,15 @@ fn run() -> Result<()> {
                         results.is_empty(),
                         primary_retry_request.as_ref(),
                     )?;
+                    let read_batch_request = result_read_batch_request(
+                        &results,
+                        "read_shard_ranges",
+                        read_request_args("index_dir", &index_dir),
+                    );
+                    let next_read_batch_request = promoted_cli_next_read_batch_request(
+                        &read_batch_request,
+                        &primary_retry_result,
+                    );
                     let mut item = serde_json::json!({
                         "query": query,
                         "surface": "shards",
@@ -3145,11 +3199,7 @@ fn run() -> Result<()> {
                             "arguments": {"index_dir": index_dir, "query": query}
                         },
                         "repo_map_request": shard_repo_map_request(&index_dir, &shard_scope_filters),
-                        "read_batch_request": result_read_batch_request(
-                            &results,
-                            "read_shard_ranges",
-                            read_request_args("index_dir", &index_dir)
-                        ),
+                        "read_batch_request": read_batch_request,
                         "results": results
                     });
                     insert_optional_json_field(&mut item, "query_plan_result", query_plan_result);
@@ -3163,6 +3213,11 @@ fn run() -> Result<()> {
                         &mut item,
                         "primary_retry_result",
                         primary_retry_result,
+                    );
+                    insert_optional_json_field(
+                        &mut item,
+                        "next_read_batch_request",
+                        next_read_batch_request,
                     );
                     batch.push(item);
                 }
@@ -3220,6 +3275,15 @@ fn run() -> Result<()> {
                         results.is_empty(),
                         primary_retry_request.as_ref(),
                     )?;
+                    let read_batch_request = result_read_batch_request(
+                        &results,
+                        "read_index_ranges",
+                        read_request_args("index", &index_path),
+                    );
+                    let next_read_batch_request = promoted_cli_next_read_batch_request(
+                        &read_batch_request,
+                        &primary_retry_result,
+                    );
                     let mut item = serde_json::json!({
                         "query": query,
                         "surface": "indexed",
@@ -3232,11 +3296,7 @@ fn run() -> Result<()> {
                             "tool": "indexed_repo_map",
                             "arguments": {"index": index_path, "detail": "compact", "read_limit": DEFAULT_REPO_MAP_READ_BATCH_RANGES}
                         },
-                        "read_batch_request": result_read_batch_request(
-                            &results,
-                            "read_index_ranges",
-                            read_request_args("index", &index_path)
-                        ),
+                        "read_batch_request": read_batch_request,
                         "results": results
                     });
                     insert_optional_json_field(&mut item, "query_plan_result", query_plan_result);
@@ -3250,6 +3310,11 @@ fn run() -> Result<()> {
                         &mut item,
                         "primary_retry_result",
                         primary_retry_result,
+                    );
+                    insert_optional_json_field(
+                        &mut item,
+                        "next_read_batch_request",
+                        next_read_batch_request,
                     );
                     batch.push(item);
                 }
@@ -3301,6 +3366,15 @@ fn run() -> Result<()> {
                         results.is_empty(),
                         primary_retry_request.as_ref(),
                     )?;
+                    let read_batch_request = result_read_batch_request(
+                        &results,
+                        "read_ranges",
+                        read_request_args("repo", &repo),
+                    );
+                    let next_read_batch_request = promoted_cli_next_read_batch_request(
+                        &read_batch_request,
+                        &primary_retry_result,
+                    );
                     let mut item = serde_json::json!({
                         "query": query,
                         "surface": "fallback",
@@ -3313,11 +3387,7 @@ fn run() -> Result<()> {
                             "tool": "repo_map",
                             "arguments": {"repo": repo, "detail": "compact", "read_limit": DEFAULT_REPO_MAP_READ_BATCH_RANGES}
                         },
-                        "read_batch_request": result_read_batch_request(
-                            &results,
-                            "read_ranges",
-                            read_request_args("repo", &repo)
-                        ),
+                        "read_batch_request": read_batch_request,
                         "results": results
                     });
                     insert_optional_json_field(&mut item, "query_plan_result", query_plan_result);
@@ -3331,6 +3401,11 @@ fn run() -> Result<()> {
                         &mut item,
                         "primary_retry_result",
                         primary_retry_result,
+                    );
+                    insert_optional_json_field(
+                        &mut item,
+                        "next_read_batch_request",
+                        next_read_batch_request,
                     );
                     batch.push(item);
                 }
