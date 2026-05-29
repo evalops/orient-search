@@ -6173,7 +6173,6 @@ fn repo_map_read_ranges(map: &RepoMap) -> Vec<ResultReadRange> {
         .entrypoints
         .iter()
         .filter(|path| !is_manifest_file(path))
-        .chain(map.test_files.iter())
     {
         push_repo_map_range(
             &mut ranges,
@@ -6187,12 +6186,21 @@ fn repo_map_read_ranges(map: &RepoMap) -> Vec<ResultReadRange> {
         );
     }
 
-    for symbol in map
-        .top_symbols
-        .iter()
-        .chain(map.related_symbols.iter().map(|related| &related.symbol))
-    {
+    for symbol in repo_map_ordered_symbols(map) {
         push_repo_map_range(&mut ranges, &mut seen, symbol_read_range(symbol));
+    }
+
+    for path in &map.test_files {
+        push_repo_map_range(
+            &mut ranges,
+            &mut seen,
+            ResultReadRange {
+                path: path.clone(),
+                start: 1,
+                lines: DEFAULT_RELATED_FILE_READ_LINES,
+                scope: None,
+            },
+        );
     }
 
     for path in map
@@ -6221,6 +6229,32 @@ fn repo_map_read_ranges(map: &RepoMap) -> Vec<ResultReadRange> {
     }
 
     ranges
+}
+
+fn repo_map_ordered_symbols(map: &RepoMap) -> Vec<&Symbol> {
+    let symbols = map
+        .top_symbols
+        .iter()
+        .chain(map.related_symbols.iter().map(|related| &related.symbol))
+        .collect::<Vec<_>>();
+    let mut seen_paths = HashSet::new();
+    let mut ordered = Vec::with_capacity(symbols.len());
+    for symbol in &symbols {
+        if seen_paths.insert(symbol.path.clone()) {
+            ordered.push(*symbol);
+        }
+    }
+    for symbol in symbols {
+        if !ordered.iter().any(|ordered| {
+            ordered.path == symbol.path
+                && ordered.line == symbol.line
+                && ordered.name == symbol.name
+                && ordered.kind == symbol.kind
+        }) {
+            ordered.push(symbol);
+        }
+    }
+    ordered
 }
 
 fn push_repo_map_range(
@@ -7239,12 +7273,26 @@ mod tests {
             },
             entrypoints: vec!["Cargo.toml".to_string(), "src/main.rs".to_string()],
             test_files: vec!["tests/auth_test.rs".to_string()],
-            top_symbols: vec![Symbol {
-                name: "issue_token".to_string(),
-                kind: "function".to_string(),
-                path: "src/auth.rs".to_string(),
-                line: 42,
-            }],
+            top_symbols: vec![
+                Symbol {
+                    name: "issue_token".to_string(),
+                    kind: "function".to_string(),
+                    path: "src/auth.rs".to_string(),
+                    line: 42,
+                },
+                Symbol {
+                    name: "verify_token".to_string(),
+                    kind: "function".to_string(),
+                    path: "src/auth.rs".to_string(),
+                    line: 80,
+                },
+                Symbol {
+                    name: "invoice_total".to_string(),
+                    kind: "function".to_string(),
+                    path: "src/billing.rs".to_string(),
+                    line: 12,
+                },
+            ],
             related_files: Vec::new(),
             related_symbols: Vec::new(),
             read_batch_request: None,
@@ -7254,16 +7302,19 @@ mod tests {
             &mut map,
             "read_ranges",
             serde_json::Map::new(),
-            3,
+            4,
         );
 
         let request = map.read_batch_request.unwrap();
         let ranges = request.arguments["ranges"].as_array().unwrap();
-        assert_eq!(ranges.len(), 3);
+        assert_eq!(ranges.len(), 4);
         assert_eq!(ranges[0]["path"], serde_json::json!("src/main.rs"));
-        assert_eq!(ranges[1]["path"], serde_json::json!("tests/auth_test.rs"));
-        assert_eq!(ranges[2]["path"], serde_json::json!("src/auth.rs"));
+        assert_eq!(ranges[1]["path"], serde_json::json!("src/auth.rs"));
+        assert_eq!(ranges[1]["scope"], serde_json::json!("symbol"));
+        assert_eq!(ranges[2]["path"], serde_json::json!("src/billing.rs"));
         assert_eq!(ranges[2]["scope"], serde_json::json!("symbol"));
+        assert_eq!(ranges[3]["path"], serde_json::json!("src/auth.rs"));
+        assert_eq!(ranges[3]["start"], serde_json::json!(80));
         assert!(
             ranges
                 .iter()
