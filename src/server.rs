@@ -1040,7 +1040,7 @@ pub fn tool_manifest() -> Value {
         ),
         tool_entry(
             "find_shard_symbol_batch",
-            "Find several symbol definitions across a local multi-repo shard directory in one request.",
+            "Find several symbol definitions across a local multi-repo shard directory in one request. Each item with hits includes read_batch_request and next_action.",
             &["index_dir", "names"],
             SYMBOL_INDEX_OPTIONAL_ARGS,
         ),
@@ -1052,7 +1052,7 @@ pub fn tool_manifest() -> Value {
         ),
         tool_entry(
             "find_symbol_batch",
-            "Find several symbol definitions in a live repo, persistent index, or shard directory in one request.",
+            "Find several symbol definitions in a live repo, persistent index, or shard directory in one request. Each item with hits includes read_batch_request and next_action.",
             &["names"],
             SYMBOL_TARGET_OPTIONAL_ARGS,
         ),
@@ -1064,7 +1064,7 @@ pub fn tool_manifest() -> Value {
         ),
         tool_entry(
             "find_index_symbol_batch",
-            "Find several symbol definitions directly from a persistent index in one request.",
+            "Find several symbol definitions directly from a persistent index in one request. Each item with hits includes read_batch_request and next_action.",
             &["index", "names"],
             SYMBOL_INDEX_OPTIONAL_ARGS,
         ),
