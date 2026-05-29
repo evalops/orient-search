@@ -16,9 +16,10 @@ use crate::repo_index::{
 };
 use crate::shards::{
     ShardEntry, ShardManifest, ShardQueryPlan, ShardRepoMap, ShardSearchScope,
-    build_shards_with_force, ensure_shards, filter_repo_map_by_prefix, filters_for_shard_scope,
-    load_manifest, refresh_shards, related_query_without_shard_selectors,
-    resolve_shard_path_from_manifest, shard_search_scopes, shard_selection_miss_plan, shard_status,
+    append_shard_facet_repair_hints, build_shards_with_force, ensure_shards,
+    filter_repo_map_by_prefix, filters_for_shard_scope, load_manifest, refresh_shards,
+    related_query_without_shard_selectors, resolve_shard_path_from_manifest, shard_search_scopes,
+    shard_selection_miss_plan, shard_status,
 };
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use anyhow::{Context, Result, anyhow};
@@ -4304,6 +4305,7 @@ impl ToolRuntime {
         let mut plans =
             self.shard_query_plan_jobs_cached(index_dir, &shard_query, &filters, jobs)?;
         plans.sort_by(|left, right| left.name.cmp(&right.name));
+        append_shard_facet_repair_hints(&mut plans, &parsed.terms, &filters);
         Ok(plans)
     }
 
@@ -4391,6 +4393,9 @@ impl ToolRuntime {
             let index = self.cached_index(index_dir.join(&job.shard.index))?;
             for scope in &job.scopes {
                 let scoped_filters = filters_for_shard_scope(filters, scope.path_prefix.as_deref());
+                if !index.query_may_match(query, &scoped_filters) {
+                    continue;
+                }
                 for mut result in index.search_filtered(query, limit, &scoped_filters)? {
                     if let Some(prefix) = &scope.path_prefix {
                         if !result.path.starts_with(prefix) {

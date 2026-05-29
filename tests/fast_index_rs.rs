@@ -2979,6 +2979,61 @@ fn dependency_filters_scope_fallback_indexed_and_shard_search() {
 }
 
 #[test]
+fn indexed_query_prefilter_skips_impossible_shards_without_false_negatives() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/auth.rs"),
+        "pub struct SessionManager;\npub fn issue_token() -> &'static str { \"token\" }\n",
+    );
+    write(
+        &repo.path().join("Cargo.toml"),
+        "[package]\nname='prefilter'\nversion='0.1.0'\nedition='2024'\n",
+    );
+
+    let index = FastIndex::build(repo.path()).unwrap();
+    for query in [
+        "issue token",
+        "mode:any issue missing",
+        "symbol:SessionManager",
+        "kind:function issue token",
+        "path:auth issue",
+        "lang:rust issue",
+        "essionman",
+    ] {
+        assert!(
+            index.query_may_match(query, &SearchFilters::default()),
+            "prefilter rejected matching query {query:?}"
+        );
+        assert!(
+            !index
+                .search_filtered(query, 10, &SearchFilters::default())
+                .unwrap()
+                .is_empty(),
+            "fixture query should have results: {query:?}"
+        );
+    }
+
+    for query in [
+        "issue missing",
+        "kind:enum issue token",
+        "lang:typescript issue",
+        "definitely_absent_token",
+    ] {
+        assert!(
+            !index.query_may_match(query, &SearchFilters::default()),
+            "prefilter kept impossible query {query:?}"
+        );
+        assert!(
+            index
+                .search_filtered(query, 10, &SearchFilters::default())
+                .unwrap()
+                .is_empty(),
+            "impossible query unexpectedly had results: {query:?}"
+        );
+    }
+}
+
+#[test]
 fn test_filter_recognizes_common_multilanguage_test_paths() {
     let repo = tempfile::tempdir().unwrap();
     let test_paths = [

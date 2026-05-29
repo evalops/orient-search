@@ -740,6 +740,9 @@ fn search_shard_job_batch(
             .with_context(|| format!("load shard {}", job.shard.index))?;
         for scope in &job.scopes {
             let scoped_filters = filters_for_shard_scope(filters, scope.path_prefix.as_deref());
+            if !index.query_may_match(query, &scoped_filters) {
+                continue;
+            }
             for mut result in index.search_filtered(query, limit, &scoped_filters)? {
                 if let Some(prefix) = &scope.path_prefix {
                     if !result.path.starts_with(prefix) {
@@ -790,6 +793,7 @@ pub fn shard_query_plans(
     }
     let mut plans = shard_query_plan_jobs(index_dir, &shard_query, &filters, jobs)?;
     plans.sort_by(|left, right| left.name.cmp(&right.name));
+    append_shard_facet_repair_hints(&mut plans, &parsed.terms, &filters);
     Ok(plans)
 }
 
@@ -935,6 +939,155 @@ fn shard_query_plan_job_batch(
         }
     }
     Ok(plans)
+}
+
+pub(crate) fn append_shard_facet_repair_hints(
+    plans: &mut [ShardQueryPlan],
+    query_terms: &[String],
+    filters: &SearchFilters,
+) {
+    if plans.is_empty() {
+        return;
+    }
+    let total = plans.iter().map(shard_plan_weight).sum::<usize>();
+    if total < 16 {
+        return;
+    }
+
+    let mut hints = Vec::new();
+    if filters.repo.is_none() {
+        if let Some((repo, count)) = top_meaningful_weighted_facet(
+            plans
+                .iter()
+                .map(|plan| (plan.name.clone(), shard_plan_weight(plan))),
+            total,
+        ) {
+            hints.push(shard_facet_hint(
+                "narrow_by_repo",
+                "repo",
+                &repo,
+                count,
+                total,
+                query_terms,
+                filters,
+            ));
+        }
+    }
+    if filters.branch.is_none() {
+        if let Some((branch, count)) = top_meaningful_weighted_facet(
+            plans.iter().filter_map(|plan| {
+                plan.git
+                    .as_ref()
+                    .and_then(|git| git.branch.clone())
+                    .map(|branch| (branch, shard_plan_weight(plan)))
+            }),
+            total,
+        ) {
+            hints.push(shard_facet_hint(
+                "narrow_by_branch",
+                "branch",
+                &branch,
+                count,
+                total,
+                query_terms,
+                filters,
+            ));
+        }
+    }
+    if filters.origin.is_none() {
+        if let Some((origin, count)) = top_meaningful_weighted_facet(
+            plans.iter().filter_map(|plan| {
+                plan.git
+                    .as_ref()
+                    .and_then(|git| git.origin.clone())
+                    .map(|origin| (origin, shard_plan_weight(plan)))
+            }),
+            total,
+        ) {
+            hints.push(shard_facet_hint(
+                "narrow_by_origin",
+                "origin",
+                &origin,
+                count,
+                total,
+                query_terms,
+                filters,
+            ));
+        }
+    }
+
+    if hints.is_empty() {
+        return;
+    }
+    hints.truncate(3);
+    if let Some(plan) = plans.iter_mut().find(|plan| shard_plan_weight(plan) > 0) {
+        for hint in hints {
+            if !plan
+                .plan
+                .repair_hints
+                .iter()
+                .any(|existing| existing.kind == hint.kind)
+            {
+                plan.plan.repair_hints.push(hint);
+            }
+        }
+    }
+}
+
+fn shard_plan_weight(plan: &ShardQueryPlan) -> usize {
+    plan.plan
+        .final_match_count
+        .max(plan.plan.scored_candidate_count)
+        .max(plan.plan.filtered_candidate_count)
+        .max(plan.plan.candidate_count)
+}
+
+fn top_meaningful_weighted_facet(
+    values: impl Iterator<Item = (String, usize)>,
+    total: usize,
+) -> Option<(String, usize)> {
+    let mut counts = HashMap::<String, usize>::new();
+    for (value, count) in values {
+        if value.trim().is_empty() || count == 0 {
+            continue;
+        }
+        *counts.entry(value).or_default() += count;
+    }
+    let mut counts = counts.into_iter().collect::<Vec<_>>();
+    counts.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
+    counts
+        .into_iter()
+        .find(|(_, count)| facet_count_is_meaningful(*count, total))
+}
+
+fn facet_count_is_meaningful(count: usize, total: usize) -> bool {
+    count >= 2 && count < total && count.saturating_mul(5) <= total.saturating_mul(4)
+}
+
+fn shard_facet_hint(
+    kind: &str,
+    field: &str,
+    value: &str,
+    count: usize,
+    total: usize,
+    query_terms: &[String],
+    filters: &SearchFilters,
+) -> QueryPlanRepairHint {
+    let mut narrowed = filters.clone();
+    match field {
+        "repo" => narrowed.repo = Some(value.to_string()),
+        "branch" => narrowed.branch = Some(value.to_string()),
+        "origin" => narrowed.origin = Some(value.to_string()),
+        _ => {}
+    }
+    let suggested_query = query_with_filters_text(query_terms, &narrowed);
+    QueryPlanRepairHint {
+        kind: kind.to_string(),
+        message: format!(
+            "Filter `{field}:{value}` narrows the shard candidate set from {total} files to {count}."
+        ),
+        suggested_query: (!suggested_query.trim().is_empty()).then_some(suggested_query),
+    }
 }
 
 pub fn find_shard_symbol(

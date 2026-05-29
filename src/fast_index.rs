@@ -1459,6 +1459,138 @@ impl FastIndex {
         Ok(finalize_results(results, limit))
     }
 
+    pub fn query_may_match(&self, query: &str, filters: &SearchFilters) -> bool {
+        let parsed = parse_query(query);
+        let mut filters = merge_filters(filters.clone(), parsed.filters);
+        if !repo_matches(&self.root, &filters) || !self.matches_dependency_filters(&filters) {
+            return false;
+        }
+
+        let query = query_text(&parsed.terms, &filters);
+        let query_tokens = unique_query_tokens(&query);
+        let query_trigrams = query_trigrams(&query);
+        let symbol_kind_postings =
+            symbol_kind_postings_for_filters(&self.symbol_kind_postings, &filters);
+        if filters.symbol_kind.is_some() && symbol_kind_postings.is_empty() {
+            return false;
+        }
+        let attribute_postings = attribute_postings_for_filters(&self.attribute_postings, &filters);
+        if attribute_postings.is_impossible() {
+            return false;
+        }
+        if query_tokens.is_empty() && query_trigrams.is_empty() {
+            return filter_only_query(&filters);
+        }
+        if query_tokens.len() > 1 && !filters.match_any {
+            filters.require_all = true;
+        }
+        let exact_symbol_query =
+            planned_symbol_query_name(&parsed.terms, &filters, parsed.explicit_content_terms);
+
+        let mut token_postings = query_tokens
+            .iter()
+            .filter_map(|token| self.postings.get(token).map(|postings| (token, postings)))
+            .collect::<Vec<_>>();
+        let symbol_postings = exact_symbol_query
+            .as_ref()
+            .and_then(|symbol| {
+                self.symbol_postings
+                    .get(symbol)
+                    .map(|postings| (symbol, postings))
+            })
+            .into_iter()
+            .collect::<Vec<_>>();
+        let mut path_postings = query_tokens
+            .iter()
+            .filter_map(|token| {
+                self.path_postings
+                    .get(token)
+                    .map(|postings| (token, postings))
+            })
+            .collect::<Vec<_>>();
+        let use_trigrams = !query_trigrams.is_empty()
+            && (token_postings.len() < query_tokens.len()
+                || (query_tokens.len() == 1 && query_tokens[0].len() >= 5));
+        let mut trigram_postings = if use_trigrams {
+            query_trigrams
+                .iter()
+                .filter_map(|trigram| {
+                    self.trigram_postings
+                        .get(trigram)
+                        .map(|postings| (trigram, postings))
+                })
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+        if token_postings.is_empty()
+            && symbol_postings.is_empty()
+            && path_postings.is_empty()
+            && trigram_postings.is_empty()
+        {
+            return false;
+        }
+        let missing_terms = missing_query_terms(
+            &query_tokens,
+            &token_postings,
+            &symbol_postings,
+            &path_postings,
+        );
+        if filters.require_all && has_unsatisfied_missing_terms(&missing_terms, &filters) {
+            return false;
+        }
+
+        token_postings.sort_by_key(|(_, postings)| postings.len());
+        path_postings.sort_by_key(|(_, postings)| postings.len());
+        trigram_postings.sort_by_key(|(_, postings)| postings.len());
+        let content_tokens = token_postings
+            .iter()
+            .map(|(token, _)| (*token).as_str())
+            .collect::<HashSet<_>>();
+        let path_plan_postings = path_postings
+            .iter()
+            .filter(|(token, _)| filters.match_any || !content_tokens.contains(token.as_str()))
+            .collect::<Vec<_>>();
+        let mut planned_postings = token_postings
+            .iter()
+            .map(|(_, postings)| *postings)
+            .chain(symbol_postings.iter().map(|(_, postings)| *postings))
+            .chain(symbol_kind_postings.iter().map(|(_, postings)| *postings))
+            .chain(path_plan_postings.iter().map(|(_, postings)| *postings))
+            .chain(
+                trigram_postings
+                    .iter()
+                    .take(8)
+                    .map(|(_, postings)| *postings),
+            )
+            .collect::<Vec<_>>();
+        planned_postings.sort_by_key(|postings| postings.len());
+
+        let candidate_ids = if use_trigrams
+            && (!token_postings.is_empty() || !path_postings.is_empty())
+            && query_tokens.len() == 1
+        {
+            let token_only = token_postings
+                .iter()
+                .map(|(_, postings)| *postings)
+                .chain(path_plan_postings.iter().map(|(_, postings)| *postings))
+                .collect::<Vec<_>>();
+            let trigram_only = trigram_postings
+                .iter()
+                .take(8)
+                .map(|(_, postings)| *postings)
+                .collect::<Vec<_>>();
+            union_candidates(
+                intersect_planned_postings(&token_only, false),
+                intersect_planned_postings(&trigram_only, true),
+            )
+        } else {
+            intersect_planned_postings(&planned_postings, filters.require_all)
+        };
+        let candidate_ids = intersect_attribute_postings(candidate_ids, &attribute_postings);
+        !indexed_filter_candidate_ids(&self.files, candidate_ids, &filters).is_empty()
+    }
+
     pub fn query_plan(&self, query: &str, filters: &SearchFilters) -> Result<QueryPlan> {
         let parsed = parse_query(query);
         let query_phrases = query_phrases(&parsed.terms);

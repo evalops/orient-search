@@ -5388,6 +5388,79 @@ fn runtime_serves_parallel_warm_shard_query_plans() {
 }
 
 #[test]
+fn runtime_shard_query_plan_suggests_repo_facet_for_broad_queries() {
+    let root = tempfile::tempdir().unwrap();
+    let service_a = root.path().join("service_a");
+    let service_b = root.path().join("service_b");
+    for index in 0..12 {
+        write(
+            &service_a.join(format!("src/a_{index}.rs")),
+            &format!("pub fn shared_facet_token_a_{index}() -> usize {{ {index} }}\n"),
+        );
+    }
+    for index in 0..4 {
+        write(
+            &service_b.join(format!("src/b_{index}.rs")),
+            &format!("pub fn shared_facet_token_b_{index}() -> usize {{ {index} }}\n"),
+        );
+    }
+    write(
+        &service_a.join("Cargo.toml"),
+        "[package]\nname='service-a'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    write(
+        &service_b.join("Cargo.toml"),
+        "[package]\nname='service-b'\nversion='0.1.0'\nedition='2024'\n",
+    );
+
+    let shard_dir = tempfile::tempdir().unwrap();
+    build_shards(&[service_a, service_b], shard_dir.path()).unwrap();
+    let runtime = ToolRuntime::default();
+    let plan = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("plan"),
+        tool: "shard_query_plan".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": shard_dir.path(),
+            "query": "shared facet token",
+            "require_all": true
+        }),
+    });
+    assert!(plan.error.is_none(), "{:?}", plan.error);
+    let plans = plan.result.unwrap();
+    let service_a_plan = plans
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|plan| plan["name"] == "service_a")
+        .unwrap();
+    let repo_hint = service_a_plan["plan"]["repair_hints"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|hint| hint["kind"] == "narrow_by_repo")
+        .unwrap();
+    assert_eq!(
+        repo_hint["suggested_query"],
+        serde_json::json!("shared facet token repo:service_a")
+    );
+    assert!(
+        repo_hint["message"]
+            .as_str()
+            .unwrap()
+            .contains("from 16 files to 12"),
+        "{repo_hint:?}"
+    );
+    assert_eq!(
+        service_a_plan["plan"]["retry_requests"][0]["tool"],
+        serde_json::json!("search_shards")
+    );
+    assert_eq!(
+        service_a_plan["plan"]["retry_requests"][0]["arguments"]["query"],
+        serde_json::json!("shared facet token repo:service_a")
+    );
+}
+
+#[test]
 fn runtime_filters_shard_search_by_nested_repo_alias() {
     let workspace = tempfile::tempdir().unwrap();
     let billing_repo = workspace.path().join("billing");
