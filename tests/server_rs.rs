@@ -6162,6 +6162,48 @@ fn runtime_search_auto_scopes_warmed_shards_to_client_cwd() {
     assert!(serialized.contains("current-app/src/lib.rs"), "{value}");
     assert!(!serialized.contains("other-app/src/lib.rs"), "{value}");
 
+    let retry = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("search-auto-cwd-retry"),
+        tool: "search_auto".to_string(),
+        arguments: serde_json::json!({
+            "cwd": current_repo.join("src"),
+            "query": "shared_lookup_token definitely_missing",
+            "limit": 5,
+            "retry_if_empty": true
+        }),
+    });
+    assert!(retry.error.is_none(), "{:?}", retry.error);
+    let retry = retry.result.unwrap();
+    assert_eq!(retry["surface"], serde_json::json!("shards"));
+    assert_eq!(retry["results"], serde_json::json!([]));
+    assert_eq!(
+        retry["primary_retry_result"]["read_batch_request"]["tool"],
+        serde_json::json!("read_ranges")
+    );
+    assert_eq!(
+        retry["primary_retry_result"]["read_batch_request"]["arguments"]["index_dir"],
+        serde_json::json!(shard_dir.canonicalize().unwrap())
+    );
+    assert_eq!(
+        retry["primary_retry_result"]["read_batch_request"]["arguments"]["ranges"][0]["path"],
+        serde_json::json!("current-app/src/lib.rs")
+    );
+    let retry_read = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("search-auto-cwd-retry-read"),
+        tool: retry["primary_retry_result"]["read_batch_request"]["tool"]
+            .as_str()
+            .unwrap()
+            .to_string(),
+        arguments: retry["primary_retry_result"]["read_batch_request"]["arguments"].clone(),
+    });
+    assert!(retry_read.error.is_none(), "{:?}", retry_read.error);
+    assert!(
+        retry_read.result.unwrap()[0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("shared_lookup_token")
+    );
+
     let explicit_repo_search = runtime.dispatch(ToolRequest {
         id: serde_json::json!("search-auto-cwd-explicit-repo"),
         tool: "search_auto".to_string(),

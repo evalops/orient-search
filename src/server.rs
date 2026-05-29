@@ -2311,26 +2311,13 @@ fn primary_retry_read_batch_request(
     result: &Value,
 ) -> Option<ResultToolRequest> {
     let base_arguments = retry_read_base_arguments(request)?;
-    result_value_read_batch_request(result, retry_read_tool(request), base_arguments)
-}
-
-fn retry_read_tool(request: &ResultToolRequest) -> &'static str {
-    let is_shard_search = request.tool == "search_shards"
-        || request
-            .arguments
-            .as_object()
-            .is_some_and(|arguments| arguments.contains_key("index_dir"));
-    if is_shard_search {
-        "read_shard_ranges"
-    } else {
-        "read_ranges"
-    }
+    result_value_read_batch_request(result, "read_ranges", base_arguments)
 }
 
 fn retry_read_base_arguments(request: &ResultToolRequest) -> Option<Map<String, Value>> {
     let source = request.arguments.as_object()?;
     let mut arguments = Map::new();
-    for name in ["repo", "index", "index_dir"] {
+    for name in ["index_dir", "index", "repo"] {
         if let Some(value) = source.get(name) {
             arguments.insert(name.to_string(), value.clone());
             return Some(arguments);

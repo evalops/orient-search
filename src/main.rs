@@ -1834,7 +1834,7 @@ fn primary_cli_retry_result(
         bail!("primary retry request failed: {error}");
     }
     let result = response.result.unwrap_or(Value::Null);
-    let read_batch_request = primary_cli_retry_read_batch_request(request, tool, &result);
+    let read_batch_request = primary_cli_retry_read_batch_request(request, &result);
     let mut value = serde_json::json!({
         "request": request,
         "results": result
@@ -1847,20 +1847,14 @@ fn primary_cli_retry_result(
 
 fn primary_cli_retry_read_batch_request(
     request: &Value,
-    search_tool: &str,
     result: &Value,
 ) -> Option<ResultToolRequest> {
     let source = request.get("arguments")?.as_object()?;
     let mut arguments = serde_json::Map::new();
-    for name in ["repo", "index", "index_dir"] {
+    for name in ["index_dir", "index", "repo"] {
         if let Some(value) = source.get(name) {
             arguments.insert(name.to_string(), value.clone());
-            let read_tool = if search_tool == "search_shards" || name == "index_dir" {
-                "read_shard_ranges"
-            } else {
-                "read_ranges"
-            };
-            return result_value_read_batch_request(result, read_tool, arguments);
+            return result_value_read_batch_request(result, "read_ranges", arguments);
         }
     }
     None

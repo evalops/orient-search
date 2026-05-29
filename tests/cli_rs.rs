@@ -468,6 +468,37 @@ fn cli_search_auto_selects_live_indexed_and_shard_surfaces() {
         .stdout(predicate::str::contains("\"tool\":\"read_shard_ranges\""))
         .stdout(predicate::str::contains("\"tool\":\"read_shard_range\""));
 
+    let mut shard_retry = Command::cargo_bin("orient").unwrap();
+    let shard_retry = shard_retry
+        .args([
+            "search-auto",
+            "--index-dir",
+            shard_dir.to_str().unwrap(),
+            "--repo-filter",
+            repo.path().to_str().unwrap(),
+            "--retry-if-empty",
+            "issue_token definitely_missing",
+        ])
+        .output()
+        .unwrap();
+    assert!(shard_retry.status.success());
+    let shard_retry: serde_json::Value = serde_json::from_slice(&shard_retry.stdout).unwrap();
+    assert_eq!(
+        shard_retry["primary_retry_result"]["read_batch_request"]["tool"],
+        serde_json::json!("read_ranges")
+    );
+    assert_eq!(
+        shard_retry["primary_retry_result"]["read_batch_request"]["arguments"]["index_dir"],
+        serde_json::json!(shard_dir.to_str().unwrap())
+    );
+    assert_eq!(
+        shard_retry["primary_retry_result"]["read_batch_request"]["arguments"]["ranges"][0]["path"],
+        serde_json::json!(format!(
+            "{}/src/auth.rs",
+            repo.path().file_name().unwrap().to_string_lossy()
+        ))
+    );
+
     let mut empty_live = Command::cargo_bin("orient").unwrap();
     empty_live
         .args([
