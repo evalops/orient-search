@@ -584,6 +584,10 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         serde_json::json!(MAX_BATCH_RANGES)
     );
     assert_eq!(
+        read_ranges["input_schema"]["properties"]["ranges"]["max_total_lines"],
+        serde_json::json!(MAX_BATCH_READ_LINES)
+    );
+    assert_eq!(
         read_ranges["input_schema"]["properties"]["ranges"]["oneOf"][2]["minItems"],
         serde_json::json!(1)
     );
@@ -606,6 +610,10 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
     assert_eq!(
         read_ranges_range_arg["max_items"],
         serde_json::json!(MAX_BATCH_RANGES)
+    );
+    assert_eq!(
+        read_ranges_range_arg["max_total_lines"],
+        serde_json::json!(MAX_BATCH_READ_LINES)
     );
     assert_eq!(
         read_shard_range["input_schema"]["properties"]["path"]["description"],
@@ -888,6 +896,10 @@ fn mcp_manifest_exposes_input_schema_for_adapter_wrappers() {
         .iter()
         .find(|tool| tool["name"] == "read_shard_range")
         .unwrap();
+    let read_ranges = tools
+        .iter()
+        .find(|tool| tool["name"] == "read_ranges")
+        .unwrap();
     let repo_map = tools
         .iter()
         .find(|tool| tool["name"] == "repo_map")
@@ -943,6 +955,10 @@ fn mcp_manifest_exposes_input_schema_for_adapter_wrappers() {
     assert_eq!(
         read_shard_range["inputSchema"]["properties"]["path"]["description"],
         "Shard-prefixed result path, unique unqualified shard-relative path, or copied location such as repo/src/lib.rs#L40-L45."
+    );
+    assert_eq!(
+        read_ranges["inputSchema"]["properties"]["ranges"]["max_total_lines"],
+        serde_json::json!(MAX_BATCH_READ_LINES)
     );
     assert!(
         read_shard_range["description"]

@@ -1481,6 +1481,9 @@ fn argument_metadata_entry(tool_name: &str, name: &str, required: bool) -> Value
     if let Some(max_items) = argument_max_items(name) {
         entry.insert("max_items".to_string(), json!(max_items));
     }
+    if let Some(max_total_lines) = argument_max_total_lines(name) {
+        entry.insert("max_total_lines".to_string(), json!(max_total_lines));
+    }
     if let Some(values) = argument_enum(name) {
         entry.insert("enum".to_string(), json!(values));
     }
@@ -1550,6 +1553,11 @@ fn argument_schema(tool_name: &str, name: &str) -> Value {
                         }
                     }
                 ]),
+            );
+            schema.insert("max_total_lines".to_string(), json!(MAX_BATCH_READ_LINES));
+            schema.insert(
+                "description".to_string(),
+                json!(argument_description(tool_name, name)),
             );
         }
         "queries" | "names" => {
@@ -1768,6 +1776,13 @@ fn argument_max_items(name: &str) -> Option<usize> {
     match name {
         "queries" | "names" => Some(MAX_BATCH_QUERIES),
         "ranges" => Some(MAX_BATCH_RANGES),
+        _ => None,
+    }
+}
+
+fn argument_max_total_lines(name: &str) -> Option<usize> {
+    match name {
+        "ranges" => Some(MAX_BATCH_READ_LINES),
         _ => None,
     }
 }
