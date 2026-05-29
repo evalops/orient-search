@@ -135,8 +135,10 @@ enum Commands {
     SearchShards {
         #[arg(long)]
         index_dir: PathBuf,
-        #[arg(allow_hyphen_values = true)]
-        query: String,
+        #[arg(allow_hyphen_values = true, required_unless_present = "query_arg")]
+        query: Option<String>,
+        #[arg(long = "query", value_name = "QUERY", conflicts_with = "query")]
+        query_arg: Option<String>,
         #[arg(long, default_value_t = 10)]
         limit: usize,
         #[arg(long = "repo")]
@@ -167,8 +169,10 @@ enum Commands {
     ShardPlan {
         #[arg(long)]
         index_dir: PathBuf,
-        #[arg(allow_hyphen_values = true)]
-        query: String,
+        #[arg(allow_hyphen_values = true, required_unless_present = "query_arg")]
+        query: Option<String>,
+        #[arg(long = "query", value_name = "QUERY", conflicts_with = "query")]
+        query_arg: Option<String>,
         #[arg(long = "repo")]
         repo: Option<String>,
         #[command(flatten)]
@@ -313,8 +317,10 @@ enum Commands {
     IndexPlan {
         #[arg(long)]
         index: PathBuf,
-        #[arg(allow_hyphen_values = true)]
-        query: String,
+        #[arg(allow_hyphen_values = true, required_unless_present = "query_arg")]
+        query: Option<String>,
+        #[arg(long = "query", value_name = "QUERY", conflicts_with = "query")]
+        query_arg: Option<String>,
         #[arg(long = "repo-filter")]
         repo_filter: Option<String>,
         #[command(flatten)]
@@ -341,8 +347,10 @@ enum Commands {
         index: Option<PathBuf>,
         #[arg(long, conflicts_with = "index")]
         index_dir: Option<PathBuf>,
-        #[arg(allow_hyphen_values = true)]
-        query: String,
+        #[arg(allow_hyphen_values = true, required_unless_present = "query_arg")]
+        query: Option<String>,
+        #[arg(long = "query", value_name = "QUERY", conflicts_with = "query")]
+        query_arg: Option<String>,
         #[arg(long = "repo-filter")]
         repo_filter: Option<String>,
         #[command(flatten)]
@@ -406,8 +414,10 @@ enum Commands {
         index: Option<PathBuf>,
         #[arg(long, conflicts_with = "index")]
         index_dir: Option<PathBuf>,
-        #[arg(allow_hyphen_values = true)]
-        query: String,
+        #[arg(allow_hyphen_values = true, required_unless_present = "query_arg")]
+        query: Option<String>,
+        #[arg(long = "query", value_name = "QUERY", conflicts_with = "query")]
+        query_arg: Option<String>,
         #[arg(long, default_value_t = 10)]
         limit: usize,
         #[arg(long = "repo-filter")]
@@ -420,8 +430,10 @@ enum Commands {
         refresh_if_stale: bool,
     },
     SearchAuto {
-        #[arg(allow_hyphen_values = true)]
-        query: String,
+        #[arg(allow_hyphen_values = true, required_unless_present = "query_arg")]
+        query: Option<String>,
+        #[arg(long = "query", value_name = "QUERY", conflicts_with = "query")]
+        query_arg: Option<String>,
         #[arg(long)]
         repo: Option<PathBuf>,
         #[arg(long)]
@@ -486,8 +498,10 @@ enum Commands {
     IndexedSearch {
         #[arg(long)]
         index: PathBuf,
-        #[arg(allow_hyphen_values = true)]
-        query: String,
+        #[arg(allow_hyphen_values = true, required_unless_present = "query_arg")]
+        query: Option<String>,
+        #[arg(long = "query", value_name = "QUERY", conflicts_with = "query")]
+        query_arg: Option<String>,
         #[arg(long, default_value_t = 10)]
         limit: usize,
         #[arg(long = "repo-filter")]
@@ -2305,12 +2319,14 @@ fn run() -> Result<()> {
         Commands::SearchShards {
             index_dir,
             query,
+            query_arg,
             limit,
             repo,
             filters,
             context_lines,
             refresh_if_stale,
         } => {
+            let query = cli_single_query(query, query_arg)?;
             if refresh_if_stale && shard_status(&index_dir)?.stale {
                 refresh_shards(&index_dir)?;
             }
@@ -2391,10 +2407,12 @@ fn run() -> Result<()> {
         Commands::ShardPlan {
             index_dir,
             query,
+            query_arg,
             repo,
             filters,
             refresh_if_stale,
         } => {
+            let query = cli_single_query(query, query_arg)?;
             if refresh_if_stale && shard_status(&index_dir)?.stale {
                 refresh_shards(&index_dir)?;
             }
@@ -2632,10 +2650,12 @@ fn run() -> Result<()> {
         Commands::IndexPlan {
             index,
             query,
+            query_arg,
             repo_filter,
             filters,
             refresh_if_stale,
         } => {
+            let query = cli_single_query(query, query_arg)?;
             let index_path = index;
             let index = load_index_for_search(index_path.clone(), refresh_if_stale)?;
             let filters = search_filters_from_args(&filters, repo_filter)?;
@@ -2677,10 +2697,12 @@ fn run() -> Result<()> {
             index,
             index_dir,
             query,
+            query_arg,
             repo_filter,
             filters,
             refresh_if_stale,
         } => {
+            let query = cli_single_query(query, query_arg)?;
             let filters = search_filters_from_args(&filters, repo_filter)?;
             if let Some(index_dir) = index_dir {
                 if refresh_if_stale && shard_status(&index_dir)?.stale {
@@ -2836,12 +2858,14 @@ fn run() -> Result<()> {
             index,
             index_dir,
             query,
+            query_arg,
             limit,
             repo_filter,
             filters,
             context_lines,
             refresh_if_stale,
         } => {
+            let query = cli_single_query(query, query_arg)?;
             let filters = search_filters_from_args(&filters, repo_filter)?;
             let results = if let Some(index_dir) = index_dir {
                 if refresh_if_stale && shard_status(&index_dir)?.stale {
@@ -2928,6 +2952,7 @@ fn run() -> Result<()> {
         }
         Commands::SearchAuto {
             query,
+            query_arg,
             repo,
             index,
             index_dir,
@@ -2938,6 +2963,7 @@ fn run() -> Result<()> {
             refresh_if_stale,
             diagnose,
         } => {
+            let query = cli_single_query(query, query_arg)?;
             if let Some(index_dir) = index_dir {
                 if refresh_if_stale && shard_status(&index_dir)?.stale {
                     refresh_shards(&index_dir)?;
@@ -3440,12 +3466,14 @@ fn run() -> Result<()> {
         Commands::IndexedSearch {
             index,
             query,
+            query_arg,
             limit,
             repo_filter,
             filters,
             context_lines,
             refresh_if_stale,
         } => {
+            let query = cli_single_query(query, query_arg)?;
             let index_path = index;
             let index = load_index_for_search(index_path.clone(), refresh_if_stale)?;
             let filters = search_filters_from_args(&filters, repo_filter)?;
@@ -4851,6 +4879,13 @@ fn cli_single_path(path: Option<String>, path_arg: Option<String>) -> Result<Str
     path.or(path_arg)
         .filter(|path| !path.is_empty())
         .ok_or_else(|| anyhow::anyhow!("provide a path or --path PATH"))
+}
+
+fn cli_single_query(query: Option<String>, query_arg: Option<String>) -> Result<String> {
+    query
+        .or(query_arg)
+        .filter(|query| !query.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("provide a query or --query QUERY"))
 }
 
 fn validate_cli_range_bounds(start: usize, lines: usize) -> Result<()> {

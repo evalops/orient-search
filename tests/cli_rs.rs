@@ -2025,6 +2025,142 @@ fn cli_search_surfaces_accept_structured_filters() {
 }
 
 #[test]
+fn cli_single_query_commands_accept_query_flag() {
+    let repo = sample_repo();
+
+    let mut fallback = Command::cargo_bin("orient").unwrap();
+    fallback
+        .args([
+            "search",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--query",
+            "issue token",
+            "--limit",
+            "1",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("src/auth.rs"));
+
+    let mut plan = Command::cargo_bin("orient").unwrap();
+    plan.args([
+        "search-plan",
+        "--repo",
+        repo.path().to_str().unwrap(),
+        "--query",
+        "issue token",
+    ])
+    .assert()
+    .success()
+    .stdout(predicate::str::contains(
+        "\"query_tokens\":[\"issue\",\"token\"]",
+    ));
+
+    let index_path = repo.path().join(".orient/index");
+    let mut index = Command::cargo_bin("orient").unwrap();
+    index
+        .args([
+            "index",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--output",
+            index_path.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let mut indexed = Command::cargo_bin("orient").unwrap();
+    indexed
+        .args([
+            "indexed-search",
+            "--index",
+            index_path.to_str().unwrap(),
+            "--query",
+            "issue token",
+            "--limit",
+            "1",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("src/auth.rs"));
+
+    let mut index_plan = Command::cargo_bin("orient").unwrap();
+    index_plan
+        .args([
+            "index-plan",
+            "--index",
+            index_path.to_str().unwrap(),
+            "--query",
+            "issue token",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "\"query_tokens\":[\"issue\",\"token\"]",
+        ));
+
+    let shard_dir = tempfile::tempdir().unwrap();
+    let mut build_shards = Command::cargo_bin("orient").unwrap();
+    build_shards
+        .args([
+            "index-shards",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--output-dir",
+            shard_dir.path().to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let mut shard_search = Command::cargo_bin("orient").unwrap();
+    shard_search
+        .args([
+            "search-shards",
+            "--index-dir",
+            shard_dir.path().to_str().unwrap(),
+            "--query",
+            "issue token",
+            "--limit",
+            "1",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("src/auth.rs"));
+
+    let mut shard_plan = Command::cargo_bin("orient").unwrap();
+    shard_plan
+        .args([
+            "shard-plan",
+            "--index-dir",
+            shard_dir.path().to_str().unwrap(),
+            "--query",
+            "issue token",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "\"query_tokens\":[\"issue\",\"token\"]",
+        ));
+
+    let mut auto = Command::cargo_bin("orient").unwrap();
+    auto.args([
+        "search-auto",
+        "--repo",
+        repo.path().to_str().unwrap(),
+        "--index",
+        index_path.to_str().unwrap(),
+        "--query",
+        "issue token",
+        "--limit",
+        "1",
+    ])
+    .assert()
+    .success()
+    .stdout(predicate::str::contains("src/auth.rs"));
+}
+
+#[test]
 fn cli_batches_searches_across_fallback_indexed_and_shards() {
     let repo = sample_repo();
     write(
