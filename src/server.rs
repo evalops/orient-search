@@ -940,7 +940,7 @@ pub fn agent_guide(
     let status_command = daemon_status_command(addr);
     json!({
         "name": "Orient Search",
-        "purpose": "Fast local code search for coding agents; no session analytics.",
+        "purpose": "Fast local code search for coding agents; no telemetry.",
         "instruction_snippet": agent_instructions(Some(repo), Some(index), Some(index_dir), Some(addr)),
         "quickstart": {
             "install": "cargo install --git https://github.com/evalops/orient-search",
@@ -1104,7 +1104,7 @@ Trust `daemon_status.search_auto_default` to see whether no-target `search_auto`
 Use query filters directly: `file:`, `path:`, `lang:`, `ext:`, `symbol:`, `type:`, `repo:`, `test:`, `generated:`, `code:`, `is:code`, `is:docs`, quoted literals, and negative filters like `-path:vendor` or `-is:generated`.\n\
 After search, follow returned `read_batch_request`, `read_request`, `related_request`, and `related_symbols_request`; each includes `jsonl` and `client_cli` for direct replay through `orient client-jsonl`.\n\
 When results are empty, noisy, or suspicious, use the returned `query_plan_request` or inline `query_plan_result` before broadening the search; pass `retry_if_empty:true` when you want Orient to execute the promoted retry once and return `primary_retry_result` immediately.\n\
-Orient is local code search only and exposes no session analytics."
+Orient is local code search only and does not collect telemetry."
     )
 }
 

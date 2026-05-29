@@ -1026,12 +1026,7 @@ fn agent_guide_returns_local_agent_request_templates() {
             .unwrap()
             .contains("127.0.0.1:9999")
     );
-    assert!(
-        guide["purpose"]
-            .as_str()
-            .unwrap()
-            .contains("no session analytics")
-    );
+    assert!(guide["purpose"].as_str().unwrap().contains("no telemetry"));
     assert!(
         guide["instruction_snippet"]
             .as_str()
@@ -1064,7 +1059,7 @@ fn agent_instructions_returns_copyable_local_agent_rules() {
         "search_auto_batch",
         "daemon_status.search_auto_default",
         "`file:`, `path:`, `lang:`, `ext:`, `symbol:`, `type:`, `repo:`, `test:`",
-        "no session analytics",
+        "does not collect telemetry",
     ] {
         assert!(
             instructions.contains(expected),
@@ -1131,7 +1126,7 @@ fn runtime_serves_agent_instructions_for_local_rule_files() {
     assert!(instructions.contains("search_auto"));
     assert!(instructions.contains("search_auto_default"));
     assert!(instructions.contains("read_batch_request"));
-    assert!(instructions.contains("no session analytics"));
+    assert!(instructions.contains("does not collect telemetry"));
 }
 
 #[test]

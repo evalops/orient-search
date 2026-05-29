@@ -1,8 +1,7 @@
 # Shared Daemon
 
-Run one warmed Orient daemon per machine or workspace family. Local agents can
-then reuse the same repo maps, search index, query plans, and bounded reads
-instead of repeatedly walking the same source tree.
+Run one warmed Orient daemon per machine or workspace family so local agents
+reuse the same repo maps, indexes, query plans, and bounded reads.
 
 ## Start
 
@@ -61,8 +60,8 @@ orient daemon-status
 orient daemon-status --format json
 ```
 
-The compact status is meant for humans. JSON status includes full warmed-target
-details and copyable default requests for agent adapters.
+The compact status is meant for humans. JSON status adds warmed-target details
+and copyable default requests for adapters.
 
 Refresh explicitly when needed:
 
@@ -72,6 +71,5 @@ orient refresh-shards --index-dir /tmp/orient-shards
 ```
 
 `ensure-shards` is the preferred shared-directory bootstrap. It adds missing
-repos and refreshes existing shards without accidentally shrinking the shard
-set. Use `index-shards --force` only when intentionally replacing a shard
-directory.
+repos and refreshes existing shards without shrinking the shard set. Use
+`index-shards --force` only when intentionally replacing a shard directory.

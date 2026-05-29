@@ -1,8 +1,8 @@
 # Memory And Footprint
 
-Orient optimizes for local agent latency. Persisted indexes store enough data to
-serve snippets and bounded range reads directly from the index, which makes
-reads fast but increases disk usage.
+Orient optimizes for local agent latency. Persisted indexes store source
+snapshots and line metadata so snippets and bounded reads do not need to reopen
+live files. This makes reads fast and makes index files larger than source.
 
 ## What Gets Stored
 
@@ -15,8 +15,8 @@ Each index contains:
 - source snapshots for snippets and bounded range reads
 - line-offset and token-to-line tables
 
-That tradeoff is intentional: agents can inspect search hits without reopening
-live files, and a shared daemon amortizes the load cost across sessions.
+That tradeoff is intentional: agents can inspect search hits quickly, and a
+shared daemon amortizes load cost across sessions.
 
 ## Inspect It
 
@@ -39,7 +39,7 @@ Useful counters:
 
 ## Defaults
 
-Use `--family-limit` when discovering broad workspaces with repeated clones or
+Use `--family-limit` when discovering workspaces with repeated clones or
 worktrees:
 
 ```bash

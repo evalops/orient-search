@@ -32,10 +32,8 @@ orient daemon-status
 orient daemon-status --format json
 ```
 
-`daemon-status` reports a compact warmed-cache summary by default. Add
-`--format json` for full warmed shard/index details, freshness, footprint
-counters, and copyable `default_requests` so agents can start with the right
-repo map, search, and query-plan calls.
+`daemon-status` reports a compact warmed-cache summary. Add `--format json`
+when an adapter needs copyable first requests and target details.
 
 ## Search
 
@@ -80,13 +78,10 @@ Use:
 orient shard-status --index-dir /tmp/orient-shards --summary
 ```
 
-The summary reports `index_bytes`, `source_bytes`, `content_snapshot_bytes`,
-`line_offset_bytes`, `posting_entries`, `compressed_posting_bytes`, and the
-largest shards. `orient daemon-status` also includes a compact `footprint`
-object for the currently warmed cache. On large workspaces, expect indexes to
-be larger than source because Orient stores snapshots and line offsets for fast
-bounded reads; warm top-10 shard searches should still stay in the low tens of
-milliseconds.
+The summary reports persisted index size, represented source size, snapshot
+bytes, line-offset bytes, posting counts, compressed posting bytes, and largest
+shards. On large workspaces, expect indexes to be larger than source because
+Orient stores snapshots and line offsets for fast bounded reads.
 
 ## Build And Test
 

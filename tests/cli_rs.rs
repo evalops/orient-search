@@ -340,7 +340,7 @@ fn cli_outputs_agent_guide() {
     .assert()
     .success()
     .stdout(predicate::str::contains("\"purpose\""))
-    .stdout(predicate::str::contains("no session analytics"))
+    .stdout(predicate::str::contains("no telemetry"))
     .stdout(predicate::str::contains("\"tool\":\"search_shards\""))
     .stdout(predicate::str::contains("\"tool\":\"search_auto\""))
     .stdout(predicate::str::contains("\"tool\":\"search_auto_batch\""))
@@ -384,7 +384,7 @@ fn cli_outputs_agent_instructions() {
     ))
     .stdout(predicate::str::contains("search_auto_batch"))
     .stdout(predicate::str::contains("read_batch_request"))
-    .stdout(predicate::str::contains("no session analytics"));
+    .stdout(predicate::str::contains("does not collect telemetry"));
 }
 
 #[test]

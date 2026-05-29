@@ -11,7 +11,7 @@ export CARGO_HOME="${CARGO_HOME:-${user_home}/.cargo}"
 export PATH="/etc/profiles/per-user/${USER:-}/bin:${CARGO_HOME}/bin:${user_home}/go/bin:/usr/local/bin:/opt/homebrew/bin:${PATH}"
 cd "${BUILD_WORKSPACE_DIRECTORY:-$(pwd)}"
 
-root="${ORIENT_WIDE_ROOT:-${user_home}/Documents/Projects}"
+root="${ORIENT_WIDE_ROOT:-${user_home}/code}"
 fallback_p95_ms="${ORIENT_WIDE_FALLBACK_P95_MS:-300}"
 shard_p95_ms="${ORIENT_WIDE_SHARD_P95_MS:-300}"
 family_limit="${ORIENT_WIDE_FAMILY_LIMIT:-1}"

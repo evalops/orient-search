@@ -69,5 +69,4 @@ orient shard-status --index-dir /tmp/orient-shards --summary
 
 - Hosted indexing.
 - Telemetry.
-- Background session analytics.
 - Replacing specialized shell tools when a direct command is clearly better.
