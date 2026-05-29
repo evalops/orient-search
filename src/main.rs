@@ -12,10 +12,10 @@ use orient::repo_index::{
     SearchFilters, SearchResult, SnippetMode, SymbolLookupResult,
     attach_repo_map_read_batch_request_with_limit, attach_result_context,
     attach_result_read_requests, attach_result_related_requests,
-    attach_result_related_symbol_requests, normalize_language_filter, read_file_range,
-    read_file_range_scoped, related_file_lookup_results, related_symbol_lookup_results,
-    result_read_batch_request, search_repo_fast_filtered, symbol_lookup_read_batch_request,
-    symbol_lookup_results,
+    attach_result_related_symbol_requests, normalize_language_filter,
+    query_plan_filter_field_present, read_file_range, read_file_range_scoped,
+    related_file_lookup_results, related_symbol_lookup_results, result_read_batch_request,
+    search_repo_fast_filtered, symbol_lookup_read_batch_request, symbol_lookup_results,
 };
 use orient::server::{
     DEFAULT_MAX_CACHED_INDEXES, MAX_BATCH_QUERIES, MAX_BATCH_RANGES, ToolRequest, ToolRuntime,
@@ -1466,6 +1466,13 @@ fn cli_retry_requests<T: Serialize>(
 ) -> Vec<ResultToolRequest> {
     let mut requests = Vec::new();
     let mut seen_queries = HashSet::new();
+    let repair_filter_fields = plan
+        .repair_hints
+        .iter()
+        .filter_map(|hint| {
+            cli_replaced_filter_field(&hint.kind).or_else(|| cli_relaxed_filter_field(&hint.kind))
+        })
+        .collect::<Vec<_>>();
     for hint in &plan.repair_hints {
         let Some(query) = hint.suggested_query.as_ref() else {
             continue;
@@ -1477,8 +1484,16 @@ fn cli_retry_requests<T: Serialize>(
         if hint.kind != "relax_filters" {
             let skip_field = cli_replaced_filter_field(&hint.kind)
                 .or_else(|| cli_relaxed_filter_field(&hint.kind));
+            let suggested_filters = parse_query(query).filters;
             add_filter_retry_args(&mut arguments, filters, target_name, skip_field);
             add_plan_filter_retry_args(&mut arguments, plan, target_name, skip_field);
+            if skip_field.is_none() && hint.kind == "try_any_terms" {
+                remove_repair_filter_retry_args(
+                    &mut arguments,
+                    &repair_filter_fields,
+                    &suggested_filters,
+                );
+            }
         }
         arguments.insert(target_name.to_string(), serde_json::json!(target_value));
         arguments.insert("query".to_string(), serde_json::json!(query));
@@ -1489,6 +1504,20 @@ fn cli_retry_requests<T: Serialize>(
         ));
     }
     requests
+}
+
+fn remove_repair_filter_retry_args(
+    arguments: &mut Map<String, Value>,
+    repair_filter_fields: &[&str],
+    suggested_filters: &SearchFilters,
+) {
+    for field in repair_filter_fields {
+        if query_plan_filter_field_present(field, suggested_filters) {
+            continue;
+        }
+        arguments.remove(*field);
+        arguments.remove(&format!("exclude_{field}"));
+    }
 }
 
 fn cli_replaced_filter_field(kind: &str) -> Option<&'static str> {

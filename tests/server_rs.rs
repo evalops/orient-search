@@ -3308,6 +3308,55 @@ fn runtime_batches_searches_and_query_plans_against_repo_index_and_shards() {
     let retry_result = serde_json::to_string(&filter_only_retry.result).unwrap();
     assert!(retry_result.contains("src/auth.rs"), "{retry_result}");
 
+    let invalid_kind_any_plan = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("invalid-kind-any-plan"),
+        tool: "search_plan".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "query": "kind:fn session manager invoice",
+            "require_all": true
+        }),
+    });
+    assert!(
+        invalid_kind_any_plan.error.is_none(),
+        "{:?}",
+        invalid_kind_any_plan.error
+    );
+    let invalid_kind_any = invalid_kind_any_plan.result.as_ref().unwrap();
+    let any_retry = invalid_kind_any["retry_requests"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|request| {
+            request["arguments"]["query"]
+                .as_str()
+                .is_some_and(|query| query.starts_with("mode:any "))
+        })
+        .expect("expected mode:any retry request");
+    assert!(
+        any_retry["arguments"].get("symbol_kind").is_none(),
+        "{any_retry:?}"
+    );
+    let any_retry_result = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("invalid-kind-any-retry"),
+        tool: any_retry["tool"].as_str().unwrap().to_string(),
+        arguments: any_retry["arguments"].clone(),
+    });
+    assert!(
+        any_retry_result.error.is_none(),
+        "{:?}",
+        any_retry_result.error
+    );
+    let any_retry_result = serde_json::to_string(&any_retry_result.result).unwrap();
+    assert!(
+        any_retry_result.contains("src/auth.rs"),
+        "{any_retry_result}"
+    );
+    assert!(
+        any_retry_result.contains("src/billing.rs"),
+        "{any_retry_result}"
+    );
+
     let live_plan_batch = runtime.dispatch(ToolRequest {
         id: serde_json::json!("live-plan-batch"),
         tool: "search_query_plan_batch".to_string(),

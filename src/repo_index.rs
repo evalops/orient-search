@@ -342,6 +342,46 @@ impl QueryPlan {
     }
 }
 
+pub fn query_plan_filter_field_present(field: &str, suggested_filters: &SearchFilters) -> bool {
+    match field {
+        "file" => suggested_filters.file.is_some() || !suggested_filters.exclude_file.is_empty(),
+        "path" => suggested_filters.path.is_some() || !suggested_filters.exclude_path.is_empty(),
+        "language" => {
+            suggested_filters.language.is_some() || !suggested_filters.exclude_language.is_empty()
+        }
+        "extension" => {
+            suggested_filters.extension.is_some() || !suggested_filters.exclude_extension.is_empty()
+        }
+        "symbol" => {
+            suggested_filters.symbol.is_some() || !suggested_filters.exclude_symbol.is_empty()
+        }
+        "symbol_kind" => {
+            suggested_filters.symbol_kind.is_some()
+                || !suggested_filters.exclude_symbol_kind.is_empty()
+        }
+        "repo" => suggested_filters.repo.is_some() || !suggested_filters.exclude_repo.is_empty(),
+        "branch" => {
+            suggested_filters.branch.is_some() || !suggested_filters.exclude_branch.is_empty()
+        }
+        "origin" => {
+            suggested_filters.origin.is_some() || !suggested_filters.exclude_origin.is_empty()
+        }
+        "dependency" => {
+            suggested_filters.dependency.is_some()
+                || !suggested_filters.exclude_dependency.is_empty()
+        }
+        "import" => {
+            suggested_filters.import.is_some() || !suggested_filters.exclude_import.is_empty()
+        }
+        "content" => !suggested_filters.exclude_content.is_empty(),
+        "test" => suggested_filters.test.is_some(),
+        "generated" => suggested_filters.generated.is_some(),
+        "code" => suggested_filters.code.is_some(),
+        "line" => suggested_filters.target_line.is_some(),
+        _ => false,
+    }
+}
+
 impl QueryPlanDiagnosis {
     fn from_plan(plan: &QueryPlan) -> Self {
         let primary_hint = plan.repair_hints.first();

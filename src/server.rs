@@ -10,9 +10,9 @@ use crate::repo_index::{
     Symbol, SymbolLookupResult, attach_repo_map_read_batch_request_with_limit,
     attach_result_context, attach_result_read_requests, attach_result_related_requests,
     attach_result_related_symbol_requests, finalize_results_for_filters, normalize_language_filter,
-    normalize_token, read_file_range, read_file_range_scoped, related_file_lookup_results,
-    related_symbol_lookup_results, result_read_batch_request, search_repo_fast_filtered,
-    symbol_lookup_read_batch_request, symbol_lookup_results,
+    normalize_token, query_plan_filter_field_present, read_file_range, read_file_range_scoped,
+    related_file_lookup_results, related_symbol_lookup_results, result_read_batch_request,
+    search_repo_fast_filtered, symbol_lookup_read_batch_request, symbol_lookup_results,
 };
 use crate::shards::{
     ShardEntry, ShardFreshness, ShardManifest, ShardQueryPlan, ShardRepoMap, ShardSearchScope,
@@ -2298,6 +2298,14 @@ fn retry_search_requests<T: Serialize>(
 ) -> Vec<ResultToolRequest> {
     let mut requests = Vec::new();
     let mut seen_queries = HashSet::new();
+    let repair_filter_fields = plan
+        .repair_hints
+        .iter()
+        .filter_map(|hint| {
+            retry_replaced_filter_field(&hint.kind)
+                .or_else(|| retry_relaxed_filter_field(&hint.kind))
+        })
+        .collect::<Vec<_>>();
     for hint in &plan.repair_hints {
         let Some(query) = hint.suggested_query.as_ref() else {
             continue;
@@ -2306,14 +2314,9 @@ fn retry_search_requests<T: Serialize>(
             continue;
         }
         let mut arguments = Map::new();
-        let replace_filter_field = match hint.kind.as_str() {
-            "replace_file_filter" => Some("file"),
-            "replace_path_filter" => Some("path"),
-            "replace_symbol_filter" => Some("symbol"),
-            "replace_symbol_kind_filter" => Some("symbol_kind"),
-            _ => None,
-        };
+        let replace_filter_field = retry_replaced_filter_field(&hint.kind);
         let relaxed_field = retry_relaxed_filter_field(&hint.kind);
+        let suggested_filters = parse_query(query).filters;
         if hint.kind == "relax_filters" {
             if let Some(source) = source_arguments.as_object() {
                 for name in ["refresh_if_stale", "require_all", "any_terms"] {
@@ -2333,12 +2336,15 @@ fn retry_search_requests<T: Serialize>(
             }
         }
         if hint.kind != "relax_filters" {
-            add_plan_filter_args(
-                &mut arguments,
-                plan,
-                target_name,
-                replace_filter_field.or(relaxed_field),
-            );
+            let skip_field = replace_filter_field.or(relaxed_field);
+            add_plan_filter_args(&mut arguments, plan, target_name, skip_field);
+            if skip_field.is_none() && hint.kind == "try_any_terms" {
+                remove_repair_filter_args(
+                    &mut arguments,
+                    &repair_filter_fields,
+                    &suggested_filters,
+                );
+            }
         }
         arguments.insert(target_name.to_string(), json!(target_value));
         arguments.insert("query".to_string(), json!(query));
@@ -2349,6 +2355,16 @@ fn retry_search_requests<T: Serialize>(
         ));
     }
     requests
+}
+
+fn retry_replaced_filter_field(kind: &str) -> Option<&'static str> {
+    match kind {
+        "replace_file_filter" => Some("file"),
+        "replace_path_filter" => Some("path"),
+        "replace_symbol_filter" => Some("symbol"),
+        "replace_symbol_kind_filter" => Some("symbol_kind"),
+        _ => None,
+    }
 }
 
 fn retry_relaxed_filter_field(kind: &str) -> Option<&'static str> {
@@ -2437,6 +2453,20 @@ fn add_plan_filter_args(
     }
     for (name, values) in negated {
         arguments.insert(name, json!(values));
+    }
+}
+
+fn remove_repair_filter_args(
+    arguments: &mut Map<String, Value>,
+    repair_filter_fields: &[&str],
+    suggested_filters: &SearchFilters,
+) {
+    for field in repair_filter_fields {
+        if query_plan_filter_field_present(field, suggested_filters) {
+            continue;
+        }
+        arguments.remove(*field);
+        arguments.remove(&format!("exclude_{field}"));
     }
 }
 
