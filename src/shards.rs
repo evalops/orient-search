@@ -22,7 +22,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 const SHARD_MANIFEST_VERSION: u32 = 1;
 const SHARD_MANIFEST_SIDECAR_VERSION: u32 = 1;
 const SHARD_MANIFEST_PREFILTER_VERSION: u32 = 1;
-const SHARD_MANIFEST_ROUTE_VERSION: u32 = 2;
+const SHARD_MANIFEST_ROUTE_VERSION: u32 = 3;
 const SHARD_MANIFEST_FILE: &str = "manifest.json";
 const SHARD_MANIFEST_SIDECAR_FILE: &str = "manifest.bin";
 const SHARD_MANIFEST_PREFILTER_FILE: &str = "manifest.prefilter.bin";
@@ -62,7 +62,7 @@ struct ShardManifestRoute {
     json_fingerprint: ManifestFileFingerprint,
     shards: Vec<ShardRouteEntry>,
     exact_terms: Vec<ShardRouteTerm>,
-    shard_ids: Vec<u16>,
+    shard_ids: Vec<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -94,6 +94,13 @@ struct ShardRouteTerm {
     hash: u32,
     start: u32,
     len: u16,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ShardRouteLookup {
+    Candidates(Vec<u16>),
+    MissingHash,
+    Corrupt,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -2174,8 +2181,10 @@ pub(crate) fn shard_route_entries(
     let Some(route) = load_manifest_route(index_dir)? else {
         return Ok(None);
     };
-    let Some(candidate_ids) = shard_route_candidate_ids(&route, &required_hashes) else {
-        return Ok(Some(Vec::new()));
+    let candidate_ids = match shard_route_candidate_ids(&route, &required_hashes) {
+        ShardRouteLookup::Candidates(candidate_ids) => candidate_ids,
+        ShardRouteLookup::MissingHash => return Ok(Some(Vec::new())),
+        ShardRouteLookup::Corrupt => return Ok(None),
     };
     let shards = candidate_ids
         .into_iter()
@@ -2198,30 +2207,41 @@ fn shard_entries_to_jobs(shards: Vec<ShardEntry>, filters: &SearchFilters) -> Ve
 fn shard_route_candidate_ids(
     route: &ShardManifestRoute,
     required_hashes: &[u32],
-) -> Option<Vec<u16>> {
+) -> ShardRouteLookup {
     let mut candidate_ids: Option<Vec<u16>> = None;
     for hash in required_hashes {
-        let postings = shard_route_postings(route, *hash)?;
+        let postings = match shard_route_postings(route, *hash) {
+            Ok(Some(postings)) => postings,
+            Ok(None) => return ShardRouteLookup::MissingHash,
+            Err(()) => return ShardRouteLookup::Corrupt,
+        };
         candidate_ids = Some(match candidate_ids {
-            Some(existing) => intersect_u16_sorted(&existing, postings),
-            None => postings.to_vec(),
+            Some(existing) => intersect_u16_sorted(&existing, &postings),
+            None => postings,
         });
         if candidate_ids.as_ref().is_some_and(Vec::is_empty) {
             break;
         }
     }
-    candidate_ids
+    ShardRouteLookup::Candidates(candidate_ids.unwrap_or_default())
 }
 
-fn shard_route_postings(route: &ShardManifestRoute, hash: u32) -> Option<&[u16]> {
+fn shard_route_postings(route: &ShardManifestRoute, hash: u32) -> Result<Option<Vec<u16>>, ()> {
     let index = route
         .exact_terms
         .binary_search_by_key(&hash, |term| term.hash)
-        .ok()?;
+        .ok();
+    let Some(index) = index else {
+        return Ok(None);
+    };
     let term = route.exact_terms[index];
     let start = term.start as usize;
-    let end = start.saturating_add(term.len as usize);
-    (end <= route.shard_ids.len()).then_some(&route.shard_ids[start..end])
+    if start > route.shard_ids.len() {
+        return Err(());
+    }
+    decode_route_shard_ids(&route.shard_ids[start..], term.len as usize)
+        .map(Some)
+        .ok_or(())
 }
 
 fn intersect_u16_sorted(left: &[u16], right: &[u16]) -> Vec<u16> {
@@ -2241,6 +2261,65 @@ fn intersect_u16_sorted(left: &[u16], right: &[u16]) -> Vec<u16> {
         }
     }
     out
+}
+
+fn encode_route_shard_ids(ids: &[u16], bytes: &mut Vec<u8>) {
+    let mut previous = 0u16;
+    for (index, id) in ids.iter().copied().enumerate() {
+        let delta = if index == 0 {
+            id
+        } else {
+            id.saturating_sub(previous)
+        };
+        encode_var_u32(delta as u32, bytes);
+        previous = id;
+    }
+}
+
+fn decode_route_shard_ids(bytes: &[u8], len: usize) -> Option<Vec<u16>> {
+    let mut ids = Vec::with_capacity(len);
+    let mut offset = 0usize;
+    let mut previous = 0u16;
+    for index in 0..len {
+        let delta = decode_var_u32(bytes, &mut offset)?;
+        let value = if index == 0 {
+            u16::try_from(delta).ok()?
+        } else {
+            let delta = u16::try_from(delta).ok()?;
+            previous.checked_add(delta)?
+        };
+        if index > 0 && value <= previous {
+            return None;
+        }
+        ids.push(value);
+        previous = value;
+    }
+    Some(ids)
+}
+
+fn encode_var_u32(mut value: u32, bytes: &mut Vec<u8>) {
+    while value >= 0x80 {
+        bytes.push((value as u8) | 0x80);
+        value >>= 7;
+    }
+    bytes.push(value as u8);
+}
+
+fn decode_var_u32(bytes: &[u8], offset: &mut usize) -> Option<u32> {
+    let mut value = 0u32;
+    let mut shift = 0u32;
+    loop {
+        let byte = *bytes.get(*offset)?;
+        *offset += 1;
+        value |= ((byte & 0x7f) as u32) << shift;
+        if byte & 0x80 == 0 {
+            return Some(value);
+        }
+        shift += 7;
+        if shift >= 32 {
+            return None;
+        }
+    }
 }
 
 fn shard_prefilter_required_exact_hashes(shard_query: &str, filters: &SearchFilters) -> Vec<u32> {
@@ -2609,7 +2688,7 @@ fn save_manifest_route(index_dir: &Path, manifest: &ShardManifest) -> Result<()>
         ids.dedup();
         let start = shard_ids.len() as u32;
         let len = ids.len() as u16;
-        shard_ids.extend(ids);
+        encode_route_shard_ids(&ids, &mut shard_ids);
         exact_terms.push(ShardRouteTerm { hash, start, len });
     }
 
@@ -3046,11 +3125,24 @@ mod tests {
     fn manifest_route_round_trips() {
         let dir = tempfile::tempdir().unwrap();
         let auth = dir.path().join("auth");
+        let billing = dir.path().join("billing");
         fs::create_dir_all(&auth).unwrap();
+        fs::create_dir_all(&billing).unwrap();
 
-        let mut manifest = test_manifest(&auth, None);
+        let mut manifest = test_manifest(&auth, Some(&billing));
         manifest.shards[0].sketch = Some(ShardQuerySketch {
-            exact_hashes: vec![sketch_fingerprint("routeprobe")],
+            exact_hashes: vec![
+                sketch_fingerprint("routeprobe"),
+                sketch_fingerprint("sharedrouteprobe"),
+            ],
+            trigram_hashes: Vec::new(),
+            exact_bits: Vec::new(),
+            trigram_bits: Vec::new(),
+            symbol_kind_bits: Vec::new(),
+            filter_bits: Vec::new(),
+        });
+        manifest.shards[1].sketch = Some(ShardQuerySketch {
+            exact_hashes: vec![sketch_fingerprint("sharedrouteprobe")],
             trigram_hashes: Vec::new(),
             exact_bits: Vec::new(),
             trigram_bits: Vec::new(),
@@ -3060,10 +3152,69 @@ mod tests {
         save_manifest(dir.path(), &manifest).unwrap();
 
         let route = load_manifest_route(dir.path()).unwrap().unwrap();
-        assert_eq!(route.shards.len(), 1);
+        assert_eq!(route.shards.len(), 2);
         assert_eq!(
-            shard_route_candidate_ids(&route, &[sketch_fingerprint("routeprobe")]).unwrap(),
-            vec![0]
+            shard_route_candidate_ids(&route, &[sketch_fingerprint("routeprobe")]),
+            ShardRouteLookup::Candidates(vec![0])
+        );
+        assert_eq!(
+            shard_route_candidate_ids(&route, &[sketch_fingerprint("sharedrouteprobe")]),
+            ShardRouteLookup::Candidates(vec![0, 1])
+        );
+        assert!(route.shard_ids.len() < 4);
+
+        let missing = shard_route_candidate_ids(&route, &[sketch_fingerprint("missingrouteprobe")]);
+        assert_eq!(missing, ShardRouteLookup::MissingHash);
+
+        let mut corrupt = route.clone();
+        let routeprobe_index = corrupt
+            .exact_terms
+            .binary_search_by_key(&sketch_fingerprint("routeprobe"), |term| term.hash)
+            .unwrap();
+        corrupt.exact_terms[routeprobe_index].start = corrupt.shard_ids.len() as u32 + 1;
+        assert_eq!(
+            shard_route_candidate_ids(&corrupt, &[sketch_fingerprint("routeprobe")]),
+            ShardRouteLookup::Corrupt
+        );
+    }
+
+    #[test]
+    fn route_shard_id_varints_round_trip_sparse_ids() {
+        let ids = vec![0, 1, 127, 128, 255, 16_384, u16::MAX];
+        let mut bytes = Vec::new();
+
+        encode_route_shard_ids(&ids, &mut bytes);
+
+        assert_eq!(decode_route_shard_ids(&bytes, ids.len()), Some(ids));
+        assert!(bytes.len() < 2 * 7);
+
+        let mut truncated = bytes;
+        truncated.pop();
+        assert_eq!(decode_route_shard_ids(&truncated, 7), None);
+        assert_eq!(decode_route_shard_ids(&[1, 0], 2), None);
+    }
+
+    #[test]
+    fn malformed_route_varints_mark_lookup_corrupt() {
+        let route = ShardManifestRoute {
+            version: SHARD_MANIFEST_ROUTE_VERSION,
+            json_fingerprint: ManifestFileFingerprint {
+                len: 0,
+                modified_secs: 0,
+                modified_nanos: 0,
+            },
+            shards: Vec::new(),
+            exact_terms: vec![ShardRouteTerm {
+                hash: 42,
+                start: 0,
+                len: 1,
+            }],
+            shard_ids: vec![0x80],
+        };
+
+        assert_eq!(
+            shard_route_candidate_ids(&route, &[42]),
+            ShardRouteLookup::Corrupt
         );
     }
 }
