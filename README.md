@@ -1,20 +1,18 @@
 # Orient Search
 
-Orient Search is a local code-search daemon for coding agents. It gives Codex,
-Claude Code, Amp, and other local agents repo maps, indexed search, query plans,
-and bounded file ranges so they stop burning runs on repeated `rg`, `find`,
-`ls`, and `cat`.
+Orient Search is a local code-search daemon for coding agents. It provides repo
+maps, indexed search, query plans, and bounded file reads so agents can inspect
+code quickly without repeated filesystem scans.
 
 ## Shared Daemon
 
-Run one warmed daemon per machine or workspace family, then point every local
-agent at it:
+Run one warmed daemon for a repo set, then point local agents at it:
 
 ```bash
 cargo install --git https://github.com/evalops/orient-search
 
 orient ensure-shards \
-  --discover-root ~/code \
+  --discover-root /path/to/workspaces \
   --output-dir /tmp/orient-shards \
   --family-limit 2
 
@@ -23,7 +21,7 @@ orient serve-tcp \
   --index-dir /tmp/orient-shards
 ```
 
-In each agent session:
+For each client:
 
 ```bash
 orient doctor --index-dir /tmp/orient-shards
@@ -32,8 +30,8 @@ orient daemon-status
 orient daemon-status --format json
 ```
 
-`daemon-status` reports a compact warmed-cache summary. Add `--format json`
-when an adapter needs copyable first requests and target details.
+`daemon-status` reports a compact warmed-cache summary. Add `--format json` for
+copyable first requests and target details.
 
 ## Search
 
@@ -68,9 +66,9 @@ and query-plan follow-ups with `jsonl`, `client_cli`, and compact CLI hints.
 
 ## Footprint
 
-Orient stores source snapshots and line offsets in persisted indexes so agents
-can read bounded context without touching the live filesystem. That makes
-snippet/range reads fast and robust, but index files are larger than source.
+Orient stores source snapshots and line offsets in persisted indexes so bounded
+reads stay fast even when served by a shared daemon. This is local-only data:
+Orient does not collect telemetry.
 
 Use:
 
@@ -80,8 +78,8 @@ orient shard-status --index-dir /tmp/orient-shards --summary
 
 The summary reports persisted index size, represented source size, snapshot
 bytes, line-offset bytes, posting counts, compressed posting bytes, and largest
-shards. On large workspaces, expect indexes to be larger than source because
-Orient stores snapshots and line offsets for fast bounded reads.
+shards. Indexes are usually larger than source because they keep enough local
+state for fast snippets and reads.
 
 ## Build And Test
 

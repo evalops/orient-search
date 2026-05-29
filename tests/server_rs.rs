@@ -959,7 +959,7 @@ fn agent_guide_returns_local_agent_request_templates() {
             .unwrap()
             .iter()
             .any(|command| command.as_str().unwrap().contains(
-                "orient ensure-shards --discover-root ~/code --output-dir /tmp/orient-shards"
+                "orient ensure-shards --discover-root /path/to/workspaces --output-dir /tmp/orient-shards"
             ))
     );
     assert!(
@@ -1054,7 +1054,7 @@ fn agent_instructions_returns_copyable_local_agent_rules() {
         "## Orient Search",
         "Use Orient as the first local code-discovery step",
         "orient client-jsonl --addr 127.0.0.1:9999",
-        "orient ensure-shards --discover-root ~/code --output-dir /tmp/orient-shards --family-limit 2",
+        "orient ensure-shards --discover-root /path/to/workspaces --output-dir /tmp/orient-shards --family-limit 2",
         "orient ensure-index --repo /work/repo --index /tmp/repo.index",
         "search_auto_batch",
         "daemon_status.search_auto_default",
@@ -5631,6 +5631,7 @@ fn runtime_shard_search_uses_manifest_sketch_before_cold_load() {
 
     let shard_dir = tempfile::tempdir().unwrap();
     build_shards(&[hit_repo, miss_repo], shard_dir.path()).unwrap();
+    assert!(shard_dir.path().join("manifest.route.bin").exists());
     let manifest: serde_json::Value =
         serde_json::from_slice(&fs::read(shard_dir.path().join("manifest.json")).unwrap()).unwrap();
     let miss_index = manifest["shards"]
@@ -5680,6 +5681,53 @@ fn runtime_shard_search_uses_manifest_sketch_before_cold_load() {
     );
     assert!(plan_result.contains("\"missing_terms\""), "{plan_result}");
     assert!(plan_result.contains("missingterm"), "{plan_result}");
+    assert_eq!(runtime.cached_index_count(), 1);
+}
+
+#[test]
+fn runtime_shard_search_uses_route_before_manifest_cache() {
+    let workspace = tempfile::tempdir().unwrap();
+    let hit_repo = workspace.path().join("hit-service");
+    let miss_repo = workspace.path().join("miss-service");
+    write(
+        &hit_repo.join("src/lib.rs"),
+        "pub fn runtime_route_probe_symbol() -> bool { true }\n",
+    );
+    write(
+        &miss_repo.join("src/lib.rs"),
+        "pub fn unrelated_runtime_route_service() -> bool { false }\n",
+    );
+
+    let shard_dir = tempfile::tempdir().unwrap();
+    build_shards(&[hit_repo, miss_repo], shard_dir.path()).unwrap();
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(shard_dir.path().join("manifest.json")).unwrap()).unwrap();
+    let miss_index = manifest["shards"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|shard| shard["name"] == "miss-service")
+        .unwrap()["index"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    fs::remove_file(shard_dir.path().join(miss_index)).unwrap();
+
+    let runtime = ToolRuntime::default();
+    let response = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("search"),
+        tool: "search_shards".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": shard_dir.path(),
+            "query": "kind:function runtime_route_probe_symbol",
+            "limit": 10
+        }),
+    });
+    assert!(response.error.is_none(), "{:?}", response.error);
+    let result = serde_json::to_string(&response.result).unwrap();
+    assert!(result.contains("hit-service/src/lib.rs"), "{result}");
+    assert!(!result.contains("miss-service/src/lib.rs"), "{result}");
+    assert_eq!(runtime.cached_shard_manifest_count(), 0);
     assert_eq!(runtime.cached_index_count(), 1);
 }
 

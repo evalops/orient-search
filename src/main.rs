@@ -4803,7 +4803,7 @@ fn doctor_report(config: DoctorConfig) -> DoctorReport {
             "pass --index or --index-dir to verify the exact shared search target".to_string(),
         );
         commands.push(
-            "orient ensure-shards --discover-root ~/code --output-dir /tmp/orient-shards --family-limit 2".to_string(),
+            "orient ensure-shards --discover-root /path/to/workspaces --output-dir /tmp/orient-shards --family-limit 2".to_string(),
         );
         commands.push(format!(
             "orient serve-tcp --addr {} --index-dir /tmp/orient-shards",

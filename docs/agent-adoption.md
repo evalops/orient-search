@@ -1,8 +1,8 @@
 # Agent Adoption
 
-Orient adoption should be boring: start one shared daemon, give each agent a
-small local rule, and let returned follow-up requests drive search, reads, and
-query-plan recovery.
+Orient adoption should be boring: start one shared daemon, give each local
+agent a small rule, and let returned follow-up requests drive search, reads,
+and query-plan recovery.
 
 For setup and shared-runtime operations, use [Shared Daemon](shared-daemon.md).
 For transport details and tool schemas, use [Agent Protocol](agent-protocol.md).

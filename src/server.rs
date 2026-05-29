@@ -19,8 +19,9 @@ use crate::shards::{
     append_shard_facet_repair_hints, build_shards_with_force, ensure_shards,
     filter_repo_map_by_prefix, filters_for_shard_scope, load_manifest, refresh_shards,
     related_query_without_shard_selectors, resolve_shard_path_from_manifest,
-    shard_prefilter_query_impossible, shard_search_scopes, shard_selection_miss_plan,
-    shard_sketch_may_diagnose_query, shard_sketch_may_match_query, shard_status,
+    shard_prefilter_query_impossible, shard_route_entries, shard_search_scopes,
+    shard_selection_miss_plan, shard_sketch_may_diagnose_query, shard_sketch_may_match_query,
+    shard_status,
 };
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use anyhow::{Context, Result, anyhow};
@@ -353,6 +354,24 @@ struct ShardJob {
     scopes: Vec<ShardSearchScope>,
 }
 
+fn shard_jobs_from_entries(
+    shards: impl IntoIterator<Item = ShardEntry>,
+    shard_query: &str,
+    filters: &SearchFilters,
+    check_sketch: bool,
+) -> Vec<ShardJob> {
+    shards
+        .into_iter()
+        .filter_map(|shard| {
+            if check_sketch && !shard_sketch_may_match_query(&shard, shard_query, filters) {
+                return None;
+            }
+            let scopes = shard_search_scopes(&shard, filters);
+            (!scopes.is_empty()).then_some(ShardJob { shard, scopes })
+        })
+        .collect()
+}
+
 impl IndexCacheEntry {
     fn loading() -> Self {
         Self {
@@ -528,7 +547,7 @@ pub fn tool_manifest() -> Value {
         ),
         tool_entry(
             "agent_instructions",
-            "Return compact copyable AGENTS.md, CLAUDE.md, or Amp instructions for using Orient first.",
+            "Return compact copyable local-agent instructions for using Orient first.",
             &[],
             &["repo", "index", "index_dir", "addr"],
         ),
@@ -945,7 +964,7 @@ pub fn agent_guide(
         "quickstart": {
             "install": "cargo install --git https://github.com/evalops/orient-search",
             "multi_repo": [
-                format!("orient ensure-shards --discover-root ~/code --output-dir {index_dir} --family-limit 2"),
+                format!("orient ensure-shards --discover-root /path/to/workspaces --output-dir {index_dir} --family-limit 2"),
                 format!("orient serve-tcp --addr {addr} --index-dir {index_dir}")
             ],
             "single_repo": [
@@ -998,7 +1017,7 @@ pub fn agent_guide(
                 format!("orient serve-tcp --addr {addr} --index {index}")
             ],
             "multi_repo_shards": [
-                format!("orient ensure-shards --discover-root ~/code --output-dir {index_dir} --family-limit 2"),
+                format!("orient ensure-shards --discover-root /path/to/workspaces --output-dir {index_dir} --family-limit 2"),
                 format!("orient serve-tcp --addr {addr} --index-dir {index_dir}")
             ]
         },
@@ -1097,7 +1116,7 @@ pub fn agent_instructions(
         "## Orient Search\n\
 Use Orient as the first local code-discovery step before repeated `rg`, `find`, `ls`, or `cat`.\n\
 Prefer the shared daemon when it is running: `{client_command}`.\n\
-For many local repos, bootstrap it with `orient ensure-shards --discover-root ~/code --output-dir {index_dir} --family-limit 2` and `orient serve-tcp --addr {addr} --index-dir {index_dir}`.\n\
+For many local repos, bootstrap it with `orient ensure-shards --discover-root /path/to/workspaces --output-dir {index_dir} --family-limit 2` and `orient serve-tcp --addr {addr} --index-dir {index_dir}`.\n\
 For one repo, bootstrap it with `orient ensure-index --repo {repo} --index {index}` and `orient serve-tcp --addr {addr} --index {index}`.\n\
 Start each session with `daemon_status` or `agent_guide`, then use `search_auto` for normal lookup and `search_auto_batch` for alternate query phrasings.\n\
 Trust `daemon_status.search_auto_default` to see whether no-target `search_auto` will use a warmed shard directory, warmed index, or the daemon current directory; use `daemon_status.default_requests` for copyable first repo-map/search/query-plan calls.\n\
@@ -4178,6 +4197,22 @@ impl ToolRuntime {
         Ok(manifest)
     }
 
+    fn cached_shard_manifest_if_fresh(
+        &self,
+        index_dir: &Path,
+    ) -> Result<Option<Arc<ShardManifest>>> {
+        let key = canonical_cache_key(index_dir);
+        let current_fingerprint = shard_manifest_fingerprint(&key);
+        let manifests = self
+            .shard_manifests
+            .lock()
+            .map_err(|_| anyhow!("shard manifest cache lock poisoned"))?;
+        Ok(manifests.get(&key).and_then(|entry| {
+            (current_fingerprint.is_none() || entry.fingerprint == current_fingerprint)
+                .then(|| Arc::clone(&entry.manifest))
+        }))
+    }
+
     fn cached_shard_manifest_paths(&self) -> Vec<String> {
         let mut paths = self
             .shard_manifests
@@ -4302,19 +4337,24 @@ impl ToolRuntime {
         if shard_prefilter_query_impossible(index_dir, &shard_query, &filters)? {
             return Ok(Vec::new());
         }
-        let manifest = self.cached_shard_manifest(index_dir)?;
-        let jobs = manifest
-            .shards
-            .iter()
-            .cloned()
-            .filter_map(|shard| {
-                if !shard_sketch_may_match_query(&shard, &shard_query, &filters) {
-                    return None;
-                }
-                let scopes = shard_search_scopes(&shard, &filters);
-                (!scopes.is_empty()).then_some(ShardJob { shard, scopes })
-            })
-            .collect::<Vec<_>>();
+        let jobs = if let Some(manifest) = self.cached_shard_manifest_if_fresh(index_dir)? {
+            shard_jobs_from_entries(
+                manifest.shards.iter().cloned(),
+                &shard_query,
+                &filters,
+                true,
+            )
+        } else if let Some(shards) = shard_route_entries(index_dir, &shard_query, &filters)? {
+            shard_jobs_from_entries(shards, &shard_query, &filters, false)
+        } else {
+            let manifest = self.cached_shard_manifest(index_dir)?;
+            shard_jobs_from_entries(
+                manifest.shards.iter().cloned(),
+                &shard_query,
+                &filters,
+                true,
+            )
+        };
         let results =
             self.search_shard_jobs_cached(index_dir, &shard_query, limit, &filters, jobs)?;
         let mut results = finalize_results(results, limit);

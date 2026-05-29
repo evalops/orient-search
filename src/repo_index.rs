@@ -5096,17 +5096,6 @@ fn shell_quote(value: &str) -> String {
 
 pub(crate) fn finalize_results(mut results: Vec<SearchResult>, limit: usize) -> Vec<SearchResult> {
     let limit = capped_search_limit(limit);
-    for result in &mut results {
-        if let Some(signals) = result.explanation.take() {
-            result.explanation = Some(compact_rank_signals(signals));
-        }
-        if result.line_range.is_none() {
-            result.line_range = line_range_from_snippet(&result.snippet);
-        }
-        compact_match_lines(&mut result.match_lines);
-        result.read_range = Some(result_read_range(result));
-    }
-
     results.sort_by(|a, b| {
         b.score
             .partial_cmp(&a.score)
@@ -5125,7 +5114,21 @@ pub(crate) fn finalize_results(mut results: Vec<SearchResult>, limit: usize) -> 
             deduped.push(result);
         }
     }
+    for result in &mut deduped {
+        finalize_result_metadata(result);
+    }
     deduped
+}
+
+fn finalize_result_metadata(result: &mut SearchResult) {
+    if let Some(signals) = result.explanation.take() {
+        result.explanation = Some(compact_rank_signals(signals));
+    }
+    if result.line_range.is_none() {
+        result.line_range = line_range_from_snippet(&result.snippet);
+    }
+    compact_match_lines(&mut result.match_lines);
+    result.read_range = Some(result_read_range(result));
 }
 
 fn result_read_range(result: &SearchResult) -> ResultReadRange {
@@ -5820,6 +5823,64 @@ fn normalized_snippet_signature(snippet: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_result(path: &str, score: f64, snippet: &str) -> SearchResult {
+        SearchResult {
+            path: path.to_string(),
+            score,
+            reason: "test".to_string(),
+            snippet: snippet.to_string(),
+            line_range: None,
+            match_lines: vec![2, 2, 1],
+            explanation: Some(vec![
+                RankSignal {
+                    kind: "term".to_string(),
+                    value: "alpha".to_string(),
+                    score: 1.0,
+                },
+                RankSignal {
+                    kind: "term".to_string(),
+                    value: "alpha".to_string(),
+                    score: 2.0,
+                },
+            ]),
+            query_plan: None,
+            duplicate_group: None,
+            context: None,
+            read_range: None,
+            read_request: None,
+            related_request: None,
+            related_symbols_request: None,
+        }
+    }
+
+    #[test]
+    fn finalize_results_dedupes_before_metadata_population() {
+        let results = vec![
+            test_result("one/src/auth.rs", 10.0, "2: pub fn issue_token() {}"),
+            test_result("two/src/auth.rs", 9.0, "9: pub fn issue_token() {}"),
+            test_result("src/other.rs", 1.0, "1: pub fn other() {}"),
+        ];
+
+        let finalized = finalize_results(results, 1);
+
+        assert_eq!(finalized.len(), 1);
+        assert_eq!(finalized[0].path, "one/src/auth.rs");
+        assert_eq!(
+            finalized[0]
+                .duplicate_group
+                .as_ref()
+                .unwrap()
+                .duplicate_paths,
+            vec!["two/src/auth.rs"]
+        );
+        assert_eq!(finalized[0].line_range.as_ref().unwrap().start_line, 2);
+        assert_eq!(finalized[0].match_lines, vec![2, 1]);
+        assert_eq!(finalized[0].read_range.as_ref().unwrap().start, 1);
+        let signals = finalized[0].explanation.as_ref().unwrap();
+        assert_eq!(signals.len(), 1);
+        assert_eq!(signals[0].score, 3.0);
+    }
 
     #[test]
     fn compiled_path_filter_matcher_normalizes_once_and_preserves_semantics() {

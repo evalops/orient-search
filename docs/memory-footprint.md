@@ -3,6 +3,7 @@
 Orient optimizes for local agent latency. Persisted indexes store source
 snapshots and line metadata so snippets and bounded reads do not need to reopen
 live files. This makes reads fast and makes index files larger than source.
+Indexes stay local; Orient does not collect telemetry.
 
 ## What Gets Stored
 
@@ -16,7 +17,7 @@ Each index contains:
 - line-offset and token-to-line tables
 
 That tradeoff is intentional: agents can inspect search hits quickly, and a
-shared daemon amortizes load cost across sessions.
+shared daemon amortizes load cost across local clients.
 
 ## Inspect It
 
@@ -44,13 +45,13 @@ worktrees:
 
 ```bash
 orient ensure-shards \
-  --discover-root ~/code \
+  --discover-root /path/to/workspaces \
   --output-dir /tmp/orient-shards \
   --family-limit 2
 ```
 
 Use `--family-limit 1` for a smaller representative shard set. Increase it when
-active worktrees matter.
+multiple active worktrees matter.
 
 Keep generated indexes outside the repo, such as under `/tmp` or another local
 cache directory. Do not commit them.

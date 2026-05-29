@@ -60,9 +60,33 @@ struct ShardManifestPrefilter {
 struct ShardManifestRoute {
     version: u32,
     json_fingerprint: ManifestFileFingerprint,
-    shards: Vec<ShardEntry>,
+    shards: Vec<ShardRouteEntry>,
     exact_terms: Vec<ShardRouteTerm>,
     shard_ids: Vec<u16>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct ShardRouteEntry {
+    name: String,
+    root: PathBuf,
+    index: String,
+    aliases: Vec<ShardRouteAlias>,
+    git: Option<ShardRouteGitMetadata>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct ShardRouteAlias {
+    name: String,
+    path_prefix: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct ShardRouteGitMetadata {
+    git_kind: Option<String>,
+    branch: Option<String>,
+    origin: Option<String>,
+    git_common_dir: Option<PathBuf>,
+    tracked_files: Option<usize>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -111,6 +135,65 @@ pub struct ShardAlias {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub path_prefix: Option<String>,
+}
+
+impl ShardRouteEntry {
+    fn from_shard(shard: &ShardEntry) -> Self {
+        Self {
+            name: shard.name.clone(),
+            root: shard.root.clone(),
+            index: shard.index.clone(),
+            aliases: shard
+                .aliases
+                .iter()
+                .map(|alias| ShardRouteAlias {
+                    name: alias.name.clone(),
+                    path_prefix: alias.path_prefix.clone(),
+                })
+                .collect(),
+            git: shard.git.as_ref().map(ShardRouteGitMetadata::from_git),
+        }
+    }
+
+    fn into_shard(self) -> ShardEntry {
+        ShardEntry {
+            name: self.name,
+            root: self.root,
+            index: self.index,
+            aliases: self
+                .aliases
+                .into_iter()
+                .map(|alias| ShardAlias {
+                    name: alias.name,
+                    path_prefix: alias.path_prefix,
+                })
+                .collect(),
+            git: self.git.map(ShardRouteGitMetadata::into_git),
+            sketch: None,
+        }
+    }
+}
+
+impl ShardRouteGitMetadata {
+    fn from_git(git: &RepoGitMetadata) -> Self {
+        Self {
+            git_kind: git.git_kind.clone(),
+            branch: git.branch.clone(),
+            origin: git.origin.clone(),
+            git_common_dir: git.git_common_dir.clone(),
+            tracked_files: git.tracked_files,
+        }
+    }
+
+    fn into_git(self) -> RepoGitMetadata {
+        RepoGitMetadata {
+            git_kind: self.git_kind,
+            branch: self.branch,
+            origin: self.origin,
+            git_common_dir: self.git_common_dir,
+            tracked_files: self.tracked_files,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -750,8 +833,8 @@ pub fn search_shards(
     if shard_prefilter_query_impossible(index_dir, &shard_query, &filters)? {
         return Ok(Vec::new());
     }
-    let jobs = if let Some(jobs) = shard_route_jobs(index_dir, &shard_query, &filters)? {
-        jobs
+    let jobs = if let Some(shards) = shard_route_entries(index_dir, &shard_query, &filters)? {
+        shard_entries_to_jobs(shards, &filters)
     } else {
         let manifest = load_manifest(index_dir)?;
         manifest
@@ -2079,11 +2162,11 @@ pub(crate) fn shard_prefilter_query_impossible(
         .any(|hash| prefilter.exact_hashes.binary_search(hash).is_err()))
 }
 
-fn shard_route_jobs(
+pub(crate) fn shard_route_entries(
     index_dir: &Path,
     shard_query: &str,
     filters: &SearchFilters,
-) -> Result<Option<Vec<ShardJob>>> {
+) -> Result<Option<Vec<ShardEntry>>> {
     let required_hashes = shard_prefilter_required_exact_hashes(shard_query, filters);
     if required_hashes.is_empty() {
         return Ok(None);
@@ -2094,15 +2177,22 @@ fn shard_route_jobs(
     let Some(candidate_ids) = shard_route_candidate_ids(&route, &required_hashes) else {
         return Ok(Some(Vec::new()));
     };
-    let jobs = candidate_ids
+    let shards = candidate_ids
         .into_iter()
         .filter_map(|id| route.shards.get(id as usize).cloned())
+        .map(ShardRouteEntry::into_shard)
+        .collect::<Vec<_>>();
+    Ok(Some(shards))
+}
+
+fn shard_entries_to_jobs(shards: Vec<ShardEntry>, filters: &SearchFilters) -> Vec<ShardJob> {
+    shards
+        .into_iter()
         .filter_map(|shard| {
             let scopes = shard_search_scopes(&shard, filters);
             (!scopes.is_empty()).then_some(ShardJob { shard, scopes })
         })
-        .collect::<Vec<_>>();
-    Ok(Some(jobs))
+        .collect()
 }
 
 fn shard_route_candidate_ids(
@@ -2506,9 +2596,7 @@ fn save_manifest_route(index_dir: &Path, manifest: &ShardManifest) -> Result<()>
                     postings.entry(*hash).or_default().push(shard_id as u16);
                 }
             }
-            let mut shard = shard.clone();
-            shard.sketch = None;
-            shard
+            ShardRouteEntry::from_shard(shard)
         })
         .collect::<Vec<_>>();
 
@@ -2952,5 +3040,30 @@ mod tests {
         .unwrap();
 
         assert_eq!(load_manifest(dir.path()).unwrap(), manifest);
+    }
+
+    #[test]
+    fn manifest_route_round_trips() {
+        let dir = tempfile::tempdir().unwrap();
+        let auth = dir.path().join("auth");
+        fs::create_dir_all(&auth).unwrap();
+
+        let mut manifest = test_manifest(&auth, None);
+        manifest.shards[0].sketch = Some(ShardQuerySketch {
+            exact_hashes: vec![sketch_fingerprint("routeprobe")],
+            trigram_hashes: Vec::new(),
+            exact_bits: Vec::new(),
+            trigram_bits: Vec::new(),
+            symbol_kind_bits: Vec::new(),
+            filter_bits: Vec::new(),
+        });
+        save_manifest(dir.path(), &manifest).unwrap();
+
+        let route = load_manifest_route(dir.path()).unwrap().unwrap();
+        assert_eq!(route.shards.len(), 1);
+        assert_eq!(
+            shard_route_candidate_ids(&route, &[sketch_fingerprint("routeprobe")]).unwrap(),
+            vec![0]
+        );
     }
 }

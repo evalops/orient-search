@@ -1,7 +1,8 @@
 # Shared Daemon
 
-Run one warmed Orient daemon per machine or workspace family so local agents
-reuse the same repo maps, indexes, query plans, and bounded reads.
+Run one warmed Orient daemon for a repo set so local agents reuse the same repo
+maps, indexes, query plans, and bounded reads. The daemon is local-only and does
+not collect telemetry.
 
 ## Start
 
@@ -9,7 +10,7 @@ For several repos:
 
 ```bash
 orient ensure-shards \
-  --discover-root ~/code \
+  --discover-root /path/to/workspaces \
   --output-dir /tmp/orient-shards \
   --family-limit 2
 
@@ -32,7 +33,7 @@ orient serve-unix --socket /tmp/orient.sock --index-dir /tmp/orient-shards
 orient client-jsonl --socket /tmp/orient.sock
 ```
 
-## Agent Rule
+## Agent Setup
 
 Generate a local rule for the current daemon target:
 
@@ -40,7 +41,7 @@ Generate a local rule for the current daemon target:
 orient agent-instructions --index-dir /tmp/orient-shards
 ```
 
-The important behavior is:
+The generated rule should keep agents on this loop:
 
 - Start with `daemon_status` or `agent_guide`.
 - Use `search_auto` for normal lookup and `search_auto_batch` for alternate
@@ -60,8 +61,8 @@ orient daemon-status
 orient daemon-status --format json
 ```
 
-The compact status is meant for humans. JSON status adds warmed-target details
-and copyable default requests for adapters.
+The compact status is meant for humans. JSON status adds warmed-target summaries
+and copyable default requests.
 
 Refresh explicitly when needed:
 
@@ -73,3 +74,4 @@ orient refresh-shards --index-dir /tmp/orient-shards
 `ensure-shards` is the preferred shared-directory bootstrap. It adds missing
 repos and refreshes existing shards without shrinking the shard set. Use
 `index-shards --force` only when intentionally replacing a shard directory.
+Keep shard directories in a local cache, not in source control.
