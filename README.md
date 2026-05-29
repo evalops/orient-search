@@ -125,6 +125,8 @@ for all returned context.
 which points to the best immediate batch read after normal results or an
 automatic retry. Their `next_action` field wraps the best immediate follow-up
 request with a compact `kind`, `source`, and `summary`.
+Generated batch read requests include `read_budget` so wrappers can see the
+range count and total line budget before sending the follow-up.
 For manual context reads, pass `scope:"symbol"` or `orient read-range --scope
 symbol` to anchor the returned window at the nearest function, class, or type
 definition instead of opening an exact line window.

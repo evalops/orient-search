@@ -923,7 +923,8 @@ fn cli_rejects_oversized_batches() {
         .stderr(predicate::str::contains("total lines"))
         .stderr(predicate::str::contains(format!(
             "max {MAX_BATCH_READ_LINES}"
-        )));
+        )))
+        .stderr(predicate::str::contains("split into smaller read-ranges"));
 }
 
 #[test]

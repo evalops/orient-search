@@ -4,6 +4,7 @@ use crate::discover::{
 };
 use crate::fast_index::{FastIndex, IndexFreshness, RefreshStats};
 use crate::query::{merge_filters, normalize_symbol_kind, parse_query, query_text};
+pub use crate::repo_index::MAX_BATCH_READ_LINES;
 use crate::repo_index::{
     DEFAULT_REPO_MAP_READ_BATCH_RANGES, MAX_ATTACHED_CONTEXT_LINES, MAX_READ_RANGE_LINES,
     MAX_RESULT_READ_BATCH_RANGES, MAX_SEARCH_RESULTS, QueryPlan, QueryPlanFilter, RangeScope,
@@ -43,7 +44,6 @@ use std::time::SystemTime;
 
 pub const MAX_BATCH_QUERIES: usize = 32;
 pub const MAX_BATCH_RANGES: usize = 64;
-pub const MAX_BATCH_READ_LINES: usize = 8_000;
 pub const DEFAULT_MAX_CACHED_INDEXES: usize = 64;
 const DEFAULT_DAEMON_ADDR: &str = "127.0.0.1:8796";
 
@@ -1243,6 +1243,7 @@ pub fn agent_guide(
             "Use search_auto.next_read_batch_request or a search_auto_batch item next_read_batch_request as the preferred immediate read follow-up after automatic retries.",
             "Use search_auto.next_action or a search_auto_batch item next_action when the wrapper wants one prioritized follow-up request.",
             "Use search_auto.read_batch_request, a search_auto_batch item read_batch_request, or a search batch item read_batch_request to read top ranges in one call.",
+            "Use read_batch_request.read_budget to keep batch reads under hard_limits.max_batch_read_lines; split large inspections instead of widening one call.",
             "Use result.read_request for one bounded file range.",
             "Batch several result.read_range objects with read_ranges, read_index_ranges, or read_shard_ranges.",
             "Use scope:symbol on manual read_range/read_ranges calls when opening from a line inside a function, class, or type definition.",
@@ -1288,6 +1289,7 @@ Use query filters directly: `file:`, `path:`, `lang:`, `ext:`, `symbol:`, `type:
 Use `line:42` or `target_line:42` with `file:` or `path:` when the agent knows the relevant line and wants anchored snippets/read ranges.\n\
 Generated paths, including hashed JavaScript bundles, are demoted by default; use `generated:true` or `is:generated` when intentionally inspecting generated output.\n\
 After search, follow returned `next_action`, `next_read_batch_request`, `read_batch_request`, `read_request`, `related_request`, and `related_symbols_request`; each includes `jsonl` and `client_cli` for direct replay through `orient client-jsonl` when it wraps a tool request.\n\
+Use `read_batch_request.read_budget` to keep batch reads under the advertised hard limits; split large inspections into smaller calls instead of widening one huge request.\n\
 For manual context reads from a line inside a definition, pass `scope:\"symbol\"` so `read_range` or `read_ranges` anchors at the nearest function, class, or type definition.\n\
 When results are empty, noisy, or suspicious, use the returned `query_plan_request` or inline `query_plan_result` before broadening the search; pass `retry_if_empty:true` when you want Orient to execute the promoted retry once and return `primary_retry_result` immediately.\n\
 Orient is local code search only and does not collect telemetry.",
@@ -8060,7 +8062,7 @@ fn validate_batch_read_line_budget(ranges: &[RangeArg]) -> Result<()> {
         .ok_or_else(|| anyhow!("batch read line count overflowed"))?;
     if total > MAX_BATCH_READ_LINES {
         return Err(anyhow!(
-            "argument ranges requests {total} total lines, max {MAX_BATCH_READ_LINES}"
+            "argument ranges requests {total} total lines, max {MAX_BATCH_READ_LINES}; split into smaller read_ranges calls or lower lines per range"
         ));
     }
     Ok(())

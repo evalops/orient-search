@@ -1314,6 +1314,7 @@ fn runtime_serves_agent_guide_for_json_lines_wrappers() {
         "Use search_auto.repo_map_request or a search_auto_batch item repo_map_request when the agent needs entrypoints, tests, commands, or top symbols for the chosen surface.",
         "Use search_auto.next_action or a search_auto_batch item next_action when the wrapper wants one prioritized follow-up request.",
         "Use search_auto.read_batch_request, a search_auto_batch item read_batch_request, or a search batch item read_batch_request to read top ranges in one call.",
+        "Use read_batch_request.read_budget to keep batch reads under hard_limits.max_batch_read_lines; split large inspections instead of widening one call.",
         "Use result.read_request for one bounded file range.",
     ] {
         assert!(
@@ -1627,6 +1628,14 @@ fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
     assert_eq!(
         live["read_batch_request"]["arguments"]["ranges"][0]["path"],
         "src/auth.rs"
+    );
+    assert_eq!(
+        live["read_batch_request"]["read_budget"]["range_count"],
+        serde_json::json!(1)
+    );
+    assert_eq!(
+        live["read_batch_request"]["read_budget"]["max_total_lines"],
+        serde_json::json!(MAX_BATCH_READ_LINES)
     );
     assert_eq!(live["next_action"]["kind"], serde_json::json!("read"));
     assert_eq!(
@@ -3426,6 +3435,7 @@ fn runtime_rejects_oversized_batches() {
         error.contains(&format!("max {MAX_BATCH_READ_LINES}")),
         "{error}"
     );
+    assert!(error.contains("split into smaller read_ranges"), "{error}");
 
     let response = runtime.dispatch(ToolRequest {
         id: serde_json::json!("empty-ranges"),

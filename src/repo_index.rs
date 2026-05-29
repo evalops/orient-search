@@ -21,6 +21,7 @@ pub const MAX_ATTACHED_CONTEXT_LINES: usize = 500;
 pub const MAX_READ_RANGE_LINES: usize = 1_000;
 pub const MAX_SEARCH_RESULTS: usize = 100;
 pub const MAX_RESULT_READ_BATCH_RANGES: usize = 64;
+pub const MAX_BATCH_READ_LINES: usize = 8_000;
 pub const DEFAULT_REPO_MAP_READ_BATCH_RANGES: usize = 16;
 const READ_BATCH_MERGE_GAP_LINES: usize = 8;
 const MAX_REPO_BRIEF_IMPORT_HINTS: usize = 32;
@@ -181,12 +182,23 @@ pub struct ResultToolRequest {
     pub tool: String,
     pub arguments: serde_json::Value,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub read_budget: Option<ReadBatchBudget>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cli: Option<String>,
     pub jsonl: String,
     pub client_cli: String,
 }
 
 pub type ResultReadRequest = ResultToolRequest;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReadBatchBudget {
+    pub range_count: usize,
+    pub total_lines: usize,
+    pub max_ranges: usize,
+    pub max_total_lines: usize,
+    pub max_lines_per_range: usize,
+}
 
 impl ResultToolRequest {
     pub fn new(tool: impl Into<String>, arguments: serde_json::Value) -> Self {
@@ -216,10 +228,16 @@ impl ResultToolRequest {
             id,
             tool,
             arguments,
+            read_budget: None,
             cli,
             jsonl,
             client_cli,
         }
+    }
+
+    fn with_read_budget(mut self, read_budget: ReadBatchBudget) -> Self {
+        self.read_budget = Some(read_budget);
+        self
     }
 }
 
@@ -5640,6 +5658,7 @@ fn read_batch_request_from_ranges_with_limit(
     let limit = read_limit.min(MAX_RESULT_READ_BATCH_RANGES);
     let mut seen = HashSet::new();
     let mut ranges = Vec::new();
+    let mut total_lines = 0usize;
     for read_range in read_ranges {
         if ranges.len() >= limit {
             break;
@@ -5647,12 +5666,22 @@ fn read_batch_request_from_ranges_with_limit(
         if !seen.insert(read_range_key(&read_range)) {
             continue;
         }
-        if try_merge_batch_read_range(&mut ranges, &read_range) {
+        if let Some(new_total_lines) =
+            try_merge_batch_read_range(&mut ranges, &read_range, total_lines)
+        {
+            total_lines = new_total_lines;
             continue;
         }
         if ranges.len() >= limit {
             break;
         }
+        let Some(next_total_lines) = total_lines.checked_add(read_range.lines) else {
+            continue;
+        };
+        if next_total_lines > MAX_BATCH_READ_LINES {
+            continue;
+        }
+        total_lines = next_total_lines;
         ranges.push(read_range);
     }
     if ranges.is_empty() {
@@ -5662,6 +5691,7 @@ fn read_batch_request_from_ranges_with_limit(
     if let Some(scope) = common_scope {
         base_arguments.insert("scope".to_string(), serde_json::json!(scope));
     }
+    let range_count = ranges.len();
     let range_values = ranges
         .into_iter()
         .map(|read_range| {
@@ -5679,10 +5709,16 @@ fn read_batch_request_from_ranges_with_limit(
         })
         .collect::<Vec<_>>();
     base_arguments.insert("ranges".to_string(), serde_json::Value::Array(range_values));
-    Some(ResultToolRequest::new(
-        tool.to_string(),
-        serde_json::Value::Object(base_arguments),
-    ))
+    let request =
+        ResultToolRequest::new(tool.to_string(), serde_json::Value::Object(base_arguments))
+            .with_read_budget(ReadBatchBudget {
+                range_count,
+                total_lines,
+                max_ranges: limit,
+                max_total_lines: MAX_BATCH_READ_LINES,
+                max_lines_per_range: MAX_READ_RANGE_LINES,
+            });
+    Some(request)
 }
 
 fn read_range_key(read_range: &ResultReadRange) -> (String, usize, usize, Option<RangeScope>) {
@@ -5697,21 +5733,30 @@ fn read_range_key(read_range: &ResultReadRange) -> (String, usize, usize, Option
 fn try_merge_batch_read_range(
     ranges: &mut [ResultReadRange],
     read_range: &ResultReadRange,
-) -> bool {
+    total_lines: usize,
+) -> Option<usize> {
     if read_range.scope.is_some() {
-        return false;
+        return None;
     }
     if let Some(existing) = ranges
         .iter_mut()
         .find(|existing| can_merge_read_ranges(existing, read_range))
     {
+        let old_lines = existing.lines;
         let start = existing.start.min(read_range.start);
         let end = read_range_end(existing).max(read_range_end(read_range));
+        let new_lines = end.saturating_sub(start).saturating_add(1);
+        let new_total_lines = total_lines
+            .saturating_sub(old_lines)
+            .saturating_add(new_lines);
+        if new_total_lines > MAX_BATCH_READ_LINES {
+            return None;
+        }
         existing.start = start;
-        existing.lines = end.saturating_sub(start).saturating_add(1);
-        true
+        existing.lines = new_lines;
+        Some(new_total_lines)
     } else {
-        false
+        None
     }
 }
 
@@ -7415,10 +7460,48 @@ mod tests {
             result_read_batch_request(&results, "read_ranges", serde_json::Map::new()).unwrap();
         let ranges = request.arguments["ranges"].as_array().unwrap();
         assert_eq!(ranges.len(), 2);
+        assert_eq!(request.read_budget.as_ref().unwrap().range_count, 2);
+        assert_eq!(request.read_budget.as_ref().unwrap().total_lines, 220);
         assert_eq!(ranges[0]["path"], serde_json::json!("src/auth.rs"));
         assert_eq!(ranges[0]["start"], serde_json::json!(10));
         assert_eq!(ranges[0]["lines"], serde_json::json!(140));
         assert_eq!(ranges[1]["start"], serde_json::json!(220));
+    }
+
+    #[test]
+    fn batch_read_tool_requests_stay_within_total_line_budget() {
+        let ranges = (0..=MAX_BATCH_READ_LINES / MAX_READ_RANGE_LINES)
+            .map(|index| ResultReadRange {
+                path: format!("src/file_{index}.rs"),
+                start: 1,
+                lines: MAX_READ_RANGE_LINES,
+                scope: None,
+            })
+            .collect::<Vec<_>>();
+
+        let request = read_batch_request_from_ranges_with_limit(
+            ranges,
+            "read_ranges",
+            serde_json::Map::new(),
+            64,
+        )
+        .unwrap();
+        let request_ranges = request.arguments["ranges"].as_array().unwrap();
+
+        assert_eq!(
+            request_ranges.len(),
+            MAX_BATCH_READ_LINES / MAX_READ_RANGE_LINES
+        );
+        assert_eq!(
+            request.read_budget,
+            Some(ReadBatchBudget {
+                range_count: MAX_BATCH_READ_LINES / MAX_READ_RANGE_LINES,
+                total_lines: MAX_BATCH_READ_LINES,
+                max_ranges: 64,
+                max_total_lines: MAX_BATCH_READ_LINES,
+                max_lines_per_range: MAX_READ_RANGE_LINES,
+            })
+        );
     }
 
     #[test]
@@ -7502,6 +7585,8 @@ mod tests {
         .unwrap();
 
         assert_eq!(request.arguments["ranges"].as_array().unwrap().len(), 2);
+        assert_eq!(request.read_budget.as_ref().unwrap().range_count, 2);
+        assert_eq!(request.read_budget.as_ref().unwrap().total_lines, 120);
         assert_eq!(
             request.arguments["ranges"][0]["path"],
             serde_json::json!("src/lib.rs")

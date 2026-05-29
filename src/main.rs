@@ -5340,7 +5340,9 @@ fn validate_cli_batch_read_line_budget(ranges: &[CliRangeSpec]) -> Result<()> {
         .try_fold(0usize, |total, range| total.checked_add(range.lines))
         .ok_or_else(|| anyhow::anyhow!("batch read line count overflowed"))?;
     if total > MAX_BATCH_READ_LINES {
-        bail!("ranges request {total} total lines, max {MAX_BATCH_READ_LINES}");
+        bail!(
+            "ranges request {total} total lines, max {MAX_BATCH_READ_LINES}; split into smaller read-ranges calls or lower lines per range"
+        );
     }
     Ok(())
 }
