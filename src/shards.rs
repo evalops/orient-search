@@ -176,10 +176,22 @@ pub fn build_shards_with_force(
     let output_dir = output_dir.as_ref();
     let _lock = ShardWriteLock::acquire(output_dir)?;
     guard_rebuild_against_shrink(repos, output_dir, force)?;
-    build_shards_unlocked(repos, output_dir)
+    build_shards_unlocked(
+        repos,
+        output_dir,
+        if force {
+            ShardManifestWriteMode::AllowShrink
+        } else {
+            ShardManifestWriteMode::PreserveExisting
+        },
+    )
 }
 
-fn build_shards_unlocked(repos: &[PathBuf], output_dir: &Path) -> Result<ShardBuildStats> {
+fn build_shards_unlocked(
+    repos: &[PathBuf],
+    output_dir: &Path,
+    write_mode: ShardManifestWriteMode,
+) -> Result<ShardBuildStats> {
     fs::create_dir_all(output_dir)?;
     let mut manifest = ShardManifest {
         version: SHARD_MANIFEST_VERSION,
@@ -226,7 +238,7 @@ fn build_shards_unlocked(repos: &[PathBuf], output_dir: &Path) -> Result<ShardBu
     }
 
     total.shards = manifest.shards.len();
-    save_manifest(output_dir, &manifest)?;
+    save_manifest_with_mode(output_dir, &manifest, write_mode)?;
     Ok(total)
 }
 
@@ -293,7 +305,7 @@ pub fn ensure_shards(repos: &[PathBuf], output_dir: impl AsRef<Path>) -> Result<
         !repos.is_empty(),
         "provide repos or discover roots when building a new shard directory"
     );
-    let stats = build_shards_unlocked(repos, output_dir)?;
+    let stats = build_shards_unlocked(repos, output_dir, ShardManifestWriteMode::PreserveExisting)?;
     Ok(ShardEnsureStats {
         version: stats.version,
         output_dir: stats.output_dir,
@@ -382,7 +394,7 @@ fn refresh_shards_unlocked(index_dir: &Path) -> Result<ShardRefreshStats> {
 
     manifest.shards = kept_shards;
     total.shards = manifest.shards.len();
-    save_manifest(index_dir, &manifest)?;
+    save_manifest_with_mode(index_dir, &manifest, ShardManifestWriteMode::AllowShrink)?;
     Ok(total)
 }
 
@@ -1838,11 +1850,62 @@ pub(crate) fn filters_for_shard_scope(
     filters
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ShardManifestWriteMode {
+    PreserveExisting,
+    AllowShrink,
+}
+
 fn save_manifest(index_dir: &Path, manifest: &ShardManifest) -> Result<()> {
+    save_manifest_with_mode(
+        index_dir,
+        manifest,
+        ShardManifestWriteMode::PreserveExisting,
+    )
+}
+
+fn save_manifest_with_mode(
+    index_dir: &Path,
+    manifest: &ShardManifest,
+    mode: ShardManifestWriteMode,
+) -> Result<()> {
+    guard_manifest_write_preserves_existing_roots(index_dir, manifest, mode)?;
     let manifest_path = index_dir.join("manifest.json");
     let bytes = serde_json::to_vec_pretty(manifest)?;
     atomic_write(&manifest_path, &bytes)
         .with_context(|| format!("write shard manifest {}", index_dir.display()))
+}
+
+fn guard_manifest_write_preserves_existing_roots(
+    index_dir: &Path,
+    next: &ShardManifest,
+    mode: ShardManifestWriteMode,
+) -> Result<()> {
+    if mode == ShardManifestWriteMode::AllowShrink {
+        return Ok(());
+    }
+    let manifest_path = index_dir.join("manifest.json");
+    if !manifest_path.exists() {
+        return Ok(());
+    }
+    let previous = load_manifest(index_dir)?;
+    let next_roots = next
+        .shards
+        .iter()
+        .map(|shard| canonical_or_self(&shard.root))
+        .collect::<HashSet<_>>();
+    let omitted = previous
+        .shards
+        .iter()
+        .filter(|shard| !next_roots.contains(&canonical_or_self(&shard.root)))
+        .count();
+    anyhow::ensure!(
+        omitted == 0,
+        "refusing to write shard manifest {} because it would remove {} existing shard root(s); use refresh-shards to prune missing roots or index-shards --force to replace the shard directory",
+        manifest_path.display(),
+        omitted,
+    );
+    Ok(())
 }
 
 fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
@@ -2116,4 +2179,55 @@ fn stable_hash(path: &Path) -> String {
         hash = hash.wrapping_mul(0x100000001b3);
     }
     format!("{hash:016x}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_manifest(root_a: &Path, root_b: Option<&Path>) -> ShardManifest {
+        let mut shards = vec![ShardEntry {
+            name: "auth".to_string(),
+            root: root_a.to_path_buf(),
+            index: "auth.orient".to_string(),
+            aliases: Vec::new(),
+            git: None,
+        }];
+        if let Some(root_b) = root_b {
+            shards.push(ShardEntry {
+                name: "billing".to_string(),
+                root: root_b.to_path_buf(),
+                index: "billing.orient".to_string(),
+                aliases: Vec::new(),
+                git: None,
+            });
+        }
+        ShardManifest {
+            version: SHARD_MANIFEST_VERSION,
+            shards,
+        }
+    }
+
+    #[test]
+    fn manifest_writer_refuses_unexpected_shrink_without_explicit_mode() {
+        let dir = tempfile::tempdir().unwrap();
+        let auth = dir.path().join("auth");
+        let billing = dir.path().join("billing");
+        fs::create_dir_all(&auth).unwrap();
+        fs::create_dir_all(&billing).unwrap();
+
+        let full = test_manifest(&auth, Some(&billing));
+        save_manifest(dir.path(), &full).unwrap();
+
+        let shrink = test_manifest(&auth, None);
+        let error = save_manifest(dir.path(), &shrink).unwrap_err().to_string();
+        assert!(
+            error.contains("refusing to write shard manifest"),
+            "{error}"
+        );
+        assert_eq!(load_manifest(dir.path()).unwrap().shards.len(), 2);
+
+        save_manifest_with_mode(dir.path(), &shrink, ShardManifestWriteMode::AllowShrink).unwrap();
+        assert_eq!(load_manifest(dir.path()).unwrap().shards.len(), 1);
+    }
 }
