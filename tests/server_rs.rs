@@ -1230,6 +1230,9 @@ fn agent_guidance_defaults_use_neutral_cache_placeholders() {
             .iter()
             .any(|item| item.as_str().unwrap().contains("private workspace layouts"))
     );
+    assert!(!guide_json.contains("AGENTS.md"));
+    assert!(!guide_json.contains("CLAUDE.md"));
+    assert!(!guide_json.contains("Amp rules"));
 
     let instructions = agent_instructions(None, None, None, None, None);
     assert!(instructions.contains("/path/to/local/cache/orient.index"));
@@ -1237,6 +1240,10 @@ fn agent_guidance_defaults_use_neutral_cache_placeholders() {
     assert!(!instructions.contains("/tmp/orient"));
     assert!(!instructions.contains("/tmp/repo"));
     assert!(instructions.contains("private workspace layouts"));
+    assert!(instructions.contains("the local agent instruction file for this repo"));
+    assert!(!instructions.contains("AGENTS.md"));
+    assert!(!instructions.contains("CLAUDE.md"));
+    assert!(!instructions.contains("Amp rules"));
 }
 
 #[test]

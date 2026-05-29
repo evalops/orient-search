@@ -1132,10 +1132,8 @@ pub fn agent_guide(
         ],
         "adapter_notes": [
             profile.adapter_note,
-            "Codex: add the instruction snippet to the repo-local AGENTS.md or equivalent local rule file.",
-            "Claude Code: add the instruction snippet to the project CLAUDE.md or equivalent local rule file.",
-            "Amp and other coding agents: add the instruction snippet to the local project rules surface and prefer JSON-lines/MCP tool calls over repeated shell scans.",
-            "Keep cache paths local to the machine running the agents; do not copy private workspace layouts into shared docs or reusable rules."
+            "Keep cache paths local to the machine running the agents; do not copy private workspace layouts into shared docs or reusable rules.",
+            "Prefer JSON-lines/MCP tool calls and returned follow-up requests over repeated shell scans."
         ],
         "preferred_surfaces": {
             "one_live_repo": "search_code",
@@ -1283,7 +1281,7 @@ Copy this snippet into {rule_target}.\n\
 Keep cache paths local to the machine running the agents; do not copy private workspace layouts into shared docs or reusable rules.\n\
 For many local repos, bootstrap it with `orient ensure-shards --discover-root /path/to/workspaces --output-dir {index_dir} --family-limit 2` and `orient serve-tcp --addr {addr} --index-dir {index_dir}`.\n\
 For one repo, bootstrap it with `orient ensure-index --repo {repo} --index {index}` and `orient serve-tcp --addr {addr} --index {index}`.\n\
-Start each session with `daemon_status` or `agent_guide`, then use `search_auto` for normal lookup and `search_auto_batch` for alternate query phrasings.\n\
+At the start of a task, call `daemon_status` or `agent_guide`, then use `search_auto` for normal lookup and `search_auto_batch` for alternate query phrasings.\n\
 Trust `daemon_status.search_auto_default` to see whether no-target `search_auto` will use a registered shard directory, warmed index, or the daemon current directory; run any `daemon_status.repair_requests`, then use `daemon_status.default_requests` for copyable first repo-map/search/query-plan calls.\n\
 When calling `search`, `search_batch`, `search_auto`, `search_auto_batch`, `repo_map`, `search_plan`, `find_symbol`, `read_range`, `read_ranges`, `related_files`, or `related_symbols` through JSON-lines/MCP without an explicit target, pass `cwd` so shared shard daemons scope results to the current git checkout.\n\
 Use query filters directly: `file:`, `path:`, `lang:`, `ext:`, `symbol:`, `type:`, `repo:`, `test:`, `generated:`, `code:`, `is:code`, `is:docs`, quoted literals, and negative filters like `-path:vendor` or `-is:generated`.\n\
@@ -1329,8 +1327,8 @@ fn agent_profile(profile: Option<&str>) -> AgentProfile {
         },
         _ => AgentProfile {
             name: "generic",
-            rule_target: "the repo-local agent rule surface, such as AGENTS.md, CLAUDE.md, or a local Amp rules file",
-            adapter_note: "Selected profile: generic; place the snippet in the local rule surface your coding agent reads.",
+            rule_target: "the local agent instruction file for this repo",
+            adapter_note: "Selected profile: generic; place the snippet in the local instruction file your coding agent reads.",
         },
     }
 }

@@ -6,7 +6,7 @@ code quickly without repeated filesystem scans.
 
 ## Shared Daemon
 
-Run one shared daemon for the repos an agent is likely to touch:
+Run one shared daemon for the repos local agents are likely to touch:
 
 ```bash
 cargo install --git https://github.com/evalops/orient-search
@@ -27,7 +27,7 @@ orient serve-tcp \
 
 `--index-dir` registers the shard manifest and lazily loads individual repo
 indexes on first use. The daemon keeps at most 64 ready indexes by default; use
-`--max-cached-indexes N` to tune that for shared multi-agent sessions. Use
+`--max-cached-indexes N` to tune that for shared multi-agent runs. Use
 `--warm-index-dir "$ORIENT_SHARDS"` only when you intentionally want to load
 shard indexes at startup.
 
@@ -35,7 +35,7 @@ Then verify the daemon and generate the short agent rule:
 
 ```bash
 orient doctor --index-dir "$ORIENT_SHARDS"
-orient agent-instructions --profile codex --index-dir "$ORIENT_SHARDS"
+orient agent-instructions --profile generic --index-dir "$ORIENT_SHARDS"
 orient daemon-status
 orient daemon-status --format json
 ```

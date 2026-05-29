@@ -54,7 +54,7 @@ orient client-jsonl --socket "$ORIENT_SOCKET"
 Generate a short local rule for the current daemon target:
 
 ```bash
-orient agent-instructions --profile codex --index-dir "$ORIENT_SHARDS"
+orient agent-instructions --profile generic --index-dir "$ORIENT_SHARDS"
 ```
 
 The generated rule should keep agents on this loop. See

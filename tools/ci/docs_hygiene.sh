@@ -11,6 +11,9 @@ fixed_patterns=(
   'task outcomes'
   'tool-call histories'
   'memory/rules surface'
+  'AGENTS.md'
+  'CLAUDE.md'
+  'Amp rules'
 )
 
 regex_patterns=(

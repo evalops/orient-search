@@ -14,18 +14,18 @@ Generate the live rule with:
 ```bash
 export ORIENT_SHARDS=/path/to/local/cache/orient-shards
 
-orient agent-instructions --profile codex --index-dir "$ORIENT_SHARDS"
+orient agent-instructions --profile generic --index-dir "$ORIENT_SHARDS"
 ```
 
 Keep that cache path local to the machine running the agents; the generated
 rule should not contain private workspace layouts.
 
-Place the generated snippet in the local rule file read by the coding agent.
-The snippet is intentionally tool-agnostic: it tells the agent to use
+Place the generated snippet in the local instruction file read by the coding
+agent. The snippet is intentionally tool-agnostic: it tells the agent to use
 JSON-lines/MCP calls and returned follow-up requests before repeated shell
-scans. Use `--profile codex`, `--profile claude`, `--profile amp`, or
-`--profile generic` to tailor the placement hint without changing the search
-protocol or generated tool calls.
+scans. Use `--profile generic` for neutral output, or an explicit adapter
+profile when you want a placement hint for that agent. The selected profile
+does not change the search protocol or generated tool calls.
 
 The rule should tell agents:
 
