@@ -4004,6 +4004,79 @@ fn cli_refresh_shards_prunes_missing_repo_roots() {
 }
 
 #[test]
+fn cli_index_shards_refuses_to_shrink_existing_manifest_without_force() {
+    let workspace = tempfile::tempdir().unwrap();
+    let auth_repo = workspace.path().join("auth");
+    write(
+        &auth_repo.join("src/auth.rs"),
+        "pub fn issue_token() -> &'static str { \"token\" }\n",
+    );
+    write(
+        &auth_repo.join("Cargo.toml"),
+        "[package]\nname='auth'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    let billing_repo = workspace.path().join("billing");
+    write(
+        &billing_repo.join("src/billing.rs"),
+        "pub fn invoice_total() -> usize { 42 }\n",
+    );
+    write(
+        &billing_repo.join("Cargo.toml"),
+        "[package]\nname='billing'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    let shard_dir = tempfile::tempdir().unwrap();
+
+    let mut build = Command::cargo_bin("orient").unwrap();
+    build
+        .args([
+            "index-shards",
+            "--repo",
+            auth_repo.to_str().unwrap(),
+            "--repo",
+            billing_repo.to_str().unwrap(),
+            "--output-dir",
+            shard_dir.path().to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"shards\":2"));
+
+    let mut shrink = Command::cargo_bin("orient").unwrap();
+    shrink
+        .args([
+            "index-shards",
+            "--repo",
+            auth_repo.to_str().unwrap(),
+            "--output-dir",
+            shard_dir.path().to_str().unwrap(),
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "refusing to overwrite shard directory",
+        ))
+        .stderr(predicate::str::contains("index-shards --force"));
+
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(shard_dir.path().join("manifest.json")).unwrap()).unwrap();
+    assert_eq!(manifest["shards"].as_array().unwrap().len(), 2);
+
+    let mut force = Command::cargo_bin("orient").unwrap();
+    force
+        .args([
+            "index-shards",
+            "--repo",
+            auth_repo.to_str().unwrap(),
+            "--output-dir",
+            shard_dir.path().to_str().unwrap(),
+            "--force",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"shards\":1"));
+}
+
+#[test]
 fn cli_reports_search_benchmarks() {
     let repo = sample_repo();
     let baseline_path = repo.path().join(".orient/fallback-bench.json");

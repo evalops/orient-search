@@ -50,8 +50,10 @@ hints for terminal-native agents.
 
 `ensure-index`, `refresh-index`, and shard refresh rebuild unreadable persisted
 indexes from source so stale local state does not strand an agent mid-task.
-Shard-directory writes use a bounded local writer lock, so several local agents
-can share one `/tmp/orient-shards` directory without racing manifest updates.
+Shard-directory writes use a bounded local writer lock, and `index-shards`
+refuses to shrink an existing shard directory unless `--force` is passed, so
+several local agents can share one `/tmp/orient-shards` directory without
+racing or accidentally replacing the shared manifest.
 
 ## Search locally
 

@@ -52,6 +52,8 @@ Generated follow-up objects such as `read_request`, `read_batch_request`, `relat
 
 Use `index_status` or `shard_status` when live files may have changed since indexing. They report added, changed, and deleted files so an agent can call `refresh_index` or `refresh_shards` before trusting indexed results. `indexed_search_code` and `search_shards` also accept `refresh_if_stale:true` for a one-call freshness check and refresh before search. Index, shard, and daemon status outputs include footprint counters such as `index_bytes`, `source_bytes`, `posting_entries`, and `compressed_posting_bytes`.
 
+Use `ensure_shards` for shard directories shared by several local agents. The lower-level `index_shards` rebuild path refuses to overwrite an existing shard directory when the requested repo set would remove existing shards; pass `force:true` or `orient index-shards --force` only when intentionally replacing that directory.
+
 ## Search First
 
 Use the fastest surface that matches your setup:

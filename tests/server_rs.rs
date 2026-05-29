@@ -3973,6 +3973,65 @@ fn runtime_indexes_shards_from_multiple_discovered_roots() {
 }
 
 #[test]
+fn runtime_index_shards_refuses_accidental_manifest_shrink_without_force() {
+    let workspace = tempfile::tempdir().unwrap();
+    let auth_repo = workspace.path().join("auth");
+    write(&auth_repo.join("src/lib.rs"), "pub fn issue_token() {}\n");
+    write(
+        &auth_repo.join("Cargo.toml"),
+        "[package]\nname='auth'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    let billing_repo = workspace.path().join("billing");
+    write(
+        &billing_repo.join("src/lib.rs"),
+        "pub fn invoice_total() {}\n",
+    );
+    write(
+        &billing_repo.join("Cargo.toml"),
+        "[package]\nname='billing'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    let shard_dir = tempfile::tempdir().unwrap();
+    let runtime = ToolRuntime::default();
+
+    let build = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("build"),
+        tool: "index_shards".to_string(),
+        arguments: serde_json::json!({
+            "repos": [auth_repo, billing_repo],
+            "output_dir": shard_dir.path()
+        }),
+    });
+    assert!(build.error.is_none(), "{:?}", build.error);
+    assert_eq!(build.result.unwrap()["shards"], serde_json::json!(2));
+
+    let shrink = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("shrink"),
+        tool: "index_shards".to_string(),
+        arguments: serde_json::json!({
+            "repos": [workspace.path().join("auth")],
+            "output_dir": shard_dir.path()
+        }),
+    });
+    let error = shrink.error.unwrap();
+    assert!(
+        error.contains("refusing to overwrite shard directory"),
+        "{error}"
+    );
+
+    let forced = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("force"),
+        tool: "index_shards".to_string(),
+        arguments: serde_json::json!({
+            "repos": [workspace.path().join("auth")],
+            "output_dir": shard_dir.path(),
+            "force": true
+        }),
+    });
+    assert!(forced.error.is_none(), "{:?}", forced.error);
+    assert_eq!(forced.result.unwrap()["shards"], serde_json::json!(1));
+}
+
+#[test]
 fn runtime_ensures_shards_builds_refreshes_and_warms() {
     let root = tempfile::tempdir().unwrap();
     write(

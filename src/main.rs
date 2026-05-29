@@ -22,7 +22,7 @@ use orient::server::{
     tool_manifest, unix_client_command,
 };
 use orient::shards::{
-    ShardQueryPlan, build_shards, ensure_shards, find_shard_symbol, read_shard_range,
+    ShardQueryPlan, build_shards_with_force, ensure_shards, find_shard_symbol, read_shard_range,
     refresh_shards, related_shard_files_filtered, related_shard_symbols_filtered, search_shards,
     shard_query_plans, shard_repo_maps, shard_status,
 };
@@ -105,6 +105,8 @@ enum Commands {
         family_limit: Option<usize>,
         #[arg(long)]
         nested_manifests: bool,
+        #[arg(long)]
+        force: bool,
         #[arg(long)]
         output_dir: PathBuf,
     },
@@ -2355,6 +2357,7 @@ fn run() -> Result<()> {
             discover_limit,
             family_limit,
             nested_manifests,
+            force,
             output_dir,
         } => {
             let selection = shard_repos_from_args_required(
@@ -2365,7 +2368,7 @@ fn run() -> Result<()> {
                 normalize_family_limit(family_limit),
                 nested_manifests,
             )?;
-            let stats = build_shards(&selection.repos, output_dir)?;
+            let stats = build_shards_with_force(&selection.repos, output_dir, force)?;
             println!(
                 "{}",
                 serde_json::to_string(&shard_bootstrap_output(stats, selection.discovery)?)?

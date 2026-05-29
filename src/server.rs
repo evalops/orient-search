@@ -15,10 +15,10 @@ use crate::repo_index::{
     symbol_lookup_results,
 };
 use crate::shards::{
-    ShardEntry, ShardManifest, ShardQueryPlan, ShardRepoMap, ShardSearchScope, build_shards,
-    ensure_shards, filter_repo_map_by_prefix, filters_for_shard_scope, load_manifest,
-    refresh_shards, related_query_without_shard_selectors, resolve_shard_path_from_manifest,
-    shard_search_scopes, shard_selection_miss_plan, shard_status,
+    ShardEntry, ShardManifest, ShardQueryPlan, ShardRepoMap, ShardSearchScope,
+    build_shards_with_force, ensure_shards, filter_repo_map_by_prefix, filters_for_shard_scope,
+    load_manifest, refresh_shards, related_query_without_shard_selectors,
+    resolve_shard_path_from_manifest, shard_search_scopes, shard_selection_miss_plan, shard_status,
 };
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use anyhow::{Context, Result, anyhow};
@@ -681,7 +681,7 @@ pub fn tool_manifest() -> Value {
             "index_shards",
             "Build a local multi-repo shard directory from explicit repos or a discovered workspace root.",
             &["output_dir"],
-            SHARD_BUILD_OPTIONAL_ARGS,
+            INDEX_SHARD_BUILD_OPTIONAL_ARGS,
         ),
         tool_entry(
             "ensure_shards",
@@ -1262,7 +1262,7 @@ fn argument_schema(tool_name: &str, name: &str) -> Value {
         }
         "test" | "generated" | "code" | "explain" | "require_all" | "any_terms"
         | "refresh_if_stale" | "diagnose" | "retry_if_empty" | "git_metadata" | "tracked_files"
-        | "nested_manifests" => {
+        | "nested_manifests" | "force" => {
             schema.insert("type".to_string(), json!("boolean"));
         }
         "limit" | "max_depth" | "discover_limit" | "family_limit" | "symbols" | "start"
@@ -1432,7 +1432,7 @@ fn argument_default(tool_name: &str, name: &str) -> Option<Value> {
         (
             _,
             "explain" | "require_all" | "any_terms" | "refresh_if_stale" | "diagnose"
-            | "retry_if_empty" | "git_metadata" | "tracked_files" | "nested_manifests",
+            | "retry_if_empty" | "git_metadata" | "tracked_files" | "nested_manifests" | "force",
         ) => Some(json!(false)),
         _ => None,
     }
@@ -1573,6 +1573,9 @@ fn argument_description(tool_name: &str, name: &str) -> &'static str {
         }
         "retry_if_empty" => {
             "When true, search_auto runs the primary_retry_request once after an empty result and returns primary_retry_result."
+        }
+        "force" => {
+            "When true for index_shards, replace an existing shard directory even if the rebuild would remove existing shards."
         }
         "exclude_file" => "File basename substring or list of substrings to exclude.",
         "exclude_path" => "Path substring or list of substrings to exclude.",
@@ -2868,7 +2871,8 @@ impl ToolRuntime {
             "index_shards" => {
                 let selection = shard_repos_from_arguments_required(&request.arguments)?;
                 let output_dir = path_arg(&request.arguments, "output_dir")?;
-                let stats = build_shards(&selection.repos, output_dir)?;
+                let force = bool_arg(&request.arguments, "force");
+                let stats = build_shards_with_force(&selection.repos, output_dir, force)?;
                 self.clear_runtime_caches()?;
                 shard_bootstrap_output(stats, selection.discovery)
             }
@@ -5518,6 +5522,19 @@ const SHARD_BUILD_OPTIONAL_ARGS: &[&str] = &[
     "limit",
     "family_limit",
     "nested_manifests",
+];
+
+const INDEX_SHARD_BUILD_OPTIONAL_ARGS: &[&str] = &[
+    "repos",
+    "discover_root",
+    "discover_roots",
+    "root",
+    "max_depth",
+    "discover_limit",
+    "limit",
+    "family_limit",
+    "nested_manifests",
+    "force",
 ];
 
 fn string_arg(arguments: &Value, name: &str) -> Result<String> {

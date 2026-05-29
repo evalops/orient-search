@@ -157,8 +157,17 @@ pub struct ShardIndexFreshness {
 }
 
 pub fn build_shards(repos: &[PathBuf], output_dir: impl AsRef<Path>) -> Result<ShardBuildStats> {
+    build_shards_with_force(repos, output_dir, false)
+}
+
+pub fn build_shards_with_force(
+    repos: &[PathBuf],
+    output_dir: impl AsRef<Path>,
+    force: bool,
+) -> Result<ShardBuildStats> {
     let output_dir = output_dir.as_ref();
     let _lock = ShardWriteLock::acquire(output_dir)?;
+    guard_rebuild_against_shrink(repos, output_dir, force)?;
     build_shards_unlocked(repos, output_dir)
 }
 
@@ -209,6 +218,33 @@ fn build_shards_unlocked(repos: &[PathBuf], output_dir: &Path) -> Result<ShardBu
     total.shards = manifest.shards.len();
     save_manifest(output_dir, &manifest)?;
     Ok(total)
+}
+
+fn guard_rebuild_against_shrink(repos: &[PathBuf], output_dir: &Path, force: bool) -> Result<()> {
+    if force || !output_dir.join("manifest.json").exists() {
+        return Ok(());
+    }
+    let manifest = load_manifest(output_dir)?;
+    if manifest.shards.is_empty() {
+        return Ok(());
+    }
+    let requested_roots = repos
+        .iter()
+        .map(|repo| repo.canonicalize())
+        .collect::<std::result::Result<HashSet<_>, _>>()?;
+    let omitted = manifest
+        .shards
+        .iter()
+        .filter(|shard| !requested_roots.contains(&canonical_or_self(&shard.root)))
+        .count();
+    anyhow::ensure!(
+        omitted == 0,
+        "refusing to overwrite shard directory {} because the existing manifest has {} shard(s) and the requested rebuild would remove {} shard(s); use ensure-shards to add or refresh repos, refresh-shards to prune missing roots, or index-shards --force to replace the shard directory",
+        output_dir.display(),
+        manifest.shards.len(),
+        omitted,
+    );
+    Ok(())
 }
 
 pub fn ensure_shards(repos: &[PathBuf], output_dir: impl AsRef<Path>) -> Result<ShardEnsureStats> {
