@@ -75,10 +75,10 @@ fn orient_paths(repo: &Path, query: &str) -> Vec<String> {
 
 fn language_for(path: &str) -> Option<&'static str> {
     let file_name = Path::new(path).file_name()?.to_str()?;
-    if matches!(
-        file_name,
-        "README" | "Makefile" | "yarn.lock" | "bun.lock" | "bun.lockb"
-    ) {
+    if let Some(language) = special_file_language(file_name) {
+        return Some(language);
+    }
+    if matches!(file_name, "README" | "Makefile") {
         return Some("text");
     }
     match Path::new(path)
@@ -100,6 +100,22 @@ fn language_for(path: &str) -> Option<&'static str> {
         "toml" => Some("toml"),
         "json" => Some("json"),
         "yaml" | "yml" => Some("yaml"),
+        "xml" => Some("xml"),
+        "gradle" => Some("gradle"),
+        _ => None,
+    }
+}
+
+fn special_file_language(file_name: &str) -> Option<&'static str> {
+    match file_name {
+        "Cargo.lock" => Some("toml"),
+        "Dockerfile" => Some("dockerfile"),
+        "Gemfile" => Some("ruby"),
+        "Justfile" => Some("justfile"),
+        "go.mod" | "go.sum" => Some("go-mod"),
+        "pom.xml" => Some("xml"),
+        "build.gradle" | "settings.gradle" => Some("gradle"),
+        "yarn.lock" | "bun.lock" | "bun.lockb" => Some("text"),
         _ => None,
     }
 }

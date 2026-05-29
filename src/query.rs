@@ -251,7 +251,21 @@ fn looks_like_file_name_query(term: &str) -> bool {
     let lower = term.to_ascii_lowercase();
     matches!(
         lower.as_str(),
-        "readme" | "makefile" | "yarn.lock" | "bun.lock" | "bun.lockb" | "agents.md"
+        "readme"
+            | "makefile"
+            | "dockerfile"
+            | "justfile"
+            | "gemfile"
+            | "cargo.lock"
+            | "go.mod"
+            | "go.sum"
+            | "pom.xml"
+            | "build.gradle"
+            | "settings.gradle"
+            | "yarn.lock"
+            | "bun.lock"
+            | "bun.lockb"
+            | "agents.md"
     ) || lower.starts_with("readme.")
         || lower.starts_with("license.")
         || lower.starts_with("changelog.")
@@ -268,6 +282,8 @@ fn agent_path_query_extension(extension: &str) -> bool {
             | "json"
             | "yaml"
             | "yml"
+            | "xml"
+            | "gradle"
             | "md"
             | "py"
             | "js"
@@ -648,6 +664,14 @@ mod tests {
         let source_path = parse_query("src/server.rs");
         assert!(source_path.terms.is_empty());
         assert_eq!(source_path.filters.path.as_deref(), Some("src/server.rs"));
+
+        let go_mod = parse_query("go.mod");
+        assert!(go_mod.terms.is_empty());
+        assert_eq!(go_mod.filters.file.as_deref(), Some("go.mod"));
+
+        let dockerfile = parse_query("Dockerfile");
+        assert!(dockerfile.terms.is_empty());
+        assert_eq!(dockerfile.filters.file.as_deref(), Some("Dockerfile"));
 
         let explicit_content = parse_query("content:Cargo.toml");
         assert_eq!(explicit_content.terms, vec!["Cargo.toml"]);

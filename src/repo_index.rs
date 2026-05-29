@@ -1244,6 +1244,11 @@ fn rg_language_globs(language: &str) -> &'static [&'static str] {
         "toml" => &["**/*.toml"],
         "json" => &["**/*.json"],
         "yaml" => &["**/*.yaml", "**/*.yml"],
+        "xml" => &["**/*.xml"],
+        "gradle" => &["**/*.gradle"],
+        "dockerfile" => &["**/Dockerfile"],
+        "justfile" => &["**/Justfile"],
+        "go-mod" => &["**/go.mod", "**/go.sum"],
         _ => &[],
     }
 }
@@ -3560,10 +3565,10 @@ fn package_json_command_hints(
 
 pub(crate) fn language_for(path: &Path) -> Option<String> {
     let file_name = path.file_name()?.to_string_lossy();
-    if matches!(
-        file_name.as_ref(),
-        "README" | "Makefile" | "yarn.lock" | "bun.lock" | "bun.lockb"
-    ) {
+    if let Some(language) = special_file_language(&file_name) {
+        return Some(language.to_string());
+    }
+    if matches!(file_name.as_ref(), "README" | "Makefile") {
         return Some("text".to_string());
     }
     let ext = path.extension()?.to_string_lossy().to_lowercase();
@@ -3581,9 +3586,25 @@ pub(crate) fn language_for(path: &Path) -> Option<String> {
         "toml" => "toml",
         "json" => "json",
         "yaml" | "yml" => "yaml",
+        "xml" => "xml",
+        "gradle" => "gradle",
         _ => return None,
     };
     Some(language.to_string())
+}
+
+fn special_file_language(file_name: &str) -> Option<&'static str> {
+    match file_name {
+        "Cargo.lock" => Some("toml"),
+        "Dockerfile" => Some("dockerfile"),
+        "Gemfile" => Some("ruby"),
+        "Justfile" => Some("justfile"),
+        "go.mod" | "go.sum" => Some("go-mod"),
+        "pom.xml" => Some("xml"),
+        "build.gradle" | "settings.gradle" => Some("gradle"),
+        "yarn.lock" | "bun.lock" | "bun.lockb" => Some("text"),
+        _ => None,
+    }
 }
 
 pub(crate) fn is_source_code_language(language: &str) -> bool {
@@ -3612,6 +3633,11 @@ pub fn normalize_language_filter(value: &str) -> String {
         "kt" | "kotlin" => "kotlin".to_string(),
         "md" | "markdown" => "markdown".to_string(),
         "yml" | "yaml" => "yaml".to_string(),
+        "xml" => "xml".to_string(),
+        "gradle" => "gradle".to_string(),
+        "docker" | "dockerfile" => "dockerfile".to_string(),
+        "just" | "justfile" => "justfile".to_string(),
+        "gomod" | "go-mod" | "go.mod" => "go-mod".to_string(),
         "txt" | "text" => "text".to_string(),
         other => other.to_string(),
     }
@@ -4561,6 +4587,7 @@ pub(crate) fn is_manifest_file(path: &str) -> bool {
     matches!(
         file_name,
         "Cargo.toml"
+            | "Cargo.lock"
             | "pyproject.toml"
             | "package.json"
             | "package-lock.json"
@@ -4579,7 +4606,10 @@ pub(crate) fn is_manifest_file(path: &str) -> bool {
 }
 
 pub(crate) fn is_important_file(path: &str) -> bool {
-    matches!(path, "AGENTS.md" | "CLAUDE.md" | "README.md" | "Makefile") || is_manifest_file(path)
+    matches!(
+        path,
+        "AGENTS.md" | "CLAUDE.md" | "README.md" | "Dockerfile" | "Justfile" | "Makefile"
+    ) || is_manifest_file(path)
 }
 
 pub(crate) fn symbol_kind_rank(kind: &str) -> usize {
