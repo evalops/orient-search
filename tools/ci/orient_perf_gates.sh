@@ -12,8 +12,12 @@ export PATH="/etc/profiles/per-user/${USER:-}/bin:${CARGO_HOME}/bin:${user_home}
 cd "${BUILD_WORKSPACE_DIRECTORY:-$(pwd)}"
 cargo build --release
 
-rm -f /tmp/orient.index /tmp/orient-fallback-bench.json /tmp/orient-indexed-bench.json
-rm -rf /tmp/orient-shards
+tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/orient-perf-gates.XXXXXX")"
+trap 'rm -rf "${tmpdir}"' EXIT
+index_path="${tmpdir}/orient.index"
+fallback_bench="${tmpdir}/orient-fallback-bench.json"
+indexed_bench="${tmpdir}/orient-indexed-bench.json"
+shard_dir="${tmpdir}/orient-shards"
 
 target/release/orient bench-search \
   --repo . \
@@ -25,10 +29,10 @@ target/release/orient bench-search \
   "read range tool manifest" \
   "file:Cargo.toml"
 
-target/release/orient index --repo . --output /tmp/orient.index
+target/release/orient index --repo . --output "${index_path}"
 target/release/orient bench-search \
   --repo . \
-  --index /tmp/orient.index \
+  --index "${index_path}" \
   --runs 5 \
   --warmup 1 \
   --limit 10 \
@@ -43,26 +47,26 @@ target/release/orient bench-search \
   --limit 10 \
   "indexed search symbol filters" \
   "read range tool manifest" \
-  > /tmp/orient-fallback-bench.json
+  > "${fallback_bench}"
 target/release/orient bench-search \
   --repo . \
-  --index /tmp/orient.index \
+  --index "${index_path}" \
   --runs 7 \
   --warmup 2 \
   --limit 10 \
-  --baseline /tmp/orient-fallback-bench.json \
+  --baseline "${fallback_bench}" \
   --allow-baseline-mode-mismatch \
   --require-faster-than-baseline \
   --max-p95-regression 0 \
   "indexed search symbol filters" \
   "read range tool manifest" \
-  > /tmp/orient-indexed-bench.json
+  > "${indexed_bench}"
 
 target/release/orient ensure-shards \
   --repo . \
-  --output-dir /tmp/orient-shards
+  --output-dir "${shard_dir}"
 target/release/orient bench-shards \
-  --index-dir /tmp/orient-shards \
+  --index-dir "${shard_dir}" \
   --cached \
   --runs 5 \
   --warmup 1 \

@@ -8,7 +8,7 @@ use orient::repo_index::{
     MAX_READ_RANGE_LINES, MAX_SEARCH_RESULTS, SearchFilters, SearchResult, SnippetMode,
     attach_result_context, search_repo_fast_filtered, search_repo_fast_filtered_with_timeout,
 };
-use orient::shards::{build_shards, search_shards};
+use orient::shards::{build_shards, search_shards, shard_query_plans};
 
 fn write(path: &Path, text: &str) {
     fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -3097,6 +3097,21 @@ fn shard_manifest_sketch_prunes_impossible_cold_shards() {
     )
     .unwrap();
     assert!(absent_identifier_results.is_empty());
+
+    let plans = shard_query_plans(
+        shard_dir.path(),
+        "uniquehitneedle missingterm",
+        &SearchFilters::default(),
+    )
+    .unwrap();
+    assert_eq!(plans.len(), 1);
+    assert_eq!(plans[0].name, "hit-service");
+    assert!(
+        plans[0]
+            .plan
+            .missing_terms
+            .contains(&"missingterm".to_string())
+    );
 }
 
 #[test]

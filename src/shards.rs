@@ -20,6 +20,9 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const SHARD_MANIFEST_VERSION: u32 = 1;
+const SHARD_MANIFEST_SIDECAR_VERSION: u32 = 1;
+const SHARD_MANIFEST_FILE: &str = "manifest.json";
+const SHARD_MANIFEST_SIDECAR_FILE: &str = "manifest.bin";
 const SHARD_WRITE_LOCK_FILE: &str = ".orient-shards.lock";
 const SHARD_WRITE_LOCK_TIMEOUT: Duration = Duration::from_secs(120);
 const SHARD_WRITE_LOCK_STALE_AFTER: Duration = Duration::from_secs(30 * 60);
@@ -33,6 +36,20 @@ const SHARD_SUBSTRING_PREFILTER_MAX_TOKEN_CHARS: usize = 20;
 pub struct ShardManifest {
     pub version: u32,
     pub shards: Vec<ShardEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct ShardManifestSidecar {
+    version: u32,
+    json_fingerprint: ManifestFileFingerprint,
+    manifest: ShardManifest,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+struct ManifestFileFingerprint {
+    len: u64,
+    modified_secs: u64,
+    modified_nanos: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -820,6 +837,8 @@ pub fn shard_query_plans(
             (!scopes.is_empty()).then_some(ShardJob { shard, scopes })
         })
         .collect::<Vec<_>>();
+    let filtered_jobs = shard_diagnostic_jobs(jobs, &shard_query);
+    let jobs = filtered_jobs;
     if jobs.is_empty() {
         return Ok(vec![shard_selection_miss_plan(
             index_dir,
@@ -833,6 +852,19 @@ pub fn shard_query_plans(
     plans.sort_by(|left, right| left.name.cmp(&right.name));
     append_shard_facet_repair_hints(&mut plans, &parsed.terms, &filters);
     Ok(plans)
+}
+
+fn shard_diagnostic_jobs(jobs: Vec<ShardJob>, shard_query: &str) -> Vec<ShardJob> {
+    let query_tokens = unique_query_tokens(shard_query);
+    if query_tokens.is_empty() {
+        return jobs;
+    }
+    let filtered = jobs
+        .iter()
+        .filter(|job| shard_sketch_may_diagnose(&job.shard, &query_tokens))
+        .cloned()
+        .collect::<Vec<_>>();
+    if filtered.is_empty() { jobs } else { filtered }
 }
 
 pub(crate) fn shard_selection_miss_plan(
@@ -1788,6 +1820,20 @@ pub(crate) fn shard_sketch_may_match_query(
     shard_sketch_may_match(shard, &query_tokens, query_identifier.as_deref(), filters)
 }
 
+pub(crate) fn shard_sketch_may_diagnose_query(shard: &ShardEntry, shard_query: &str) -> bool {
+    let query_tokens = unique_query_tokens(shard_query);
+    query_tokens.is_empty() || shard_sketch_may_diagnose(shard, &query_tokens)
+}
+
+fn shard_sketch_may_diagnose(shard: &ShardEntry, query_tokens: &[String]) -> bool {
+    let Some(sketch) = &shard.sketch else {
+        return true;
+    };
+    query_tokens
+        .iter()
+        .any(|token| shard_sketch_token_may_diagnose(sketch, token))
+}
+
 fn shard_query_identifier_prefilter(
     shard_query: &str,
     query_tokens: &[String],
@@ -1811,6 +1857,20 @@ fn shard_sketch_token_may_match(
         return true;
     }
     if filters.symbol_kind.is_some() || !allow_trigram_fallback {
+        return false;
+    }
+    let trigrams = shard_query_trigrams(token);
+    !trigrams.is_empty()
+        && trigrams
+            .iter()
+            .all(|trigram| shard_sketch_trigram_may_contain(sketch, trigram))
+}
+
+fn shard_sketch_token_may_diagnose(sketch: &ShardQuerySketch, token: &str) -> bool {
+    if shard_sketch_exact_may_contain(sketch, token) {
+        return true;
+    }
+    if !shard_allows_substring_prefilter(token) {
         return false;
     }
     let trigrams = shard_query_trigrams(token);
@@ -1950,7 +2010,13 @@ fn shard_query_trigrams(query: &str) -> Vec<String> {
 }
 
 pub(crate) fn load_manifest(index_dir: &Path) -> Result<ShardManifest> {
-    let bytes = fs::read(index_dir.join("manifest.json"))
+    let manifest_path = index_dir.join(SHARD_MANIFEST_FILE);
+    let fingerprint = manifest_file_fingerprint(&manifest_path).ok();
+    if let Some(manifest) = load_manifest_sidecar(index_dir, fingerprint)? {
+        return Ok(manifest);
+    }
+
+    let bytes = fs::read(&manifest_path)
         .with_context(|| format!("read shard manifest {}", index_dir.display()))?;
     let manifest = serde_json::from_slice::<ShardManifest>(&bytes)?;
     anyhow::ensure!(
@@ -1960,6 +2026,50 @@ pub(crate) fn load_manifest(index_dir: &Path) -> Result<ShardManifest> {
     );
     validate_manifest(&manifest)?;
     Ok(manifest)
+}
+
+fn load_manifest_sidecar(
+    index_dir: &Path,
+    json_fingerprint: Option<ManifestFileFingerprint>,
+) -> Result<Option<ShardManifest>> {
+    let Some(json_fingerprint) = json_fingerprint else {
+        return Ok(None);
+    };
+    let sidecar_path = index_dir.join(SHARD_MANIFEST_SIDECAR_FILE);
+    let bytes = match fs::read(&sidecar_path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
+        Err(_) => return Ok(None),
+    };
+    let sidecar = match bincode::deserialize::<ShardManifestSidecar>(&bytes) {
+        Ok(sidecar) => sidecar,
+        Err(_) => return Ok(None),
+    };
+    if sidecar.version != SHARD_MANIFEST_SIDECAR_VERSION
+        || sidecar.json_fingerprint != json_fingerprint
+    {
+        return Ok(None);
+    }
+    let manifest = sidecar.manifest;
+    if manifest.version != SHARD_MANIFEST_VERSION || validate_manifest(&manifest).is_err() {
+        return Ok(None);
+    }
+    Ok(Some(manifest))
+}
+
+fn manifest_file_fingerprint(path: &Path) -> Result<ManifestFileFingerprint> {
+    let metadata =
+        fs::metadata(path).with_context(|| format!("stat shard manifest {}", path.display()))?;
+    let modified = metadata
+        .modified()
+        .unwrap_or(SystemTime::UNIX_EPOCH)
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
+    Ok(ManifestFileFingerprint {
+        len: metadata.len(),
+        modified_secs: modified.as_secs(),
+        modified_nanos: modified.subsec_nanos(),
+    })
 }
 
 fn validate_manifest(manifest: &ShardManifest) -> Result<()> {
@@ -2144,10 +2254,23 @@ fn save_manifest_with_mode(
     mode: ShardManifestWriteMode,
 ) -> Result<()> {
     guard_manifest_write_preserves_existing_roots(index_dir, manifest, mode)?;
-    let manifest_path = index_dir.join("manifest.json");
+    let manifest_path = index_dir.join(SHARD_MANIFEST_FILE);
     let bytes = serde_json::to_vec_pretty(manifest)?;
     atomic_write(&manifest_path, &bytes)
-        .with_context(|| format!("write shard manifest {}", index_dir.display()))
+        .with_context(|| format!("write shard manifest {}", index_dir.display()))?;
+    save_manifest_sidecar(index_dir, manifest)
+}
+
+fn save_manifest_sidecar(index_dir: &Path, manifest: &ShardManifest) -> Result<()> {
+    let manifest_path = index_dir.join(SHARD_MANIFEST_FILE);
+    let sidecar = ShardManifestSidecar {
+        version: SHARD_MANIFEST_SIDECAR_VERSION,
+        json_fingerprint: manifest_file_fingerprint(&manifest_path)?,
+        manifest: manifest.clone(),
+    };
+    let bytes = bincode::serialize(&sidecar)?;
+    atomic_write(&index_dir.join(SHARD_MANIFEST_SIDECAR_FILE), &bytes)
+        .with_context(|| format!("write shard manifest sidecar {}", index_dir.display()))
 }
 
 fn guard_manifest_write_preserves_existing_roots(
@@ -2158,7 +2281,7 @@ fn guard_manifest_write_preserves_existing_roots(
     if mode == ShardManifestWriteMode::AllowShrink {
         return Ok(());
     }
-    let manifest_path = index_dir.join("manifest.json");
+    let manifest_path = index_dir.join(SHARD_MANIFEST_FILE);
     if !manifest_path.exists() {
         return Ok(());
     }
@@ -2505,5 +2628,65 @@ mod tests {
 
         save_manifest_with_mode(dir.path(), &shrink, ShardManifestWriteMode::AllowShrink).unwrap();
         assert_eq!(load_manifest(dir.path()).unwrap().shards.len(), 1);
+    }
+
+    #[test]
+    fn manifest_sidecar_loads_when_current_and_falls_back_when_invalid() {
+        let dir = tempfile::tempdir().unwrap();
+        let auth = dir.path().join("auth");
+        fs::create_dir_all(&auth).unwrap();
+
+        let manifest = test_manifest(&auth, None);
+        save_manifest(dir.path(), &manifest).unwrap();
+        let sidecar_path = dir.path().join(SHARD_MANIFEST_SIDECAR_FILE);
+        assert!(sidecar_path.exists());
+        assert_eq!(load_manifest(dir.path()).unwrap(), manifest);
+
+        fs::write(&sidecar_path, b"not bincode").unwrap();
+        assert_eq!(load_manifest(dir.path()).unwrap(), manifest);
+    }
+
+    #[test]
+    fn manifest_sidecar_is_ignored_when_json_fingerprint_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let auth = dir.path().join("auth");
+        let billing = dir.path().join("billing");
+        fs::create_dir_all(&auth).unwrap();
+        fs::create_dir_all(&billing).unwrap();
+
+        let full = test_manifest(&auth, Some(&billing));
+        save_manifest(dir.path(), &full).unwrap();
+        let stale_sidecar = fs::read(dir.path().join(SHARD_MANIFEST_SIDECAR_FILE)).unwrap();
+
+        let shrink = test_manifest(&auth, None);
+        save_manifest_with_mode(dir.path(), &shrink, ShardManifestWriteMode::AllowShrink).unwrap();
+        fs::write(dir.path().join(SHARD_MANIFEST_SIDECAR_FILE), stale_sidecar).unwrap();
+
+        assert_eq!(load_manifest(dir.path()).unwrap(), shrink);
+    }
+
+    #[test]
+    fn manifest_sidecar_is_ignored_when_current_but_invalid() {
+        let dir = tempfile::tempdir().unwrap();
+        let auth = dir.path().join("auth");
+        fs::create_dir_all(&auth).unwrap();
+
+        let manifest = test_manifest(&auth, None);
+        save_manifest(dir.path(), &manifest).unwrap();
+        let mut invalid_manifest = manifest.clone();
+        invalid_manifest.version = SHARD_MANIFEST_VERSION + 1;
+        let sidecar = ShardManifestSidecar {
+            version: SHARD_MANIFEST_SIDECAR_VERSION,
+            json_fingerprint: manifest_file_fingerprint(&dir.path().join(SHARD_MANIFEST_FILE))
+                .unwrap(),
+            manifest: invalid_manifest,
+        };
+        fs::write(
+            dir.path().join(SHARD_MANIFEST_SIDECAR_FILE),
+            bincode::serialize(&sidecar).unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(load_manifest(dir.path()).unwrap(), manifest);
     }
 }

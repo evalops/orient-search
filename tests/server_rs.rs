@@ -5598,7 +5598,7 @@ fn runtime_shard_search_uses_manifest_sketch_before_cold_load() {
     let miss_repo = workspace.path().join("miss-service");
     write(
         &hit_repo.join("src/lib.rs"),
-        "pub fn unique_runtime_shard_prefilter_token() -> bool { true }\n",
+        "pub fn zzprefilteronlyneedle() -> bool { true }\n",
     );
     write(
         &miss_repo.join("src/lib.rs"),
@@ -5626,7 +5626,7 @@ fn runtime_shard_search_uses_manifest_sketch_before_cold_load() {
         tool: "search_shards".to_string(),
         arguments: serde_json::json!({
             "index_dir": shard_dir.path(),
-            "query": "unique_runtime_shard_prefilter_token",
+            "query": "zzprefilteronlyneedle",
             "limit": 10
         }),
     });
@@ -5634,6 +5634,28 @@ fn runtime_shard_search_uses_manifest_sketch_before_cold_load() {
     let result = serde_json::to_string(&response.result).unwrap();
     assert!(result.contains("hit-service/src/lib.rs"), "{result}");
     assert!(!result.contains("miss-service/src/lib.rs"), "{result}");
+    assert_eq!(runtime.cached_index_count(), 1);
+
+    let plan_response = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("plan"),
+        tool: "shard_query_plan".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": shard_dir.path(),
+            "query": "zzprefilteronlyneedle missingterm"
+        }),
+    });
+    assert!(plan_response.error.is_none(), "{:?}", plan_response.error);
+    let plan_result = serde_json::to_string(&plan_response.result).unwrap();
+    assert!(
+        plan_result.contains("\"name\":\"hit-service\""),
+        "{plan_result}"
+    );
+    assert!(
+        !plan_result.contains("\"name\":\"miss-service\""),
+        "{plan_result}"
+    );
+    assert!(plan_result.contains("\"missing_terms\""), "{plan_result}");
+    assert!(plan_result.contains("missingterm"), "{plan_result}");
     assert_eq!(runtime.cached_index_count(), 1);
 }
 

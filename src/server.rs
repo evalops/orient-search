@@ -19,7 +19,8 @@ use crate::shards::{
     append_shard_facet_repair_hints, build_shards_with_force, ensure_shards,
     filter_repo_map_by_prefix, filters_for_shard_scope, load_manifest, refresh_shards,
     related_query_without_shard_selectors, resolve_shard_path_from_manifest, shard_search_scopes,
-    shard_selection_miss_plan, shard_sketch_may_match_query, shard_status,
+    shard_selection_miss_plan, shard_sketch_may_diagnose_query, shard_sketch_may_match_query,
+    shard_status,
 };
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use anyhow::{Context, Result, anyhow};
@@ -346,6 +347,7 @@ enum IndexCacheState {
     Failed(String),
 }
 
+#[derive(Clone)]
 struct ShardJob {
     shard: ShardEntry,
     scopes: Vec<ShardSearchScope>,
@@ -4404,6 +4406,7 @@ impl ToolRuntime {
                 (!scopes.is_empty()).then_some(ShardJob { shard, scopes })
             })
             .collect::<Vec<_>>();
+        let jobs = self.shard_diagnostic_jobs(jobs, &shard_query);
         if jobs.is_empty() {
             return Ok(vec![shard_selection_miss_plan(
                 index_dir,
@@ -4418,6 +4421,15 @@ impl ToolRuntime {
         plans.sort_by(|left, right| left.name.cmp(&right.name));
         append_shard_facet_repair_hints(&mut plans, &parsed.terms, &filters);
         Ok(plans)
+    }
+
+    fn shard_diagnostic_jobs(&self, jobs: Vec<ShardJob>, shard_query: &str) -> Vec<ShardJob> {
+        let filtered = jobs
+            .iter()
+            .filter(|job| shard_sketch_may_diagnose_query(&job.shard, shard_query))
+            .cloned()
+            .collect::<Vec<_>>();
+        if filtered.is_empty() { jobs } else { filtered }
     }
 
     fn shard_query_plan_jobs_cached(
