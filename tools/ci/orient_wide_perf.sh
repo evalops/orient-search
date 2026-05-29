@@ -24,6 +24,12 @@ queries=(
   "file:Cargo.toml"
 )
 
+json_string() {
+  local value="${1//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  printf '"%s"' "${value}"
+}
+
 if [[ ! -d "${root}" ]]; then
   if [[ "${ORIENT_WIDE_REQUIRE_ROOT:-0}" == "1" ]]; then
     echo "wide perf root does not exist: ${root}" >&2
@@ -57,10 +63,17 @@ fi
 if [[ "${shards}" == "1" ]]; then
   rm -rf "${output_dir}"
   echo "wide shard build: root=${root} output_dir=${output_dir} family_limit=${family_limit}" >&2
+  build_started_s="$(date +%s)"
   target/release/orient ensure-shards \
     --discover-root "${root}" \
     --output-dir "${output_dir}" \
     --family-limit "${family_limit}"
+  build_finished_s="$(date +%s)"
+  printf '{"mode":"wide_shard_build","build_seconds":%s,"output_dir":%s}\n' \
+    "$((build_finished_s - build_started_s))" \
+    "$(json_string "${output_dir}")"
+  echo "wide shard status: output_dir=${output_dir}" >&2
+  target/release/orient shard-status --index-dir "${output_dir}" --summary
   echo "wide cached shard gate: output_dir=${output_dir} p95<=${shard_p95_ms}ms" >&2
   target/release/orient bench-shards \
     --index-dir "${output_dir}" \

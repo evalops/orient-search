@@ -22,9 +22,9 @@ use orient::server::{
     tool_manifest, unix_client_command,
 };
 use orient::shards::{
-    ShardQueryPlan, build_shards_with_force, ensure_shards, find_shard_symbol, read_shard_range,
-    refresh_shards, related_shard_files_filtered, related_shard_symbols_filtered, search_shards,
-    shard_query_plans, shard_repo_maps, shard_status,
+    ShardFreshness, ShardQueryPlan, build_shards_with_force, ensure_shards, find_shard_symbol,
+    read_shard_range, refresh_shards, related_shard_files_filtered, related_shard_symbols_filtered,
+    search_shards, shard_query_plans, shard_repo_maps, shard_status,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -117,6 +117,8 @@ enum Commands {
     ShardStatus {
         #[arg(long)]
         index_dir: PathBuf,
+        #[arg(long)]
+        summary: bool,
     },
     EnsureShards {
         #[arg(long = "repo")]
@@ -2379,8 +2381,14 @@ fn run() -> Result<()> {
         Commands::RefreshShards { index_dir } => {
             println!("{}", serde_json::to_string(&refresh_shards(index_dir)?)?);
         }
-        Commands::ShardStatus { index_dir } => {
-            println!("{}", serde_json::to_string(&shard_status(index_dir)?)?);
+        Commands::ShardStatus { index_dir, summary } => {
+            let status = shard_status(index_dir)?;
+            let output = if summary {
+                shard_status_summary(&status)
+            } else {
+                serde_json::to_value(status)?
+            };
+            println!("{}", serde_json::to_string(&output)?);
         }
         Commands::EnsureShards {
             repos,
@@ -5152,6 +5160,72 @@ fn shard_bootstrap_output<T: Serialize>(
         object.insert("discovery".to_string(), serde_json::to_value(discovery)?);
     }
     Ok(value)
+}
+
+fn shard_status_summary(status: &ShardFreshness) -> Value {
+    let mut largest = status
+        .shards
+        .iter()
+        .map(|shard| {
+            (
+                shard.status.index_bytes,
+                serde_json::json!({
+                    "name": shard.name,
+                    "root": shard.root,
+                    "index": shard.index,
+                    "index_bytes": shard.status.index_bytes,
+                    "source_bytes": shard.status.source_bytes,
+                    "content_snapshot_bytes": shard.status.content_snapshot_bytes,
+                    "line_offset_bytes": shard.status.line_offset_bytes,
+                    "compressed_posting_bytes": shard.status.compressed_posting_bytes,
+                    "files": shard.status.indexed_files,
+                    "symbols": shard.status.symbols,
+                    "stale": shard.status.stale
+                }),
+            )
+        })
+        .collect::<Vec<_>>();
+    largest.sort_by(|left, right| right.0.cmp(&left.0));
+    largest.truncate(10);
+
+    let stale_shards = status
+        .shards
+        .iter()
+        .filter(|shard| shard.status.stale)
+        .take(20)
+        .map(|shard| {
+            serde_json::json!({
+                "name": shard.name,
+                "root": shard.root,
+                "changed_files": shard.status.changed_files,
+                "deleted_files": shard.status.deleted_files,
+                "added_files": shard.status.added_files
+            })
+        })
+        .collect::<Vec<_>>();
+
+    serde_json::json!({
+        "version": status.version,
+        "index_dir": status.index_dir,
+        "shard_count": status.shard_count,
+        "stale": status.stale,
+        "stale_shards": status.stale_shards,
+        "index_bytes": status.index_bytes,
+        "source_bytes": status.source_bytes,
+        "content_snapshot_bytes": status.content_snapshot_bytes,
+        "line_offset_bytes": status.line_offset_bytes,
+        "terms": status.terms,
+        "path_terms": status.path_terms,
+        "trigrams": status.trigrams,
+        "posting_entries": status.posting_entries,
+        "compressed_posting_bytes": status.compressed_posting_bytes,
+        "symbols": status.symbols,
+        "changed_files": status.changed_files,
+        "deleted_files": status.deleted_files,
+        "added_files": status.added_files,
+        "largest_shards": largest.into_iter().map(|(_, value)| value).collect::<Vec<_>>(),
+        "stale_shard_examples": stale_shards
+    })
 }
 
 struct BenchConfig {

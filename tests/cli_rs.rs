@@ -2567,6 +2567,23 @@ fn cli_reports_index_and_shard_freshness() {
         .stdout(predicate::str::contains("\"compressed_posting_bytes\""))
         .stdout(predicate::str::contains("src/after_shard.rs"));
 
+    let mut shard_status_summary = Command::cargo_bin("orient").unwrap();
+    shard_status_summary
+        .args([
+            "shard-status",
+            "--index-dir",
+            shard_dir.path().to_str().unwrap(),
+            "--summary",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"stale\":true"))
+        .stdout(predicate::str::contains("\"stale_shards\":1"))
+        .stdout(predicate::str::contains("\"index_bytes\""))
+        .stdout(predicate::str::contains("\"largest_shards\""))
+        .stdout(predicate::str::contains("\"stale_shard_examples\""))
+        .stdout(predicate::str::contains("src/after_shard.rs").not());
+
     let mut stale_shard_search = Command::cargo_bin("orient").unwrap();
     stale_shard_search
         .args([

@@ -114,10 +114,13 @@ ORIENT_WIDE_FALLBACK=0 ORIENT_WIDE_SHARDS=1 bazel run //:ci_wide_perf
 
 The script defaults to `~/Documents/Projects`, enforces the `<=300ms` fallback
 p95 target, and can also rebuild a family-limited shard set under
-`/tmp/orient-wide-shards` for warm cached shard measurements. It skips when the
-wide root is absent unless `ORIENT_WIDE_REQUIRE_ROOT=1` is set, so GitHub CI can
-stay deterministic while local runs cover the user's real multi-repo layout.
-The fallback leg uses explicit `bench-search --mode fallback` and repeatable
+`/tmp/orient-wide-shards` for warm cached shard measurements. It prints shard
+build time plus `shard-status --summary` footprint counters such as `index_bytes`,
+`source_bytes`, `content_snapshot_bytes`, `line_offset_bytes`, and compressed
+posting bytes before the warm latency gate. It skips when the wide root is
+absent unless `ORIENT_WIDE_REQUIRE_ROOT=1` is set, so GitHub CI can stay
+deterministic while local runs cover the user's real multi-repo layout. The
+fallback leg uses explicit `bench-search --mode fallback` and repeatable
 `--query`; set `ORIENT_WIDE_FALLBACK=0` when the goal is only the fast shared
 shard path for many local agents.
 
