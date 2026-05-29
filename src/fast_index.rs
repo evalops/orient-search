@@ -1296,6 +1296,15 @@ impl FastIndex {
         } else {
             Vec::new()
         };
+        if suppress_symbol_kind_trigram_fallback(
+            &filters,
+            &query_tokens,
+            token_postings.len(),
+            symbol_postings.len(),
+            path_postings.len(),
+        ) {
+            trigram_postings.clear();
+        }
         let missing_terms = missing_query_terms(
             &query_tokens,
             &token_postings,
@@ -1366,6 +1375,13 @@ impl FastIndex {
         let candidate_ids =
             intersect_symbol_kind_postings(candidate_ids, &symbol_kind_postings, &filters);
         let candidate_ids = intersect_attribute_postings(candidate_ids, &attribute_postings);
+        let candidate_ids = filter_symbol_kind_trigram_candidates(
+            candidate_ids,
+            &self.files,
+            &query_tokens,
+            use_trigrams,
+            &filters,
+        );
         let candidate_count = candidate_ids.len();
 
         let posting_lists = token_postings
@@ -1524,6 +1540,15 @@ impl FastIndex {
         } else {
             Vec::new()
         };
+        if suppress_symbol_kind_trigram_fallback(
+            &filters,
+            &query_tokens,
+            token_postings.len(),
+            symbol_postings.len(),
+            path_postings.len(),
+        ) {
+            trigram_postings.clear();
+        }
         if token_postings.is_empty()
             && symbol_postings.is_empty()
             && path_postings.is_empty()
@@ -1590,6 +1615,13 @@ impl FastIndex {
         let candidate_ids =
             intersect_symbol_kind_postings(candidate_ids, &symbol_kind_postings, &filters);
         let candidate_ids = intersect_attribute_postings(candidate_ids, &attribute_postings);
+        let candidate_ids = filter_symbol_kind_trigram_candidates(
+            candidate_ids,
+            &self.files,
+            &query_tokens,
+            use_trigrams,
+            &filters,
+        );
         !indexed_filter_candidate_ids(&self.files, candidate_ids, &filters).is_empty()
     }
 
@@ -1772,6 +1804,15 @@ impl FastIndex {
         } else {
             Vec::new()
         };
+        if suppress_symbol_kind_trigram_fallback(
+            &filters,
+            &query_tokens,
+            token_postings.len(),
+            symbol_postings.len(),
+            path_postings.len(),
+        ) {
+            trigram_postings.clear();
+        }
         let missing_terms = missing_query_terms(
             &query_tokens,
             &token_postings,
@@ -1834,6 +1875,13 @@ impl FastIndex {
         let candidate_ids =
             intersect_symbol_kind_postings(candidate_ids, &symbol_kind_postings, &filters);
         let candidate_ids = intersect_attribute_postings(candidate_ids, &attribute_postings);
+        let candidate_ids = filter_symbol_kind_trigram_candidates(
+            candidate_ids,
+            &self.files,
+            &query_tokens,
+            use_trigrams,
+            &filters,
+        );
 
         let candidate_count = candidate_ids.len();
         let posting_lists = token_postings
@@ -4190,6 +4238,62 @@ fn intersect_symbol_kind_postings(
         .fold(candidate_ids, |candidate_ids, (_, postings)| {
             intersect_sorted_ids_with_postings(&candidate_ids, postings)
         })
+}
+
+fn filter_symbol_kind_trigram_candidates(
+    candidate_ids: Vec<u32>,
+    files: &[IndexedPath],
+    query_tokens: &[String],
+    use_trigrams: bool,
+    filters: &SearchFilters,
+) -> Vec<u32> {
+    if !use_trigrams || filters.symbol_kind.is_none() || query_tokens.len() != 1 {
+        return candidate_ids;
+    }
+    let token = &query_tokens[0];
+    candidate_ids
+        .into_iter()
+        .filter(|file_id| {
+            files
+                .get(*file_id as usize)
+                .is_some_and(|file| indexed_file_has_verified_query_token(file, token))
+        })
+        .collect()
+}
+
+fn suppress_symbol_kind_trigram_fallback(
+    filters: &SearchFilters,
+    query_tokens: &[String],
+    token_postings: usize,
+    symbol_postings: usize,
+    path_postings: usize,
+) -> bool {
+    filters.symbol_kind.is_some()
+        && query_tokens.len() == 1
+        && token_postings == 0
+        && symbol_postings == 0
+        && path_postings == 0
+}
+
+fn indexed_file_has_verified_query_token(file: &IndexedPath, token: &str) -> bool {
+    file.path_lower.contains(token)
+        || file.terms.iter().any(|term| term.term == token)
+        || file.path_terms.iter().any(|term| term.term == token)
+        || file.symbols.iter().any(|symbol| {
+            symbol.normalized.contains(token) || symbol.tokens.iter().any(|part| part == token)
+        })
+        || contains_ascii_case_insensitive(&file.content, token)
+}
+
+fn contains_ascii_case_insensitive(haystack: &str, needle: &str) -> bool {
+    let needle = needle.as_bytes();
+    if needle.is_empty() {
+        return true;
+    }
+    haystack
+        .as_bytes()
+        .windows(needle.len())
+        .any(|window| window.eq_ignore_ascii_case(needle))
 }
 
 fn intersect_attribute_postings(

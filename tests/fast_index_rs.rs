@@ -2366,6 +2366,10 @@ fn indexed_kind_filter_intersects_content_terms() {
         &repo.path().join("src/noise.rs"),
         "pub fn unrelated_alpha() {}\npub fn unrelated_beta() {}\n",
     );
+    write(
+        &repo.path().join("src/trigram_noise.rs"),
+        "pub fn unrelated_gamma() {}\n// sha har are red edn dne nee eed edl dle\n",
+    );
     for index in 0..20 {
         write(
             &repo.path().join(format!("docs/sharedneedle-{index}.md")),
@@ -2402,6 +2406,28 @@ fn indexed_kind_filter_intersects_content_terms() {
         .unwrap();
     assert_eq!(direct_plan.candidate_count, 1);
     assert_eq!(direct_plan.final_match_count, 1);
+}
+
+#[test]
+fn indexed_kind_filter_skips_trigram_only_false_positives() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/trigram_noise.rs"),
+        "pub fn unrelated_gamma() {}\n// sha har are red edn dne nee eed edl dle\n",
+    );
+
+    let index = FastIndex::build(repo.path()).unwrap();
+    let results = index
+        .search_filtered("kind:function sharedneedle", 10, &SearchFilters::default())
+        .unwrap();
+    assert!(results.is_empty(), "{results:?}");
+    assert!(!index.query_may_match("kind:function sharedneedle", &SearchFilters::default()));
+
+    let plan = index
+        .query_plan("kind:function sharedneedle", &SearchFilters::default())
+        .unwrap();
+    assert_eq!(plan.candidate_count, 0);
+    assert_eq!(plan.final_match_count, 0);
 }
 
 #[test]
