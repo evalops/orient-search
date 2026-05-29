@@ -22,7 +22,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 const SHARD_MANIFEST_VERSION: u32 = 1;
 const SHARD_MANIFEST_SIDECAR_VERSION: u32 = 1;
 const SHARD_MANIFEST_PREFILTER_VERSION: u32 = 1;
-const SHARD_MANIFEST_ROUTE_VERSION: u32 = 1;
+const SHARD_MANIFEST_ROUTE_VERSION: u32 = 2;
 const SHARD_MANIFEST_FILE: &str = "manifest.json";
 const SHARD_MANIFEST_SIDECAR_FILE: &str = "manifest.bin";
 const SHARD_MANIFEST_PREFILTER_FILE: &str = "manifest.prefilter.bin";
@@ -93,7 +93,7 @@ struct ShardRouteGitMetadata {
 struct ShardRouteTerm {
     hash: u32,
     start: u32,
-    len: u32,
+    len: u16,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -2608,7 +2608,7 @@ fn save_manifest_route(index_dir: &Path, manifest: &ShardManifest) -> Result<()>
         ids.sort_unstable();
         ids.dedup();
         let start = shard_ids.len() as u32;
-        let len = ids.len() as u32;
+        let len = ids.len() as u16;
         shard_ids.extend(ids);
         exact_terms.push(ShardRouteTerm { hash, start, len });
     }
