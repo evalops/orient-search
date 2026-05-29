@@ -53,9 +53,10 @@ manifest. Call `warm_shards` only when every shard index should be loaded
 immediately.
 
 `daemon_status`, or the direct CLI wrapper `orient daemon-status`, reports the
-daemon's warmed indexes and registered shard directories. The default CLI output is compact;
-use `orient daemon-status --format json` for registered-target details,
-`search_auto_default`, and copyable `default_requests`.
+daemon's warmed indexes, registered shard directories, and `max_cached_indexes`
+cap. The default CLI output is compact; use `orient daemon-status --format json`
+for registered-target details, `search_auto_default`, and copyable
+`default_requests`.
 
 When exactly one index is warmed or one shard directory is registered, indexed and shard tools
 marked with `daemon_default.source` may omit `index` or `index_dir`; otherwise

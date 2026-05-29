@@ -18,8 +18,8 @@ use orient::repo_index::{
     symbol_lookup_results,
 };
 use orient::server::{
-    MAX_BATCH_QUERIES, MAX_BATCH_RANGES, ToolRequest, ToolRuntime, agent_guide, agent_instructions,
-    mcp_tool_manifest, retarget_client_cli_commands, serve_jsonl,
+    DEFAULT_MAX_CACHED_INDEXES, MAX_BATCH_QUERIES, MAX_BATCH_RANGES, ToolRequest, ToolRuntime,
+    agent_guide, agent_instructions, mcp_tool_manifest, retarget_client_cli_commands, serve_jsonl,
     serve_jsonl_stream_with_client_command, serve_mcp, serve_tcp, tcp_client_command,
     tool_manifest, unix_client_command,
 };
@@ -852,6 +852,8 @@ enum Commands {
         index_dirs: Vec<PathBuf>,
         #[arg(long = "warm-index-dir")]
         warm_index_dirs: Vec<PathBuf>,
+        #[arg(long, default_value_t = DEFAULT_MAX_CACHED_INDEXES)]
+        max_cached_indexes: usize,
         #[arg(long = "ensure-shards-dir")]
         ensure_shard_dirs: Vec<PathBuf>,
         #[arg(long = "repo")]
@@ -877,6 +879,8 @@ enum Commands {
         index_dirs: Vec<PathBuf>,
         #[arg(long = "warm-index-dir")]
         warm_index_dirs: Vec<PathBuf>,
+        #[arg(long, default_value_t = DEFAULT_MAX_CACHED_INDEXES)]
+        max_cached_indexes: usize,
         #[arg(long = "ensure-shards-dir")]
         ensure_shard_dirs: Vec<PathBuf>,
         #[arg(long = "repo")]
@@ -4644,6 +4648,7 @@ fn run() -> Result<()> {
             indexes,
             index_dirs,
             warm_index_dirs,
+            max_cached_indexes,
             ensure_shard_dirs,
             repos,
             discover_roots,
@@ -4657,6 +4662,7 @@ fn run() -> Result<()> {
                 indexes,
                 index_dirs,
                 warm_index_dirs,
+                max_cached_indexes,
                 ensure_shard_dirs,
                 repos,
                 discover_roots,
@@ -4669,6 +4675,7 @@ fn run() -> Result<()> {
             let mut startup = serde_json::json!({
                 "addr": addr.clone(),
                 "transport": "tcp",
+                "max_cached_indexes": runtime.max_cached_indexes(),
                 "cached_indexes": runtime.cached_index_count(),
                 "ensured_shards": ensured_shards,
                 "daemon_status": runtime.daemon_status()
@@ -4684,6 +4691,7 @@ fn run() -> Result<()> {
             indexes,
             index_dirs,
             warm_index_dirs,
+            max_cached_indexes,
             ensure_shard_dirs,
             repos,
             discover_roots,
@@ -4701,6 +4709,7 @@ fn run() -> Result<()> {
                 indexes,
                 index_dirs,
                 warm_index_dirs,
+                max_cached_indexes,
                 ensure_shard_dirs,
                 repos,
                 discover_roots,
@@ -4712,6 +4721,7 @@ fn run() -> Result<()> {
             let mut startup = serde_json::json!({
                 "socket": socket.clone(),
                 "transport": "unix",
+                "max_cached_indexes": runtime.max_cached_indexes(),
                 "cached_indexes": runtime.cached_index_count(),
                 "ensured_shards": ensured_shards,
                 "daemon_status": runtime.daemon_status()
@@ -4736,6 +4746,7 @@ fn bootstrap_runtime(
     indexes: Vec<PathBuf>,
     index_dirs: Vec<PathBuf>,
     warm_index_dirs: Vec<PathBuf>,
+    max_cached_indexes: usize,
     ensure_shard_dirs: Vec<PathBuf>,
     repos: Vec<PathBuf>,
     discover_roots: Vec<PathBuf>,
@@ -4744,7 +4755,7 @@ fn bootstrap_runtime(
     family_limit: Option<usize>,
     nested_manifests: bool,
 ) -> Result<(ToolRuntime, Vec<Value>)> {
-    let runtime = ToolRuntime::default();
+    let runtime = ToolRuntime::with_max_cached_indexes(max_cached_indexes);
     for index in indexes {
         runtime.warm_index(index)?;
     }
@@ -4877,6 +4888,10 @@ fn daemon_status_summary(status: &Value) -> Value {
             .get("cached_indexes")
             .cloned()
             .unwrap_or_else(|| serde_json::json!(0)),
+        "max_cached_indexes": status
+            .get("max_cached_indexes")
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!(DEFAULT_MAX_CACHED_INDEXES)),
         "cached_shard_manifests": status
             .get("cached_shard_manifests")
             .cloned()

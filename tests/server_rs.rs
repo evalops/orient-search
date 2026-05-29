@@ -15,8 +15,9 @@ use orient::repo_index::{
     MAX_RESULT_READ_BATCH_RANGES, MAX_SEARCH_RESULTS,
 };
 use orient::server::{
-    MAX_BATCH_QUERIES, MAX_BATCH_RANGES, ToolRequest, ToolRuntime, agent_guide, agent_instructions,
-    mcp_dispatch_value, mcp_tool_manifest, serve_mcp_with_runtime, tool_manifest,
+    DEFAULT_MAX_CACHED_INDEXES, MAX_BATCH_QUERIES, MAX_BATCH_RANGES, ToolRequest, ToolRuntime,
+    agent_guide, agent_instructions, mcp_dispatch_value, mcp_tool_manifest, serve_mcp_with_runtime,
+    tool_manifest,
 };
 use orient::shards::{build_shards, refresh_shards};
 
@@ -4582,6 +4583,10 @@ fn runtime_warms_index_by_tool_request() {
         arguments: serde_json::json!({}),
     });
     let result = status.result.unwrap();
+    assert_eq!(
+        result["max_cached_indexes"],
+        serde_json::json!(DEFAULT_MAX_CACHED_INDEXES)
+    );
     assert_eq!(result["cached_indexes"], serde_json::json!(1));
     assert_eq!(
         result["search_auto_default"]["surface"],
@@ -4739,6 +4744,83 @@ fn runtime_reuses_cached_index_after_initial_load() {
     assert_eq!(
         status.result.unwrap()["cached_index_details"][0]["disk_missing"],
         serde_json::json!(true)
+    );
+}
+
+#[test]
+fn runtime_evicts_least_recently_used_cached_indexes() {
+    let root = tempfile::tempdir().unwrap();
+    let auth_repo = root.path().join("auth");
+    write(
+        &auth_repo.join("src/lib.rs"),
+        "pub fn issue_token() -> usize { 1 }\n",
+    );
+    let auth_index = auth_repo.join(".orient/index");
+    FastIndex::build(&auth_repo)
+        .unwrap()
+        .save(&auth_index)
+        .unwrap();
+
+    let billing_repo = root.path().join("billing");
+    write(
+        &billing_repo.join("src/lib.rs"),
+        "pub fn invoice_total() -> usize { 42 }\n",
+    );
+    let billing_index = billing_repo.join(".orient/index");
+    FastIndex::build(&billing_repo)
+        .unwrap()
+        .save(&billing_index)
+        .unwrap();
+
+    let runtime = ToolRuntime::with_max_cached_indexes(1);
+    let first = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("first"),
+        tool: "indexed_search_code".to_string(),
+        arguments: serde_json::json!({
+            "index": auth_index,
+            "query": "issue token",
+            "limit": 3,
+            "require_all": true
+        }),
+    });
+    assert!(first.error.is_none(), "{:?}", first.error);
+    assert_eq!(runtime.cached_index_count(), 1);
+
+    let second = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("second"),
+        tool: "indexed_search_code".to_string(),
+        arguments: serde_json::json!({
+            "index": billing_index,
+            "query": "invoice total",
+            "limit": 3,
+            "require_all": true
+        }),
+    });
+    assert!(second.error.is_none(), "{:?}", second.error);
+    assert_eq!(runtime.cached_index_count(), 1);
+    let status = runtime.daemon_status();
+    assert_eq!(status["max_cached_indexes"], serde_json::json!(1));
+    assert_eq!(
+        status["cached_index_details"][0]["root"],
+        serde_json::json!(billing_repo.canonicalize().unwrap().to_string_lossy())
+    );
+
+    let third = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("third"),
+        tool: "indexed_search_code".to_string(),
+        arguments: serde_json::json!({
+            "index": auth_index,
+            "query": "issue token",
+            "limit": 3,
+            "require_all": true
+        }),
+    });
+    assert!(third.error.is_none(), "{:?}", third.error);
+    assert_eq!(runtime.cached_index_count(), 1);
+    let status = runtime.daemon_status();
+    assert_eq!(
+        status["cached_index_details"][0]["root"],
+        serde_json::json!(auth_repo.canonicalize().unwrap().to_string_lossy())
     );
 }
 
@@ -6587,6 +6669,83 @@ fn runtime_serves_parallel_warm_shard_searches() {
 }
 
 #[test]
+fn runtime_bounds_lazy_shard_index_cache() {
+    let workspace = tempfile::tempdir().unwrap();
+    let auth_repo = workspace.path().join("auth");
+    write(
+        &auth_repo.join("src/lib.rs"),
+        "pub fn issue_token() -> usize { 1 }\n",
+    );
+    let billing_repo = workspace.path().join("billing");
+    write(
+        &billing_repo.join("src/lib.rs"),
+        "pub fn invoice_total() -> usize { 42 }\n",
+    );
+
+    let shard_dir = tempfile::tempdir().unwrap();
+    build_shards(&[auth_repo.clone(), billing_repo.clone()], shard_dir.path()).unwrap();
+
+    let runtime = ToolRuntime::with_max_cached_indexes(1);
+    runtime
+        .register_shards(shard_dir.path().to_path_buf())
+        .unwrap();
+    assert_eq!(runtime.cached_index_count(), 0);
+
+    let first = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("first"),
+        tool: "search_shards".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": shard_dir.path(),
+            "query": "issue token",
+            "limit": 3,
+            "require_all": true
+        }),
+    });
+    assert!(first.error.is_none(), "{:?}", first.error);
+    assert_eq!(runtime.cached_index_count(), 1);
+    assert_eq!(
+        runtime.daemon_status()["cached_index_details"][0]["root"],
+        serde_json::json!(auth_repo.canonicalize().unwrap().to_string_lossy())
+    );
+
+    let second = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("second"),
+        tool: "search_shards".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": shard_dir.path(),
+            "query": "invoice total",
+            "limit": 3,
+            "require_all": true
+        }),
+    });
+    assert!(second.error.is_none(), "{:?}", second.error);
+    assert_eq!(runtime.cached_index_count(), 1);
+    let status = runtime.daemon_status();
+    assert_eq!(status["max_cached_indexes"], serde_json::json!(1));
+    assert_eq!(
+        status["cached_index_details"][0]["root"],
+        serde_json::json!(billing_repo.canonicalize().unwrap().to_string_lossy())
+    );
+
+    let third = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("third"),
+        tool: "search_shards".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": shard_dir.path(),
+            "query": "issue token",
+            "limit": 3,
+            "require_all": true
+        }),
+    });
+    assert!(third.error.is_none(), "{:?}", third.error);
+    assert_eq!(runtime.cached_index_count(), 1);
+    assert_eq!(
+        runtime.daemon_status()["cached_index_details"][0]["root"],
+        serde_json::json!(auth_repo.canonicalize().unwrap().to_string_lossy())
+    );
+}
+
+#[test]
 fn runtime_shard_search_uses_global_prefilter_before_manifest_cache() {
     let workspace = tempfile::tempdir().unwrap();
     let repo = workspace.path().join("service");
@@ -8361,6 +8520,109 @@ fn tcp_daemon_registers_shards_without_warming_indexes() {
     assert!(
         status.contains("\"cached_indexes\":1"),
         "search should lazily load only the touched shard: {status}"
+    );
+}
+
+#[test]
+fn tcp_daemon_honors_max_cached_indexes_for_lazy_shards() {
+    let workspace = tempfile::tempdir().unwrap();
+    let auth_repo = workspace.path().join("auth");
+    write(
+        &auth_repo.join("src/lib.rs"),
+        "pub fn issue_token() -> usize { 1 }\n",
+    );
+    let billing_repo = workspace.path().join("billing");
+    write(
+        &billing_repo.join("src/lib.rs"),
+        "pub fn invoice_total() -> usize { 42 }\n",
+    );
+    let shard_dir = tempfile::tempdir().unwrap();
+    build_shards(&[auth_repo, billing_repo], shard_dir.path()).unwrap();
+
+    let binary = assert_cmd::cargo::cargo_bin("orient");
+    let mut child = Command::new(binary)
+        .args([
+            "serve-tcp",
+            "--addr",
+            "127.0.0.1:0",
+            "--index-dir",
+            shard_dir.path().to_str().unwrap(),
+            "--max-cached-indexes",
+            "1",
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let stdout = child.stdout.take().unwrap();
+    let mut startup_reader = BufReader::new(stdout);
+    let mut startup = String::new();
+    startup_reader.read_line(&mut startup).unwrap();
+    let startup_json: serde_json::Value = serde_json::from_str(&startup).unwrap();
+    let addr = startup_json["addr"].as_str().unwrap().to_string();
+    assert_eq!(startup_json["max_cached_indexes"], serde_json::json!(1));
+    assert_eq!(
+        startup_json["daemon_status"]["cached_indexes"],
+        serde_json::json!(0)
+    );
+
+    let first = tcp_tool_request(
+        &addr,
+        serde_json::json!({
+            "id": "first",
+            "tool": "search_shards",
+            "arguments": {
+                "query": "issue token",
+                "limit": 3,
+                "require_all": true
+            }
+        }),
+    );
+    let second = tcp_tool_request(
+        &addr,
+        serde_json::json!({
+            "id": "second",
+            "tool": "search_shards",
+            "arguments": {
+                "query": "invoice total",
+                "limit": 3,
+                "require_all": true
+            }
+        }),
+    );
+    let status = tcp_tool_request(
+        &addr,
+        serde_json::json!({
+            "id": "status",
+            "tool": "daemon_status",
+            "arguments": {}
+        }),
+    );
+
+    child.kill().unwrap();
+    let _ = child.wait();
+
+    assert!(first.contains("src/lib.rs"), "{first}");
+    assert!(second.contains("src/lib.rs"), "{second}");
+    let status_json: serde_json::Value = serde_json::from_str(&status).unwrap();
+    assert_eq!(
+        status_json["result"]["max_cached_indexes"],
+        serde_json::json!(1)
+    );
+    assert_eq!(
+        status_json["result"]["cached_indexes"],
+        serde_json::json!(1)
+    );
+    assert_eq!(
+        status_json["result"]["cached_index_details"][0]["root"],
+        serde_json::json!(
+            workspace
+                .path()
+                .join("billing")
+                .canonicalize()
+                .unwrap()
+                .to_string_lossy()
+        )
     );
 }
 

@@ -20,9 +20,11 @@ orient serve-tcp \
 ```
 
 `--index-dir` registers the shard manifest and loads individual repo indexes
-lazily when a search, read, map, or symbol request touches them. Use
-`--warm-index-dir /tmp/orient-shards` only when you explicitly want every shard
-index resident at startup.
+lazily when a search, read, map, or symbol request touches them. The daemon
+keeps at most 64 ready indexes by default; pass `--max-cached-indexes N` when a
+shared daemon should stay tighter or keep more hot repos resident. Use
+`--warm-index-dir /tmp/orient-shards` only when you explicitly want shard
+indexes loaded at startup.
 
 For one repo, use a single persisted index:
 

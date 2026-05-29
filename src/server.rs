@@ -31,12 +31,16 @@ use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{
+    Arc, Condvar, Mutex,
+    atomic::{AtomicU64, Ordering as AtomicOrdering},
+};
 use std::thread;
 use std::time::SystemTime;
 
 pub const MAX_BATCH_QUERIES: usize = 32;
 pub const MAX_BATCH_RANGES: usize = 64;
+pub const DEFAULT_MAX_CACHED_INDEXES: usize = 64;
 const DEFAULT_DAEMON_ADDR: &str = "127.0.0.1:8796";
 
 #[derive(Debug, Deserialize)]
@@ -297,10 +301,35 @@ fn mcp_error(id: Value, code: i64, message: impl Into<String>) -> Value {
     })
 }
 
-#[derive(Default)]
 pub struct ToolRuntime {
     indexes: Mutex<HashMap<PathBuf, Arc<IndexCacheEntry>>>,
     shard_manifests: Mutex<HashMap<PathBuf, CachedShardManifest>>,
+    next_index_access: AtomicU64,
+    cache_policy: IndexCachePolicy,
+}
+
+#[derive(Clone, Copy)]
+struct IndexCachePolicy {
+    max_ready_indexes: Option<usize>,
+}
+
+impl Default for ToolRuntime {
+    fn default() -> Self {
+        Self {
+            indexes: Mutex::new(HashMap::new()),
+            shard_manifests: Mutex::new(HashMap::new()),
+            next_index_access: AtomicU64::new(1),
+            cache_policy: IndexCachePolicy::default(),
+        }
+    }
+}
+
+impl Default for IndexCachePolicy {
+    fn default() -> Self {
+        Self {
+            max_ready_indexes: Some(DEFAULT_MAX_CACHED_INDEXES),
+        }
+    }
 }
 
 struct IndexCacheEntry {
@@ -344,6 +373,7 @@ enum IndexCacheState {
     Ready {
         index: Arc<FastIndex>,
         fingerprint: Option<CacheFileFingerprint>,
+        last_access: u64,
     },
     Failed(String),
 }
@@ -380,9 +410,17 @@ impl IndexCacheEntry {
         }
     }
 
-    fn ready(index: Arc<FastIndex>, fingerprint: Option<CacheFileFingerprint>) -> Self {
+    fn ready(
+        index: Arc<FastIndex>,
+        fingerprint: Option<CacheFileFingerprint>,
+        access: u64,
+    ) -> Self {
         Self {
-            state: Mutex::new(IndexCacheState::Ready { index, fingerprint }),
+            state: Mutex::new(IndexCacheState::Ready {
+                index,
+                fingerprint,
+                last_access: access,
+            }),
             ready: Condvar::new(),
         }
     }
@@ -396,7 +434,9 @@ impl IndexCacheEntry {
 
     fn ready_snapshot(&self) -> Option<CachedIndexSnapshot> {
         self.state.lock().ok().and_then(|state| match &*state {
-            IndexCacheState::Ready { index, fingerprint } => Some(CachedIndexSnapshot {
+            IndexCacheState::Ready {
+                index, fingerprint, ..
+            } => Some(CachedIndexSnapshot {
                 index: Arc::clone(index),
                 fingerprint: *fingerprint,
             }),
@@ -418,9 +458,25 @@ impl IndexCacheEntry {
             })
             .unwrap_or(false)
     }
+
+    fn last_access(&self) -> Option<u64> {
+        self.state.lock().ok().and_then(|state| match &*state {
+            IndexCacheState::Ready { last_access, .. } => Some(*last_access),
+            IndexCacheState::Loading | IndexCacheState::Failed(_) => None,
+        })
+    }
 }
 
 impl ToolRuntime {
+    pub fn with_max_cached_indexes(max_cached_indexes: usize) -> Self {
+        Self {
+            cache_policy: IndexCachePolicy {
+                max_ready_indexes: Some(max_cached_indexes.max(1)),
+            },
+            ..Self::default()
+        }
+    }
+
     pub fn warm_index(&self, index_path: PathBuf) -> Result<PathBuf> {
         let (key, _) = self.cached_index_with_key(index_path)?;
         Ok(key)
@@ -478,6 +534,12 @@ impl ToolRuntime {
             .unwrap_or(0)
     }
 
+    pub fn max_cached_indexes(&self) -> usize {
+        self.cache_policy
+            .max_ready_indexes
+            .unwrap_or(DEFAULT_MAX_CACHED_INDEXES)
+    }
+
     pub fn daemon_status(&self) -> Value {
         let search_auto_default = self.search_auto_default_status();
         let cached_index_details = self.cached_index_details();
@@ -487,6 +549,7 @@ impl ToolRuntime {
         json!({
             "search_auto_default": search_auto_default.clone(),
             "default_requests": daemon_default_requests(&search_auto_default),
+            "max_cached_indexes": self.max_cached_indexes(),
             "cached_indexes": self.cached_index_count(),
             "cached_index_paths": self.cached_index_paths(),
             "cached_index_details": cached_index_details,
@@ -4698,16 +4761,24 @@ impl ToolRuntime {
         self.refresh_shards_if_stale(index_dir)
     }
 
+    fn next_index_access(&self) -> u64 {
+        self.next_index_access.fetch_add(1, AtomicOrdering::Relaxed)
+    }
+
     fn replace_cached_index(&self, index_path: PathBuf, index: Arc<FastIndex>) -> Result<PathBuf> {
         let key = canonical_cache_key(&index_path);
         let fingerprint = index_file_fingerprint(&key);
-        self.indexes
-            .lock()
-            .map_err(|_| anyhow!("index cache lock poisoned"))?
-            .insert(
-                key.clone(),
-                Arc::new(IndexCacheEntry::ready(index, fingerprint)),
-            );
+        let access = self.next_index_access();
+        {
+            self.indexes
+                .lock()
+                .map_err(|_| anyhow!("index cache lock poisoned"))?
+                .insert(
+                    key.clone(),
+                    Arc::new(IndexCacheEntry::ready(index, fingerprint, access)),
+                );
+        }
+        self.evict_cached_indexes_if_needed(&key)?;
         Ok(key)
     }
 
@@ -4740,6 +4811,7 @@ impl ToolRuntime {
                 let result = match loaded {
                     Ok(index) => {
                         let fingerprint = index_file_fingerprint(&key);
+                        let access = self.next_index_access();
                         *entry
                             .state
                             .lock()
@@ -4747,6 +4819,7 @@ impl ToolRuntime {
                             IndexCacheState::Ready {
                                 index: Arc::clone(&index),
                                 fingerprint,
+                                last_access: access,
                             };
                         Ok((key.clone(), index))
                     }
@@ -4761,7 +4834,9 @@ impl ToolRuntime {
                     }
                 };
                 entry.ready.notify_all();
-                if result.is_err() {
+                if result.is_ok() {
+                    self.evict_cached_indexes_if_needed(&key)?;
+                } else {
                     let mut indexes = self
                         .indexes
                         .lock()
@@ -4781,13 +4856,18 @@ impl ToolRuntime {
                 .lock()
                 .map_err(|_| anyhow!("index cache entry lock poisoned"))?;
             loop {
-                match &*state {
-                    IndexCacheState::Ready { index, fingerprint } => {
+                match &mut *state {
+                    IndexCacheState::Ready {
+                        index,
+                        fingerprint,
+                        last_access,
+                    } => {
                         let current_fingerprint = index_file_fingerprint(&key);
                         if current_fingerprint.is_some() && *fingerprint != current_fingerprint {
                             drop(state);
                             break;
                         }
+                        *last_access = self.next_index_access();
                         return Ok((key, Arc::clone(index)));
                     }
                     IndexCacheState::Failed(message) => return Err(anyhow!(message.clone())),
@@ -5020,6 +5100,35 @@ impl ToolRuntime {
             .lock()
             .map_err(|_| anyhow!("index cache lock poisoned"))?
             .retain(|path, _| !path.starts_with(&index_dir));
+        Ok(())
+    }
+
+    fn evict_cached_indexes_if_needed(&self, protected: &Path) -> Result<()> {
+        let Some(max_ready_indexes) = self.cache_policy.max_ready_indexes else {
+            return Ok(());
+        };
+        let mut indexes = self
+            .indexes
+            .lock()
+            .map_err(|_| anyhow!("index cache lock poisoned"))?;
+        loop {
+            let ready_count = indexes.values().filter(|entry| entry.is_ready()).count();
+            if ready_count <= max_ready_indexes {
+                break;
+            }
+            let victim = indexes
+                .iter()
+                .filter(|(path, entry)| path.as_path() != protected && entry.is_ready())
+                .filter_map(|(path, entry)| {
+                    entry.last_access().map(|access| (path.clone(), access))
+                })
+                .min_by_key(|(_, access)| *access)
+                .map(|(path, _)| path);
+            let Some(victim) = victim else {
+                break;
+            };
+            indexes.remove(&victim);
+        }
         Ok(())
     }
 
