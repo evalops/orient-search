@@ -86,6 +86,13 @@ without Orient, then compare time to first relevant file, local-search command
 count, wrong file opens, tool calls before edit, edit success rate, and
 wall-clock time.
 
+```bash
+orient eval-adoption \
+  --tasks eval/tasks.jsonl \
+  --baseline-transcript eval/baseline/auth-token-refresh.jsonl \
+  --orient-transcript eval/orient/auth-token-refresh.jsonl
+```
+
 ## Docs
 
 More detail:

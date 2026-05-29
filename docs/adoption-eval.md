@@ -47,7 +47,7 @@ For shard tasks, `repo` can be replaced with an `index_dir` and `repo_filter`.
 
 ## Transcript Events
 
-`orient eval-adoption` should accept normalized events like:
+`orient eval-adoption` accepts normalized events like:
 
 ```jsonl
 {"ts":"2026-05-28T10:00:00Z","kind":"tool_call","tool":"shell","command":"rg \"token refresh\""}
@@ -57,7 +57,10 @@ For shard tasks, `repo` can be replaced with an `index_dir` and `repo_filter`.
 ```
 
 Adapters can convert Codex, Claude Code, or Amp transcripts into this schema.
-The scorer should not need model-specific behavior after normalization.
+The scorer does not need model-specific behavior after normalization. Transcript
+events can carry `task_id`; when omitted, the transcript filename stem is used as
+the task id. Timestamps may be RFC3339 `...Z`, numeric seconds in `ts`, or
+numeric milliseconds in `ts_ms`.
 
 ## Metrics
 
@@ -89,17 +92,18 @@ hurting edit success. A strong result is:
 - equal or better edit success
 - clear query-plan diagnostics on failed searches
 
-## CLI Shape
+## CLI
 
-Planned command:
+Run:
 
 ```bash
 orient eval-adoption \
   --tasks eval/tasks.jsonl \
-  --baseline-transcripts eval/baseline/*.jsonl \
-  --orient-transcripts eval/orient/*.jsonl \
+  --baseline-transcript eval/baseline/auth-token-refresh.jsonl \
+  --orient-transcript eval/orient/auth-token-refresh.jsonl \
   --format json
 ```
 
-The command should also support a compact terminal summary for quick local
-iteration.
+Shell globs can pass many transcript paths by repeating `--baseline-transcript`
+and `--orient-transcript`. `--format text` prints a compact local summary for
+quick iteration.

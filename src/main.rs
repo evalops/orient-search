@@ -1,5 +1,5 @@
-use ahash::AHashSet as HashSet;
-use anyhow::{Result, bail};
+use ahash::{AHashMap as HashMap, AHashSet as HashSet};
+use anyhow::{Context, Result, bail};
 use clap::{Args, Parser, Subcommand};
 use orient::discover::{
     DiscoverOptions, DiscoverySelectionSummary, discover_repos, discovery_selection_summary,
@@ -730,6 +730,16 @@ enum Commands {
         #[arg(required = true, allow_hyphen_values = true)]
         queries: Vec<String>,
     },
+    EvalAdoption {
+        #[arg(long)]
+        tasks: PathBuf,
+        #[arg(long = "baseline-transcript", alias = "baseline-transcripts")]
+        baseline_transcripts: Vec<PathBuf>,
+        #[arg(long = "orient-transcript", alias = "orient-transcripts")]
+        orient_transcripts: Vec<PathBuf>,
+        #[arg(long, default_value = "text", value_parser = ["text", "json"])]
+        format: String,
+    },
     ToolManifest,
     McpManifest,
     AgentGuide {
@@ -1259,6 +1269,568 @@ struct SymbolBatchResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     read_batch_request: Option<ResultToolRequest>,
     symbols: Vec<SymbolLookupResult>,
+}
+
+#[derive(Debug)]
+struct EvalAdoptionConfig {
+    tasks: PathBuf,
+    baseline_transcripts: Vec<PathBuf>,
+    orient_transcripts: Vec<PathBuf>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct EvalTask {
+    id: String,
+    #[serde(default)]
+    relevant_files: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct EvalTranscriptEvent {
+    #[serde(default)]
+    task_id: Option<String>,
+    #[serde(default)]
+    ts: Option<Value>,
+    #[serde(default)]
+    ts_ms: Option<f64>,
+    kind: String,
+    #[serde(default)]
+    tool: Option<String>,
+    #[serde(default)]
+    command: Option<String>,
+    #[serde(default)]
+    path: Option<String>,
+    #[serde(default)]
+    paths: Vec<String>,
+    #[serde(default)]
+    passed: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct EvalAdoptionReport {
+    tasks: usize,
+    compared_tasks: usize,
+    baseline: EvalRunSummary,
+    orient: EvalRunSummary,
+    delta: EvalDeltaSummary,
+    task_results: Vec<EvalTaskComparison>,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+struct EvalRunSummary {
+    transcripts: usize,
+    successes: usize,
+    first_relevant_file_rate: f64,
+    first_edit_relevant_rate: f64,
+    median_time_to_first_relevant_file_s: Option<f64>,
+    median_local_search_commands: f64,
+    median_orient_requests: f64,
+    median_wrong_file_opens_before_relevant: f64,
+    median_tool_calls_before_first_edit: f64,
+    median_wall_clock_s: Option<f64>,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+struct EvalDeltaSummary {
+    local_search_commands_median_delta: f64,
+    orient_requests_median_delta: f64,
+    wrong_file_opens_median_delta: f64,
+    tool_calls_before_edit_median_delta: f64,
+    time_to_first_relevant_file_median_delta_s: Option<f64>,
+    wall_clock_median_delta_s: Option<f64>,
+    success_delta: isize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct EvalTaskComparison {
+    task_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    baseline: Option<EvalTaskMetrics>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    orient: Option<EvalTaskMetrics>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct EvalTaskMetrics {
+    task_id: String,
+    events: usize,
+    local_search_commands: usize,
+    orient_requests: usize,
+    wrong_file_opens_before_relevant: usize,
+    tool_calls_before_first_edit: usize,
+    first_edit_touched_relevant_file: bool,
+    success: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    time_to_first_relevant_file_s: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    wall_clock_s: Option<f64>,
+}
+
+fn eval_adoption(config: EvalAdoptionConfig) -> Result<EvalAdoptionReport> {
+    let tasks = load_eval_tasks(&config.tasks)?;
+    if tasks.is_empty() {
+        bail!("adoption eval task manifest is empty");
+    }
+    let task_by_id = tasks
+        .iter()
+        .map(|task| (task.id.clone(), task.clone()))
+        .collect::<HashMap<_, _>>();
+    let baseline = load_eval_run(&config.baseline_transcripts, &task_by_id)?;
+    let orient = load_eval_run(&config.orient_transcripts, &task_by_id)?;
+    let mut task_ids = tasks.iter().map(|task| task.id.clone()).collect::<Vec<_>>();
+    task_ids.sort();
+    let task_results = task_ids
+        .into_iter()
+        .map(|task_id| EvalTaskComparison {
+            baseline: baseline.get(&task_id).cloned(),
+            orient: orient.get(&task_id).cloned(),
+            task_id,
+        })
+        .collect::<Vec<_>>();
+    let baseline_summary = summarize_eval_run(baseline.values());
+    let orient_summary = summarize_eval_run(orient.values());
+    let delta = eval_delta(&baseline_summary, &orient_summary);
+    let compared_tasks = task_results
+        .iter()
+        .filter(|task| task.baseline.is_some() && task.orient.is_some())
+        .count();
+    Ok(EvalAdoptionReport {
+        tasks: tasks.len(),
+        compared_tasks,
+        baseline: baseline_summary,
+        orient: orient_summary,
+        delta,
+        task_results,
+    })
+}
+
+fn load_eval_tasks(path: &Path) -> Result<Vec<EvalTask>> {
+    load_json_or_jsonl(path).with_context(|| format!("loading tasks from {}", path.display()))
+}
+
+fn load_eval_run(
+    paths: &[PathBuf],
+    task_by_id: &HashMap<String, EvalTask>,
+) -> Result<HashMap<String, EvalTaskMetrics>> {
+    let mut metrics = HashMap::new();
+    for path in paths {
+        let events = load_eval_events(path)
+            .with_context(|| format!("loading transcript {}", path.display()))?;
+        let task_id = transcript_task_id(path, &events);
+        let task = task_by_id.get(&task_id).ok_or_else(|| {
+            anyhow::anyhow!(
+                "transcript {} maps to unknown task id `{}`",
+                path.display(),
+                task_id
+            )
+        })?;
+        metrics.insert(task_id.clone(), score_eval_transcript(task, events));
+    }
+    Ok(metrics)
+}
+
+fn load_eval_events(path: &Path) -> Result<Vec<EvalTranscriptEvent>> {
+    load_json_or_jsonl(path)
+}
+
+fn load_json_or_jsonl<T>(path: &Path) -> Result<Vec<T>>
+where
+    T: for<'de> Deserialize<'de>,
+{
+    let text = fs::read_to_string(path)?;
+    let trimmed = text.trim_start();
+    if trimmed.is_empty() {
+        return Ok(Vec::new());
+    }
+    if trimmed.starts_with('[') {
+        return Ok(serde_json::from_str(trimmed)?);
+    }
+    let mut values = Vec::new();
+    for (line_index, line) in text.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        values.push(serde_json::from_str(line).with_context(|| {
+            format!(
+                "parsing JSONL line {} in {}",
+                line_index + 1,
+                path.display()
+            )
+        })?);
+    }
+    Ok(values)
+}
+
+fn transcript_task_id(path: &Path, events: &[EvalTranscriptEvent]) -> String {
+    events
+        .iter()
+        .find_map(|event| event.task_id.as_ref())
+        .filter(|task_id| !task_id.trim().is_empty())
+        .cloned()
+        .unwrap_or_else(|| {
+            path.file_stem()
+                .map(|value| value.to_string_lossy().into_owned())
+                .unwrap_or_else(|| path.display().to_string())
+        })
+}
+
+fn score_eval_transcript(task: &EvalTask, events: Vec<EvalTranscriptEvent>) -> EvalTaskMetrics {
+    let relevant_files = task
+        .relevant_files
+        .iter()
+        .map(|path| normalize_eval_path(path))
+        .collect::<Vec<_>>();
+    let mut first_ts = None;
+    let mut last_ts = None;
+    let mut first_relevant_ts = None;
+    let mut local_search_commands = 0usize;
+    let mut orient_requests = 0usize;
+    let mut wrong_file_opens_before_relevant = 0usize;
+    let mut tool_calls_before_first_edit = 0usize;
+    let mut seen_first_edit = false;
+    let mut first_edit_touched_relevant_file = false;
+    let mut success = false;
+
+    for event in &events {
+        if let Some(ts) = eval_event_timestamp_s(event) {
+            first_ts.get_or_insert(ts);
+            last_ts = Some(ts);
+        }
+        if event_is_local_search_command(event) {
+            local_search_commands += 1;
+        }
+        if event_is_orient_request(event) {
+            orient_requests += 1;
+        }
+        if !seen_first_edit && event.kind == "tool_call" {
+            tool_calls_before_first_edit += 1;
+        }
+        let paths = eval_event_paths(event);
+        let touches_relevant = paths
+            .iter()
+            .any(|path| eval_path_matches_any(path, &relevant_files));
+        if first_relevant_ts.is_none()
+            && touches_relevant
+            && matches!(
+                event.kind.as_str(),
+                "file_open" | "open" | "read" | "read_range" | "edit"
+            )
+        {
+            first_relevant_ts = eval_event_timestamp_s(event).or(first_ts);
+        }
+        if first_relevant_ts.is_none()
+            && event_is_file_open_like(event)
+            && !paths.is_empty()
+            && !touches_relevant
+        {
+            wrong_file_opens_before_relevant += paths.len();
+        }
+        if !seen_first_edit && event.kind == "edit" {
+            seen_first_edit = true;
+            first_edit_touched_relevant_file = touches_relevant;
+        }
+        if event.kind == "success" {
+            success = event.passed.unwrap_or(true);
+        }
+    }
+
+    EvalTaskMetrics {
+        task_id: task.id.clone(),
+        events: events.len(),
+        local_search_commands,
+        orient_requests,
+        wrong_file_opens_before_relevant,
+        tool_calls_before_first_edit,
+        first_edit_touched_relevant_file,
+        success,
+        time_to_first_relevant_file_s: elapsed_s(first_ts, first_relevant_ts),
+        wall_clock_s: elapsed_s(first_ts, last_ts),
+    }
+}
+
+fn summarize_eval_run<'a>(metrics: impl Iterator<Item = &'a EvalTaskMetrics>) -> EvalRunSummary {
+    let metrics = metrics.cloned().collect::<Vec<_>>();
+    let transcripts = metrics.len();
+    if transcripts == 0 {
+        return EvalRunSummary::default();
+    }
+    EvalRunSummary {
+        transcripts,
+        successes: metrics.iter().filter(|metric| metric.success).count(),
+        first_relevant_file_rate: rate(
+            metrics
+                .iter()
+                .filter(|metric| metric.time_to_first_relevant_file_s.is_some())
+                .count(),
+            transcripts,
+        ),
+        first_edit_relevant_rate: rate(
+            metrics
+                .iter()
+                .filter(|metric| metric.first_edit_touched_relevant_file)
+                .count(),
+            transcripts,
+        ),
+        median_time_to_first_relevant_file_s: median_option(
+            metrics
+                .iter()
+                .filter_map(|metric| metric.time_to_first_relevant_file_s)
+                .collect(),
+        ),
+        median_local_search_commands: median_usize(
+            metrics
+                .iter()
+                .map(|metric| metric.local_search_commands)
+                .collect(),
+        ),
+        median_orient_requests: median_usize(
+            metrics
+                .iter()
+                .map(|metric| metric.orient_requests)
+                .collect(),
+        ),
+        median_wrong_file_opens_before_relevant: median_usize(
+            metrics
+                .iter()
+                .map(|metric| metric.wrong_file_opens_before_relevant)
+                .collect(),
+        ),
+        median_tool_calls_before_first_edit: median_usize(
+            metrics
+                .iter()
+                .map(|metric| metric.tool_calls_before_first_edit)
+                .collect(),
+        ),
+        median_wall_clock_s: median_option(
+            metrics
+                .iter()
+                .filter_map(|metric| metric.wall_clock_s)
+                .collect(),
+        ),
+    }
+}
+
+fn eval_delta(baseline: &EvalRunSummary, orient: &EvalRunSummary) -> EvalDeltaSummary {
+    EvalDeltaSummary {
+        local_search_commands_median_delta: orient.median_local_search_commands
+            - baseline.median_local_search_commands,
+        orient_requests_median_delta: orient.median_orient_requests
+            - baseline.median_orient_requests,
+        wrong_file_opens_median_delta: orient.median_wrong_file_opens_before_relevant
+            - baseline.median_wrong_file_opens_before_relevant,
+        tool_calls_before_edit_median_delta: orient.median_tool_calls_before_first_edit
+            - baseline.median_tool_calls_before_first_edit,
+        time_to_first_relevant_file_median_delta_s: option_delta(
+            baseline.median_time_to_first_relevant_file_s,
+            orient.median_time_to_first_relevant_file_s,
+        ),
+        wall_clock_median_delta_s: option_delta(
+            baseline.median_wall_clock_s,
+            orient.median_wall_clock_s,
+        ),
+        success_delta: orient.successes as isize - baseline.successes as isize,
+    }
+}
+
+fn print_eval_adoption_report(report: &EvalAdoptionReport) {
+    println!(
+        "Adoption eval: {} tasks, {} compared",
+        report.tasks, report.compared_tasks
+    );
+    println!(
+        "baseline: transcripts={} success={} median_local_search={} median_wrong_opens={} median_tools_before_edit={} median_first_relevant_s={}",
+        report.baseline.transcripts,
+        report.baseline.successes,
+        report.baseline.median_local_search_commands,
+        report.baseline.median_wrong_file_opens_before_relevant,
+        report.baseline.median_tool_calls_before_first_edit,
+        display_optional_f64(report.baseline.median_time_to_first_relevant_file_s)
+    );
+    println!(
+        "orient:   transcripts={} success={} median_local_search={} median_orient_requests={} median_wrong_opens={} median_tools_before_edit={} median_first_relevant_s={}",
+        report.orient.transcripts,
+        report.orient.successes,
+        report.orient.median_local_search_commands,
+        report.orient.median_orient_requests,
+        report.orient.median_wrong_file_opens_before_relevant,
+        report.orient.median_tool_calls_before_first_edit,
+        display_optional_f64(report.orient.median_time_to_first_relevant_file_s)
+    );
+    println!(
+        "delta:    local_search={} orient_requests={} wrong_opens={} tools_before_edit={} first_relevant_s={} success={}",
+        signed_f64(report.delta.local_search_commands_median_delta),
+        signed_f64(report.delta.orient_requests_median_delta),
+        signed_f64(report.delta.wrong_file_opens_median_delta),
+        signed_f64(report.delta.tool_calls_before_edit_median_delta),
+        display_optional_delta(report.delta.time_to_first_relevant_file_median_delta_s),
+        signed_isize(report.delta.success_delta)
+    );
+}
+
+fn eval_event_timestamp_s(event: &EvalTranscriptEvent) -> Option<f64> {
+    if let Some(ts_ms) = event.ts_ms {
+        return Some(ts_ms / 1000.0);
+    }
+    match event.ts.as_ref()? {
+        Value::Number(number) => number.as_f64(),
+        Value::String(value) => parse_rfc3339_z_seconds(value),
+        _ => None,
+    }
+}
+
+fn parse_rfc3339_z_seconds(value: &str) -> Option<f64> {
+    let value = value.trim();
+    let value = value.strip_suffix('Z')?;
+    let (date, time) = value.split_once('T')?;
+    let mut date_parts = date.split('-');
+    let year = date_parts.next()?.parse::<i64>().ok()?;
+    let month = date_parts.next()?.parse::<u32>().ok()?;
+    let day = date_parts.next()?.parse::<u32>().ok()?;
+    let mut time_parts = time.split(':');
+    let hour = time_parts.next()?.parse::<u32>().ok()?;
+    let minute = time_parts.next()?.parse::<u32>().ok()?;
+    let second_text = time_parts.next()?;
+    let second = second_text.parse::<f64>().ok().or_else(|| {
+        let (whole, fraction) = second_text.split_once('.')?;
+        let whole = whole.parse::<f64>().ok()?;
+        let fraction = format!("0.{fraction}").parse::<f64>().ok()?;
+        Some(whole + fraction)
+    })?;
+    if !(1..=12).contains(&month) || day == 0 || day > 31 || hour > 23 || minute > 59 {
+        return None;
+    }
+    let days = days_from_civil(year, month as i64, day as i64);
+    Some(days as f64 * 86_400.0 + hour as f64 * 3600.0 + minute as f64 * 60.0 + second)
+}
+
+fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
+    let year = year - i64::from(month <= 2);
+    let era = if year >= 0 { year } else { year - 399 } / 400;
+    let year_of_era = year - era * 400;
+    let month_prime = month + if month > 2 { -3 } else { 9 };
+    let day_of_year = (153 * month_prime + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    era * 146_097 + day_of_era - 719_468
+}
+
+fn eval_event_paths(event: &EvalTranscriptEvent) -> Vec<String> {
+    event
+        .path
+        .iter()
+        .chain(event.paths.iter())
+        .map(|path| normalize_eval_path(path))
+        .filter(|path| !path.is_empty())
+        .collect()
+}
+
+fn normalize_eval_path(path: &str) -> String {
+    path.trim()
+        .trim_start_matches("./")
+        .replace('\\', "/")
+        .trim_matches('/')
+        .to_string()
+}
+
+fn eval_path_matches_any(path: &str, relevant_files: &[String]) -> bool {
+    relevant_files.iter().any(|relevant| {
+        path == relevant
+            || path
+                .strip_suffix(relevant)
+                .is_some_and(|prefix| prefix.ends_with('/'))
+    })
+}
+
+fn event_is_file_open_like(event: &EvalTranscriptEvent) -> bool {
+    matches!(
+        event.kind.as_str(),
+        "file_open" | "open" | "read" | "read_range"
+    )
+}
+
+fn event_is_local_search_command(event: &EvalTranscriptEvent) -> bool {
+    if event.kind != "tool_call" {
+        return false;
+    }
+    let command = event.command.as_deref().unwrap_or_default();
+    let tool = event.tool.as_deref().unwrap_or_default();
+    let head = command.split_whitespace().next().unwrap_or(tool);
+    matches!(
+        head,
+        "rg" | "grep" | "find" | "fd" | "ls" | "tree" | "cat" | "sed" | "awk"
+    )
+}
+
+fn event_is_orient_request(event: &EvalTranscriptEvent) -> bool {
+    let tool = event.tool.as_deref().unwrap_or_default();
+    let command = event.command.as_deref().unwrap_or_default();
+    event.kind == "orient_request"
+        || tool.contains("orient")
+        || command.split_whitespace().next() == Some("orient")
+}
+
+fn elapsed_s(start: Option<f64>, end: Option<f64>) -> Option<f64> {
+    Some(round4((end? - start?).max(0.0)))
+}
+
+fn rate(numerator: usize, denominator: usize) -> f64 {
+    if denominator == 0 {
+        0.0
+    } else {
+        round4(numerator as f64 / denominator as f64)
+    }
+}
+
+fn median_usize(values: Vec<usize>) -> f64 {
+    median_option(values.into_iter().map(|value| value as f64).collect()).unwrap_or(0.0)
+}
+
+fn median_option(mut values: Vec<f64>) -> Option<f64> {
+    if values.is_empty() {
+        return None;
+    }
+    values.sort_by(|left, right| left.total_cmp(right));
+    let middle = values.len() / 2;
+    let median = if values.len() % 2 == 0 {
+        (values[middle - 1] + values[middle]) / 2.0
+    } else {
+        values[middle]
+    };
+    Some(round4(median))
+}
+
+fn option_delta(left: Option<f64>, right: Option<f64>) -> Option<f64> {
+    Some(round4(right? - left?))
+}
+
+fn round4(value: f64) -> f64 {
+    (value * 10_000.0).round() / 10_000.0
+}
+
+fn display_optional_f64(value: Option<f64>) -> String {
+    value
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "n/a".to_string())
+}
+
+fn display_optional_delta(value: Option<f64>) -> String {
+    value.map(signed_f64).unwrap_or_else(|| "n/a".to_string())
+}
+
+fn signed_f64(value: f64) -> String {
+    if value > 0.0 {
+        format!("+{}", round4(value))
+    } else {
+        round4(value).to_string()
+    }
+}
+
+fn signed_isize(value: isize) -> String {
+    if value > 0 {
+        format!("+{value}")
+    } else {
+        value.to_string()
+    }
 }
 
 fn main() {
@@ -3295,6 +3867,22 @@ fn run() -> Result<()> {
             }
             if let Some(threshold) = fail_p95_ms {
                 fail_slow_bench_queries(&report, threshold)?;
+            }
+        }
+        Commands::EvalAdoption {
+            tasks,
+            baseline_transcripts,
+            orient_transcripts,
+            format,
+        } => {
+            let report = eval_adoption(EvalAdoptionConfig {
+                tasks,
+                baseline_transcripts,
+                orient_transcripts,
+            })?;
+            match format.as_str() {
+                "json" => println!("{}", serde_json::to_string(&report)?),
+                _ => print_eval_adoption_report(&report),
             }
         }
         Commands::ToolManifest => {
