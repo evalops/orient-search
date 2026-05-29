@@ -449,7 +449,7 @@ fn cli_search_auto_selects_live_indexed_and_shard_surfaces() {
         .stdout(predicate::str::contains("\"surface\":\"indexed\""))
         .stdout(predicate::str::contains("\"tool\":\"indexed_query_plan\""))
         .stdout(predicate::str::contains("\"tool\":\"indexed_repo_map\""))
-        .stdout(predicate::str::contains("\"tool\":\"read_index_ranges\""))
+        .stdout(predicate::str::contains("\"tool\":\"read_ranges\""))
         .stdout(predicate::str::contains("\"tool\":\"read_index_range\""));
 
     let mut shard = Command::cargo_bin("orient").unwrap();
@@ -465,7 +465,7 @@ fn cli_search_auto_selects_live_indexed_and_shard_surfaces() {
         .stdout(predicate::str::contains("\"surface\":\"shards\""))
         .stdout(predicate::str::contains("\"tool\":\"shard_query_plan\""))
         .stdout(predicate::str::contains("\"tool\":\"shard_repo_map\""))
-        .stdout(predicate::str::contains("\"tool\":\"read_shard_ranges\""))
+        .stdout(predicate::str::contains("\"tool\":\"read_ranges\""))
         .stdout(predicate::str::contains("\"tool\":\"read_shard_range\""));
 
     let mut shard_retry = Command::cargo_bin("orient").unwrap();
@@ -737,7 +737,7 @@ fn cli_search_auto_batch_returns_query_surfaces() {
         .stdout(predicate::str::contains("\"surface\":\"indexed\""))
         .stdout(predicate::str::contains("\"tool\":\"indexed_query_plan\""))
         .stdout(predicate::str::contains("\"tool\":\"indexed_repo_map\""))
-        .stdout(predicate::str::contains("\"tool\":\"read_index_ranges\""))
+        .stdout(predicate::str::contains("\"tool\":\"read_ranges\""))
         .stdout(predicate::str::contains("\"tool\":\"read_index_range\""));
 
     let mut empty_batch = Command::cargo_bin("orient").unwrap();

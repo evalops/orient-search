@@ -2878,7 +2878,7 @@ fn run() -> Result<()> {
                 )?;
                 let read_batch_request = result_read_batch_request(
                     &results,
-                    "read_shard_ranges",
+                    "read_ranges",
                     read_request_args("index_dir", &index_dir),
                 );
                 let next_read_batch_request = promoted_cli_next_read_batch_request(
@@ -2969,7 +2969,7 @@ fn run() -> Result<()> {
                 )?;
                 let read_batch_request = result_read_batch_request(
                     &results,
-                    "read_index_ranges",
+                    "read_ranges",
                     read_request_args("index", &index_path),
                 );
                 let next_read_batch_request = promoted_cli_next_read_batch_request(
@@ -3183,7 +3183,7 @@ fn run() -> Result<()> {
                     )?;
                     let read_batch_request = result_read_batch_request(
                         &results,
-                        "read_shard_ranges",
+                        "read_ranges",
                         read_request_args("index_dir", &index_dir),
                     );
                     let next_read_batch_request = promoted_cli_next_read_batch_request(
@@ -3277,7 +3277,7 @@ fn run() -> Result<()> {
                     )?;
                     let read_batch_request = result_read_batch_request(
                         &results,
-                        "read_index_ranges",
+                        "read_ranges",
                         read_request_args("index", &index_path),
                     );
                     let next_read_batch_request = promoted_cli_next_read_batch_request(
