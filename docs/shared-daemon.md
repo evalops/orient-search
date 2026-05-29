@@ -63,7 +63,9 @@ The generated rule should keep agents on this loop. See
 - Follow returned `read_*`, `related_*`, `repo_map_request`, and
   `query_plan_request` objects directly.
 - Pass `refresh_if_stale:true` when live files may have changed. With `cwd`,
-  Orient refreshes only the active checkout's shard.
+  Orient refreshes only the active checkout's shard. For `search_auto_batch`,
+  Orient coalesces refresh across the batch's selected shard roots before
+  running the searches.
 - Call `shard_status` with `cwd` or `repo_filter` when only one repo's
   freshness matters.
 - Treat generated bundle output as searchable but lower-priority by default;

@@ -63,6 +63,10 @@ printf '%s\n' \
   | orient client-jsonl
 ```
 
+On a registered shard daemon, `search_auto_batch` resolves all query scopes and
+refreshes the selected shard roots once before running the batch, so agents can
+try alternate phrasings without paying repeated freshness scans.
+
 ## Expected Loop
 
 1. Call `agent_guide` or `tool_manifest`.

@@ -71,6 +71,10 @@ indexing. They report added, changed, and deleted files so an agent can refresh
 before trusting indexed results. `indexed_search_code` and `search_shards` also
 accept `refresh_if_stale:true` for a one-call freshness check and refresh before
 search.
+For registered shard daemons, `search_auto_batch` coalesces
+`refresh_if_stale:true` across the batch: it resolves each query's `cwd`,
+`repo:`, `branch:`, or `origin:` scope, refreshes the selected shard roots once,
+and then runs all batch items against that shard directory.
 
 For shared shard daemons, pass `cwd` or `repo_filter` when the agent only needs
 freshness for one checkout. Status outputs include footprint counters such as
@@ -90,7 +94,7 @@ Use the fastest surface that matches your setup:
 - `search_code` for a live repo without a prebuilt index.
 - `indexed_search_code` for one persistent repo index.
 - `search_shards` for a multi-repo shard directory.
-- `search_auto_batch`, `search_batch`, `indexed_search_batch`, or `search_shards_batch` when an agent wants to try several query formulations in one round trip. The JSON-lines `search_batch` tool accepts `repo`, `index`, or `index_dir` for the same target-aware plain result shape as `search`; the CLI mirrors this as `search-batch --repo`, `search-batch --index`, or `search-batch --index-dir`. The indexed and shard-specific batch tools remain available for explicit adapters.
+- `search_auto_batch`, `search_batch`, `indexed_search_batch`, or `search_shards_batch` when an agent wants to try several query formulations in one round trip. On the warmed-shard path, `search_auto_batch` applies `refresh_if_stale:true` once across the selected shard roots instead of refreshing per query. The JSON-lines `search_batch` tool accepts `repo`, `index`, or `index_dir` for the same target-aware plain result shape as `search`; the CLI mirrors this as `search-batch --repo`, `search-batch --index`, or `search-batch --index-dir`. The indexed and shard-specific batch tools remain available for explicit adapters.
 - `search_plan`, `indexed_query_plan`, or `shard_query_plan` when a search returns empty or suspicious results and the agent needs missing terms plus retry hints. JSON-lines `search_plan` accepts `repo`, `index`, or `index_dir` for target-aware diagnostics; explicit `search_query_plan`, `indexed_query_plan`, and `shard_query_plan` remain available for adapters that prefer surface-specific tools. Plans include ready-to-send `retry_requests` when a repair hint has a suggested query. The CLI mirrors this as `search-plan --repo`, `search-plan --index`, or `search-plan --index-dir`; explicit `index-plan` and `shard-plan` remain available.
 
 CLI-style JSON-lines aliases are accepted for the most guessable names:
