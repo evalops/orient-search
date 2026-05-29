@@ -2,14 +2,15 @@
 
 use crate::query::{merge_filters, normalize_phrase_text, parse_query, query_phrases, query_text};
 use crate::repo_index::{
-    FileRange, MAX_READ_RANGE_LINES, QueryPlan, QueryPlanFilter, QueryPlanPosting,
-    QueryPlanRepairHint, RankSignal, RelatedFile, RelatedSymbol, RepoBrief, RepoMap, RepoMapDetail,
-    SearchFilters, SearchResult, SnippetMode, Symbol, best_snippet_for_path_with_phrases,
-    capped_search_limit, command_hints_from_manifest_texts, dependency_filters_match,
-    dependency_hints_from_manifest_texts, extract_symbols, filter_only_query, filter_value_matches,
-    finalize_results, import_hints_from_source_texts, is_entrypoint_path, is_generated_path,
-    is_ignored, is_important_file, is_manifest_file, is_test_path, known_commands_from_hints,
-    language_for, matches_filters_with_path_metadata, normalize_language_filter, normalize_token,
+    FileRange, MAX_READ_RANGE_LINES, PathFilterMatcher, QueryPlan, QueryPlanFilter,
+    QueryPlanPosting, QueryPlanRepairHint, RankSignal, RelatedFile, RelatedSymbol, RepoBrief,
+    RepoMap, RepoMapDetail, SearchFilters, SearchResult, SnippetMode, Symbol,
+    best_snippet_for_path_with_phrases, capped_search_limit, command_hints_from_manifest_texts,
+    dependency_filters_match, dependency_hints_from_manifest_texts, extract_symbols,
+    filter_only_query, filter_value_matches, finalize_results, import_hints_from_source_texts,
+    is_entrypoint_path, is_generated_path, is_ignored, is_important_file, is_manifest_file,
+    is_test_path, known_commands_from_hints, language_for,
+    matches_filters_with_compiled_path_metadata, normalize_language_filter, normalize_token,
     referenced_symbol_name, regular_file_metadata, related_query_terms_symbol_and_filters,
     related_stem_terms, repo_map_seed_paths, repo_matches, result_matches_all_tokens,
     result_matches_symbol_filters, round4, score_filter_only_path_match,
@@ -774,13 +775,18 @@ impl FastIndex {
 
         let mut scored = Vec::new();
         let mut seen = HashSet::new();
+        let path_filters = PathFilterMatcher::from_filters(filters);
 
         if let Some(postings) = self.symbol_postings.get(&needle) {
             for posting in postings {
                 let Some(file) = self.files.get(posting.file_id as usize) else {
                     continue;
                 };
-                if !indexed_file_matches_related_symbol_filters(file, filters) {
+                if !indexed_file_matches_related_symbol_filters_compiled(
+                    file,
+                    filters,
+                    &path_filters,
+                ) {
                     continue;
                 }
                 for symbol in &file.symbols {
@@ -797,7 +803,11 @@ impl FastIndex {
 
         if scored.len() < limit {
             for file in &self.files {
-                if !indexed_file_matches_related_symbol_filters(file, filters) {
+                if !indexed_file_matches_related_symbol_filters_compiled(
+                    file,
+                    filters,
+                    &path_filters,
+                ) {
                     continue;
                 }
                 for symbol in &file.symbols {
@@ -875,12 +885,13 @@ impl FastIndex {
             .map(|symbol| (symbol.name.clone(), symbol.name.to_ascii_lowercase()))
             .collect::<Vec<_>>();
         let mut related = Vec::new();
+        let path_filters = PathFilterMatcher::from_filters(filters);
 
         for file in &self.files {
             if file.path == normalized {
                 continue;
             }
-            if !indexed_file_matches_related_file_filters(file, filters) {
+            if !indexed_file_matches_related_file_filters_compiled(file, filters, &path_filters) {
                 continue;
             }
             let lower = &file.path_lower;
@@ -980,6 +991,7 @@ impl FastIndex {
             .unwrap_or_default();
         let mut related = Vec::new();
         let mut seen = HashSet::new();
+        let path_filters = PathFilterMatcher::from_filters(&filters);
 
         if normalized_path.is_none() && !query_symbol.is_empty() {
             if let Some(postings) = self.symbol_postings.get(&query_symbol) {
@@ -987,7 +999,11 @@ impl FastIndex {
                     let Some(file) = self.files.get(posting.file_id as usize) else {
                         continue;
                     };
-                    if !indexed_file_matches_related_symbol_filters(file, &filters) {
+                    if !indexed_file_matches_related_symbol_filters_compiled(
+                        file,
+                        &filters,
+                        &path_filters,
+                    ) {
                         continue;
                     }
                     for indexed_symbol in &file.symbols {
@@ -1032,7 +1048,11 @@ impl FastIndex {
 
         if related.len() < limit {
             for file in &self.files {
-                if !indexed_file_matches_related_symbol_filters(file, &filters) {
+                if !indexed_file_matches_related_symbol_filters_compiled(
+                    file,
+                    &filters,
+                    &path_filters,
+                ) {
                     continue;
                 }
                 for indexed_symbol in &file.symbols {
@@ -1434,16 +1454,21 @@ impl FastIndex {
         if query_tokens.is_empty() && query_trigrams.is_empty() {
             if filter_only_query(&filters) {
                 let candidate_ids = filter_only_candidate_ids(&symbol_kind_postings, &filters);
+                let path_filters = PathFilterMatcher::from_filters(&filters);
                 let final_match_count = match &candidate_ids {
                     Some(candidate_ids) => candidate_ids
                         .iter()
                         .filter_map(|file_id| self.files.get(*file_id as usize))
-                        .filter(|file| indexed_file_matches_filters(file, &filters))
+                        .filter(|file| {
+                            indexed_file_matches_filters_compiled(file, &filters, &path_filters)
+                        })
                         .count(),
                     None => self
                         .files
                         .iter()
-                        .filter(|file| indexed_file_matches_filters(file, &filters))
+                        .filter(|file| {
+                            indexed_file_matches_filters_compiled(file, &filters, &path_filters)
+                        })
                         .count(),
                 };
                 let candidate_count = candidate_ids
@@ -2407,12 +2432,13 @@ fn indexed_filter_candidate_ids(
     candidate_ids: Vec<u32>,
     filters: &SearchFilters,
 ) -> Vec<u32> {
+    let path_filters = PathFilterMatcher::from_filters(filters);
     candidate_ids
         .into_iter()
         .filter(|file_id| {
-            files
-                .get(*file_id as usize)
-                .is_some_and(|file| indexed_file_matches_filters(file, filters))
+            files.get(*file_id as usize).is_some_and(|file| {
+                indexed_file_matches_filters_compiled(file, filters, &path_filters)
+            })
         })
         .collect()
 }
@@ -2480,12 +2506,21 @@ fn indexed_content_contains_phrase(file: &IndexedPath, phrase: &str) -> bool {
 }
 
 fn indexed_file_matches_filters(file: &IndexedPath, filters: &SearchFilters) -> bool {
-    matches_filters_with_path_metadata(
+    let path_filters = PathFilterMatcher::from_filters(filters);
+    indexed_file_matches_filters_compiled(file, filters, &path_filters)
+}
+
+fn indexed_file_matches_filters_compiled(
+    file: &IndexedPath,
+    filters: &SearchFilters,
+    path_filters: &PathFilterMatcher,
+) -> bool {
+    matches_filters_with_compiled_path_metadata(
         &file.path_lower,
         &file.file_name_lower,
         file.extension_lower.as_deref(),
         Some(&file.language),
-        filters,
+        path_filters,
     ) && indexed_path_matches_symbol_kind_filters(file, filters)
         && source_import_filters_match(&file.path, &file.content, filters)
         && source_excluded_content_filters_match(&file.content, filters)
@@ -2584,16 +2619,17 @@ fn indexed_path_matches_symbol_kind_filter(file: &IndexedPath, wanted: &str) -> 
     )
 }
 
-fn indexed_file_matches_related_symbol_filters(
+fn indexed_file_matches_related_symbol_filters_compiled(
     file: &IndexedPath,
     filters: &SearchFilters,
+    path_filters: &PathFilterMatcher,
 ) -> bool {
-    matches_filters_with_path_metadata(
+    matches_filters_with_compiled_path_metadata(
         &file.path_lower,
         &file.file_name_lower,
         file.extension_lower.as_deref(),
         Some(&file.language),
-        filters,
+        path_filters,
     ) && source_import_filters_match(&file.path, &file.content, filters)
         && source_excluded_content_filters_match(&file.content, filters)
 }
@@ -2612,8 +2648,12 @@ fn indexed_query_token_overlap(
         .count()
 }
 
-fn indexed_file_matches_related_file_filters(file: &IndexedPath, filters: &SearchFilters) -> bool {
-    indexed_file_matches_related_symbol_filters(file, filters)
+fn indexed_file_matches_related_file_filters_compiled(
+    file: &IndexedPath,
+    filters: &SearchFilters,
+    path_filters: &PathFilterMatcher,
+) -> bool {
+    indexed_file_matches_related_symbol_filters_compiled(file, filters, path_filters)
         && indexed_path_matches_symbol_filter_fields(file, filters)
 }
 

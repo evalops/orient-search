@@ -395,6 +395,159 @@ pub(crate) struct FilterOnlyMatch {
     pub signals: Vec<RankSignal>,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct PathFilterMatcher {
+    file: Option<FilterPattern>,
+    path: Option<FilterPattern>,
+    language: Option<String>,
+    extension: Option<String>,
+    exclude_file: Vec<FilterPattern>,
+    exclude_path: Vec<FilterPattern>,
+    exclude_language: Vec<String>,
+    exclude_extension: Vec<String>,
+    test: Option<bool>,
+    generated: Option<bool>,
+}
+
+#[derive(Debug, Clone)]
+struct FilterPattern {
+    value: String,
+    wildcard: bool,
+}
+
+impl FilterPattern {
+    fn new(filter: &str) -> Self {
+        let value = normalize_path_filter(filter);
+        let wildcard = value.contains('*') || value.contains('?');
+        Self { value, wildcard }
+    }
+
+    fn matches(&self, haystack_lower: &str) -> bool {
+        if self.wildcard {
+            wildcard_matches(&self.value, haystack_lower)
+        } else {
+            haystack_lower.contains(&self.value)
+        }
+    }
+}
+
+impl PathFilterMatcher {
+    pub(crate) fn from_filters(filters: &SearchFilters) -> Self {
+        Self {
+            file: filters.file.as_deref().map(FilterPattern::new),
+            path: filters.path.as_deref().map(FilterPattern::new),
+            language: filters.language.as_deref().map(normalize_language_filter),
+            extension: filters.extension.as_deref().map(normalize_extension_filter),
+            exclude_file: filters
+                .exclude_file
+                .iter()
+                .map(|filter| FilterPattern::new(filter))
+                .collect(),
+            exclude_path: filters
+                .exclude_path
+                .iter()
+                .map(|filter| FilterPattern::new(filter))
+                .collect(),
+            exclude_language: filters
+                .exclude_language
+                .iter()
+                .map(|filter| normalize_language_filter(filter))
+                .collect(),
+            exclude_extension: filters
+                .exclude_extension
+                .iter()
+                .map(|filter| normalize_extension_filter(filter))
+                .collect(),
+            test: filters.test,
+            generated: filters.generated,
+        }
+    }
+
+    fn matches(
+        &self,
+        path_lower: &str,
+        file_name_lower: &str,
+        extension_lower: Option<&str>,
+        language: Option<&str>,
+    ) -> bool {
+        if self
+            .file
+            .as_ref()
+            .is_some_and(|filter| !filter.matches(file_name_lower))
+        {
+            return false;
+        }
+        if self
+            .path
+            .as_ref()
+            .is_some_and(|filter| !filter.matches(path_lower))
+        {
+            return false;
+        }
+        if let Some(language_filter) = &self.language {
+            let Some(language) = language else {
+                return false;
+            };
+            if language != language_filter {
+                return false;
+            }
+        }
+        if let Some(extension_filter) = &self.extension {
+            let Some(extension) = extension_lower else {
+                return false;
+            };
+            if extension != extension_filter {
+                return false;
+            }
+        }
+        if self
+            .test
+            .is_some_and(|test| is_test_path(path_lower) != test)
+        {
+            return false;
+        }
+        if self
+            .generated
+            .is_some_and(|generated| is_generated_path(path_lower) != generated)
+        {
+            return false;
+        }
+        if self
+            .exclude_file
+            .iter()
+            .any(|filter| filter.matches(file_name_lower))
+        {
+            return false;
+        }
+        if self
+            .exclude_path
+            .iter()
+            .any(|filter| filter.matches(path_lower))
+        {
+            return false;
+        }
+        if let Some(language) = language {
+            if self
+                .exclude_language
+                .iter()
+                .any(|filter| language == filter)
+            {
+                return false;
+            }
+        }
+        if let Some(extension) = extension_lower {
+            if self
+                .exclude_extension
+                .iter()
+                .any(|filter| extension == filter)
+            {
+                return false;
+            }
+        }
+        true
+    }
+}
+
 impl Default for SearchFilters {
     fn default() -> Self {
         Self {
@@ -5092,89 +5245,36 @@ pub(crate) fn matches_filters_with_path_metadata(
     language: Option<&str>,
     filters: &SearchFilters,
 ) -> bool {
-    if let Some(file_filter) = &filters.file {
-        if !filter_value_matches(file_name_lower, file_filter) {
-            return false;
-        }
-    }
-    if let Some(path_filter) = &filters.path {
-        if !filter_value_matches(path_lower, path_filter) {
-            return false;
-        }
-    }
-    if let Some(language_filter) = &filters.language {
-        let Some(language) = language else {
-            return false;
-        };
-        if !language_filter.trim().eq_ignore_ascii_case(language)
-            && language != normalize_language_filter(language_filter)
-        {
-            return false;
-        }
-    }
-    if let Some(extension_filter) = &filters.extension {
-        let wanted = extension_filter
-            .trim()
-            .trim_start_matches('.')
-            .to_lowercase();
-        let Some(extension) = extension_lower else {
-            return false;
-        };
-        if extension != wanted {
-            return false;
-        }
-    }
-    if let Some(test) = filters.test {
-        if is_test_path(&path_lower) != test {
-            return false;
-        }
-    }
-    if let Some(generated) = filters.generated {
-        if is_generated_path(path_lower) != generated {
-            return false;
-        }
-    }
-    if filters
-        .exclude_file
-        .iter()
-        .any(|filter| filter_value_matches(file_name_lower, filter))
-    {
-        return false;
-    }
-    if filters
-        .exclude_path
-        .iter()
-        .any(|filter| filter_value_matches(path_lower, filter))
-    {
-        return false;
-    }
-    if let Some(language) = language {
-        if filters.exclude_language.iter().any(|filter| {
-            filter.trim().eq_ignore_ascii_case(language)
-                || language == normalize_language_filter(filter)
-        }) {
-            return false;
-        }
-    }
-    if let Some(extension) = extension_lower {
-        if filters
-            .exclude_extension
-            .iter()
-            .any(|filter| &extension == filter)
-        {
-            return false;
-        }
-    }
-    true
+    let matcher = PathFilterMatcher::from_filters(filters);
+    matches_filters_with_compiled_path_metadata(
+        path_lower,
+        file_name_lower,
+        extension_lower,
+        language,
+        &matcher,
+    )
+}
+
+pub(crate) fn matches_filters_with_compiled_path_metadata(
+    path_lower: &str,
+    file_name_lower: &str,
+    extension_lower: Option<&str>,
+    language: Option<&str>,
+    matcher: &PathFilterMatcher,
+) -> bool {
+    matcher.matches(path_lower, file_name_lower, extension_lower, language)
 }
 
 pub(crate) fn filter_value_matches(haystack_lower: &str, filter: &str) -> bool {
-    let filter_lower = filter.trim().replace('\\', "/").to_ascii_lowercase();
-    if filter_lower.contains('*') || filter_lower.contains('?') {
-        wildcard_matches(&filter_lower, haystack_lower)
-    } else {
-        haystack_lower.contains(&filter_lower)
-    }
+    FilterPattern::new(filter).matches(haystack_lower)
+}
+
+fn normalize_path_filter(filter: &str) -> String {
+    filter.trim().replace('\\', "/").to_ascii_lowercase()
+}
+
+fn normalize_extension_filter(filter: &str) -> String {
+    filter.trim().trim_start_matches('.').to_ascii_lowercase()
 }
 
 fn wildcard_matches(pattern: &str, haystack: &str) -> bool {
@@ -5592,6 +5692,44 @@ fn normalized_snippet_signature(snippet: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compiled_path_filter_matcher_normalizes_once_and_preserves_semantics() {
+        let filters = SearchFilters {
+            file: Some("AUTH*.RS".to_string()),
+            path: Some("SRC\\AUTH".to_string()),
+            language: Some("Rust".to_string()),
+            extension: Some(".RS".to_string()),
+            exclude_path: vec!["generated".to_string()],
+            exclude_extension: vec![".md".to_string()],
+            test: Some(false),
+            generated: Some(false),
+            ..SearchFilters::default()
+        };
+        let matcher = PathFilterMatcher::from_filters(&filters);
+
+        assert!(matches_filters_with_compiled_path_metadata(
+            "src/auth.rs",
+            "auth.rs",
+            Some("rs"),
+            Some("rust"),
+            &matcher
+        ));
+        assert!(!matches_filters_with_compiled_path_metadata(
+            "src/generated/auth.rs",
+            "auth.rs",
+            Some("rs"),
+            Some("rust"),
+            &matcher
+        ));
+        assert!(!matches_filters_with_compiled_path_metadata(
+            "src/auth.md",
+            "auth.md",
+            Some("md"),
+            Some("markdown"),
+            &matcher
+        ));
+    }
 
     #[test]
     fn read_tool_requests_include_shell_safe_cli_hints() {
