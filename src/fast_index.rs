@@ -2041,12 +2041,16 @@ impl FastIndex {
         attribute_postings: &AttributeFilterPostings<'_>,
         path_filter_postings: &PathFilterTrigramPostings<'_>,
     ) -> Vec<SearchResult> {
-        let candidate_ids = filter_only_candidate_ids(
-            symbol_kind_postings,
-            attribute_postings,
-            path_filter_postings,
-            filters,
-        );
+        let candidate_ids = indexed_exact_path_filter_id(&self.files, filters)
+            .map(|file_id| vec![file_id])
+            .or_else(|| {
+                filter_only_candidate_ids(
+                    symbol_kind_postings,
+                    attribute_postings,
+                    path_filter_postings,
+                    filters,
+                )
+            });
         let mut results = match &candidate_ids {
             Some(candidate_ids) => candidate_ids
                 .iter()
@@ -2991,6 +2995,24 @@ fn indexed_content_contains_phrase(file: &IndexedPath, phrase: &str) -> bool {
 fn indexed_file_matches_filters(file: &IndexedPath, filters: &SearchFilters) -> bool {
     let path_filters = PathFilterMatcher::from_filters(filters);
     indexed_file_matches_filters_compiled(file, filters, &path_filters)
+}
+
+fn indexed_exact_path_filter_id(files: &[IndexedPath], filters: &SearchFilters) -> Option<u32> {
+    let path = filters.path.as_deref()?.trim().replace('\\', "/");
+    if path.is_empty()
+        || path.contains('*')
+        || path.contains('?')
+        || path.contains('\0')
+        || path.starts_with('/')
+        || path.split('/').any(|part| matches!(part, "" | "." | ".."))
+    {
+        return None;
+    }
+    let path = path.to_ascii_lowercase();
+    files
+        .iter()
+        .position(|file| file.path_lower == path)
+        .map(|file_id| file_id as u32)
 }
 
 fn indexed_file_matches_filters_compiled(

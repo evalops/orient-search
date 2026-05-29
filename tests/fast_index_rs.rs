@@ -1973,7 +1973,7 @@ fn bare_path_like_queries_use_filter_only_fast_paths() {
     );
 
     let path_indexed = index.search_filtered("src/lib.rs", 10, &filters).unwrap();
-    assert_eq!(path_indexed[0].path, "src/lib.rs");
+    assert_eq!(result_paths(&path_indexed), vec!["src/lib.rs"]);
     assert!(
         path_indexed[0]
             .query_plan
