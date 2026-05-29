@@ -6,7 +6,8 @@ use crate::query::{merge_filters, parse_query, query_text, query_with_filters_te
 use crate::repo_index::{
     CommandHint, FileRange, QueryPlan, QueryPlanFilter, QueryPlanRepairHint, RangeScope,
     RelatedFile, RelatedSymbol, RepoMap, RepoMapDetail, SearchFilters, SearchResult, Symbol,
-    finalize_results, is_manifest_file, language_for, normalize_token, unique_query_tokens,
+    finalize_results_for_snippet, is_manifest_file, language_for, normalize_token,
+    unique_query_tokens,
 };
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use anyhow::{Context, Result};
@@ -1095,7 +1096,11 @@ pub fn search_shards(
             .collect::<Vec<_>>()
     };
     let results = search_shard_jobs(index_dir, &shard_query, limit, &filters, jobs)?;
-    Ok(finalize_results(results, limit))
+    Ok(finalize_results_for_snippet(
+        results,
+        limit,
+        filters.snippet,
+    ))
 }
 
 #[derive(Debug, Clone)]

@@ -170,6 +170,8 @@ pub struct ResultReadRange {
     pub path: String,
     pub start: usize,
     pub lines: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<RangeScope>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -726,7 +728,8 @@ pub struct FileRange {
     pub symbol: Option<Symbol>,
 }
 
-#[derive(Debug, Copy, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum RangeScope {
     #[default]
     Exact,
@@ -914,7 +917,11 @@ fn search_repo_filter_only(
         ));
     }
 
-    Ok(finalize_results(results, limit))
+    Ok(finalize_results_for_snippet(
+        results,
+        limit,
+        filters.snippet,
+    ))
 }
 
 fn filter_only_candidates_from_fd_files(
@@ -1613,7 +1620,11 @@ fn search_repo_ripgrep(
             filters.snippet,
         );
     }
-    Ok(Some(finalize_results(results, limit)))
+    Ok(Some(finalize_results_for_snippet(
+        results,
+        limit,
+        filters.snippet,
+    )))
 }
 
 const TEST_RIPGREP_GLOBS: &[&str] = &[
@@ -1747,7 +1758,11 @@ fn search_repo_streaming_until(
     if filters.require_all {
         results.retain(|result| result_matches_all_tokens(result, query_tokens));
     }
-    Ok(finalize_results(results, limit))
+    Ok(finalize_results_for_snippet(
+        results,
+        limit,
+        filters.snippet,
+    ))
 }
 
 fn retain_results_matching_file_symbol_filters(
@@ -4650,17 +4665,7 @@ pub fn attach_result_read_requests(
         let Some(read_range) = &result.read_range else {
             continue;
         };
-        let mut arguments = base_arguments.clone();
-        arguments.insert(
-            "path".to_string(),
-            serde_json::json!(read_range.path.clone()),
-        );
-        arguments.insert("start".to_string(), serde_json::json!(read_range.start));
-        arguments.insert("lines".to_string(), serde_json::json!(read_range.lines));
-        result.read_request = Some(ResultReadRequest::new(
-            tool.to_string(),
-            serde_json::Value::Object(arguments),
-        ));
+        result.read_request = Some(read_request_from_range(tool, &base_arguments, read_range));
     }
 }
 
@@ -4776,6 +4781,9 @@ fn read_request_from_range(
     );
     arguments.insert("start".to_string(), serde_json::json!(read_range.start));
     arguments.insert("lines".to_string(), serde_json::json!(read_range.lines));
+    if let Some(scope) = read_range.scope {
+        arguments.insert("scope".to_string(), serde_json::json!(scope));
+    }
     ResultReadRequest::new(tool.to_string(), serde_json::Value::Object(arguments))
 }
 
@@ -4800,29 +4808,58 @@ fn read_batch_request_from_ranges_with_limit(
 ) -> Option<ResultToolRequest> {
     let limit = read_limit.min(MAX_RESULT_READ_BATCH_RANGES);
     let mut seen = HashSet::new();
-    let mut range_values = Vec::new();
+    let mut ranges = Vec::new();
     for read_range in read_ranges {
-        if range_values.len() >= limit {
+        if ranges.len() >= limit {
             break;
         }
-        let key = (read_range.path.clone(), read_range.start, read_range.lines);
+        let key = (
+            read_range.path.clone(),
+            read_range.start,
+            read_range.lines,
+            read_range.scope,
+        );
         if !seen.insert(key) {
             continue;
         }
-        range_values.push(serde_json::json!({
-            "path": read_range.path,
-            "start": read_range.start,
-            "lines": read_range.lines
-        }));
+        ranges.push(read_range);
     }
-    if range_values.is_empty() {
+    if ranges.is_empty() {
         return None;
     }
+    let common_scope = common_read_scope(&ranges);
+    if let Some(scope) = common_scope {
+        base_arguments.insert("scope".to_string(), serde_json::json!(scope));
+    }
+    let range_values = ranges
+        .into_iter()
+        .map(|read_range| {
+            let mut value = serde_json::json!({
+                "path": read_range.path,
+                "start": read_range.start,
+                "lines": read_range.lines
+            });
+            if common_scope.is_none()
+                && let Some(scope) = read_range.scope
+            {
+                value["scope"] = serde_json::json!(scope);
+            }
+            value
+        })
+        .collect::<Vec<_>>();
     base_arguments.insert("ranges".to_string(), serde_json::Value::Array(range_values));
     Some(ResultToolRequest::new(
         tool.to_string(),
         serde_json::Value::Object(base_arguments),
     ))
+}
+
+fn common_read_scope(ranges: &[ResultReadRange]) -> Option<RangeScope> {
+    let first = ranges.first()?.scope?;
+    ranges
+        .iter()
+        .all(|range| range.scope == Some(first))
+        .then_some(first)
 }
 
 pub fn result_read_batch_request(
@@ -5275,7 +5312,27 @@ fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 
-pub(crate) fn finalize_results(mut results: Vec<SearchResult>, limit: usize) -> Vec<SearchResult> {
+pub(crate) fn finalize_results(results: Vec<SearchResult>, limit: usize) -> Vec<SearchResult> {
+    finalize_results_with_read_scope(results, limit, None)
+}
+
+pub(crate) fn finalize_results_for_snippet(
+    results: Vec<SearchResult>,
+    limit: usize,
+    snippet: SnippetMode,
+) -> Vec<SearchResult> {
+    finalize_results_with_read_scope(results, limit, read_scope_for_snippet(snippet))
+}
+
+pub(crate) fn read_scope_for_snippet(snippet: SnippetMode) -> Option<RangeScope> {
+    matches!(snippet, SnippetMode::Symbol).then_some(RangeScope::Symbol)
+}
+
+fn finalize_results_with_read_scope(
+    mut results: Vec<SearchResult>,
+    limit: usize,
+    read_scope: Option<RangeScope>,
+) -> Vec<SearchResult> {
     let limit = capped_search_limit(limit);
     results.sort_by(|a, b| {
         b.score
@@ -5296,12 +5353,12 @@ pub(crate) fn finalize_results(mut results: Vec<SearchResult>, limit: usize) -> 
         }
     }
     for result in &mut deduped {
-        finalize_result_metadata(result);
+        finalize_result_metadata(result, read_scope);
     }
     deduped
 }
 
-fn finalize_result_metadata(result: &mut SearchResult) {
+fn finalize_result_metadata(result: &mut SearchResult, read_scope: Option<RangeScope>) {
     if let Some(signals) = result.explanation.take() {
         result.explanation = Some(compact_rank_signals(signals));
     }
@@ -5309,15 +5366,30 @@ fn finalize_result_metadata(result: &mut SearchResult) {
         result.line_range = line_range_from_snippet(&result.snippet);
     }
     compact_match_lines(&mut result.match_lines);
-    result.read_range = Some(result_read_range(result));
+    result.read_range = Some(result_read_range(result, read_scope));
 }
 
-fn result_read_range(result: &SearchResult) -> ResultReadRange {
+fn result_read_range(result: &SearchResult, read_scope: Option<RangeScope>) -> ResultReadRange {
+    let start = if read_scope == Some(RangeScope::Symbol) {
+        symbol_scope_anchor_line(result)
+    } else {
+        context_start_line(result, DEFAULT_RESULT_READ_LINES)
+    };
     ResultReadRange {
         path: result.path.clone(),
-        start: context_start_line(result, DEFAULT_RESULT_READ_LINES),
+        start,
         lines: DEFAULT_RESULT_READ_LINES,
+        scope: read_scope,
     }
+}
+
+fn symbol_scope_anchor_line(result: &SearchResult) -> usize {
+    result
+        .match_lines
+        .first()
+        .copied()
+        .or_else(|| result.line_range.as_ref().map(|range| range.start_line))
+        .unwrap_or(1)
 }
 
 fn related_file_read_range(related: &RelatedFile) -> ResultReadRange {
@@ -5325,6 +5397,7 @@ fn related_file_read_range(related: &RelatedFile) -> ResultReadRange {
         path: related.path.clone(),
         start: 1,
         lines: DEFAULT_RELATED_FILE_READ_LINES,
+        scope: None,
     }
 }
 
@@ -5354,6 +5427,7 @@ fn repo_map_read_ranges(map: &RepoMap) -> Vec<ResultReadRange> {
                 path: path.clone(),
                 start: 1,
                 lines: DEFAULT_RELATED_FILE_READ_LINES,
+                scope: None,
             },
         );
     }
@@ -5371,10 +5445,10 @@ fn repo_map_read_ranges(map: &RepoMap) -> Vec<ResultReadRange> {
 
 fn push_repo_map_range(
     ranges: &mut Vec<ResultReadRange>,
-    seen: &mut HashSet<(String, usize, usize)>,
+    seen: &mut HashSet<(String, usize, usize, Option<RangeScope>)>,
     range: ResultReadRange,
 ) {
-    if seen.insert((range.path.clone(), range.start, range.lines)) {
+    if seen.insert((range.path.clone(), range.start, range.lines, range.scope)) {
         ranges.push(range);
     }
 }
@@ -5382,11 +5456,9 @@ fn push_repo_map_range(
 fn symbol_read_range(symbol: &Symbol) -> ResultReadRange {
     ResultReadRange {
         path: symbol.path.clone(),
-        start: symbol
-            .line
-            .saturating_sub(DEFAULT_SYMBOL_READ_CONTEXT_BEFORE)
-            .max(1),
+        start: symbol.line,
         lines: DEFAULT_SYMBOL_READ_LINES,
+        scope: Some(RangeScope::Symbol),
     }
 }
 
@@ -6253,16 +6325,19 @@ mod tests {
                     path: "src/lib.rs".to_string(),
                     start: 1,
                     lines: 80,
+                    scope: None,
                 },
                 ResultReadRange {
                     path: "src/lib.rs".to_string(),
                     start: 1,
                     lines: 80,
+                    scope: None,
                 },
                 ResultReadRange {
                     path: "tests/auth.rs".to_string(),
                     start: 5,
                     lines: 40,
+                    scope: None,
                 },
             ],
             "read_index_ranges",
@@ -6280,6 +6355,59 @@ mod tests {
             request.arguments["ranges"][1]["path"],
             serde_json::json!("tests/auth.rs")
         );
+    }
+
+    #[test]
+    fn symbol_snippet_results_generate_symbol_scoped_read_requests() {
+        let results = vec![SearchResult {
+            path: "src/auth.rs".to_string(),
+            score: 10.0,
+            reason: "matched symbol:issue_token".to_string(),
+            snippet: "26: pub fn issue_token() {\n27:     let token = 42;\n28: }".to_string(),
+            line_range: None,
+            match_lines: vec![26],
+            explanation: None,
+            query_plan: None,
+            duplicate_group: None,
+            context: None,
+            read_range: None,
+            read_request: None,
+            related_request: None,
+            related_symbols_request: None,
+        }];
+        let mut finalized = finalize_results_for_snippet(results, 1, SnippetMode::Symbol);
+        attach_result_read_requests(&mut finalized, "read_range", serde_json::Map::new());
+
+        let read_range = finalized[0].read_range.as_ref().unwrap();
+        assert_eq!(read_range.scope, Some(RangeScope::Symbol));
+        assert_eq!(read_range.start, 26);
+        assert_eq!(
+            finalized[0].read_request.as_ref().unwrap().arguments["scope"],
+            serde_json::json!("symbol")
+        );
+    }
+
+    #[test]
+    fn symbol_lookup_read_requests_are_symbol_scoped() {
+        let symbols = vec![Symbol {
+            name: "issue_token".to_string(),
+            kind: "function".to_string(),
+            path: "src/auth.rs".to_string(),
+            line: 26,
+        }];
+        let results = symbol_lookup_results(symbols, "read_range", serde_json::Map::new());
+
+        assert_eq!(results[0].read_range.scope, Some(RangeScope::Symbol));
+        assert_eq!(results[0].read_range.start, 26);
+        assert_eq!(
+            results[0].read_request.arguments["scope"],
+            serde_json::json!("symbol")
+        );
+
+        let batch =
+            symbol_lookup_read_batch_request(&results, "read_ranges", serde_json::Map::new())
+                .unwrap();
+        assert_eq!(batch.arguments["scope"], serde_json::json!("symbol"));
     }
 
     #[test]

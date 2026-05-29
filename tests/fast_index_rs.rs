@@ -2123,6 +2123,10 @@ fn indexed_search_supports_line_offsets_and_snippet_modes() {
             .starts_with("1: pub struct SessionManager;")
     );
     assert_eq!(symbol[0].line_range.as_ref().unwrap().start_line, 1);
+    assert_eq!(
+        symbol[0].read_range.as_ref().unwrap().scope,
+        Some(orient::repo_index::RangeScope::Symbol)
+    );
 }
 
 #[test]
