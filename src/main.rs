@@ -1866,6 +1866,43 @@ fn insert_optional_json_field(object: &mut Value, name: &str, value: Option<Valu
     }
 }
 
+fn attach_cli_next_action(object: &mut Value) {
+    let Some(fields) = object.as_object_mut() else {
+        return;
+    };
+    for (source, kind, summary) in [
+        (
+            "next_read_batch_request",
+            "read",
+            "Read the top available result ranges.",
+        ),
+        (
+            "primary_retry_request",
+            "retry",
+            "Run the promoted repaired search.",
+        ),
+        (
+            "repo_map_request",
+            "map",
+            "Open a compact repo map before broadening manually.",
+        ),
+    ] {
+        let Some(request) = fields.get(source).filter(|value| !value.is_null()).cloned() else {
+            continue;
+        };
+        fields.insert(
+            "next_action".to_string(),
+            serde_json::json!({
+                "kind": kind,
+                "source": source,
+                "summary": summary,
+                "request": request
+            }),
+        );
+        break;
+    }
+}
+
 fn promoted_cli_next_read_batch_request(
     read_batch_request: &Option<ResultToolRequest>,
     primary_retry_result: &Option<Value>,
@@ -2914,6 +2951,7 @@ fn run() -> Result<()> {
                     "next_read_batch_request",
                     next_read_batch_request,
                 );
+                attach_cli_next_action(&mut output);
                 println!("{}", serde_json::to_string(&output)?);
             } else if let Some(index_path) = index {
                 let index = load_index_for_search(index_path.clone(), refresh_if_stale)?;
@@ -3008,6 +3046,7 @@ fn run() -> Result<()> {
                     "next_read_batch_request",
                     next_read_batch_request,
                 );
+                attach_cli_next_action(&mut output);
                 println!("{}", serde_json::to_string(&output)?);
             } else {
                 let repo = repo.unwrap_or_else(|| PathBuf::from("."));
@@ -3096,6 +3135,7 @@ fn run() -> Result<()> {
                     "next_read_batch_request",
                     next_read_batch_request,
                 );
+                attach_cli_next_action(&mut output);
                 println!("{}", serde_json::to_string(&output)?);
             }
         }
@@ -3219,6 +3259,7 @@ fn run() -> Result<()> {
                         "next_read_batch_request",
                         next_read_batch_request,
                     );
+                    attach_cli_next_action(&mut item);
                     batch.push(item);
                 }
             } else if let Some(index_path) = index {
@@ -3316,6 +3357,7 @@ fn run() -> Result<()> {
                         "next_read_batch_request",
                         next_read_batch_request,
                     );
+                    attach_cli_next_action(&mut item);
                     batch.push(item);
                 }
             } else {
@@ -3407,6 +3449,7 @@ fn run() -> Result<()> {
                         "next_read_batch_request",
                         next_read_batch_request,
                     );
+                    attach_cli_next_action(&mut item);
                     batch.push(item);
                 }
             }

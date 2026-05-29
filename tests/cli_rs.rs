@@ -508,6 +508,10 @@ fn cli_search_auto_selects_live_indexed_and_shard_surfaces() {
         shard_retry["next_read_batch_request"],
         shard_retry["primary_retry_result"]["read_batch_request"]
     );
+    assert_eq!(
+        shard_retry["next_action"]["request"],
+        shard_retry["next_read_batch_request"]
+    );
 
     let mut empty_live = Command::cargo_bin("orient").unwrap();
     empty_live
@@ -554,6 +558,10 @@ fn cli_search_auto_selects_live_indexed_and_shard_surfaces() {
     assert_eq!(
         auto_retry_live["next_read_batch_request"],
         auto_retry_live["primary_retry_result"]["read_batch_request"]
+    );
+    assert_eq!(
+        auto_retry_live["next_action"]["source"],
+        serde_json::json!("next_read_batch_request")
     );
 
     let mut diagnosed_live = Command::cargo_bin("orient").unwrap();
@@ -784,6 +792,10 @@ fn cli_search_auto_batch_returns_query_surfaces() {
     assert_eq!(
         auto_retry_batch[0]["next_read_batch_request"]["arguments"]["ranges"][0]["path"],
         serde_json::json!("src/auth.rs")
+    );
+    assert_eq!(
+        auto_retry_batch[0]["next_action"]["request"],
+        auto_retry_batch[0]["next_read_batch_request"]
     );
 
     let mut diagnosed_batch = Command::cargo_bin("orient").unwrap();

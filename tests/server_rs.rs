@@ -1269,6 +1269,7 @@ fn runtime_serves_agent_guide_for_json_lines_wrappers() {
         "Use search_auto.query_plan_result or a search_auto_batch item query_plan_result immediately when an automatic search is empty.",
         "Use search_auto.query_plan_request or a search_auto_batch item query_plan_request when results are empty or noisy.",
         "Use search_auto.repo_map_request or a search_auto_batch item repo_map_request when the agent needs entrypoints, tests, commands, or top symbols for the chosen surface.",
+        "Use search_auto.next_action or a search_auto_batch item next_action when the wrapper wants one prioritized follow-up request.",
         "Use search_auto.read_batch_request, a search_auto_batch item read_batch_request, or a search batch item read_batch_request to read top ranges in one call.",
         "Use result.read_request for one bounded file range.",
     ] {
@@ -1301,6 +1302,7 @@ fn runtime_serves_agent_instructions_for_local_rule_files() {
     assert!(instructions.contains("orient client-jsonl --addr 127.0.0.1:9999"));
     assert!(instructions.contains("search_auto"));
     assert!(instructions.contains("search_auto_default"));
+    assert!(instructions.contains("next_action"));
     assert!(instructions.contains("read_batch_request"));
     assert!(instructions.contains("local Amp project rules surface"));
     assert!(instructions.contains("does not collect telemetry"));
@@ -1559,6 +1561,11 @@ fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
         live["read_batch_request"]["arguments"]["ranges"][0]["path"],
         "src/auth.rs"
     );
+    assert_eq!(live["next_action"]["kind"], serde_json::json!("read"));
+    assert_eq!(
+        live["next_action"]["request"],
+        live["next_read_batch_request"]
+    );
     let read_jsonl: serde_json::Value =
         serde_json::from_str(live["read_batch_request"]["jsonl"].as_str().unwrap()).unwrap();
     assert_eq!(read_jsonl["id"], serde_json::json!("read"));
@@ -1727,6 +1734,14 @@ fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
     assert_eq!(
         auto_retry["next_read_batch_request"],
         auto_retry["primary_retry_result"]["read_batch_request"]
+    );
+    assert_eq!(
+        auto_retry["next_action"]["source"],
+        serde_json::json!("next_read_batch_request")
+    );
+    assert_eq!(
+        auto_retry["next_action"]["request"],
+        auto_retry["next_read_batch_request"]
     );
 
     let git_scope_miss = runtime.dispatch(ToolRequest {

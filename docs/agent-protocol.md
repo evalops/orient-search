@@ -99,7 +99,7 @@ Use `ensure_shards` for shard directories shared by several local agents. The lo
 
 Use the fastest surface that matches your setup:
 
-- `search_auto` when a daemon has exactly one registered shard directory or warmed index, when the request supplies `index_dir`, `index`, or a live `repo`, or when the daemon was started from the desired repo directory. It returns `{query,surface,target,query_plan_request,repo_map_request,results}` and keeps result follow-up requests aligned with the chosen surface.
+- `search_auto` when a daemon has exactly one registered shard directory or warmed index, when the request supplies `index_dir`, `index`, or a live `repo`, or when the daemon was started from the desired repo directory. It returns `{query,surface,target,next_action,query_plan_request,repo_map_request,results}` and keeps result follow-up requests aligned with the chosen surface.
 - `search_code` for a live repo without a prebuilt index.
 - `indexed_search_code` for one persistent repo index.
 - `search_shards` for a multi-repo shard directory.
@@ -187,7 +187,36 @@ Search results include:
 - `context`: optional attached file context when `context_lines` is set.
 - `explanation` and `query_plan` when `explain` is set.
 
-`search_auto` and each `search_auto_batch` item also include `query_plan_request`, a ready-to-send plan request for the chosen live, indexed, or shard surface. Generated query-plan follow-ups include `jsonl`, `client_cli`, and a `cli` string with the equivalent `orient search-plan` command. When an automatic search is empty, the response also includes `query_plan_result` with repair hints and retry requests immediately; generated retry requests include `jsonl`, `client_cli`, and `cli` strings with equivalent `orient search` commands. On empty or `diagnose:true` indexed/shard searches, Orient checks the scoped index for freshness without scanning unrelated shards; if it is stale, the response includes `freshness` with changed/added/deleted counts plus a top-level `refresh_request` that sets `refresh_if_stale:true` and repeats the same `search_auto` request. The same request is also nested at `freshness.refresh_request` for compatibility. When diagnostics are present, `primary_diagnosis` promotes the compact plan diagnosis to the top level; when a concrete retry exists, `primary_retry_request` promotes the first ready-to-send retry too, so wrappers can recover without parsing the full diagnostic plan. Set `retry_if_empty:true` or pass `--retry-if-empty` to run that primary retry once and receive `primary_retry_result` in the same response; if the retry returns hits, that object also includes a target-aware `read_batch_request`. `next_read_batch_request` promotes the best immediate read follow-up, using normal results first and retry hits when the original result set was empty. Set `diagnose:true` when results are noisy or suspicious to include `query_plan_result`, `primary_diagnosis`, `primary_retry_request`, and stale-index freshness when applicable even with hits, saving a second diagnostic call. They also include a target-aware `repo_map_request` when the agent needs entrypoints, tests, commands, or top symbols before editing; shard map follow-ups preserve `repo:`, `branch:`, `origin:`, and matching exclusions from structured arguments or the query string. Generated map follow-ups include `jsonl`, `client_cli`, and a `cli` string with the equivalent `orient repo-map` command. Batch search items from `search_batch`, `indexed_search_batch`, and `search_shards_batch` include the same `read_batch_request` shape. Repo-map responses include a top-level `read_batch_request` covering source entrypoints, top symbol definitions, tests, manifests, important files, and related context in that order so low `read_limit` values still open actionable code first. Like single read requests, generated batch read requests include `jsonl`, `client_cli`, and `cli` hints using compact `path:start:lines` arguments.
+`search_auto` and each `search_auto_batch` item also include follow-ups for the
+chosen live, indexed, or shard surface:
+
+- `next_action`: the best immediate follow-up as
+  `{kind,source,summary,request}`. Wrappers can run this first before
+  inspecting the rest of the response.
+- `next_read_batch_request`: the preferred read follow-up, using normal hits
+  first and retry hits when the original result set was empty.
+- `query_plan_request`: a ready-to-send plan request for empty, noisy, or
+  suspicious results.
+- `repo_map_request`: a target-aware map request for entrypoints, tests,
+  commands, and top symbols before editing.
+- `refresh_request`: present on stale scoped indexed/shard searches. It sets
+  `refresh_if_stale:true` and repeats the same automatic search. The same
+  request is also nested at `freshness.refresh_request` for compatibility.
+- `primary_retry_request`: the promoted repaired search when diagnostics find a
+  concrete retry.
+
+Generated follow-ups include `jsonl`, `client_cli`, and compact CLI hints.
+Set `retry_if_empty:true` or pass `--retry-if-empty` to run the promoted retry
+once and receive `primary_retry_result`; if that retry returns hits, Orient also
+returns a target-aware read batch request for those hits. Set `diagnose:true`
+when results are noisy or suspicious to include inline diagnostics even when the
+search already returned hits. Batch search items from `search_batch`,
+`indexed_search_batch`, and `search_shards_batch` include the same
+`read_batch_request` shape. Repo-map responses include a top-level
+`read_batch_request` covering source entrypoints, top symbol definitions, tests,
+manifests, important files, and related context in that order. Like single read
+requests, generated batch read requests include compact `path:start:lines`
+arguments.
 
 Explicit `symbol:` searches center snippets and read ranges on the matching definition line when the language extractor can identify it, even if earlier callers also match the same tokens.
 
@@ -199,7 +228,7 @@ For most agents, the handoff is:
 
 1. Call search.
 2. Collect one or more `read_range` objects from results.
-3. Send `next_read_batch_request` when it is present; otherwise send `read_batch_request`, pass one object or an array of `read_range` objects directly to the matching batch read tool, or send a result's `read_request` when the wrapper wants a single ready-made follow-up call.
+3. Prefer `next_action.request` when present; otherwise send `next_read_batch_request`, `read_batch_request`, one object or an array of `read_range` objects directly to the matching batch read tool, or a result's `read_request` when the wrapper wants a single ready-made follow-up call.
 4. Use `related_request` when the likely next step is finding nearby tests, source counterparts, or sibling files for a hit; returned related files include `read_request` payloads for opening the file directly.
 5. Use `related_symbols_request` when the likely next step is finding nearby definitions, types, or other symbols for a hit; search-generated requests already carry the original query, and returned related symbols include `read_request` payloads for the next bounded read.
 
