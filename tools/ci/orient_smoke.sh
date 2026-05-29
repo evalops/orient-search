@@ -15,3 +15,10 @@ cargo build --release
 printf '%s\n' '{"id":"tools","tool":"list_tools","arguments":{}}' \
   | target/release/orient serve-jsonl \
   | grep -q '"search_code"'
+
+printf '%s\n' \
+  '{"jsonrpc":"2.0","id":"init","method":"initialize","params":{}}' \
+  '{"jsonrpc":"2.0","id":"tools","method":"tools/list","params":{}}' \
+  '{"jsonrpc":"2.0","id":"call","method":"tools/call","params":{"name":"list_tools","arguments":{}}}' \
+  | target/release/orient serve-mcp \
+  | grep -q '"structuredContent"'
