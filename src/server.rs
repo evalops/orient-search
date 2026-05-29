@@ -2063,8 +2063,14 @@ fn shard_freshness_roots_for_search(
     arguments: &Value,
     filters: &SearchFilters,
 ) -> Result<Vec<PathBuf>> {
-    let mut roots = scoped_shard_status_roots(arguments)?;
-    if roots.is_empty() && filters.repo.is_some() {
+    let has_positive_selector =
+        filters.repo.is_some() || filters.branch.is_some() || filters.origin.is_some();
+    let mut roots = if has_positive_selector {
+        Vec::new()
+    } else {
+        scoped_shard_status_roots(arguments)?
+    };
+    if roots.is_empty() && has_positive_selector {
         let manifest = load_manifest(index_dir)?;
         roots = manifest
             .shards
@@ -2076,6 +2082,27 @@ fn shard_freshness_roots_for_search(
     roots.sort();
     roots.dedup();
     Ok(roots)
+}
+
+enum ShardRefreshSelection {
+    Roots(Vec<PathBuf>),
+    All,
+}
+
+fn shard_refresh_selection_for_search(
+    index_dir: &Path,
+    arguments: &Value,
+    filters: &SearchFilters,
+) -> Result<ShardRefreshSelection> {
+    let roots = shard_freshness_roots_for_search(index_dir, arguments, filters)?;
+    if !roots.is_empty()
+        || filters.repo.is_some()
+        || filters.branch.is_some()
+        || filters.origin.is_some()
+    {
+        return Ok(ShardRefreshSelection::Roots(roots));
+    }
+    Ok(ShardRefreshSelection::All)
 }
 
 fn add_shard_scope_filter_args(arguments: &mut Map<String, Value>, filters: &SearchFilters) {
@@ -2229,27 +2256,6 @@ fn index_matches_client_cwd(index: &FastIndex, arguments: &Value) -> Result<bool
         .canonicalize()
         .unwrap_or_else(|_| index.root.clone())
         == repo_root)
-}
-
-fn scoped_refresh_root(arguments: &Value) -> Result<Option<PathBuf>> {
-    let repo_filter = optional_string_arg(arguments, "repo_filter");
-    if let Some(repo_root) = git_root_from_client_cwd(arguments, "refresh_if_stale")? {
-        let repo_root_text = repo_root.to_string_lossy().to_string();
-        if repo_filter.as_deref() == Some(repo_root_text.as_str()) {
-            return Ok(Some(repo_root));
-        }
-    }
-    let Some(repo_filter) = repo_filter else {
-        return Ok(None);
-    };
-    let path = PathBuf::from(&repo_filter);
-    if path.is_absolute() && path.exists() {
-        return path
-            .canonicalize()
-            .map(Some)
-            .with_context(|| format!("canonicalize refresh_if_stale repo_filter {repo_filter}"));
-    }
-    Ok(None)
 }
 
 fn scoped_shard_status_roots(arguments: &Value) -> Result<Vec<PathBuf>> {
@@ -2806,10 +2812,16 @@ impl ToolRuntime {
                 if let Some(index_dir) =
                     optional_string_arg(&request.arguments, "index_dir").map(PathBuf::from)
                 {
-                    if bool_arg(&request.arguments, "refresh_if_stale") {
-                        self.refresh_shards_for_arguments_if_stale(&index_dir, &request.arguments)?;
-                    }
                     let filters = search_filters(&request.arguments, true)?;
+                    if bool_arg(&request.arguments, "refresh_if_stale") {
+                        let refresh_filters =
+                            merge_filters(filters.clone(), parse_query(&query).filters);
+                        self.refresh_shards_for_arguments_if_stale(
+                            &index_dir,
+                            &request.arguments,
+                            &refresh_filters,
+                        )?;
+                    }
                     let mut results = self.search_shards_cached(
                         &index_dir,
                         &query,
@@ -2877,13 +2889,16 @@ impl ToolRuntime {
                     let scoped_arguments =
                         arguments_scoped_to_client_cwd_for_query(&request.arguments, &query)?;
                     if let Ok(index_dir) = self.single_cached_shard_manifest_path() {
+                        let filters = search_filters(&scoped_arguments, true)?;
                         if bool_arg(&request.arguments, "refresh_if_stale") {
+                            let refresh_filters =
+                                merge_filters(filters.clone(), parse_query(&query).filters);
                             self.refresh_shards_for_arguments_if_stale(
                                 &index_dir,
                                 &scoped_arguments,
+                                &refresh_filters,
                             )?;
                         }
-                        let filters = search_filters(&scoped_arguments, true)?;
                         let mut results = self.search_shards_cached(
                             &index_dir,
                             &query,
@@ -3032,10 +3047,18 @@ impl ToolRuntime {
                 if let Some(index_dir) =
                     optional_string_arg(&request.arguments, "index_dir").map(PathBuf::from)
                 {
-                    if bool_arg(&request.arguments, "refresh_if_stale") {
-                        self.refresh_shards_for_arguments_if_stale(&index_dir, &request.arguments)?;
-                    }
                     let filters = search_filters(&request.arguments, true)?;
+                    if bool_arg(&request.arguments, "refresh_if_stale") {
+                        for query in &queries {
+                            let refresh_filters =
+                                merge_filters(filters.clone(), parse_query(query).filters);
+                            self.refresh_shards_for_arguments_if_stale(
+                                &index_dir,
+                                &request.arguments,
+                                &refresh_filters,
+                            )?;
+                        }
+                    }
                     for query in queries {
                         let mut results = self.search_shards_cached(
                             &index_dir,
@@ -3120,18 +3143,21 @@ impl ToolRuntime {
                 }
                 if optional_string_arg(&request.arguments, "cwd").is_some() {
                     if let Ok(index_dir) = self.single_cached_shard_manifest_path() {
-                        if bool_arg(&request.arguments, "refresh_if_stale") {
-                            self.refresh_shards_for_arguments_if_stale(
-                                &index_dir,
-                                &request.arguments,
-                            )?;
-                        }
                         for query in &queries {
                             let scoped_arguments = arguments_scoped_to_client_cwd_for_query(
                                 &request.arguments,
                                 query,
                             )?;
                             let filters = search_filters(&scoped_arguments, true)?;
+                            if bool_arg(&request.arguments, "refresh_if_stale") {
+                                let refresh_filters =
+                                    merge_filters(filters.clone(), parse_query(query).filters);
+                                self.refresh_shards_for_arguments_if_stale(
+                                    &index_dir,
+                                    &scoped_arguments,
+                                    &refresh_filters,
+                                )?;
+                            }
                             let mut results = self.search_shards_cached(
                                 &index_dir,
                                 query,
@@ -3285,14 +3311,17 @@ impl ToolRuntime {
                 if let Some(index_dir) =
                     optional_string_arg(&request.arguments, "index_dir").map(PathBuf::from)
                 {
+                    let filters = search_filters(&request.arguments, true)?;
                     if bool_arg(&request.arguments, "refresh_if_stale") {
-                        self.refresh_shards_for_arguments_if_stale(&index_dir, &request.arguments)?;
+                        let refresh_filters =
+                            merge_filters(filters.clone(), parse_query(&query).filters);
+                        self.refresh_shards_for_arguments_if_stale(
+                            &index_dir,
+                            &request.arguments,
+                            &refresh_filters,
+                        )?;
                     }
-                    let mut plans = self.shard_query_plans_cached(
-                        &index_dir,
-                        &query,
-                        &search_filters(&request.arguments, true)?,
-                    )?;
+                    let mut plans = self.shard_query_plans_cached(&index_dir, &query, &filters)?;
                     attach_shard_retry_requests_with_tool(
                         &mut plans,
                         "search",
@@ -3321,17 +3350,18 @@ impl ToolRuntime {
                     let scoped_arguments =
                         arguments_scoped_to_client_cwd_for_query(&request.arguments, &query)?;
                     if let Ok(index_dir) = self.single_cached_shard_manifest_path() {
+                        let filters = search_filters(&scoped_arguments, true)?;
                         if bool_arg(&request.arguments, "refresh_if_stale") {
+                            let refresh_filters =
+                                merge_filters(filters.clone(), parse_query(&query).filters);
                             self.refresh_shards_for_arguments_if_stale(
                                 &index_dir,
                                 &scoped_arguments,
+                                &refresh_filters,
                             )?;
                         }
-                        let mut plans = self.shard_query_plans_cached(
-                            &index_dir,
-                            &query,
-                            &search_filters(&scoped_arguments, true)?,
-                        )?;
+                        let mut plans =
+                            self.shard_query_plans_cached(&index_dir, &query, &filters)?;
                         attach_shard_retry_requests_with_tool(
                             &mut plans,
                             "search",
@@ -3403,10 +3433,18 @@ impl ToolRuntime {
                 if let Some(index_dir) =
                     optional_string_arg(&request.arguments, "index_dir").map(PathBuf::from)
                 {
-                    if bool_arg(&request.arguments, "refresh_if_stale") {
-                        self.refresh_shards_for_arguments_if_stale(&index_dir, &request.arguments)?;
-                    }
                     let filters = search_filters(&request.arguments, true)?;
+                    if bool_arg(&request.arguments, "refresh_if_stale") {
+                        for query in &queries {
+                            let refresh_filters =
+                                merge_filters(filters.clone(), parse_query(query).filters);
+                            self.refresh_shards_for_arguments_if_stale(
+                                &index_dir,
+                                &request.arguments,
+                                &refresh_filters,
+                            )?;
+                        }
+                    }
                     let mut batch = Vec::new();
                     for query in queries {
                         let mut plans =
@@ -3443,12 +3481,6 @@ impl ToolRuntime {
                 }
                 if optional_string_arg(&request.arguments, "cwd").is_some() {
                     if let Ok(index_dir) = self.single_cached_shard_manifest_path() {
-                        if bool_arg(&request.arguments, "refresh_if_stale") {
-                            self.refresh_shards_for_arguments_if_stale(
-                                &index_dir,
-                                &request.arguments,
-                            )?;
-                        }
                         let mut batch = Vec::new();
                         for query in queries {
                             let scoped_arguments = arguments_scoped_to_client_cwd_for_query(
@@ -3456,6 +3488,15 @@ impl ToolRuntime {
                                 &query,
                             )?;
                             let filters = search_filters(&scoped_arguments, true)?;
+                            if bool_arg(&request.arguments, "refresh_if_stale") {
+                                let refresh_filters =
+                                    merge_filters(filters.clone(), parse_query(&query).filters);
+                                self.refresh_shards_for_arguments_if_stale(
+                                    &index_dir,
+                                    &scoped_arguments,
+                                    &refresh_filters,
+                                )?;
+                            }
                             let mut plans =
                                 self.shard_query_plans_cached(&index_dir, &query, &filters)?;
                             attach_shard_retry_requests_with_tool(
@@ -3717,14 +3758,21 @@ impl ToolRuntime {
                 let query = string_arg(&request.arguments, "query")?;
                 let limit = search_limit_arg(&request.arguments)?;
                 let context_lines = context_lines_arg(&request.arguments)?;
+                let filters = search_filters(&request.arguments, true)?;
                 if bool_arg(&request.arguments, "refresh_if_stale") {
-                    self.refresh_shards_for_arguments_if_stale(&index_dir, &request.arguments)?;
+                    let refresh_filters =
+                        merge_filters(filters.clone(), parse_query(&query).filters);
+                    self.refresh_shards_for_arguments_if_stale(
+                        &index_dir,
+                        &request.arguments,
+                        &refresh_filters,
+                    )?;
                 }
                 Ok(serde_json::to_value(self.search_shards_cached(
                     &index_dir,
                     &query,
                     limit,
-                    &search_filters(&request.arguments, true)?,
+                    &filters,
                     context_lines,
                 )?)?)
             }
@@ -3733,10 +3781,18 @@ impl ToolRuntime {
                 let queries = string_array_arg(&request.arguments, "queries")?;
                 let limit = search_limit_arg(&request.arguments)?;
                 let context_lines = context_lines_arg(&request.arguments)?;
-                if bool_arg(&request.arguments, "refresh_if_stale") {
-                    self.refresh_shards_for_arguments_if_stale(&index_dir, &request.arguments)?;
-                }
                 let filters = search_filters(&request.arguments, true)?;
+                if bool_arg(&request.arguments, "refresh_if_stale") {
+                    for query in &queries {
+                        let refresh_filters =
+                            merge_filters(filters.clone(), parse_query(query).filters);
+                        self.refresh_shards_for_arguments_if_stale(
+                            &index_dir,
+                            &request.arguments,
+                            &refresh_filters,
+                        )?;
+                    }
+                }
                 let mut batch = Vec::new();
                 for query in queries {
                     let results = self.search_shards_cached(
@@ -3762,24 +3818,35 @@ impl ToolRuntime {
             "shard_query_plan" | "shard_plan" => {
                 let index_dir = self.shard_dir_arg_or_single_cached(&request.arguments)?;
                 let query = string_arg(&request.arguments, "query")?;
+                let filters = search_filters(&request.arguments, true)?;
                 if bool_arg(&request.arguments, "refresh_if_stale") {
-                    self.refresh_shards_for_arguments_if_stale(&index_dir, &request.arguments)?;
+                    let refresh_filters =
+                        merge_filters(filters.clone(), parse_query(&query).filters);
+                    self.refresh_shards_for_arguments_if_stale(
+                        &index_dir,
+                        &request.arguments,
+                        &refresh_filters,
+                    )?;
                 }
-                let mut plans = self.shard_query_plans_cached(
-                    &index_dir,
-                    &query,
-                    &search_filters(&request.arguments, true)?,
-                )?;
+                let mut plans = self.shard_query_plans_cached(&index_dir, &query, &filters)?;
                 attach_shard_retry_requests(&mut plans, &index_dir, &request.arguments);
                 Ok(serde_json::to_value(plans)?)
             }
             "shard_query_plan_batch" => {
                 let index_dir = self.shard_dir_arg_or_single_cached(&request.arguments)?;
                 let queries = string_array_arg(&request.arguments, "queries")?;
-                if bool_arg(&request.arguments, "refresh_if_stale") {
-                    self.refresh_shards_for_arguments_if_stale(&index_dir, &request.arguments)?;
-                }
                 let filters = search_filters(&request.arguments, true)?;
+                if bool_arg(&request.arguments, "refresh_if_stale") {
+                    for query in &queries {
+                        let refresh_filters =
+                            merge_filters(filters.clone(), parse_query(query).filters);
+                        self.refresh_shards_for_arguments_if_stale(
+                            &index_dir,
+                            &request.arguments,
+                            &refresh_filters,
+                        )?;
+                    }
+                }
                 let mut batch = Vec::new();
                 for query in queries {
                     let mut plans = self.shard_query_plans_cached(&index_dir, &query, &filters)?;
@@ -4712,11 +4779,15 @@ impl ToolRuntime {
         diagnose: bool,
         retry_if_empty: bool,
     ) -> Result<SearchAutoResult> {
-        if refresh_if_stale {
-            self.refresh_shards_for_arguments_if_stale(&index_dir, arguments)?;
-        }
         let filters = search_filters(arguments, true)?;
         let shard_scope_filters = merge_filters(filters.clone(), parse_query(query).filters);
+        if refresh_if_stale {
+            self.refresh_shards_for_arguments_if_stale(
+                &index_dir,
+                arguments,
+                &shard_scope_filters,
+            )?;
+        }
         let mut results =
             self.search_shards_cached(&index_dir, query, limit, &filters, context_lines)?;
         attach_result_read_requests(
@@ -4969,12 +5040,18 @@ impl ToolRuntime {
         &self,
         index_dir: &Path,
         arguments: &Value,
+        filters: &SearchFilters,
     ) -> Result<()> {
-        if let Some(root) = scoped_refresh_root(arguments)? {
-            refresh_shards_by_root(index_dir, &[root])?;
-            return self.clear_runtime_caches();
+        match shard_refresh_selection_for_search(index_dir, arguments, filters)? {
+            ShardRefreshSelection::Roots(roots) => {
+                if roots.is_empty() || !shard_status_by_root(index_dir, &roots)?.stale {
+                    return Ok(());
+                }
+                refresh_shards_by_root(index_dir, &roots)?;
+                self.clear_runtime_caches()
+            }
+            ShardRefreshSelection::All => self.refresh_shards_if_stale(index_dir),
         }
-        self.refresh_shards_if_stale(index_dir)
     }
 
     fn next_index_access(&self) -> u64 {

@@ -6053,6 +6053,74 @@ fn runtime_search_auto_refreshes_only_client_cwd_shard_when_scoped() {
 }
 
 #[test]
+fn runtime_search_auto_refreshes_only_query_selected_shard_when_repo_filter_is_in_query() {
+    let workspace = tempfile::tempdir().unwrap();
+    let current_repo = workspace.path().join("current-app");
+    let other_repo = workspace.path().join("other-app");
+    fs::create_dir_all(current_repo.join(".git")).unwrap();
+    fs::create_dir_all(other_repo.join(".git")).unwrap();
+    write(
+        &current_repo.join("src/lib.rs"),
+        "pub fn baseline_current_token() {}\n",
+    );
+    write(
+        &other_repo.join("src/lib.rs"),
+        "pub fn baseline_other_token() {}\n",
+    );
+    let shard_dir = workspace.path().join("shards");
+    build_shards(
+        &[PathBuf::from(&current_repo), PathBuf::from(&other_repo)],
+        &shard_dir,
+    )
+    .unwrap();
+
+    write(
+        &current_repo.join("src/new_current.rs"),
+        "pub fn current_after_refresh_token() {}\n",
+    );
+    write(
+        &other_repo.join("src/new_other.rs"),
+        "pub fn other_after_refresh_token() {}\n",
+    );
+
+    let runtime = ToolRuntime::default();
+    runtime.warm_shards(shard_dir.clone()).unwrap();
+
+    let other_search = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("fresh-other"),
+        tool: "search_auto".to_string(),
+        arguments: serde_json::json!({
+            "cwd": current_repo.join("src"),
+            "query": "repo:other-app other_after_refresh_token",
+            "limit": 5,
+            "refresh_if_stale": true
+        }),
+    });
+    assert!(other_search.error.is_none(), "{:?}", other_search.error);
+    let other_search = serde_json::to_string(&other_search.result).unwrap();
+    assert!(
+        other_search.contains("other-app/src/new_other.rs"),
+        "{other_search}"
+    );
+
+    let current_search = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("stale-current"),
+        tool: "search_shards".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": shard_dir,
+            "query": "repo:current-app current_after_refresh_token",
+            "limit": 5
+        }),
+    });
+    assert!(current_search.error.is_none(), "{:?}", current_search.error);
+    let current_search = serde_json::to_string(&current_search.result).unwrap();
+    assert!(
+        !current_search.contains("current-app/src/new_current.rs"),
+        "{current_search}"
+    );
+}
+
+#[test]
 fn runtime_search_auto_reports_stale_shard_refresh_request_on_empty_results() {
     let workspace = tempfile::tempdir().unwrap();
     let current_repo = workspace.path().join("current-app");
