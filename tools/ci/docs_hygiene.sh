@@ -5,7 +5,11 @@ docs=(README.md docs)
 
 patterns=(
   '/Users/'
+  '/private/tmp'
+  '/var/folders'
   'Documents/Projects'
+  'C:\Users\'
+  'jonathanhaas'
   'agent-jsonl-explorer'
   'session analytics'
   'codex jsonl'
@@ -18,3 +22,36 @@ for pattern in "${patterns[@]}"; do
     exit 1
   fi
 done
+
+markdown_files=(README.md)
+while IFS= read -r file; do
+  markdown_files+=("$file")
+done < <(find docs -type f -name '*.md' | sort)
+
+while IFS=: read -r file line target; do
+  target="${target%% \"*}"
+  target="${target#<}"
+  target="${target%>}"
+
+  case "$target" in
+    ''|\#*|http://*|https://*|mailto:*)
+      continue
+      ;;
+  esac
+
+  link_path="${target%%#*}"
+  [ -n "$link_path" ] || continue
+
+  if [[ "$link_path" = /* ]]; then
+    echo "$file:$line: public docs should not link to absolute local paths: $target" >&2
+    exit 1
+  fi
+
+  candidate="$(dirname "$file")/$link_path"
+  if [ ! -e "$candidate" ]; then
+    echo "$file:$line: broken local docs link: $target" >&2
+    exit 1
+  fi
+done < <(
+  perl -ne 'while (/\[[^\]]+\]\(([^)]+)\)/g) { print "$ARGV:$.:$1\n" } close ARGV if eof' "${markdown_files[@]}"
+)

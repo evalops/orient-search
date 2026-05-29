@@ -10,6 +10,29 @@ Agents already search. The useful work is making local search fast, cheap, and
 structured enough that agents stop spending turns on repeated `rg`, `find`,
 `ls`, and `cat` exploration.
 
+## Design Takeaways
+
+- [Zoekt](https://github.com/sourcegraph/zoekt) validates the core search
+  shape: trigram-backed code search, multi-repo indexes, source-aware ranking,
+  query filters, symbols as a ranking signal, and service/API access all matter
+  for large codebases.
+- Sourcegraph's
+  [Zoekt story](https://sourcegraph.com/blog/zoekt-creating-internal-tools-at-google)
+  reinforces the internal-tool lesson: code search wins when it is fast enough
+  to become everyday infrastructure, not a special workflow.
+- Sourcegraph's
+  [code-search capabilities](https://sourcegraph.com/docs/code-search/features)
+  point to the product surface agents need too: precise query filters,
+  freshness, symbol lookup, file/path scoping, and shareable line ranges.
+- Agent tools such as [Amp](https://ampcode.com/manual) make the adapter
+  requirement clear: guidance files, MCP/local tools, subagents, and terminal
+  workflows need short, copyable commands and structured follow-up requests.
+
+Orient should borrow the durable search-engine ideas, but keep the product
+local-agent-first: no hosted indexing requirement, no thread or transcript
+analytics, bounded JSON-lines/MCP-style calls, and repo-relative examples in
+public docs.
+
 ## Already In Place
 
 - Live `rg`-backed search with Rust-side scoring and snippets.
