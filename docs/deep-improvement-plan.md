@@ -1,171 +1,119 @@
 # Deep Improvement Plan
 
-Orient is already fast enough to be useful. The next step is making it reliable
-enough, obvious enough, and measurable enough that local coding agents use it
-before repeated `rg`, `find`, `ls`, and `cat` exploration.
-
-## Product Thesis
-
-The durable wedge is not "search is faster than grep." The wedge is "agents
-already search, and local search can become a cheap structured primitive."
-
-That means the main product metric is agent waste reduction:
-
-- fewer local discovery commands before the first edit
-- fewer wrong file opens
-- faster time to first relevant file
-- equal or better edit success
-- useful recovery hints when search fails
+Orient is already useful as a fast local search layer. The remaining work should
+make shared use smoother, reduce refresh/build cost, and keep memory/disk
+footprint visible.
 
 Orient should remain local code search only. No session analytics, no telemetry,
 and no hosted dependency.
 
-## Highest-Leverage Work
+## Current Priorities
 
-### 1. Build the adoption eval
+### 1. Make Multi-Agent Use Boring
 
-The adoption eval is the proof layer. Today the repo documents the idea, but it
-does not yet ship a runnable harness.
+Many local agents often work on the same few codebases. Orient should feel like
+one shared local search appliance for that setup.
 
-Build `orient eval-adoption` around local task fixtures and explicit transcript
-input. It should compare baseline agent runs against Orient-assisted runs for
-the same tasks without collecting background analytics.
+Done pieces:
 
-Exit condition:
+- TCP, Unix socket, stdio JSON-lines, and MCP stdio transports
+- `serve-tcp` / `serve-unix` startup warming via `--index` and `--index-dir`
+- `daemon_status` with warmed targets and copyable default requests
+- `doctor` with reachability, freshness, and repair/start commands
+- cached index and shard-manifest reloads when persisted files change
+- shard write locks and shrink guards for shared shard directories
 
-- a task manifest format exists
-- transcript parsing supports Codex/Claude-style JSONL or a small normalized
-  event schema
-- scoring reports time to first relevant file, wrong opens, local-search
-  commands, tool calls before edit, final success, and wall-clock time
-- the command emits JSON and a compact terminal summary
-- docs include a 20-task recommended protocol
+Next useful work:
 
-### 2. Make multi-agent use boring
+- clearer bootstrap command aliases for common local layouts
+- better daemon-status summaries when many shards are warmed
+- stronger stale-target messaging in agent-generated instructions
 
-The user has many local agents touching a small number of codebases. Orient
-should feel like one shared local search appliance for that setup.
+### 2. Make Refresh Cheaper Than Rebuild
 
-Add `orient doctor` and a bootstrap command that answers:
+Wide shard build cost is the main pain left. Warm search is already fast, so
+the daemon should amortize indexing and avoid unnecessary rebuilds.
 
-- is `orient` installed and on `PATH`?
-- is a daemon reachable?
-- what shard directory or index is warmed?
-- are shards stale?
-- what command should a new agent copy first?
-- is the repo target ambiguous?
+Done pieces:
 
-Exit condition:
+- incremental single-repo refresh for add/edit/delete/rename
+- `ensure-shards` adds missing repos and refreshes existing shards
+- `refresh-shards` prunes missing roots and updates nested aliases
+- wide perf script reports build seconds and shard footprint
 
-- a fresh Codex/Claude/Amp session can run one command and know exactly how to
-  use the shared daemon
-- stale or missing index states produce copyable repair commands
-- daemon status is short enough to paste into agent instructions
+Next useful work:
 
-### 3. Ship a real MCP stdio surface
+- parallelize independent shard refresh more aggressively while respecting the
+  writer lock
+- expose per-shard refresh duration and changed-file counts in summary output
+- add a cheap "what would refresh?" dry run for broad shard directories
 
-Orient already has an MCP-shaped manifest and JSON-lines transport. The next
-adoption jump is a real MCP server mode so tools can be mounted directly instead
-of explained through shell snippets.
+### 3. Keep Footprint Visible
 
-Exit condition:
+The current index stores source snapshots and line offsets so agents can read
+bounded context without touching live files. That is intentionally fast but not
+small.
 
-- `orient serve-mcp` exposes the existing read-only search/read/map/plan tools
-- tool names, schemas, bounds, and read-only annotations match the native
-  manifest
-- integration docs cover Codex, Claude Code, and Amp
-- native JSONL stays as the simple fallback
+Done pieces:
 
-### 4. Improve failure recovery with facets
+- `index_status`, `shard_status`, and `daemon_status` expose index/source,
+  content-snapshot, line-offset, posting-entry, and compressed-posting counters
+- `shard-status --summary` reports largest shards without huge per-shard output
+- wide perf runs print footprint counters before latency gates
 
-Current repair hints handle typos, bad filters, missing terms, candidate-cap
-diagnostics, and candidate-set facets for broad indexed searches. The next useful
-step is making those facets richer across shard plans and non-cap noisy results.
+Next useful work:
 
-When candidate caps or broad results happen, sample candidates and return top
-facets such as:
+- sectioned mmap-friendly index format with a file metadata section, string
+  table, term dictionary, compressed posting blocks, line-offset table, and
+  snapshot content blob
+- lazy query-time loading for posting blocks
+- memory-oriented benchmarks for cold load and warmed daemon RSS
 
-- path prefixes
-- extensions and languages
-- test/generated/source split
-- symbol kinds
-- repo/branch/origin for shard results
+### 4. Improve Query Recovery
 
-Exit condition:
+The product gets more useful when failed or noisy searches explain what to do
+next.
 
-- broad searches produce `narrow_by_*` hints only when the facet meaningfully
-  reduces the candidate set
-- hints include replayable retry requests when safe
-- candidate-cap hints never create no-op retry loops
+Done pieces:
 
-### 5. Move the index toward zero-copy sections
+- query plans with missing terms/trigrams, filter rejection counts, phrase and
+  final-match diagnostics
+- retry requests for safe repairs
+- facet hints for indexed and shard searches
 
-The index now has mmap-backed loading and compressed posting maps, but search
-still deserializes into owned Rust structures. That is a good current shape, not
-the final large-monorepo shape.
+Next useful work:
 
-Next architecture:
+- richer path/language/test/source/generated facets for noisy shard results
+- avoid surfacing hints unless they materially reduce the candidate set
+- make broad-result explanations shorter for agents
 
-- header and section table
-- file metadata section
-- string table
-- term dictionary
-- compressed posting blocks with skip data
-- line-offset table
-- snapshot content blob
+## Performance Targets
 
-Exit condition:
+- broad-workspace fallback top-10 p95 <= 300ms for common queries
+- repo-local fallback p95 <= 100ms
+- indexed repeated-query p95 faster than fallback
+- warm shard top-10 searches in the low tens of milliseconds for the local broad
+  shard set
+- no multi-second hangs; candidate collection has caps and hard timeouts
 
-- loading a large index does not require decoding every posting list
-- search only touches the sections needed for the query
-- index status reports file count, source bytes, index bytes, posting bytes, and
-  content-snapshot bytes separately
-- legacy index compatibility remains covered by tests
+## Verification
 
-### 6. Upgrade ranking quality tests
+Keep releases backed by:
 
-Latency is only useful if top results are right. The existing golden and
-differential tests are valuable, but they should grow into a relevance suite.
+```bash
+cargo fmt --check
+cargo test
+cargo build --release
+bazel test --test_output=errors //...
+bazel run //:ci_perf_gates
+ORIENT_WIDE_SHARDS=0 bazel run //:ci_wide_perf
+```
 
-Add adversarial fixtures for:
+For shared daemon and footprint changes, also run:
 
-- the same identifier in source, docs, tests, generated files, and lockfiles
-- prompts that imply a target file without naming it
-- near-symbol typos
-- path/file filter confusion
-- duplicated worktrees and monorepo-style packages
-- broad terms that need facet narrowing
-
-Exit condition:
-
-- the suite reports Recall@10 and MRR for labeled queries
-- fallback, indexed, shard, and daemon surfaces share expected top-k behavior
-- regressions fail locally and in CI
-
-### 7. Tighten performance gates where they matter
-
-The current gates prove the project is not accidentally slow on itself. Add
-local wide-corpus gates for the user's real project layout and keep CI focused
-on deterministic synthetic fixtures.
-
-Exit condition:
-
-- CI keeps deterministic repo-local p95 gates
-- a local script runs wide-corpus shard benches against `~/Documents/Projects`
-- reports include cold load, warm daemon, memory, index size, build time, and
-  p95/p99 search latency; benchmark JSON now includes p99 alongside p50/p95/max,
-  and the wide shard gate emits build seconds plus `shard-status --summary`
-  footprint counters
-- failure output names the slow query and surface
-
-## Immediate Build Order
-
-1. `orient doctor`
-2. adoption-eval manifest and scorer
-3. candidate facet hints
-4. real MCP stdio server
-5. sectioned zero-copy index prototype
-6. relevance suite and wide local perf script
-
-This order makes Orient more useful to today's coding sessions before spending
-engineering time on deeper index internals.
+```bash
+orient doctor --index-dir /tmp/orient-shards
+orient daemon-status
+orient shard-status --index-dir /tmp/orient-shards --summary
+ORIENT_WIDE_FALLBACK=0 ORIENT_WIDE_SHARDS=1 bazel run //:ci_wide_perf
+```

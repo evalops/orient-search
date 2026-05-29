@@ -21,7 +21,7 @@ target/release/orient client-jsonl --socket /tmp/orient.sock
 Each request is one JSON object per line:
 
 ```json
-{"id":"search","tool":"search_shards","arguments":{"index_dir":"/tmp/orient-shards","query":"repo:platform session token auth","limit":5,"require_all":true}}
+{"id":"search","tool":"search_shards","arguments":{"index_dir":"/tmp/orient-shards","query":"repo:service session token auth","limit":5,"require_all":true}}
 ```
 
 Responses preserve `id` and return either `result` or `error`. Use `tool_manifest` for the complete tool list, argument metadata, daemon-default hints, defaults, enums, and JSON-schema-like input schemas.
@@ -40,7 +40,7 @@ For one repo:
 For many repos:
 
 ```json
-{"id":"ensure-shards","tool":"ensure_shards","arguments":{"output_dir":"/tmp/orient-shards","discover_roots":["/Users/jonathanhaas/Documents/Projects"],"max_depth":4,"discover_limit":500,"family_limit":2}}
+{"id":"ensure-shards","tool":"ensure_shards","arguments":{"output_dir":"/tmp/orient-shards","discover_roots":["/path/to/workspace"],"max_depth":4,"discover_limit":500,"family_limit":2}}
 {"id":"status","tool":"daemon_status","arguments":{}}
 {"id":"instructions","tool":"agent_instructions","arguments":{"index_dir":"/tmp/orient-shards"}}
 {"id":"guide","tool":"agent_guide","arguments":{"index_dir":"/tmp/orient-shards"}}
@@ -50,7 +50,7 @@ For many repos:
 
 Generated follow-up objects such as `read_request`, `read_batch_request`, `related_request`, `related_symbols_request`, `repo_map_request`, `query_plan_request`, and query-plan `retry_requests` are complete tool requests. They include an `id`, `tool`, `arguments`, raw `jsonl`, a shell-native `client_cli` pipe for `orient client-jsonl`, and, when there is a compact human CLI equivalent, a `cli` hint.
 
-Use `index_status` or `shard_status` when live files may have changed since indexing. They report added, changed, and deleted files so an agent can call `refresh_index` or `refresh_shards` before trusting indexed results. `indexed_search_code` and `search_shards` also accept `refresh_if_stale:true` for a one-call freshness check and refresh before search. Index, shard, and daemon status outputs include footprint counters such as `index_bytes`, `source_bytes`, `content_snapshot_bytes`, `line_offset_bytes`, `posting_entries`, and `compressed_posting_bytes`.
+Use `index_status` or `shard_status` when live files may have changed since indexing. They report added, changed, and deleted files so an agent can call `refresh_index` or `refresh_shards` before trusting indexed results. `indexed_search_code` and `search_shards` also accept `refresh_if_stale:true` for a one-call freshness check and refresh before search. Index, shard, and daemon status outputs include footprint counters such as `index_bytes`, `source_bytes`, `content_snapshot_bytes`, `line_offset_bytes`, `posting_entries`, and `compressed_posting_bytes`; use `shard_status --summary` for large shared shard sets. See [Memory and footprint](memory-footprint.md) for the disk/memory tradeoffs behind those counters.
 
 Use `ensure_shards` for shard directories shared by several local agents. The lower-level `index_shards` rebuild path refuses to overwrite an existing shard directory when the requested repo set would remove existing shards; pass `force:true` or `orient index-shards --force` only when intentionally replacing that directory.
 
@@ -76,7 +76,7 @@ The plain CLI `orient search` command also accepts `--index` and `--index-dir`
 as convenience target flags for agents that reach first for `search` and then
 add the available search surface.
 
-Query strings support filters such as `repo:platform`, `branch:feature/auth`, `origin:evalops/platform`, `path:src/auth` or `dir:src/auth` / `folder:src/auth`, `file:auth.rs` or `filename:auth.rs`, `file:*.rs`, `path:src/*gateway.rs`, `path:src\auth.rs`, `lang:rust` or shorthand `lang:rs` / `lang:ts` / `lang:py`, `ext:rs`, `symbol:SessionManager`, `kind:function`, `type:function`, `dep:react`, `import:crate::auth`, `test:false`, `is:test`, `is:source`, `code:true`, `code:false`, `is:code`, `is:docs`, `generated:false`, `is:generated`, positive content aliases like `content:"issue token"` or `text:gateway`, negative filters like `-path:docs`, `-file:*test.rs`, `-folder:vendor`, `-is:generated`, `-lang:md`, `-branch:wip`, `-origin:legacy`, `-kind:class`, `-dep:legacy`, or `-import:old_api`, and quoted phrases like `"issue token"`. Multi-token queries use AND behavior by default; use `mode:any` in the query or `any_terms:true` in JSON-lines calls for broad orientation searches. Indexed search plans `symbol:` and `kind:` filters through symbol postings and also treats identifier-shaped raw terms such as `SessionManager` and `agent_instructions` as symbol planning hints when a matching symbol exists, while ordinary spaced concept queries stay broad.
+Query strings support filters such as `repo:service`, `branch:feature/auth`, `origin:example/service`, `path:src/auth` or `dir:src/auth` / `folder:src/auth`, `file:auth.rs` or `filename:auth.rs`, `file:*.rs`, `path:src/*gateway.rs`, `path:src\auth.rs`, `lang:rust` or shorthand `lang:rs` / `lang:ts` / `lang:py`, `ext:rs`, `symbol:SessionManager`, `kind:function`, `type:function`, `dep:react`, `import:crate::auth`, `test:false`, `is:test`, `is:source`, `code:true`, `code:false`, `is:code`, `is:docs`, `generated:false`, `is:generated`, positive content aliases like `content:"issue token"` or `text:gateway`, negative filters like `-path:docs`, `-file:*test.rs`, `-folder:vendor`, `-is:generated`, `-lang:md`, `-branch:wip`, `-origin:legacy`, `-kind:class`, `-dep:legacy`, or `-import:old_api`, and quoted phrases like `"issue token"`. Multi-token queries use AND behavior by default; use `mode:any` in the query or `any_terms:true` in JSON-lines calls for broad orientation searches. Indexed search plans `symbol:` and `kind:` filters through symbol postings and also treats identifier-shaped raw terms such as `SessionManager` and `agent_instructions` as symbol planning hints when a matching symbol exists, while ordinary spaced concept queries stay broad.
 Use `content:` / `text:` / `term:` when an identifier-shaped string should stay a content lookup instead of narrowing indexed search through implicit symbol postings.
 Positive non-code language scopes such as `lang:md` keep identifier-shaped terms as content searches instead of requiring symbol postings, so docs/prose lookups stay consistent with live fallback search.
 The same applies when positive `file:`, `path:`, or `ext:` scopes clearly target non-code files, such as `path:docs/*.md SessionManager` or `ext:md agent_instructions`.
@@ -133,7 +133,7 @@ For most agents, the handoff is:
 4. Use `related_request` when the likely next step is finding nearby tests, source counterparts, or sibling files for a hit; returned related files include `read_request` payloads for opening the file directly.
 5. Use `related_symbols_request` when the likely next step is finding nearby definitions, types, or other symbols for a hit; search-generated requests already carry the original query, and returned related symbols include `read_request` payloads for the next bounded read.
 
-Read-range tools accept `/` or `\` separators in repo-relative paths and reject parent-directory escapes after separator normalization. Shard range and related-context tools accept exact shard-prefixed paths from search hits, such as `platform/src/auth.rs`, and also accept unqualified paths like `src/auth.rs` when they resolve to exactly one shard. Ambiguous unqualified paths fail with a prompt to use `<repo>/<path>`.
+Read-range tools accept `/` or `\` separators in repo-relative paths and reject parent-directory escapes after separator normalization. Shard range and related-context tools accept exact shard-prefixed paths from search hits, such as `service/src/auth.rs`, and also accept unqualified paths like `src/auth.rs` when they resolve to exactly one shard. Ambiguous unqualified paths fail with a prompt to use `<repo>/<path>`.
 
 `read_range` / `open_range` and `read_ranges` / `open_ranges` are target-aware convenience tools: pass `repo`, `index`, or `index_dir` to read from a live repository, persistent index, or shard directory with one adapter path. The explicit `read_index_range` and `read_shard_range` families remain available for wrappers that want surface-specific tools.
 
@@ -144,14 +144,14 @@ Examples:
 ```json
 {"id":"read-one","tool":"read_ranges","arguments":{"index":"/tmp/orient.index","ranges":{"path":"src/auth.rs","start":1,"lines":80}}}
 {"id":"read","tool":"read_ranges","arguments":{"index":"/tmp/orient.index","ranges":[{"path":"src/auth.rs","start":1,"lines":80}]}}
-{"id":"read-shards","tool":"read_ranges","arguments":{"index_dir":"/tmp/orient-shards","ranges":[{"path":"platform/src/auth.rs","start":40,"lines":80}]}}
+{"id":"read-shards","tool":"read_ranges","arguments":{"index_dir":"/tmp/orient-shards","ranges":[{"path":"service/src/auth.rs","start":40,"lines":80}]}}
 ```
 
 CLI equivalents support repeatable `--range path:start:lines`:
 
 ```bash
 target/release/orient read-index-ranges --index /tmp/orient.index --range src/auth.rs:1:80
-target/release/orient read-shard-ranges --index-dir /tmp/orient-shards --range platform/src/auth.rs:40:80
+target/release/orient read-shard-ranges --index-dir /tmp/orient-shards --range service/src/auth.rs:40:80
 ```
 
 Range reads follow manifest bounds: `start >= 1`, `1 <= lines <= lines.maximum`, non-empty batch arrays, and `ranges.maxItems`, so a mistaken request cannot dump unbounded file content.

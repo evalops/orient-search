@@ -5,13 +5,16 @@ Claude Code, Amp, and other local agents repo maps, indexed search, query plans,
 and bounded file ranges so they stop burning runs on repeated `rg`, `find`,
 `ls`, and `cat`.
 
-## Run it
+## Shared Daemon
+
+Run one warmed daemon per machine or workspace family, then point every local
+agent at it:
 
 ```bash
 cargo install --git https://github.com/evalops/orient-search
 
 orient ensure-shards \
-  --discover-root ~/Documents/Projects \
+  --discover-root ~/code \
   --output-dir /tmp/orient-shards \
   --family-limit 2
 
@@ -20,7 +23,68 @@ orient serve-tcp \
   --index-dir /tmp/orient-shards
 ```
 
-## Build and test
+In each agent session:
+
+```bash
+orient doctor --index-dir /tmp/orient-shards
+orient agent-instructions --index-dir /tmp/orient-shards
+orient daemon-status
+```
+
+`daemon-status` reports the warmed shard/index set, freshness, footprint
+counters, and copyable `default_requests` so agents can start with the right
+repo map, search, and query-plan calls.
+
+## Search
+
+```bash
+orient search-auto "symbol:SessionManager token"
+orient search --repo . "issue token"
+orient search --index /tmp/repo.index "issue token"
+orient search --index-dir /tmp/orient-shards "repo:service issue token"
+orient read-range --index /tmp/repo.index src/lib.rs:40:80
+```
+
+Useful filters: `repo:`, `path:`/`dir:`, `file:`, `lang:`, `ext:`, `symbol:`,
+`kind:`/`type:`, `dep:`, `import:`, `test:`, `generated:`, `code:`,
+`is:test`, `is:source`, `is:code`, `is:docs`, `is:generated`, `content:`,
+quoted phrases, negative filters like `-path:vendor`, and `mode:any` for broad
+orientation.
+
+## Protocol
+
+JSON-lines requests look like this:
+
+```jsonl
+{"id":"tools","tool":"tool_manifest","arguments":{}}
+{"id":"guide","tool":"agent_guide","arguments":{"index_dir":"/tmp/orient-shards"}}
+{"id":"map","tool":"shard_repo_map","arguments":{"index_dir":"/tmp/orient-shards","detail":"compact","read_limit":16}}
+{"id":"search","tool":"search_auto","arguments":{"query":"repo:service branch:main symbol:SessionManager token","limit":10,"explain":true}}
+{"id":"read","tool":"read_ranges","arguments":{"index_dir":"/tmp/orient-shards","ranges":[{"path":"service/src/auth.rs","start":40,"lines":80}]}}
+```
+
+Every search result includes ready-to-send read, related-file, related-symbol,
+and query-plan follow-ups with `jsonl`, `client_cli`, and compact CLI hints.
+
+## Footprint
+
+Orient stores source snapshots and line offsets in persisted indexes so agents
+can read bounded context without touching the live filesystem. That makes
+snippet/range reads fast and robust, but index files are larger than source.
+
+Use:
+
+```bash
+orient shard-status --index-dir /tmp/orient-shards --summary
+```
+
+The summary reports `index_bytes`, `source_bytes`, `content_snapshot_bytes`,
+`line_offset_bytes`, `posting_entries`, `compressed_posting_bytes`, and the
+largest shards. On large workspaces, expect indexes to be larger than source
+because Orient stores snapshots and line offsets for fast bounded reads; warm
+top-10 shard searches should still stay in the low tens of milliseconds.
+
+## Build And Test
 
 ```bash
 bazel build -c opt //:orient
@@ -30,85 +94,9 @@ bazel run //:ci_perf_gates
 ORIENT_WIDE_SHARDS=0 bazel run //:ci_wide_perf
 ```
 
-## Give it to agents
-
-Give an agent the generated local rule snippet:
-
-```bash
-orient agent-instructions --index-dir /tmp/orient-shards
-orient agent-guide --index-dir /tmp/orient-shards
-orient doctor --index-dir /tmp/orient-shards
-orient serve-mcp
-orient client-jsonl
-```
-
-The intended loop is simple: get the tool manifest or agent guide, ask for a
-repo map, search the warmed shard set, follow the returned `read_*` and
-`related_*` requests, and inspect the query plan when results are empty or
-noisy. Follow-up requests include replayable `cli`, `jsonl`, and `client_cli`
-hints for terminal-native agents.
-
-`ensure-index`, `refresh-index`, and shard refresh rebuild unreadable persisted
-indexes from source so stale local state does not strand an agent mid-task.
-Shard-directory writes use a bounded local writer lock, and `index-shards`
-refuses to shrink an existing shard directory unless `--force` is passed, so
-several local agents can share one `/tmp/orient-shards` directory without
-racing or accidentally replacing the shared manifest.
-
-## Search locally
-
-For one-shot CLI use inside a repo:
-
-```bash
-orient search-auto "symbol:AuthSession token"
-orient search --repo . "issue token"
-orient search --index /tmp/repo.index "issue token"
-orient search --index-dir /tmp/orient-shards "repo:api issue token"
-orient search --index-dir /tmp/orient-shards "branch:feature/auth origin:evalops/api issue token"
-orient read-range --index /tmp/repo.index src/lib.rs:40:80
-```
-
-## Protocol
-
-JSON-lines requests look like this:
-
-```jsonl
-{"id":"tools","tool":"tool_manifest","arguments":{}}
-{"id":"guide","tool":"agent_guide","arguments":{"index_dir":"/tmp/orient-shards"}}
-{"id":"map","tool":"shard_repo_map","arguments":{"symbols":25,"tests":25,"detail":"compact","read_limit":16}}
-{"id":"search","tool":"search_auto","arguments":{"query":"repo:api branch:main symbol:AuthSession token","limit":10,"explain":true}}
-{"id":"batch","tool":"search_auto_batch","arguments":{"queries":["repo:api symbol:AuthSession token","origin:evalops/api path:auth token"],"limit":10}}
-{"id":"read","tool":"read_ranges","arguments":{"index_dir":"/tmp/orient-shards","ranges":[{"path":"api/src/auth.rs","start":40,"lines":80}]}}
-```
-
-## Filters
-
-Useful filters: `repo:`, `path:`/`dir:`, `file:`, `lang:`, `ext:`, `symbol:`,
-`kind:`/`type:`, `dep:`, `import:`, `test:`, `generated:`, `code:`,
-`is:test`, `is:source`, `is:code`, `is:docs`, `is:generated`, `content:`, quoted
-phrases, negative filters like `-path:vendor` and `-content:generated`, and
-`mode:any` for broad orientation.
-
-## Eval
-
-The adoption eval is the money chart: run the same repo-editing tasks with and
-without Orient, then compare time to first relevant file, local-search command
-count, wrong file opens, tool calls before edit, edit success rate, and
-wall-clock time.
-
-```bash
-orient eval-adoption \
-  --tasks eval/tasks.jsonl \
-  --baseline-transcript eval/baseline \
-  --orient-transcript eval/orient
-```
-
 ## Docs
 
-More detail:
-
-- [Agent adoption](docs/agent-adoption.md)
+- [Shared daemon guide](docs/shared-daemon.md)
+- [Memory and footprint](docs/memory-footprint.md)
 - [Agent protocol](docs/agent-protocol.md)
-- [Adoption eval](docs/adoption-eval.md)
-- [Deep improvement plan](docs/deep-improvement-plan.md)
 - [Fast search roadmap](docs/fast-search-roadmap.md)

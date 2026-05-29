@@ -67,37 +67,37 @@ Implemented now:
 - Exact symbol definition boosting in both fallback and indexed search.
 - Direct symbol lookup and related-context lookup from live and persistent indexes, including filter-aware single and batch `find_symbol`/`find_index_symbol`/`find_shard_symbol` tools, ready-to-send symbol `read_request` payloads, batch symbol `read_batch_request` payloads, and test-to-source stem matching for common `_test`, `test_`, `.test`, and `.spec` naming, so agent wrappers can jump to definitions and nearby tests/files without rebuilding a repo index.
 - Direct symbol lookup across local shard directories, returning repo-prefixed paths that can be passed to `read-shard-range`.
-- Bounded workspace discovery finds git or manifest-backed repo roots while skipping dependency/build directories, so agents can build shard directories from layouts like `Documents/Projects`, `~/repos`, and `.codex-worktrees` without manual repo lists. It prioritizes visible canonical repos before dated split, temp, and worktree folders when limits are small, treats git checkouts as traversal boundaries by default, accepts `nested_manifests` / `--nested-manifests` when an agent really wants package-level subprojects as separate shard candidates, and supports `family_limit` / `--family-limit` to cap selected checkouts per repeated git family while still reporting full family counts plus `candidates_found`. `index-shards` and `ensure-shards` include compact discovery summaries in their JSON output, and accept repeated discovery roots so one daemon can warm the canonical repos and active worktrees together.
+- Bounded workspace discovery finds git or manifest-backed repo roots while skipping dependency/build directories, so agents can build shard directories from broad workspace roots without manual repo lists. It prioritizes visible canonical repos before dated split, temp, and worktree folders when limits are small, treats git checkouts as traversal boundaries by default, accepts `nested_manifests` / `--nested-manifests` when an agent really wants package-level subprojects as separate shard candidates, and supports `family_limit` / `--family-limit` to cap selected checkouts per repeated git family while still reporting full family counts plus `candidates_found`. `index-shards` and `ensure-shards` include compact discovery summaries in their JSON output, and accept repeated discovery roots so one daemon can warm the canonical repos and active worktrees together.
 - Repo-map orientation from live repos, persistent indexes, and shard directories, so agents can inspect entrypoints, manifests, tests, symbols, compact related-file/symbol hints, important files, structured command hints, manifest-derived dependency hints, and source-derived import/module hints without rebuilding a separate live repo index.
 - Command hints are manifest-aware, include command kind/source provenance, and parse common `package.json` scripts while respecting package-manager lockfiles.
-- Shard manifests record aliases for nested repo-looking child directories, so broad dated worktree shards can still answer stable filters like `repo:maestro` and scope results to the matching child path.
+- Shard manifests record aliases for nested repo-looking child directories, so broad dated worktree shards can still answer stable filters like `repo:service` and scope results to the matching child path.
 - Shard manifests record bounded git metadata for each shard, including origin, branch, clone/worktree kind, and common git dir when available. Shard repo filters and shard maps can use this topology, so agents can target an active branch or origin without knowing the exact checkout path.
 - `daemon_status`, `warm_index`, `warm_shards`, and `serve-tcp --index-dir` expose compact warmed-index and warmed-shard details, so parallel local agents can confirm they are sharing the intended repo/branch shard set without session analytics.
-- Alias-scoped shard search, symbol lookup, and repo maps emit stable alias-prefixed paths, so search hits like `maestro/src/foo.rs` can be opened without knowing the enclosing worktree shard name.
+- Alias-scoped shard search, symbol lookup, and repo maps emit stable alias-prefixed paths, so search hits like `service/src/foo.rs` can be opened without knowing the enclosing worktree shard name.
 - Shard related-file and related-symbol tools accept alias-prefixed search-hit paths plus unique unqualified shard-relative paths, and keep returned context inside the same alias scope.
 - Batch search and read tools cap query/range array sizes plus read line counts, reducing JSON-lines round trips without letting one caller monopolize the daemon; CLI batch reads also accept repeatable `--range path:start:lines` specs for search hits with different line windows.
 - Shard refresh recomputes nested repo aliases, so newly added child repos become filterable after `refresh-shards`.
-- `read-shard-range` resolves alias-prefixed paths and unique unqualified shard-relative paths, so agents can read `maestro/src/foo.rs` even when `maestro` lives inside a broader dated worktree shard, while single-repo shard directories can also accept `src/foo.rs`.
+- `read-shard-range` resolves alias-prefixed paths and unique unqualified shard-relative paths, so agents can read `service/src/foo.rs` even when `service` lives inside a broader dated worktree shard, while single-repo shard directories can also accept `src/foo.rs`.
 
-Measured on this machine:
+Measured examples:
 
-- Wide tree fallback: `/Users/jonathanhaas/Documents/Projects`, common top-10 literal/token queries passed the local wide gate with p95s of about `79ms`, `31ms`, and `109ms` after warmup, below the `300ms` target.
+- Broad workspace fallback common top-10 literal/token queries passed the local wide gate below the `300ms` p95 target.
 - Local repo fallback: query `indexed search symbol filters`, top 10 at about `12.5ms` p95 after warmup.
 - Hot-path fallback has a `250ms` wall-clock timeout plus match caps; if the timeout fires it returns partial results instead of blocking the agent.
 - Search result output is capped at 100 items per query across fallback, indexed, and shard search surfaces; batch request sizes are capped too.
 - Local repo index build: about `0.25s`.
 - Local repo refresh after build: reuses unchanged files, reuses same-content renames by retargeting path-derived postings, and rebuilds postings from per-file term lists; tests verify renamed symbols plus related-file and related-symbol followups resolve to the new path.
 - Local repo indexed search: query `indexed search symbol filters`, top 10 at about `0.96ms` p95 after warmup.
-- Local single-shard search: query `repo:agent-jsonl-explorer indexed search symbol filters`, top 10 at about `3.43ms` p95 after warmup, or about `1.01ms` p95 through the warm cached runtime path.
-- Real local layout discovery: `/Users/jonathanhaas/Documents/Projects` now resolves to 454 git or manifest-backed repo roots at `max-depth 4` after scanning 554 directories, with the hottest repeated families being `maestro-internal` at 99 checkouts, `deploy` at 72, `platform` at 53, `browser-use-rs` at 30, and `maestro` at 30. `/Users/jonathanhaas/repos` resolves to 72 repo roots after scanning 106 directories. Before git-boundary discovery, the same broad tree could hit a 2,000-candidate cap by walking every nested package manifest.
-- With `--family-limit 1`, the same `Documents/Projects` root selects 115 repo representatives from 454 candidates while preserving full family counts; the latest local wide shard build covered 133,337 files and about 1.25GB of source snapshots.
-- Wide cached shard search over that family-limited `Documents/Projects` shard set returned top-10 results with p95s of about `15ms`, `15ms`, and `3ms` for the default wide-gate queries.
+- Local single-shard search for a repo-scoped indexed query stayed in low single-digit milliseconds after warmup, and around 1ms through the warm cached runtime path.
+- Broad workspace discovery handles hundreds of git or manifest-backed repo roots while avoiding nested dependency/build directories; before git-boundary discovery, broad trees could hit candidate caps by walking every nested package manifest.
+- With a family limit, broad workspace shard builds can cover six-figure file counts. Persisted shard indexes may be several times larger than source snapshots because they include source snapshots, line offsets, and postings for fast agent reads.
+- Wide cached shard search over a family-limited broad workspace shard set returned top-10 results in the low tens of milliseconds for the default wide-gate queries.
 
 ## Exit Conditions
 
 High-performance definition:
 
-- Wide-tree hot path returns useful top-10 results from `/Users/jonathanhaas/Documents/Projects` in `<=300ms` p95 for common literal/token queries.
+- Wide-tree hot path returns useful top-10 results from a broad local workspace in `<=300ms` p95 for common literal/token queries.
 - Repo-local searches return `<=100ms` p95 after warmup.
 - Shard search has a first-class warm-runtime benchmark gate via `orient bench-shards --fail-p95-ms`; use `--cold` only when measuring repeated direct-load cost.
 - Indexed search beats fallback search on repeated repo-local queries.
@@ -107,22 +107,22 @@ High-performance definition:
 Local wide-corpus gate:
 
 ```bash
-ORIENT_WIDE_SHARDS=0 bazel run //:ci_wide_perf
-ORIENT_WIDE_SHARDS=1 ORIENT_WIDE_FAMILY_LIMIT=1 bazel run //:ci_wide_perf
-ORIENT_WIDE_FALLBACK=0 ORIENT_WIDE_SHARDS=1 bazel run //:ci_wide_perf
+ORIENT_WIDE_ROOT=~/code ORIENT_WIDE_SHARDS=0 bazel run //:ci_wide_perf
+ORIENT_WIDE_ROOT=~/code ORIENT_WIDE_SHARDS=1 ORIENT_WIDE_FAMILY_LIMIT=1 bazel run //:ci_wide_perf
+ORIENT_WIDE_ROOT=~/code ORIENT_WIDE_FALLBACK=0 ORIENT_WIDE_SHARDS=1 bazel run //:ci_wide_perf
 ```
 
-The script defaults to `~/Documents/Projects`, enforces the `<=300ms` fallback
-p95 target, and can also rebuild a family-limited shard set under
-`/tmp/orient-wide-shards` for warm cached shard measurements. It prints shard
-build time plus `shard-status --summary` footprint counters such as `index_bytes`,
-`source_bytes`, `content_snapshot_bytes`, `line_offset_bytes`, and compressed
-posting bytes before the warm latency gate. It skips when the wide root is
-absent unless `ORIENT_WIDE_REQUIRE_ROOT=1` is set, so GitHub CI can stay
-deterministic while local runs cover the user's real multi-repo layout. The
-fallback leg uses explicit `bench-search --mode fallback` and repeatable
-`--query`; set `ORIENT_WIDE_FALLBACK=0` when the goal is only the fast shared
-shard path for many local agents.
+Set `ORIENT_WIDE_ROOT` to the local workspace you want to measure. The script
+enforces the `<=300ms` fallback p95 target and can also rebuild a family-limited
+shard set under `/tmp/orient-wide-shards` for warm cached shard measurements. It
+prints shard build time plus `shard-status --summary` footprint counters such as
+`index_bytes`, `source_bytes`, `content_snapshot_bytes`, `line_offset_bytes`,
+and compressed posting bytes before the warm latency gate. It skips when the
+wide root is absent unless `ORIENT_WIDE_REQUIRE_ROOT=1` is set, so GitHub CI can
+stay deterministic while local runs cover real multi-repo layouts. The fallback
+leg uses explicit `bench-search --mode fallback` and repeatable `--query`; set
+`ORIENT_WIDE_FALLBACK=0` when the goal is only the fast shared shard path for
+many local agents.
 
 Search quality definition:
 
