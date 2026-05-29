@@ -234,6 +234,12 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         search["input_schema"]["properties"]["code"]["description"],
         "When true, include only implementation source-code paths; when false, exclude implementation source-code paths."
     );
+    assert!(
+        search["input_schema"]["properties"]["generated"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("demoted in ranking")
+    );
     assert_eq!(
         search["input_schema"]["properties"]["code"].get("default"),
         None
@@ -1040,6 +1046,13 @@ fn agent_guide_returns_local_agent_request_templates() {
             .iter()
             .any(|item| item.as_str().unwrap().contains("search_auto_default"))
     );
+    assert!(
+        guide["ranking_notes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item.as_str().unwrap().contains("generated:true"))
+    );
 }
 
 #[test]
@@ -1059,6 +1072,7 @@ fn agent_instructions_returns_copyable_local_agent_rules() {
         "search_auto_batch",
         "daemon_status.search_auto_default",
         "`file:`, `path:`, `lang:`, `ext:`, `symbol:`, `type:`, `repo:`, `test:`",
+        "Generated paths, including hashed JavaScript bundles, are demoted by default",
         "does not collect telemetry",
     ] {
         assert!(
@@ -6412,6 +6426,108 @@ fn tcp_daemon_status_cli_reports_runtime_cache() {
             .contains(&format!("| orient client-jsonl --addr {addr}"))
     );
     assert!(status.get("id").is_none(), "{status}");
+}
+
+#[test]
+fn cli_search_auto_uses_warm_daemon_before_live_fallback() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/auth.rs"),
+        "pub fn issue_token() -> &'static str { \"ok\" }\n",
+    );
+    let index_path = repo.path().join("orient.index");
+    FastIndex::build(repo.path())
+        .unwrap()
+        .save(&index_path)
+        .unwrap();
+
+    let binary = assert_cmd::cargo::cargo_bin("orient");
+    let mut child = Command::new(&binary)
+        .args([
+            "serve-tcp",
+            "--addr",
+            "127.0.0.1:0",
+            "--index",
+            index_path.to_str().unwrap(),
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let stdout = child.stdout.take().unwrap();
+    let mut startup_reader = BufReader::new(stdout);
+    let mut startup = String::new();
+    startup_reader.read_line(&mut startup).unwrap();
+    let startup_json: serde_json::Value = serde_json::from_str(&startup).unwrap();
+    let addr = startup_json["addr"].as_str().unwrap();
+
+    let empty_cwd = tempfile::tempdir().unwrap();
+    let output = Command::new(&binary)
+        .current_dir(empty_cwd.path())
+        .args(["search-auto", "--daemon-addr", addr, "issue_token"])
+        .output()
+        .unwrap();
+    let batch_output = Command::new(&binary)
+        .current_dir(empty_cwd.path())
+        .args([
+            "search-auto-batch",
+            "--daemon-addr",
+            addr,
+            "issue_token",
+            "missing",
+        ])
+        .output()
+        .unwrap();
+    let local_output = Command::new(&binary)
+        .current_dir(empty_cwd.path())
+        .args([
+            "search-auto",
+            "--daemon-addr",
+            addr,
+            "--no-daemon",
+            "issue_token",
+        ])
+        .output()
+        .unwrap();
+
+    child.kill().unwrap();
+    let _ = child.wait();
+
+    assert!(output.status.success(), "{output:?}");
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["surface"], serde_json::json!("indexed"));
+    assert!(
+        value["target"].as_str().unwrap().ends_with("/orient.index"),
+        "{value}"
+    );
+    assert!(
+        serde_json::to_string(&value)
+            .unwrap()
+            .contains("src/auth.rs")
+    );
+    assert!(
+        value["read_batch_request"]["client_cli"]
+            .as_str()
+            .unwrap()
+            .contains(&format!("| orient client-jsonl --addr {addr}")),
+        "{value}"
+    );
+
+    assert!(batch_output.status.success(), "{batch_output:?}");
+    let batch: serde_json::Value = serde_json::from_slice(&batch_output.stdout).unwrap();
+    assert_eq!(batch[0]["surface"], serde_json::json!("indexed"));
+    assert!(
+        batch[0]["target"]
+            .as_str()
+            .unwrap()
+            .ends_with("/orient.index"),
+        "{batch}"
+    );
+
+    assert!(local_output.status.success(), "{local_output:?}");
+    let local: serde_json::Value = serde_json::from_slice(&local_output.stdout).unwrap();
+    assert_eq!(local["surface"], serde_json::json!("fallback"));
+    assert!(local["results"].as_array().unwrap().is_empty(), "{local}");
 }
 
 #[test]

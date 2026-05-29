@@ -458,6 +458,10 @@ enum Commands {
         diagnose: bool,
         #[arg(long)]
         retry_if_empty: bool,
+        #[arg(long = "daemon-addr", default_value = DEFAULT_DAEMON_ADDR)]
+        daemon_addr: String,
+        #[arg(long)]
+        no_daemon: bool,
     },
     SearchAutoBatch {
         #[arg(required = true, allow_hyphen_values = true)]
@@ -482,6 +486,10 @@ enum Commands {
         diagnose: bool,
         #[arg(long)]
         retry_if_empty: bool,
+        #[arg(long = "daemon-addr", default_value = DEFAULT_DAEMON_ADDR)]
+        daemon_addr: String,
+        #[arg(long)]
+        no_daemon: bool,
     },
     SearchBatch {
         #[arg(long, default_value = ".")]
@@ -2310,6 +2318,149 @@ fn insert_optional_json_field(object: &mut Value, name: &str, value: Option<Valu
     }
 }
 
+fn daemon_search_auto_arguments(
+    query: &str,
+    limit: usize,
+    filters: &SearchFilters,
+    context_lines: usize,
+    refresh_if_stale: bool,
+    diagnose: bool,
+    retry_if_empty: bool,
+) -> Value {
+    let mut arguments = search_filter_arguments(filters);
+    arguments.insert("query".to_string(), Value::String(query.to_string()));
+    arguments.insert("limit".to_string(), serde_json::json!(limit));
+    arguments.insert(
+        "context_lines".to_string(),
+        serde_json::json!(context_lines),
+    );
+    arguments.insert(
+        "refresh_if_stale".to_string(),
+        serde_json::json!(refresh_if_stale),
+    );
+    arguments.insert("diagnose".to_string(), serde_json::json!(diagnose));
+    arguments.insert(
+        "retry_if_empty".to_string(),
+        serde_json::json!(retry_if_empty),
+    );
+    Value::Object(arguments)
+}
+
+fn daemon_search_auto_batch_arguments(
+    queries: &[String],
+    limit: usize,
+    filters: &SearchFilters,
+    context_lines: usize,
+    refresh_if_stale: bool,
+    diagnose: bool,
+    retry_if_empty: bool,
+) -> Value {
+    let mut arguments = search_filter_arguments(filters);
+    arguments.insert("queries".to_string(), serde_json::json!(queries));
+    arguments.insert("limit".to_string(), serde_json::json!(limit));
+    arguments.insert(
+        "context_lines".to_string(),
+        serde_json::json!(context_lines),
+    );
+    arguments.insert(
+        "refresh_if_stale".to_string(),
+        serde_json::json!(refresh_if_stale),
+    );
+    arguments.insert("diagnose".to_string(), serde_json::json!(diagnose));
+    arguments.insert(
+        "retry_if_empty".to_string(),
+        serde_json::json!(retry_if_empty),
+    );
+    Value::Object(arguments)
+}
+
+fn search_filter_arguments(filters: &SearchFilters) -> Map<String, Value> {
+    let mut arguments = Map::new();
+    insert_optional_string(&mut arguments, "file", &filters.file);
+    insert_optional_string(&mut arguments, "path", &filters.path);
+    insert_optional_string(&mut arguments, "language", &filters.language);
+    insert_optional_string(&mut arguments, "extension", &filters.extension);
+    insert_optional_string(&mut arguments, "symbol", &filters.symbol);
+    insert_optional_string(&mut arguments, "symbol_kind", &filters.symbol_kind);
+    insert_optional_string(&mut arguments, "repo_filter", &filters.repo);
+    insert_optional_string(&mut arguments, "branch", &filters.branch);
+    insert_optional_string(&mut arguments, "origin", &filters.origin);
+    insert_optional_string(&mut arguments, "dependency", &filters.dependency);
+    insert_optional_string(&mut arguments, "import", &filters.import);
+    insert_optional_bool(&mut arguments, "test", filters.test);
+    insert_optional_bool(&mut arguments, "generated", filters.generated);
+    insert_optional_bool(&mut arguments, "code", filters.code);
+    arguments.insert(
+        "require_all".to_string(),
+        serde_json::json!(filters.require_all),
+    );
+    arguments.insert(
+        "any_terms".to_string(),
+        serde_json::json!(filters.match_any),
+    );
+    arguments.insert(
+        "snippet".to_string(),
+        Value::String(snippet_mode_name(filters.snippet).to_string()),
+    );
+    arguments.insert("explain".to_string(), serde_json::json!(filters.explain));
+    insert_string_vec(&mut arguments, "exclude_file", &filters.exclude_file);
+    insert_string_vec(&mut arguments, "exclude_path", &filters.exclude_path);
+    insert_string_vec(
+        &mut arguments,
+        "exclude_language",
+        &filters.exclude_language,
+    );
+    insert_string_vec(
+        &mut arguments,
+        "exclude_extension",
+        &filters.exclude_extension,
+    );
+    insert_string_vec(&mut arguments, "exclude_symbol", &filters.exclude_symbol);
+    insert_string_vec(
+        &mut arguments,
+        "exclude_symbol_kind",
+        &filters.exclude_symbol_kind,
+    );
+    insert_string_vec(&mut arguments, "exclude_repo", &filters.exclude_repo);
+    insert_string_vec(&mut arguments, "exclude_branch", &filters.exclude_branch);
+    insert_string_vec(&mut arguments, "exclude_origin", &filters.exclude_origin);
+    insert_string_vec(
+        &mut arguments,
+        "exclude_dependency",
+        &filters.exclude_dependency,
+    );
+    insert_string_vec(&mut arguments, "exclude_import", &filters.exclude_import);
+    insert_string_vec(&mut arguments, "exclude_content", &filters.exclude_content);
+    arguments
+}
+
+fn insert_optional_string(arguments: &mut Map<String, Value>, name: &str, value: &Option<String>) {
+    if let Some(value) = value {
+        arguments.insert(name.to_string(), Value::String(value.clone()));
+    }
+}
+
+fn insert_optional_bool(arguments: &mut Map<String, Value>, name: &str, value: Option<bool>) {
+    if let Some(value) = value {
+        arguments.insert(name.to_string(), serde_json::json!(value));
+    }
+}
+
+fn insert_string_vec(arguments: &mut Map<String, Value>, name: &str, values: &[String]) {
+    if !values.is_empty() {
+        arguments.insert(name.to_string(), serde_json::json!(values));
+    }
+}
+
+fn snippet_mode_name(mode: SnippetMode) -> &'static str {
+    match mode {
+        SnippetMode::Short => "short",
+        SnippetMode::Medium => "medium",
+        SnippetMode::Block => "block",
+        SnippetMode::Symbol => "symbol",
+    }
+}
+
 fn run() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
@@ -3062,8 +3213,29 @@ fn run() -> Result<()> {
             refresh_if_stale,
             diagnose,
             retry_if_empty,
+            daemon_addr,
+            no_daemon,
         } => {
             let query = cli_single_query(query, query_arg)?;
+            if repo.is_none() && index.is_none() && index_dir.is_none() && !no_daemon {
+                let filters = search_filters_from_args(&filters, repo_filter.clone())?;
+                let arguments = daemon_search_auto_arguments(
+                    &query,
+                    limit,
+                    &filters,
+                    context_lines,
+                    refresh_if_stale,
+                    diagnose,
+                    retry_if_empty,
+                );
+                if let Some(mut result) =
+                    try_daemon_tool_request_tcp(&daemon_addr, "search_auto", arguments)?
+                {
+                    retarget_client_cli_commands(&mut result, &tcp_client_command(&daemon_addr));
+                    println!("{}", serde_json::to_string(&result)?);
+                    return Ok(());
+                }
+            }
             if let Some(index_dir) = index_dir {
                 if refresh_if_stale && shard_status(&index_dir)?.stale {
                     refresh_shards(&index_dir)?;
@@ -3306,8 +3478,29 @@ fn run() -> Result<()> {
             refresh_if_stale,
             diagnose,
             retry_if_empty,
+            daemon_addr,
+            no_daemon,
         } => {
             let queries = cli_batch_queries(queries)?;
+            if repo.is_none() && index.is_none() && index_dir.is_none() && !no_daemon {
+                let filters = search_filters_from_args(&filters, repo_filter.clone())?;
+                let arguments = daemon_search_auto_batch_arguments(
+                    &queries,
+                    limit,
+                    &filters,
+                    context_lines,
+                    refresh_if_stale,
+                    diagnose,
+                    retry_if_empty,
+                );
+                if let Some(mut result) =
+                    try_daemon_tool_request_tcp(&daemon_addr, "search_auto_batch", arguments)?
+                {
+                    retarget_client_cli_commands(&mut result, &tcp_client_command(&daemon_addr));
+                    println!("{}", serde_json::to_string(&result)?);
+                    return Ok(());
+                }
+            }
             let mut batch = Vec::new();
             if let Some(index_dir) = index_dir {
                 if refresh_if_stale && shard_status(&index_dir)?.stale {
@@ -4487,6 +4680,43 @@ fn client_jsonl_unix(socket: &Path) -> Result<()> {
 
 fn daemon_status_tcp(addr: &str) -> Result<Value> {
     daemon_status_stream(TcpStream::connect(addr)?)
+}
+
+fn try_daemon_tool_request_tcp(addr: &str, tool: &str, arguments: Value) -> Result<Option<Value>> {
+    let stream = match TcpStream::connect(addr) {
+        Ok(stream) => stream,
+        Err(_) => return Ok(None),
+    };
+    daemon_tool_request_stream(stream, tool, arguments).map(Some)
+}
+
+fn daemon_tool_request_stream(
+    stream: impl Read + Write,
+    tool: &str,
+    arguments: Value,
+) -> Result<Value> {
+    let mut reader = BufReader::new(stream);
+    let request = serde_json::json!({
+        "id": "cli",
+        "tool": tool,
+        "arguments": arguments
+    });
+    writeln!(reader.get_mut(), "{request}")?;
+    reader.get_mut().flush()?;
+
+    let mut response = String::new();
+    reader.read_line(&mut response)?;
+    if response.is_empty() {
+        bail!("daemon closed connection without a response");
+    }
+    let response: Value = serde_json::from_str(&response)?;
+    if let Some(error) = response.get("error").and_then(Value::as_str) {
+        bail!("{error}");
+    }
+    response
+        .get("result")
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("daemon response did not include result"))
 }
 
 #[cfg(unix)]

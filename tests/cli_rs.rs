@@ -435,7 +435,7 @@ fn cli_search_auto_selects_live_indexed_and_shard_surfaces() {
     let mut live_default = Command::cargo_bin("orient").unwrap();
     live_default
         .current_dir(repo.path())
-        .args(["search-auto", "issue_token"])
+        .args(["search-auto", "--no-daemon", "issue_token"])
         .assert()
         .success()
         .stdout(predicate::str::contains("\"surface\":\"fallback\""))
@@ -738,7 +738,12 @@ fn cli_search_auto_batch_returns_query_surfaces() {
     let mut default_live_batch = Command::cargo_bin("orient").unwrap();
     default_live_batch
         .current_dir(repo.path())
-        .args(["search-auto-batch", "issue_token", "SessionManager"])
+        .args([
+            "search-auto-batch",
+            "--no-daemon",
+            "issue_token",
+            "SessionManager",
+        ])
         .assert()
         .success()
         .stdout(predicate::str::contains("\"query\":\"issue_token\""))

@@ -1006,6 +1006,10 @@ pub fn agent_guide(
             "\"quoted literal\"",
             "mode:any for exploratory searches"
         ],
+        "ranking_notes": [
+            "Generated paths, including hashed JavaScript bundles under assets/ or static/, are demoted by default but still searchable.",
+            "Use generated:true or is:generated when intentionally inspecting generated output."
+        ],
         "transports": {
             "stdio": "orient serve-jsonl",
             "tcp_daemon": format!("orient serve-tcp --addr {addr} --index-dir {index_dir}"),
@@ -1121,6 +1125,7 @@ For one repo, bootstrap it with `orient ensure-index --repo {repo} --index {inde
 Start each session with `daemon_status` or `agent_guide`, then use `search_auto` for normal lookup and `search_auto_batch` for alternate query phrasings.\n\
 Trust `daemon_status.search_auto_default` to see whether no-target `search_auto` will use a warmed shard directory, warmed index, or the daemon current directory; use `daemon_status.default_requests` for copyable first repo-map/search/query-plan calls.\n\
 Use query filters directly: `file:`, `path:`, `lang:`, `ext:`, `symbol:`, `type:`, `repo:`, `test:`, `generated:`, `code:`, `is:code`, `is:docs`, quoted literals, and negative filters like `-path:vendor` or `-is:generated`.\n\
+Generated paths, including hashed JavaScript bundles, are demoted by default; use `generated:true` or `is:generated` when intentionally inspecting generated output.\n\
 After search, follow returned `read_batch_request`, `read_request`, `related_request`, and `related_symbols_request`; each includes `jsonl` and `client_cli` for direct replay through `orient client-jsonl`.\n\
 When results are empty, noisy, or suspicious, use the returned `query_plan_request` or inline `query_plan_result` before broadening the search; pass `retry_if_empty:true` when you want Orient to execute the promoted retry once and return `primary_retry_result` immediately.\n\
 Orient is local code search only and does not collect telemetry."
@@ -1632,7 +1637,7 @@ fn argument_description(tool_name: &str, name: &str) -> &'static str {
         "file" => "File basename substring filter.",
         "test" => "When true, include only test paths; when false, exclude test paths.",
         "generated" => {
-            "When true, include only generated-code paths; when false, exclude generated-code paths."
+            "When true, include only generated-code paths; when false, exclude generated-code paths. Without this filter, generated paths are searchable but demoted in ranking."
         }
         "code" => {
             "When true, include only implementation source-code paths; when false, exclude implementation source-code paths."

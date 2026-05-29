@@ -7,17 +7,17 @@ Orient's JSON-lines protocol is meant for local coding agents that need fast sea
 Run either a one-shot stdio server or a shared TCP daemon:
 
 ```bash
-target/release/orient serve-jsonl
-target/release/orient serve-mcp
-target/release/orient serve-tcp --addr 127.0.0.1:8796 --index-dir /tmp/orient-shards
-target/release/orient serve-tcp --addr 127.0.0.1:8796 --ensure-shards-dir /tmp/orient-shards --repo /path/to/repo-a --repo /path/to/repo-b
-target/release/orient daemon-status
-target/release/orient daemon-status --format json
-target/release/orient client-jsonl
-target/release/orient serve-unix --socket /tmp/orient.sock --index-dir /tmp/orient-shards
-target/release/orient daemon-status --socket /tmp/orient.sock
-target/release/orient daemon-status --socket /tmp/orient.sock --format json
-target/release/orient client-jsonl --socket /tmp/orient.sock
+orient serve-jsonl
+orient serve-mcp
+orient serve-tcp --addr 127.0.0.1:8796 --index-dir /tmp/orient-shards
+orient serve-tcp --addr 127.0.0.1:8796 --ensure-shards-dir /tmp/orient-shards --repo /path/to/repo-a --repo /path/to/repo-b
+orient daemon-status
+orient daemon-status --format json
+orient client-jsonl
+orient serve-unix --socket /tmp/orient.sock --index-dir /tmp/orient-shards
+orient daemon-status --socket /tmp/orient.sock
+orient daemon-status --socket /tmp/orient.sock --format json
+orient client-jsonl --socket /tmp/orient.sock
 ```
 
 Each request is one JSON object per line:
@@ -73,7 +73,12 @@ CLI-style JSON-lines aliases are accepted for the most guessable names:
 JSON-lines `search`, `search_batch`, `search_plan`, and `search_plan_batch`
 tools are forgiving targeted entrypoints: pass `repo`, `index`, or `index_dir`
 and they use the matching live, indexed, or shard surface.
-The CLI equivalent for automatic target selection is `orient search-auto`; when no target flag is supplied it searches the current directory as a live repo.
+The CLI equivalent for automatic target selection is `orient search-auto`. When
+no target flag is supplied, it first tries the warm TCP daemon at
+`127.0.0.1:8796`, then searches the current directory as a live repo if no
+daemon is reachable. Use `--daemon-addr` for another TCP daemon or
+`--no-daemon` to force current-directory fallback. `orient search-auto-batch`
+follows the same daemon-first rule.
 The plain CLI `orient search` command also accepts `--index` and `--index-dir`
 as convenience target flags for agents that reach first for `search` and then
 add the available search surface.
@@ -88,7 +93,13 @@ CLI query positionals accept leading negative filters directly, so `orient searc
 
 `code:true` / `is:code` matches implementation source-code languages such as Rust, Python, TypeScript, JavaScript, Go, Ruby, Java, Kotlin, and Swift while excluding docs/config formats like Markdown, TOML, JSON, YAML, and text; `code:false` / `is:docs` does the inverse for prose/config searches.
 
-`generated:true` / `is:generated` matches common generated-code paths and suffixes such as `generated/`, `__generated__/`, `codegen/`, `.generated.*`, `.gen.*`, `.pb.go`, and `.g.dart`; `generated:false` / `-is:generated` excludes them when the agent wants hand-authored source.
+Generated paths are searchable but demoted by default, including common
+generated-code paths and hashed JavaScript bundles under `assets/` or `static/`.
+Use `generated:true` / `is:generated` to intentionally inspect generated
+output, or `generated:false` / `-is:generated` to exclude it. Generated matching
+covers patterns such as `generated/`, `__generated__/`, `codegen/`,
+`.generated.*`, `.gen.*`, `.pb.go`, `.g.dart`, `.min.js`, `.bundle.js`, and
+`chunk-*.js`.
 Live fallback search pushes safe `file:`, `path:`, `ext:`, `lang:`, `test:`, `-file:`, and `-path:` scopes into `rg` globs first, then rechecks every candidate with Orient's query matcher. This keeps scoped searches fast on large workspaces without making the glob layer authoritative.
 
 Use `content:` / `text:` / `term:` when a word or quoted phrase must match file
@@ -152,8 +163,8 @@ Examples:
 CLI equivalents support repeatable `--range path:start:lines`:
 
 ```bash
-target/release/orient read-index-ranges --index /tmp/orient.index --range src/auth.rs:1:80
-target/release/orient read-shard-ranges --index-dir /tmp/orient-shards --range service/src/auth.rs:40:80
+orient read-index-ranges --index /tmp/orient.index --range src/auth.rs:1:80
+orient read-shard-ranges --index-dir /tmp/orient-shards --range service/src/auth.rs:40:80
 ```
 
 Range reads follow manifest bounds: `start >= 1`, `1 <= lines <= lines.maximum`, non-empty batch arrays, and `ranges.maxItems`, so a mistaken request cannot dump unbounded file content.

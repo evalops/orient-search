@@ -37,17 +37,27 @@ copyable first requests and target details.
 
 ```bash
 orient search-auto "symbol:SessionManager token"
+orient search-auto --no-daemon "symbol:SessionManager token"
 orient search --repo . "issue token"
 orient search --index /tmp/repo.index "issue token"
 orient search --index-dir /tmp/orient-shards "repo:service issue token"
 orient read-range --index /tmp/repo.index src/lib.rs:40:80
 ```
 
+With no explicit `--repo`, `--index`, or `--index-dir`, `search-auto` first
+uses the warm daemon at `127.0.0.1:8796` when available, then falls back to a
+live search of the current directory. Use `--daemon-addr` for another TCP
+daemon or `--no-daemon` to force local fallback.
+
 Useful filters: `repo:`, `path:`/`dir:`, `file:`, `lang:`, `ext:`, `symbol:`,
 `kind:`/`type:`, `dep:`, `import:`, `test:`, `generated:`, `code:`,
 `is:test`, `is:source`, `is:code`, `is:docs`, `is:generated`, `content:`,
 quoted phrases, negative filters like `-path:vendor`, and `mode:any` for broad
 orientation.
+
+Generated paths, including hashed JavaScript bundles, are demoted by default.
+Use `generated:true` / `is:generated` when you intentionally want generated
+output, or `generated:false` / `-is:generated` to exclude it entirely.
 
 ## Protocol
 

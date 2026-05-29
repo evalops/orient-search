@@ -1,6 +1,6 @@
 # Shared Daemon
 
-Run one warmed Orient daemon for a repo set so local agents reuse the same repo
+Run one warmed Orient daemon for a repo set so local agents share the same repo
 maps, indexes, query plans, and bounded reads. The daemon is local-only and does
 not collect telemetry.
 
@@ -46,9 +46,15 @@ The generated rule should keep agents on this loop:
 - Start with `daemon_status` or `agent_guide`.
 - Use `search_auto` for normal lookup and `search_auto_batch` for alternate
   query phrasings.
+- From shell, bare `orient search-auto ...` and `orient search-auto-batch ...`
+  use the TCP daemon first when no explicit target is supplied. Pass
+  `--daemon-addr` for a non-default daemon or `--no-daemon` to force
+  current-directory fallback.
 - Follow returned `read_*`, `related_*`, `repo_map_request`, and
   `query_plan_request` objects directly.
 - Pass `refresh_if_stale:true` when live files may have changed.
+- Treat generated bundle output as searchable but lower-priority by default;
+  use `generated:true` only when intentionally inspecting generated files.
 - Fall back to shell search only when Orient is unavailable or unhelpful.
 
 ## Operations

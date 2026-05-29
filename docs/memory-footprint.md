@@ -16,7 +16,7 @@ Each index contains:
 - source snapshots for snippets and bounded range reads
 - line-offset and token-to-line tables
 
-That tradeoff is intentional: agents can inspect search hits quickly, and a
+That tradeoff is intentional: agents can inspect search hits quickly while a
 shared daemon amortizes load cost across local clients.
 
 ## Inspect It
@@ -49,7 +49,7 @@ aliases, git metadata, and index filenames. Dense sketches and route filters
 live in binary sidecars so agents do not pay JSON parse costs for hot-path
 searches.
 
-## Defaults
+## Operating Defaults
 
 Use `--family-limit` when discovering workspaces with repeated clones or
 worktrees:
@@ -66,6 +66,11 @@ multiple active worktrees matter.
 
 Keep generated indexes outside the repo, such as under `/tmp` or another local
 cache directory. Do not commit them.
+
+Generated source and bundle files are still indexed so agents can inspect them
+when needed, but they are demoted in normal ranking. Use `generated:true` or
+`is:generated` when generated output is the target; use `generated:false` or
+`-is:generated` when it should be excluded entirely.
 
 ## Current Shape
 
