@@ -3061,6 +3061,7 @@ fn shard_manifest_sketch_prunes_impossible_cold_shards() {
     let manifest: serde_json::Value =
         serde_json::from_slice(&fs::read(shard_dir.path().join("manifest.json")).unwrap()).unwrap();
     assert!(shard_dir.path().join("manifest.prefilter.bin").exists());
+    assert!(shard_dir.path().join("manifest.route.bin").exists());
     assert!(manifest["shards"][0]["sketch"]["exact_hashes"].is_array());
     assert!(manifest["shards"][0]["sketch"]["trigram_bits"].is_array());
     let hit_index = manifest["shards"]
@@ -3091,6 +3092,18 @@ fn shard_manifest_sketch_prunes_impossible_cold_shards() {
     )
     .unwrap();
     assert_eq!(result_paths(&results), vec!["hit-service/src/lib.rs"]);
+
+    let routed_kind_results = search_shards(
+        shard_dir.path(),
+        "kind:function uniquehitneedle",
+        10,
+        &SearchFilters::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        result_paths(&routed_kind_results),
+        vec!["hit-service/src/lib.rs"]
+    );
 
     let substring_results =
         search_shards(shard_dir.path(), "essionman", 10, &SearchFilters::default()).unwrap();

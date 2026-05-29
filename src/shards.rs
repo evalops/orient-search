@@ -22,9 +22,11 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 const SHARD_MANIFEST_VERSION: u32 = 1;
 const SHARD_MANIFEST_SIDECAR_VERSION: u32 = 1;
 const SHARD_MANIFEST_PREFILTER_VERSION: u32 = 1;
+const SHARD_MANIFEST_ROUTE_VERSION: u32 = 1;
 const SHARD_MANIFEST_FILE: &str = "manifest.json";
 const SHARD_MANIFEST_SIDECAR_FILE: &str = "manifest.bin";
 const SHARD_MANIFEST_PREFILTER_FILE: &str = "manifest.prefilter.bin";
+const SHARD_MANIFEST_ROUTE_FILE: &str = "manifest.route.bin";
 const SHARD_WRITE_LOCK_FILE: &str = ".orient-shards.lock";
 const SHARD_WRITE_LOCK_TIMEOUT: Duration = Duration::from_secs(120);
 const SHARD_WRITE_LOCK_STALE_AFTER: Duration = Duration::from_secs(30 * 60);
@@ -52,6 +54,22 @@ struct ShardManifestPrefilter {
     version: u32,
     json_fingerprint: ManifestFileFingerprint,
     exact_hashes: Vec<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct ShardManifestRoute {
+    version: u32,
+    json_fingerprint: ManifestFileFingerprint,
+    shards: Vec<ShardEntry>,
+    exact_terms: Vec<ShardRouteTerm>,
+    shard_ids: Vec<u16>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+struct ShardRouteTerm {
+    hash: u32,
+    start: u32,
+    len: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -732,18 +750,22 @@ pub fn search_shards(
     if shard_prefilter_query_impossible(index_dir, &shard_query, &filters)? {
         return Ok(Vec::new());
     }
-    let manifest = load_manifest(index_dir)?;
-    let jobs = manifest
-        .shards
-        .into_iter()
-        .filter_map(|shard| {
-            if !shard_sketch_may_match_query(&shard, &shard_query, &filters) {
-                return None;
-            }
-            let scopes = shard_search_scopes(&shard, &filters);
-            (!scopes.is_empty()).then_some(ShardJob { shard, scopes })
-        })
-        .collect::<Vec<_>>();
+    let jobs = if let Some(jobs) = shard_route_jobs(index_dir, &shard_query, &filters)? {
+        jobs
+    } else {
+        let manifest = load_manifest(index_dir)?;
+        manifest
+            .shards
+            .into_iter()
+            .filter_map(|shard| {
+                if !shard_sketch_may_match_query(&shard, &shard_query, &filters) {
+                    return None;
+                }
+                let scopes = shard_search_scopes(&shard, &filters);
+                (!scopes.is_empty()).then_some(ShardJob { shard, scopes })
+            })
+            .collect::<Vec<_>>()
+    };
     let results = search_shard_jobs(index_dir, &shard_query, limit, &filters, jobs)?;
     Ok(finalize_results(results, limit))
 }
@@ -2057,6 +2079,80 @@ pub(crate) fn shard_prefilter_query_impossible(
         .any(|hash| prefilter.exact_hashes.binary_search(hash).is_err()))
 }
 
+fn shard_route_jobs(
+    index_dir: &Path,
+    shard_query: &str,
+    filters: &SearchFilters,
+) -> Result<Option<Vec<ShardJob>>> {
+    let required_hashes = shard_prefilter_required_exact_hashes(shard_query, filters);
+    if required_hashes.is_empty() {
+        return Ok(None);
+    }
+    let Some(route) = load_manifest_route(index_dir)? else {
+        return Ok(None);
+    };
+    let Some(candidate_ids) = shard_route_candidate_ids(&route, &required_hashes) else {
+        return Ok(Some(Vec::new()));
+    };
+    let jobs = candidate_ids
+        .into_iter()
+        .filter_map(|id| route.shards.get(id as usize).cloned())
+        .filter_map(|shard| {
+            let scopes = shard_search_scopes(&shard, filters);
+            (!scopes.is_empty()).then_some(ShardJob { shard, scopes })
+        })
+        .collect::<Vec<_>>();
+    Ok(Some(jobs))
+}
+
+fn shard_route_candidate_ids(
+    route: &ShardManifestRoute,
+    required_hashes: &[u32],
+) -> Option<Vec<u16>> {
+    let mut candidate_ids: Option<Vec<u16>> = None;
+    for hash in required_hashes {
+        let postings = shard_route_postings(route, *hash)?;
+        candidate_ids = Some(match candidate_ids {
+            Some(existing) => intersect_u16_sorted(&existing, postings),
+            None => postings.to_vec(),
+        });
+        if candidate_ids.as_ref().is_some_and(Vec::is_empty) {
+            break;
+        }
+    }
+    candidate_ids
+}
+
+fn shard_route_postings(route: &ShardManifestRoute, hash: u32) -> Option<&[u16]> {
+    let index = route
+        .exact_terms
+        .binary_search_by_key(&hash, |term| term.hash)
+        .ok()?;
+    let term = route.exact_terms[index];
+    let start = term.start as usize;
+    let end = start.saturating_add(term.len as usize);
+    (end <= route.shard_ids.len()).then_some(&route.shard_ids[start..end])
+}
+
+fn intersect_u16_sorted(left: &[u16], right: &[u16]) -> Vec<u16> {
+    let mut out = Vec::new();
+    let mut left_index = 0usize;
+    let mut right_index = 0usize;
+    while let (Some(left_value), Some(right_value)) = (left.get(left_index), right.get(right_index))
+    {
+        match left_value.cmp(right_value) {
+            std::cmp::Ordering::Less => left_index += 1,
+            std::cmp::Ordering::Greater => right_index += 1,
+            std::cmp::Ordering::Equal => {
+                out.push(*left_value);
+                left_index += 1;
+                right_index += 1;
+            }
+        }
+    }
+    out
+}
+
 fn shard_prefilter_required_exact_hashes(shard_query: &str, filters: &SearchFilters) -> Vec<u32> {
     let query_tokens = unique_query_tokens(shard_query);
     let mut hashes = Vec::new();
@@ -2066,11 +2162,13 @@ fn shard_prefilter_required_exact_hashes(shard_query: &str, filters: &SearchFilt
     }
 
     let require_all = filters.require_all || (query_tokens.len() > 1 && !filters.match_any);
-    if require_all || query_tokens.len() == 1 {
+    if require_all || filters.symbol_kind.is_some() || query_tokens.len() == 1 {
         hashes.extend(
             query_tokens
                 .iter()
-                .filter(|token| !shard_allows_substring_prefilter(token))
+                .filter(|token| {
+                    filters.symbol_kind.is_some() || !shard_allows_substring_prefilter(token)
+                })
                 .map(|token| sketch_fingerprint(token)),
         );
     }
@@ -2100,6 +2198,27 @@ fn load_manifest_prefilter(index_dir: &Path) -> Result<Option<ShardManifestPrefi
         return Ok(None);
     }
     Ok(Some(prefilter))
+}
+
+fn load_manifest_route(index_dir: &Path) -> Result<Option<ShardManifestRoute>> {
+    let json_fingerprint = manifest_file_fingerprint(&index_dir.join(SHARD_MANIFEST_FILE)).ok();
+    let Some(json_fingerprint) = json_fingerprint else {
+        return Ok(None);
+    };
+    let route_path = index_dir.join(SHARD_MANIFEST_ROUTE_FILE);
+    let bytes = match fs::read(&route_path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
+        Err(_) => return Ok(None),
+    };
+    let route = match bincode::deserialize::<ShardManifestRoute>(&bytes) {
+        Ok(route) => route,
+        Err(_) => return Ok(None),
+    };
+    if route.version != SHARD_MANIFEST_ROUTE_VERSION || route.json_fingerprint != json_fingerprint {
+        return Ok(None);
+    }
+    Ok(Some(route))
 }
 
 fn load_manifest_sidecar(
@@ -2333,7 +2452,8 @@ fn save_manifest_with_mode(
     atomic_write(&manifest_path, &bytes)
         .with_context(|| format!("write shard manifest {}", index_dir.display()))?;
     save_manifest_sidecar(index_dir, manifest)?;
-    save_manifest_prefilter(index_dir, manifest)
+    save_manifest_prefilter(index_dir, manifest)?;
+    save_manifest_route(index_dir, manifest)
 }
 
 fn save_manifest_sidecar(index_dir: &Path, manifest: &ShardManifest) -> Result<()> {
@@ -2366,6 +2486,55 @@ fn save_manifest_prefilter(index_dir: &Path, manifest: &ShardManifest) -> Result
     let bytes = bincode::serialize(&prefilter)?;
     atomic_write(&index_dir.join(SHARD_MANIFEST_PREFILTER_FILE), &bytes)
         .with_context(|| format!("write shard manifest prefilter {}", index_dir.display()))
+}
+
+fn save_manifest_route(index_dir: &Path, manifest: &ShardManifest) -> Result<()> {
+    anyhow::ensure!(
+        manifest.shards.len() <= u16::MAX as usize,
+        "shard route supports at most {} shards",
+        u16::MAX
+    );
+    let manifest_path = index_dir.join(SHARD_MANIFEST_FILE);
+    let mut postings = HashMap::<u32, Vec<u16>>::new();
+    let shards = manifest
+        .shards
+        .iter()
+        .enumerate()
+        .map(|(shard_id, shard)| {
+            if let Some(sketch) = &shard.sketch {
+                for hash in &sketch.exact_hashes {
+                    postings.entry(*hash).or_default().push(shard_id as u16);
+                }
+            }
+            let mut shard = shard.clone();
+            shard.sketch = None;
+            shard
+        })
+        .collect::<Vec<_>>();
+
+    let mut terms = postings.into_iter().collect::<Vec<_>>();
+    terms.sort_unstable_by_key(|(hash, _)| *hash);
+    let mut exact_terms = Vec::with_capacity(terms.len());
+    let mut shard_ids = Vec::new();
+    for (hash, mut ids) in terms {
+        ids.sort_unstable();
+        ids.dedup();
+        let start = shard_ids.len() as u32;
+        let len = ids.len() as u32;
+        shard_ids.extend(ids);
+        exact_terms.push(ShardRouteTerm { hash, start, len });
+    }
+
+    let route = ShardManifestRoute {
+        version: SHARD_MANIFEST_ROUTE_VERSION,
+        json_fingerprint: manifest_file_fingerprint(&manifest_path)?,
+        shards,
+        exact_terms,
+        shard_ids,
+    };
+    let bytes = bincode::serialize(&route)?;
+    atomic_write(&index_dir.join(SHARD_MANIFEST_ROUTE_FILE), &bytes)
+        .with_context(|| format!("write shard manifest route {}", index_dir.display()))
 }
 
 fn guard_manifest_write_preserves_existing_roots(
