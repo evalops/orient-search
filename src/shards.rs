@@ -128,6 +128,12 @@ enum ShardRouteLookup {
     Corrupt,
 }
 
+pub(crate) struct ShardRouteSelection {
+    pub shards: Vec<ShardEntry>,
+    pub shard_count: usize,
+    pub shard_names: Vec<String>,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct ShardRouteRequirements {
     exact_hashes: Vec<u32>,
@@ -1179,24 +1185,35 @@ pub fn shard_query_plans(
     filters: &SearchFilters,
 ) -> Result<Vec<ShardQueryPlan>> {
     let index_dir = index_dir.as_ref();
-    let manifest = load_manifest(index_dir)?;
     let parsed = parse_query(query);
     let filters = merge_filters(filters.clone(), parsed.filters);
     let shard_query = query_text(&parsed.terms, &filters);
-    let shard_count = manifest.shards.len();
-    let shard_names = manifest
-        .shards
-        .iter()
-        .map(|shard| shard.name.clone())
-        .collect::<Vec<_>>();
-    let jobs = manifest
-        .shards
-        .into_iter()
-        .filter_map(|shard| {
-            let scopes = shard_search_scopes(&shard, &filters);
-            (!scopes.is_empty()).then_some(ShardJob { shard, scopes })
-        })
-        .collect::<Vec<_>>();
+    let route_selection = shard_route_selection(index_dir, &shard_query, &filters)?;
+    let (jobs, shard_count, shard_names) =
+        if let Some(selection) = route_selection.filter(|selection| !selection.shards.is_empty()) {
+            (
+                shard_entries_to_jobs(selection.shards, &filters),
+                selection.shard_count,
+                selection.shard_names,
+            )
+        } else {
+            let manifest = load_manifest(index_dir)?;
+            let shard_count = manifest.shards.len();
+            let shard_names = manifest
+                .shards
+                .iter()
+                .map(|shard| shard.name.clone())
+                .collect::<Vec<_>>();
+            let jobs = manifest
+                .shards
+                .into_iter()
+                .filter_map(|shard| {
+                    let scopes = shard_search_scopes(&shard, &filters);
+                    (!scopes.is_empty()).then_some(ShardJob { shard, scopes })
+                })
+                .collect::<Vec<_>>();
+            (jobs, shard_count, shard_names)
+        };
     let filtered_jobs = shard_diagnostic_jobs(jobs, &shard_query);
     let jobs = filtered_jobs;
     if jobs.is_empty() {
@@ -2504,6 +2521,14 @@ pub(crate) fn shard_route_entries(
     shard_query: &str,
     filters: &SearchFilters,
 ) -> Result<Option<Vec<ShardEntry>>> {
+    Ok(shard_route_selection(index_dir, shard_query, filters)?.map(|selection| selection.shards))
+}
+
+pub(crate) fn shard_route_selection(
+    index_dir: &Path,
+    shard_query: &str,
+    filters: &SearchFilters,
+) -> Result<Option<ShardRouteSelection>> {
     let requirements = shard_route_requirements(shard_query, filters);
     if requirements.exact_hashes.is_empty() && requirements.trigram_hashes.is_empty() {
         return Ok(None);
@@ -2511,9 +2536,21 @@ pub(crate) fn shard_route_entries(
     let Some(route) = load_manifest_route(index_dir)? else {
         return Ok(None);
     };
+    let shard_count = route.shards.len();
+    let shard_names = route
+        .shards
+        .iter()
+        .map(|shard| shard.name.clone())
+        .collect::<Vec<_>>();
     let candidate_ids = match shard_route_candidate_ids(&route, &requirements) {
         ShardRouteLookup::Candidates(candidate_ids) => candidate_ids,
-        ShardRouteLookup::MissingHash => return Ok(Some(Vec::new())),
+        ShardRouteLookup::MissingHash => {
+            return Ok(Some(ShardRouteSelection {
+                shards: Vec::new(),
+                shard_count,
+                shard_names,
+            }));
+        }
         ShardRouteLookup::Omitted => return Ok(None),
         ShardRouteLookup::Corrupt => return Ok(None),
     };
@@ -2522,7 +2559,11 @@ pub(crate) fn shard_route_entries(
         .filter_map(|id| route.shards.get(id as usize).cloned())
         .map(ShardRouteEntry::into_shard)
         .collect::<Vec<_>>();
-    Ok(Some(shards))
+    Ok(Some(ShardRouteSelection {
+        shards,
+        shard_count,
+        shard_names,
+    }))
 }
 
 fn shard_entries_to_jobs(shards: Vec<ShardEntry>, filters: &SearchFilters) -> Vec<ShardJob> {

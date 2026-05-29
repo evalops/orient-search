@@ -21,8 +21,9 @@ use crate::shards::{
     filter_repo_map_by_prefix, filters_for_shard_scope, load_manifest, refresh_shards,
     refresh_shards_by_root, related_query_without_shard_selectors,
     resolve_shard_path_from_manifest, shard_prefilter_query_impossible, shard_route_entries,
-    shard_search_scopes, shard_selection_miss_plan, shard_sketch_may_diagnose_query,
-    shard_sketch_may_match_query, shard_status, shard_status_by_root,
+    shard_route_selection, shard_search_scopes, shard_selection_miss_plan,
+    shard_sketch_may_diagnose_query, shard_sketch_may_match_query, shard_status,
+    shard_status_by_root,
 };
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use anyhow::{Context, Result, anyhow};
@@ -5926,25 +5927,37 @@ impl ToolRuntime {
         query: &str,
         filters: &SearchFilters,
     ) -> Result<Vec<ShardQueryPlan>> {
-        let manifest = self.cached_shard_manifest(index_dir)?;
         let parsed = parse_query(query);
         let filters = merge_filters(filters.clone(), parsed.filters);
         let shard_query = query_text(&parsed.terms, &filters);
-        let shard_count = manifest.shards.len();
-        let shard_names = manifest
-            .shards
-            .iter()
-            .map(|shard| shard.name.clone())
-            .collect::<Vec<_>>();
-        let jobs = manifest
-            .shards
-            .iter()
-            .cloned()
-            .filter_map(|shard| {
-                let scopes = shard_search_scopes(&shard, &filters);
-                (!scopes.is_empty()).then_some(ShardJob { shard, scopes })
-            })
-            .collect::<Vec<_>>();
+        let route_selection = shard_route_selection(index_dir, &shard_query, &filters)?;
+        let (jobs, shard_count, shard_names) = if let Some(selection) =
+            route_selection.filter(|selection| !selection.shards.is_empty())
+        {
+            (
+                shard_jobs_from_entries(selection.shards, &shard_query, &filters, false),
+                selection.shard_count,
+                selection.shard_names,
+            )
+        } else {
+            let manifest = self.cached_shard_manifest(index_dir)?;
+            let shard_count = manifest.shards.len();
+            let shard_names = manifest
+                .shards
+                .iter()
+                .map(|shard| shard.name.clone())
+                .collect::<Vec<_>>();
+            let jobs = manifest
+                .shards
+                .iter()
+                .cloned()
+                .filter_map(|shard| {
+                    let scopes = shard_search_scopes(&shard, &filters);
+                    (!scopes.is_empty()).then_some(ShardJob { shard, scopes })
+                })
+                .collect::<Vec<_>>();
+            (jobs, shard_count, shard_names)
+        };
         let jobs = self.shard_diagnostic_jobs(jobs, &shard_query);
         if jobs.is_empty() {
             return Ok(vec![shard_selection_miss_plan(
