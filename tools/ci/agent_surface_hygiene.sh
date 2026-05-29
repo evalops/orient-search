@@ -54,3 +54,22 @@ for file in "${scratch}"/agent-instructions-*.txt; do
   grep -q 'does not collect telemetry' "${file}"
   grep -q 'local code-discovery' "${file}"
 done
+
+if rg -n 'AGENTS.md|CLAUDE.md|Amp rules' \
+  "${scratch}/agent-instructions-generic.txt" \
+  "${scratch}/agent-guide-generic.json"; then
+  echo "generic generated agent surface should not name adapter-specific rule files" >&2
+  exit 1
+fi
+
+grep -q 'AGENTS.md' "${scratch}/agent-instructions-codex.txt"
+if grep -q 'CLAUDE.md' "${scratch}/agent-instructions-codex.txt"; then
+  echo "codex instructions should not mention Claude rule files" >&2
+  exit 1
+fi
+
+grep -q 'CLAUDE.md' "${scratch}/agent-instructions-claude.txt"
+if grep -q 'AGENTS.md' "${scratch}/agent-instructions-claude.txt"; then
+  echo "claude instructions should not mention Codex rule files" >&2
+  exit 1
+fi
