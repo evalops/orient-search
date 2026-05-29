@@ -917,11 +917,7 @@ fn search_repo_filter_only(
         ));
     }
 
-    Ok(finalize_results_for_snippet(
-        results,
-        limit,
-        filters.snippet,
-    ))
+    Ok(finalize_results_for_filters(results, limit, filters))
 }
 
 fn filter_only_candidates_from_fd_files(
@@ -1620,11 +1616,7 @@ fn search_repo_ripgrep(
             filters.snippet,
         );
     }
-    Ok(Some(finalize_results_for_snippet(
-        results,
-        limit,
-        filters.snippet,
-    )))
+    Ok(Some(finalize_results_for_filters(results, limit, filters)))
 }
 
 const TEST_RIPGREP_GLOBS: &[&str] = &[
@@ -1758,11 +1750,7 @@ fn search_repo_streaming_until(
     if filters.require_all {
         results.retain(|result| result_matches_all_tokens(result, query_tokens));
     }
-    Ok(finalize_results_for_snippet(
-        results,
-        limit,
-        filters.snippet,
-    ))
+    Ok(finalize_results_for_filters(results, limit, filters))
 }
 
 fn retain_results_matching_file_symbol_filters(
@@ -5316,16 +5304,23 @@ pub(crate) fn finalize_results(results: Vec<SearchResult>, limit: usize) -> Vec<
     finalize_results_with_read_scope(results, limit, None)
 }
 
-pub(crate) fn finalize_results_for_snippet(
+pub(crate) fn finalize_results_for_filters(
     results: Vec<SearchResult>,
     limit: usize,
-    snippet: SnippetMode,
+    filters: &SearchFilters,
 ) -> Vec<SearchResult> {
-    finalize_results_with_read_scope(results, limit, read_scope_for_snippet(snippet))
+    finalize_results_with_read_scope(results, limit, read_scope_for_filters(filters))
 }
 
-pub(crate) fn read_scope_for_snippet(snippet: SnippetMode) -> Option<RangeScope> {
-    matches!(snippet, SnippetMode::Symbol).then_some(RangeScope::Symbol)
+fn read_scope_for_filters(filters: &SearchFilters) -> Option<RangeScope> {
+    if matches!(filters.snippet, SnippetMode::Symbol)
+        || filters.symbol.is_some()
+        || filters.symbol_kind.is_some()
+    {
+        Some(RangeScope::Symbol)
+    } else {
+        None
+    }
 }
 
 fn finalize_results_with_read_scope(
@@ -6375,7 +6370,11 @@ mod tests {
             related_request: None,
             related_symbols_request: None,
         }];
-        let mut finalized = finalize_results_for_snippet(results, 1, SnippetMode::Symbol);
+        let filters = SearchFilters {
+            snippet: SnippetMode::Symbol,
+            ..SearchFilters::default()
+        };
+        let mut finalized = finalize_results_for_filters(results, 1, &filters);
         attach_result_read_requests(&mut finalized, "read_range", serde_json::Map::new());
 
         let read_range = finalized[0].read_range.as_ref().unwrap();

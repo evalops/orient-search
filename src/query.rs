@@ -41,6 +41,7 @@ pub fn parse_query(input: &str) -> ParsedQuery {
     if terms.len() > 1 && !filters.match_any {
         filters.require_all = true;
     }
+    infer_path_like_single_term(&mut terms, &mut filters, explicit_content_terms);
 
     ParsedQuery {
         terms,
@@ -207,6 +208,78 @@ fn test_filter_from_is_value(value: &str) -> Option<IsFilter> {
         }
         _ => None,
     }
+}
+
+fn infer_path_like_single_term(
+    terms: &mut Vec<String>,
+    filters: &mut SearchFilters,
+    explicit_content_terms: bool,
+) {
+    if explicit_content_terms
+        || terms.len() != 1
+        || filters.file.is_some()
+        || filters.path.is_some()
+        || filters.symbol.is_some()
+    {
+        return;
+    }
+
+    let term = terms[0].trim().replace('\\', "/");
+    if term.is_empty()
+        || term.chars().any(char::is_whitespace)
+        || term.starts_with('.')
+        || term == "-"
+    {
+        return;
+    }
+
+    if term.contains('/') {
+        filters.path = Some(term);
+        terms.clear();
+        filters.require_all = false;
+        return;
+    }
+
+    if looks_like_file_name_query(&term) {
+        filters.file = Some(term);
+        terms.clear();
+        filters.require_all = false;
+    }
+}
+
+fn looks_like_file_name_query(term: &str) -> bool {
+    let lower = term.to_ascii_lowercase();
+    matches!(
+        lower.as_str(),
+        "readme" | "makefile" | "yarn.lock" | "bun.lock" | "bun.lockb" | "agents.md"
+    ) || lower.starts_with("readme.")
+        || lower.starts_with("license.")
+        || lower.starts_with("changelog.")
+        || lower.starts_with("contributing.")
+        || lower
+            .rsplit_once('.')
+            .is_some_and(|(_, extension)| agent_path_query_extension(extension))
+}
+
+fn agent_path_query_extension(extension: &str) -> bool {
+    matches!(
+        extension,
+        "rs" | "toml"
+            | "json"
+            | "yaml"
+            | "yml"
+            | "md"
+            | "py"
+            | "js"
+            | "jsx"
+            | "ts"
+            | "tsx"
+            | "go"
+            | "java"
+            | "kt"
+            | "swift"
+            | "rb"
+    )
 }
 
 pub fn normalize_symbol_kind(value: &str) -> String {
@@ -563,6 +636,32 @@ mod tests {
         assert_eq!(parsed.filters.exclude_language, vec!["markdown"]);
         assert_eq!(parsed.filters.exclude_file, vec!["generated.rs"]);
         assert_eq!(parsed.filters.exclude_path, vec!["vendor"]);
+    }
+
+    #[test]
+    fn infers_bare_filename_and_path_queries_as_fast_filters() {
+        let manifest = parse_query("Cargo.toml");
+        assert!(manifest.terms.is_empty());
+        assert_eq!(manifest.filters.file.as_deref(), Some("Cargo.toml"));
+        assert!(!manifest.filters.require_all);
+
+        let source_path = parse_query("src/server.rs");
+        assert!(source_path.terms.is_empty());
+        assert_eq!(source_path.filters.path.as_deref(), Some("src/server.rs"));
+
+        let explicit_content = parse_query("content:Cargo.toml");
+        assert_eq!(explicit_content.terms, vec!["Cargo.toml"]);
+        assert!(explicit_content.filters.file.is_none());
+
+        let symbolish = parse_query("SessionManager");
+        assert_eq!(symbolish.terms, vec!["SessionManager"]);
+        assert!(symbolish.filters.file.is_none());
+        assert!(symbolish.filters.path.is_none());
+
+        let common_word = parse_query("build");
+        assert_eq!(common_word.terms, vec!["build"]);
+        assert!(common_word.filters.file.is_none());
+        assert!(common_word.filters.path.is_none());
     }
 
     #[test]

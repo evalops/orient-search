@@ -9,7 +9,7 @@ use crate::repo_index::{
     RepoIndexer, RepoMapDetail, ResultToolRequest, SearchFilters, SearchResult, SnippetMode,
     Symbol, SymbolLookupResult, attach_repo_map_read_batch_request_with_limit,
     attach_result_context, attach_result_read_requests, attach_result_related_requests,
-    attach_result_related_symbol_requests, finalize_results_for_snippet, normalize_language_filter,
+    attach_result_related_symbol_requests, finalize_results_for_filters, normalize_language_filter,
     normalize_token, read_file_range, read_file_range_scoped, related_file_lookup_results,
     related_symbol_lookup_results, result_read_batch_request, search_repo_fast_filtered,
     symbol_lookup_read_batch_request, symbol_lookup_results,
@@ -5032,7 +5032,7 @@ impl ToolRuntime {
         };
         let results =
             self.search_shard_jobs_cached(index_dir, &shard_query, limit, &filters, jobs)?;
-        let mut results = finalize_results_for_snippet(results, limit, filters.snippet);
+        let mut results = finalize_results_for_filters(results, limit, &filters);
         attach_result_context(&mut results, context_lines, |path, start, lines| {
             self.read_shard_range_cached(index_dir, path, start, lines)
         })?;

@@ -8,7 +8,7 @@ use crate::repo_index::{
     Symbol, best_snippet_for_path_with_phrases, capped_search_limit,
     command_hints_from_manifest_texts, dependency_filters_match,
     dependency_hints_from_manifest_texts, extract_symbols, filter_only_query, filter_value_matches,
-    finalize_results_for_snippet, import_hints_from_source_texts, is_entrypoint_path,
+    finalize_results_for_filters, import_hints_from_source_texts, is_entrypoint_path,
     is_generated_path, is_ignored, is_important_file, is_manifest_file, is_source_code_language,
     is_test_path, known_commands_from_hints, language_for,
     matches_filters_with_compiled_path_metadata, normalize_language_filter, normalize_token,
@@ -1493,11 +1493,7 @@ impl FastIndex {
                 result.query_plan = Some(query_plan.clone());
             }
         }
-        Ok(finalize_results_for_snippet(
-            results,
-            limit,
-            filters.snippet,
-        ))
+        Ok(finalize_results_for_filters(results, limit, &filters))
     }
 
     pub fn query_may_match(&self, query: &str, filters: &SearchFilters) -> bool {
@@ -2071,7 +2067,7 @@ impl FastIndex {
                 result.query_plan = Some(query_plan.clone());
             }
         }
-        finalize_results_for_snippet(results, limit, filters.snippet)
+        finalize_results_for_filters(results, limit, filters)
     }
 
     fn score_file(

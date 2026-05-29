@@ -1953,6 +1953,30 @@ fn runtime_search_alias_accepts_live_index_and_shard_targets() {
         serde_json::json!(index_path)
     );
 
+    let indexed_symbol_query = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("indexed-symbol-query"),
+        tool: "search".to_string(),
+        arguments: serde_json::json!({
+            "index": repo.path().join(".orient/index"),
+            "query": "symbol:SessionManager",
+            "limit": 3
+        }),
+    });
+    assert!(
+        indexed_symbol_query.error.is_none(),
+        "{:?}",
+        indexed_symbol_query.error
+    );
+    let indexed_symbol_query = indexed_symbol_query.result.unwrap();
+    assert_eq!(
+        indexed_symbol_query[0]["read_range"]["scope"],
+        serde_json::json!("symbol")
+    );
+    assert_eq!(
+        indexed_symbol_query[0]["read_request"]["arguments"]["scope"],
+        serde_json::json!("symbol")
+    );
+
     let symbol_snippet = runtime.dispatch(ToolRequest {
         id: serde_json::json!("indexed-symbol-snippet"),
         tool: "search".to_string(),

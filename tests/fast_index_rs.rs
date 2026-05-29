@@ -1848,6 +1848,81 @@ fn filter_only_queries_discover_files_without_content_terms() {
 }
 
 #[test]
+fn bare_path_like_queries_use_filter_only_fast_paths() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("Cargo.toml"),
+        "[package]\nname='sample'\nversion='0.1.0'\n",
+    );
+    write(
+        &repo.path().join("src/lib.rs"),
+        "pub fn target_entrypoint() {}\n",
+    );
+    write(
+        &repo.path().join("tests/mentions.rs"),
+        "const MANIFEST: &str = \"Cargo.toml\";\nconst SOURCE: &str = \"src/lib.rs\";\n",
+    );
+
+    let filters = SearchFilters {
+        explain: true,
+        ..SearchFilters::default()
+    };
+    let manifest_fallback =
+        search_repo_fast_filtered(repo.path(), "Cargo.toml", 10, &filters).unwrap();
+    assert_eq!(manifest_fallback[0].path, "Cargo.toml");
+    assert!(
+        manifest_fallback[0]
+            .explanation
+            .as_ref()
+            .unwrap()
+            .iter()
+            .any(|signal| signal.kind == "file_filter" && signal.value == "Cargo.toml")
+    );
+    assert!(
+        !manifest_fallback
+            .iter()
+            .take(1)
+            .any(|result| result.path == "tests/mentions.rs")
+    );
+
+    let path_fallback = search_repo_fast_filtered(repo.path(), "src/lib.rs", 10, &filters).unwrap();
+    assert_eq!(path_fallback[0].path, "src/lib.rs");
+    assert!(
+        path_fallback[0]
+            .explanation
+            .as_ref()
+            .unwrap()
+            .iter()
+            .any(|signal| signal.kind == "path_filter" && signal.value == "src/lib.rs")
+    );
+
+    let index = FastIndex::build(repo.path()).unwrap();
+    let manifest_indexed = index.search_filtered("Cargo.toml", 10, &filters).unwrap();
+    assert_eq!(manifest_indexed[0].path, "Cargo.toml");
+    assert!(
+        manifest_indexed[0]
+            .query_plan
+            .as_ref()
+            .unwrap()
+            .planned_postings
+            .iter()
+            .any(|posting| posting.kind == "path_filter_trigram")
+    );
+
+    let path_indexed = index.search_filtered("src/lib.rs", 10, &filters).unwrap();
+    assert_eq!(path_indexed[0].path, "src/lib.rs");
+    assert!(
+        path_indexed[0]
+            .query_plan
+            .as_ref()
+            .unwrap()
+            .planned_postings
+            .iter()
+            .any(|posting| posting.kind == "path_filter_trigram")
+    );
+}
+
+#[test]
 fn path_filter_only_queries_use_path_trigram_prefilter_after_load() {
     let repo = tempfile::tempdir().unwrap();
     for index in 0..200 {
