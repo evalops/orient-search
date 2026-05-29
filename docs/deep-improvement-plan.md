@@ -78,9 +78,9 @@ Exit condition:
 
 ### 4. Improve failure recovery with facets
 
-Current repair hints handle typos, bad filters, missing terms, and candidate-cap
-diagnostics. The next useful step is suggesting a narrowing filter from the
-actual candidate set.
+Current repair hints handle typos, bad filters, missing terms, candidate-cap
+diagnostics, and candidate-set facets for broad indexed searches. The next useful
+step is making those facets richer across shard plans and non-cap noisy results.
 
 When candidate caps or broad results happen, sample candidates and return top
 facets such as:

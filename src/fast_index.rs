@@ -1288,6 +1288,7 @@ impl FastIndex {
         let filtered_candidate_ids =
             indexed_filter_candidate_ids(&self.files, candidate_ids, &filters);
         let filtered_candidate_count = filtered_candidate_ids.len();
+        let facet_candidate_ids = filtered_candidate_ids.clone();
         let candidate_cap = indexed_candidate_cap(limit);
         let (filtered_candidate_ids, candidate_cap_hit) = cap_candidate_ids(
             filtered_candidate_ids,
@@ -1342,6 +1343,7 @@ impl FastIndex {
                 active_filters,
                 &filters,
                 &self.files,
+                &facet_candidate_ids,
                 &self.symbol_postings,
                 filters.require_all,
                 candidate_count,
@@ -1610,6 +1612,7 @@ impl FastIndex {
         let filtered_candidate_ids =
             indexed_filter_candidate_ids(&self.files, candidate_ids, &filters);
         let filtered_candidate_count = filtered_candidate_ids.len();
+        let facet_candidate_ids = filtered_candidate_ids.clone();
         let candidate_cap = MAX_INDEX_CANDIDATES_TO_SCORE;
         let (filtered_candidate_ids, candidate_cap_hit) = cap_candidate_ids(
             filtered_candidate_ids,
@@ -1662,6 +1665,7 @@ impl FastIndex {
             active_filters,
             &filters,
             &self.files,
+            &facet_candidate_ids,
             &self.symbol_postings,
             filters.require_all,
             candidate_count,
@@ -2631,6 +2635,7 @@ fn indexed_query_plan(
     active_filters: Vec<QueryPlanFilter>,
     filters: &SearchFilters,
     files: &[IndexedPath],
+    facet_candidate_ids: &[u32],
     all_symbol_postings: &HashMap<String, Vec<Posting>>,
     require_all: bool,
     candidate_count: usize,
@@ -2680,6 +2685,7 @@ fn indexed_query_plan(
         missing_trigrams,
         filters,
         files,
+        facet_candidate_ids,
         all_symbol_postings,
         &active_filters,
         require_all,
@@ -2729,6 +2735,7 @@ fn query_plan_repair_hints(
     missing_trigrams: &[String],
     filters: &SearchFilters,
     files: &[IndexedPath],
+    facet_candidate_ids: &[u32],
     all_symbol_postings: &HashMap<String, Vec<Posting>>,
     active_filters: &[QueryPlanFilter],
     require_all: bool,
@@ -2747,6 +2754,12 @@ fn query_plan_repair_hints(
                 "The indexed planner found {candidate_count} candidates and capped scoring at {candidate_cap}. Add a rarer term or file/path/lang/ext/symbol/generated filter for more complete results."
             ),
             None,
+        ));
+        hints.extend(candidate_facet_repair_hints(
+            query_tokens,
+            filters,
+            files,
+            facet_candidate_ids,
         ));
     }
     if final_match_count > 0 {
@@ -2871,6 +2884,187 @@ fn filter_specific_repair_hints(
             )
         })
         .collect()
+}
+
+fn candidate_facet_repair_hints(
+    query_tokens: &[String],
+    filters: &SearchFilters,
+    files: &[IndexedPath],
+    candidate_ids: &[u32],
+) -> Vec<QueryPlanRepairHint> {
+    let total = candidate_ids.len();
+    if total < 16 {
+        return Vec::new();
+    }
+
+    let mut hints = Vec::new();
+    if filters.path.is_none() {
+        if let Some((prefix, count)) = top_meaningful_string_facet(
+            candidate_ids
+                .iter()
+                .filter_map(|file_id| files.get(*file_id as usize))
+                .filter_map(|file| path_prefix_facet(&file.path)),
+            total,
+        ) {
+            hints.push(facet_hint(
+                "narrow_by_path",
+                "path",
+                &prefix,
+                count,
+                total,
+                query_tokens,
+            ));
+        }
+    }
+    if filters.extension.is_none() {
+        if let Some((extension, count)) = top_meaningful_string_facet(
+            candidate_ids
+                .iter()
+                .filter_map(|file_id| files.get(*file_id as usize))
+                .filter_map(|file| file.extension_lower.clone()),
+            total,
+        ) {
+            hints.push(facet_hint(
+                "narrow_by_extension",
+                "ext",
+                &extension,
+                count,
+                total,
+                query_tokens,
+            ));
+        }
+    }
+    if filters.language.is_none() {
+        if let Some((language, count)) = top_meaningful_string_facet(
+            candidate_ids
+                .iter()
+                .filter_map(|file_id| files.get(*file_id as usize))
+                .map(|file| file.language.to_ascii_lowercase())
+                .filter(|language| !language.is_empty()),
+            total,
+        ) {
+            hints.push(facet_hint(
+                "narrow_by_language",
+                "lang",
+                &language,
+                count,
+                total,
+                query_tokens,
+            ));
+        }
+    }
+    if filters.test.is_none() {
+        if let Some((value, count)) = meaningful_bool_facet(
+            candidate_ids
+                .iter()
+                .filter_map(|file_id| files.get(*file_id as usize))
+                .map(|file| is_test_path(&file.path_lower)),
+            total,
+        ) {
+            hints.push(facet_hint(
+                "narrow_by_test",
+                "test",
+                if value { "true" } else { "false" },
+                count,
+                total,
+                query_tokens,
+            ));
+        }
+    }
+    if filters.generated.is_none() {
+        if let Some((value, count)) = meaningful_bool_facet(
+            candidate_ids
+                .iter()
+                .filter_map(|file_id| files.get(*file_id as usize))
+                .map(|file| is_generated_path(&file.path_lower)),
+            total,
+        ) {
+            hints.push(facet_hint(
+                "narrow_by_generated",
+                "generated",
+                if value { "true" } else { "false" },
+                count,
+                total,
+                query_tokens,
+            ));
+        }
+    }
+    hints.truncate(4);
+    hints
+}
+
+fn top_meaningful_string_facet(
+    values: impl Iterator<Item = String>,
+    total: usize,
+) -> Option<(String, usize)> {
+    let mut counts = HashMap::<String, usize>::new();
+    for value in values {
+        if value.trim().is_empty() {
+            continue;
+        }
+        *counts.entry(value).or_default() += 1;
+    }
+    let mut counts = counts.into_iter().collect::<Vec<_>>();
+    counts.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
+    counts
+        .into_iter()
+        .find(|(_, count)| facet_count_is_meaningful(*count, total))
+}
+
+fn meaningful_bool_facet(
+    values: impl Iterator<Item = bool>,
+    total: usize,
+) -> Option<(bool, usize)> {
+    let mut true_count = 0usize;
+    let mut false_count = 0usize;
+    for value in values {
+        if value {
+            true_count += 1;
+        } else {
+            false_count += 1;
+        }
+    }
+    [(true, true_count), (false, false_count)]
+        .into_iter()
+        .filter(|(_, count)| facet_count_is_meaningful(*count, total))
+        .min_by(|left, right| left.1.cmp(&right.1).then_with(|| right.0.cmp(&left.0)))
+}
+
+fn facet_count_is_meaningful(count: usize, total: usize) -> bool {
+    count >= 2 && count < total && count.saturating_mul(5) <= total.saturating_mul(4)
+}
+
+fn facet_hint(
+    kind: &str,
+    field: &str,
+    value: &str,
+    count: usize,
+    total: usize,
+    query_tokens: &[String],
+) -> QueryPlanRepairHint {
+    repair_hint(
+        kind,
+        format!(
+            "Filter `{field}:{value}` narrows the current candidate set from {total} files to {count}."
+        ),
+        suggested_faceted_query(field, value, query_tokens),
+    )
+}
+
+fn suggested_faceted_query(field: &str, value: &str, query_tokens: &[String]) -> Option<String> {
+    let facet = format!("{field}:{value}");
+    let query = suggested_token_query(query_tokens)?;
+    Some(format!("{facet} {query}"))
+}
+
+fn path_prefix_facet(path: &str) -> Option<String> {
+    let mut parts = path.split('/').filter(|part| !part.is_empty());
+    let first = parts.next()?;
+    if ["src", "tests", "test", "docs", "examples", "benches"].contains(&first) {
+        return Some(first.to_string());
+    }
+    let second = parts.next()?;
+    Some(format!("{first}/{second}"))
 }
 
 fn repo_scope_mismatch_repair_hints(

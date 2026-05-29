@@ -467,9 +467,15 @@ fn search_result_limits_are_capped() {
 #[test]
 fn indexed_search_warns_when_candidate_cap_is_hit() {
     let repo = tempfile::tempdir().unwrap();
-    for index in 0..1100 {
+    for index in 0..700 {
         write(
             &repo.path().join(format!("src/file_{index:04}.rs")),
+            "pub fn shared_cap_token() {}\n",
+        );
+    }
+    for index in 0..400 {
+        write(
+            &repo.path().join(format!("tests/file_{index:04}_test.rs")),
             "pub fn shared_cap_token() {}\n",
         );
     }
@@ -495,6 +501,16 @@ fn indexed_search_warns_when_candidate_cap_is_hit() {
         hint.kind == "narrow_query"
             && hint.message.contains("capped scoring at 1024")
             && hint.suggested_query.is_none()
+    }));
+    assert!(plan.repair_hints.iter().any(|hint| {
+        hint.kind == "narrow_by_path"
+            && hint.message.contains("from 1100 files to 700")
+            && hint.suggested_query.as_deref() == Some("path:src shared cap token")
+    }));
+    assert!(plan.repair_hints.iter().any(|hint| {
+        hint.kind == "narrow_by_test"
+            && hint.message.contains("from 1100 files to 400")
+            && hint.suggested_query.as_deref() == Some("test:true shared cap token")
     }));
 }
 
