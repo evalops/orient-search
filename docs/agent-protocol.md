@@ -7,23 +7,28 @@ Orient's JSON-lines protocol is meant for local coding agents that need fast sea
 Run either a one-shot stdio server or a shared TCP daemon:
 
 ```bash
+export ORIENT_SHARDS=/path/to/local/cache/orient-shards
+export ORIENT_SOCKET=/path/to/local/cache/orient.sock
+export ORIENT_REPO_A=/path/to/repo-a
+export ORIENT_REPO_B=/path/to/repo-b
+
 orient serve-jsonl
 orient serve-mcp
-orient serve-tcp --addr 127.0.0.1:8796 --index-dir /tmp/orient-shards
-orient serve-tcp --addr 127.0.0.1:8796 --ensure-shards-dir /tmp/orient-shards --repo /path/to/repo-a --repo /path/to/repo-b
+orient serve-tcp --addr 127.0.0.1:8796 --index-dir "$ORIENT_SHARDS"
+orient serve-tcp --addr 127.0.0.1:8796 --ensure-shards-dir "$ORIENT_SHARDS" --repo "$ORIENT_REPO_A" --repo "$ORIENT_REPO_B"
 orient daemon-status
 orient daemon-status --format json
 orient client-jsonl
-orient serve-unix --socket /tmp/orient.sock --index-dir /tmp/orient-shards
-orient daemon-status --socket /tmp/orient.sock
-orient daemon-status --socket /tmp/orient.sock --format json
-orient client-jsonl --socket /tmp/orient.sock
+orient serve-unix --socket "$ORIENT_SOCKET" --index-dir "$ORIENT_SHARDS"
+orient daemon-status --socket "$ORIENT_SOCKET"
+orient daemon-status --socket "$ORIENT_SOCKET" --format json
+orient client-jsonl --socket "$ORIENT_SOCKET"
 ```
 
 Each request is one JSON object per line:
 
 ```json
-{"id":"search","tool":"search_shards","arguments":{"index_dir":"/tmp/orient-shards","query":"repo:service session token auth","limit":5,"require_all":true}}
+{"id":"search","tool":"search_shards","arguments":{"index_dir":"/path/to/local/cache/orient-shards","query":"repo:service session token auth","limit":5,"require_all":true}}
 ```
 
 Responses preserve `id` and return either `result` or `error`. Use `tool_manifest` for the complete tool list, argument metadata, daemon-default hints, defaults, enums, and JSON-schema-like input schemas.
@@ -35,17 +40,17 @@ Agents and wrappers that want a compact first-use recipe can call `agent_guide` 
 For one repo:
 
 ```json
-{"id":"ensure","tool":"ensure_index","arguments":{"repo":"/path/to/repo","index":"/tmp/orient.index"}}
-{"id":"warm","tool":"warm_index","arguments":{"index":"/tmp/orient.index"}}
+{"id":"ensure","tool":"ensure_index","arguments":{"repo":"/path/to/repo","index":"/path/to/local/cache/orient.index"}}
+{"id":"warm","tool":"warm_index","arguments":{"index":"/path/to/local/cache/orient.index"}}
 ```
 
 For many repos:
 
 ```json
-{"id":"ensure-shards","tool":"ensure_shards","arguments":{"output_dir":"/tmp/orient-shards","discover_roots":["/path/to/workspace"],"max_depth":4,"discover_limit":500,"family_limit":2}}
+{"id":"ensure-shards","tool":"ensure_shards","arguments":{"output_dir":"/path/to/local/cache/orient-shards","discover_roots":["/path/to/workspace"],"max_depth":4,"discover_limit":500,"family_limit":2}}
 {"id":"status","tool":"daemon_status","arguments":{}}
-{"id":"instructions","tool":"agent_instructions","arguments":{"index_dir":"/tmp/orient-shards"}}
-{"id":"guide","tool":"agent_guide","arguments":{"index_dir":"/tmp/orient-shards"}}
+{"id":"instructions","tool":"agent_instructions","arguments":{"index_dir":"/path/to/local/cache/orient-shards"}}
+{"id":"guide","tool":"agent_guide","arguments":{"index_dir":"/path/to/local/cache/orient-shards"}}
 ```
 
 For an existing shard directory, call `register_shards` to cache only the
@@ -201,17 +206,17 @@ Read-range tools accept `/` or `\` separators in repo-relative paths and reject 
 Examples:
 
 ```json
-{"id":"read-one","tool":"read_ranges","arguments":{"index":"/tmp/orient.index","ranges":{"path":"src/auth.rs","start":1,"lines":80}}}
-{"id":"read","tool":"read_ranges","arguments":{"index":"/tmp/orient.index","ranges":[{"path":"src/auth.rs","start":1,"lines":80}]}}
+{"id":"read-one","tool":"read_ranges","arguments":{"index":"/path/to/local/cache/orient.index","ranges":{"path":"src/auth.rs","start":1,"lines":80}}}
+{"id":"read","tool":"read_ranges","arguments":{"index":"/path/to/local/cache/orient.index","ranges":[{"path":"src/auth.rs","start":1,"lines":80}]}}
 {"id":"read-copied","tool":"read_range","arguments":{"repo":"/path/to/repo","path":"src/auth.rs#L40-L45"}}
-{"id":"read-shards","tool":"read_ranges","arguments":{"index_dir":"/tmp/orient-shards","ranges":[{"path":"service/src/auth.rs","start":40,"lines":80},"service/src/lib.rs#L40-L45"]}}
+{"id":"read-shards","tool":"read_ranges","arguments":{"index_dir":"/path/to/local/cache/orient-shards","ranges":[{"path":"service/src/auth.rs","start":40,"lines":80},"service/src/lib.rs#L40-L45"]}}
 ```
 
 CLI equivalents support repeatable `--range path:start:lines`:
 
 ```bash
-orient read-index-ranges --index /tmp/orient.index --range src/auth.rs:1:80
-orient read-shard-ranges --index-dir /tmp/orient-shards --range service/src/auth.rs:40:80
+orient read-index-ranges --index "$ORIENT_INDEX" --range src/auth.rs:1:80
+orient read-shard-ranges --index-dir "$ORIENT_SHARDS" --range service/src/auth.rs:40:80
 ```
 
 Range reads follow manifest bounds: `start >= 1`, `1 <= lines <= lines.maximum`, non-empty batch arrays, and `ranges.maxItems`, so a mistaken request cannot dump unbounded file content.

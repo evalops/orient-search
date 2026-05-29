@@ -83,9 +83,11 @@ ORIENT_WIDE_SHARDS=0 bazel run //:ci_wide_perf
 For shared daemon or footprint changes, also run:
 
 ```bash
-orient doctor --index-dir /tmp/orient-shards
+export ORIENT_SHARDS=/path/to/local/cache/orient-shards
+
+orient doctor --index-dir "$ORIENT_SHARDS"
 orient daemon-status
-orient shard-status --index-dir /tmp/orient-shards --summary
+orient shard-status --index-dir "$ORIENT_SHARDS" --summary
 ```
 
 ## Non-Goals

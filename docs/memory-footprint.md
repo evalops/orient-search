@@ -27,13 +27,17 @@ there too.
 
 Daemon memory is just a hot cache for those code-search artifacts: loaded
 indexes, shard route data, repo metadata, and freshness checks. It is not a
-persistent memory system for agents.
+persistent memory system for agents, and it does not store prompts,
+transcripts, tool-call histories, task outcomes, or usage analytics.
 
 ## Inspect It
 
 ```bash
-orient index-status --index /tmp/orient.index
-orient shard-status --index-dir /tmp/orient-shards --summary
+export ORIENT_INDEX=/path/to/local/cache/orient.index
+export ORIENT_SHARDS=/path/to/local/cache/orient-shards
+
+orient index-status --index "$ORIENT_INDEX"
+orient shard-status --index-dir "$ORIENT_SHARDS" --summary
 orient daemon-status
 orient daemon-status --format json
 ```
@@ -64,18 +68,21 @@ Use `--family-limit` when discovering workspaces with repeated clones or
 worktrees:
 
 ```bash
+export ORIENT_WORKSPACES=/path/to/workspaces
+export ORIENT_SHARDS=/path/to/local/cache/orient-shards
+
 orient ensure-shards \
-  --discover-root /path/to/workspaces \
-  --output-dir /tmp/orient-shards \
+  --discover-root "$ORIENT_WORKSPACES" \
+  --output-dir "$ORIENT_SHARDS" \
   --family-limit 2
 ```
 
 Use `--family-limit 1` for a smaller representative shard set. Increase it when
 multiple active worktrees matter.
 
-Keep generated indexes outside the repo, such as under `/tmp` or another local
-cache directory. Public examples should use placeholders rather than
-machine-specific paths.
+Keep generated indexes outside the repo in local cache storage. Public examples
+should use environment variables or placeholders rather than machine-specific
+paths.
 
 Generated source and bundle files are still indexed so agents can inspect them
 when needed, but they are demoted in normal ranking. Use `generated:true` or

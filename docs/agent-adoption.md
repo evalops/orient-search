@@ -12,7 +12,9 @@ For transport details and tool schemas, use [Agent Protocol](agent-protocol.md).
 Generate the live rule with:
 
 ```bash
-orient agent-instructions --index-dir /tmp/orient-shards
+export ORIENT_SHARDS=/path/to/local/cache/orient-shards
+
+orient agent-instructions --index-dir "$ORIENT_SHARDS"
 ```
 
 The rule should tell agents:

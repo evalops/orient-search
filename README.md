@@ -11,27 +11,31 @@ Run one shared daemon for the repos an agent is likely to touch:
 ```bash
 cargo install --git https://github.com/evalops/orient-search
 
+export ORIENT_WORKSPACES=/path/to/workspaces
+export ORIENT_SHARDS=/path/to/local/cache/orient-shards
+export ORIENT_INDEX=/path/to/local/cache/orient.index
+
 orient ensure-shards \
-  --discover-root /path/to/workspaces \
-  --output-dir /tmp/orient-shards \
+  --discover-root "$ORIENT_WORKSPACES" \
+  --output-dir "$ORIENT_SHARDS" \
   --family-limit 2
 
 orient serve-tcp \
   --addr 127.0.0.1:8796 \
-  --index-dir /tmp/orient-shards
+  --index-dir "$ORIENT_SHARDS"
 ```
 
 `--index-dir` registers the shard manifest and lazily loads individual repo
 indexes on first use. The daemon keeps at most 64 ready indexes by default; use
 `--max-cached-indexes N` to tune that for shared multi-agent sessions. Use
-`--warm-index-dir /tmp/orient-shards` only when you intentionally want to load
+`--warm-index-dir "$ORIENT_SHARDS"` only when you intentionally want to load
 shard indexes at startup.
 
 Then verify the daemon and generate the short agent rule:
 
 ```bash
-orient doctor --index-dir /tmp/orient-shards
-orient agent-instructions --index-dir /tmp/orient-shards
+orient doctor --index-dir "$ORIENT_SHARDS"
+orient agent-instructions --index-dir "$ORIENT_SHARDS"
 orient daemon-status
 orient daemon-status --format json
 ```
@@ -49,9 +53,9 @@ interaction analytics.
 orient search-auto "symbol:SessionManager token"
 orient search-auto --no-daemon "symbol:SessionManager token"
 orient search --repo . "issue token"
-orient search --index /tmp/repo.index "issue token"
-orient search --index-dir /tmp/orient-shards "repo:service issue token"
-orient read-range --index /tmp/repo.index src/lib.rs:40:80
+orient search --index "$ORIENT_INDEX" "issue token"
+orient search --index-dir "$ORIENT_SHARDS" "repo:service issue token"
+orient read-range --index "$ORIENT_INDEX" src/lib.rs:40:80
 orient read-range --repo . src/lib.rs#L40-L45
 ```
 
@@ -97,10 +101,10 @@ JSON-lines requests look like this:
 
 ```jsonl
 {"id":"tools","tool":"tool_manifest","arguments":{}}
-{"id":"guide","tool":"agent_guide","arguments":{"index_dir":"/tmp/orient-shards"}}
-{"id":"map","tool":"shard_repo_map","arguments":{"index_dir":"/tmp/orient-shards","detail":"compact","read_limit":16}}
+{"id":"guide","tool":"agent_guide","arguments":{"index_dir":"/path/to/local/cache/orient-shards"}}
+{"id":"map","tool":"shard_repo_map","arguments":{"index_dir":"/path/to/local/cache/orient-shards","detail":"compact","read_limit":16}}
 {"id":"search","tool":"search_auto","arguments":{"query":"repo:service branch:main symbol:SessionManager token","limit":10,"explain":true}}
-{"id":"read","tool":"read_ranges","arguments":{"index_dir":"/tmp/orient-shards","ranges":[{"path":"service/src/auth.rs","start":40,"lines":80},"service/src/lib.rs#L40-L45"]}}
+{"id":"read","tool":"read_ranges","arguments":{"index_dir":"/path/to/local/cache/orient-shards","ranges":[{"path":"service/src/auth.rs","start":40,"lines":80},"service/src/lib.rs#L40-L45"]}}
 ```
 
 Every search result includes ready-to-send read, related-file, related-symbol,
@@ -122,7 +126,7 @@ session data.
 Use:
 
 ```bash
-orient shard-status --index-dir /tmp/orient-shards --summary
+orient shard-status --index-dir "$ORIENT_SHARDS" --summary
 ```
 
 The summary reports index size, represented source size, snapshot bytes,

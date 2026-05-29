@@ -13,35 +13,41 @@ analytics.
 For several repos, build or refresh a shard directory and serve it locally:
 
 ```bash
+export ORIENT_WORKSPACES=/path/to/workspaces
+export ORIENT_SHARDS=/path/to/local/cache/orient-shards
+export ORIENT_INDEX=/path/to/local/cache/orient.index
+export ORIENT_REPO=/path/to/repo
+export ORIENT_SOCKET=/path/to/local/cache/orient.sock
+
 orient ensure-shards \
-  --discover-root /path/to/workspaces \
-  --output-dir /tmp/orient-shards \
+  --discover-root "$ORIENT_WORKSPACES" \
+  --output-dir "$ORIENT_SHARDS" \
   --family-limit 2
 
 orient serve-tcp \
   --addr 127.0.0.1:8796 \
-  --index-dir /tmp/orient-shards
+  --index-dir "$ORIENT_SHARDS"
 ```
 
 `--index-dir` registers the shard manifest and loads individual repo indexes
 lazily when a search, read, map, or symbol request touches them. The daemon
 keeps at most 64 ready indexes by default; pass `--max-cached-indexes N` when a
 shared daemon should stay tighter or keep more hot repos resident. Use
-`--warm-index-dir /tmp/orient-shards` only when you explicitly want shard
+`--warm-index-dir "$ORIENT_SHARDS"` only when you explicitly want shard
 indexes loaded at startup.
 
 For one repo, use a single persisted index:
 
 ```bash
-orient ensure-index --repo /path/to/repo --index /tmp/orient.index
-orient serve-tcp --addr 127.0.0.1:8796 --index /tmp/orient.index
+orient ensure-index --repo "$ORIENT_REPO" --index "$ORIENT_INDEX"
+orient serve-tcp --addr 127.0.0.1:8796 --index "$ORIENT_INDEX"
 ```
 
 Unix sockets are available when a TCP port is inconvenient:
 
 ```bash
-orient serve-unix --socket /tmp/orient.sock --index-dir /tmp/orient-shards
-orient client-jsonl --socket /tmp/orient.sock
+orient serve-unix --socket "$ORIENT_SOCKET" --index-dir "$ORIENT_SHARDS"
+orient client-jsonl --socket "$ORIENT_SOCKET"
 ```
 
 ## Agent Setup
@@ -49,7 +55,7 @@ orient client-jsonl --socket /tmp/orient.sock
 Generate a short local rule for the current daemon target:
 
 ```bash
-orient agent-instructions --index-dir /tmp/orient-shards
+orient agent-instructions --index-dir "$ORIENT_SHARDS"
 ```
 
 The generated rule should keep agents on this loop. See
@@ -81,7 +87,7 @@ The generated rule should keep agents on this loop. See
 Check local readiness:
 
 ```bash
-orient doctor --index-dir /tmp/orient-shards
+orient doctor --index-dir "$ORIENT_SHARDS"
 orient daemon-status
 orient daemon-status --format json
 ```
@@ -92,8 +98,8 @@ warmed-index summaries plus copyable default requests.
 Refresh explicitly when needed:
 
 ```bash
-orient refresh-index --repo /path/to/repo --index /tmp/orient.index
-orient refresh-shards --index-dir /tmp/orient-shards
+orient refresh-index --repo "$ORIENT_REPO" --index "$ORIENT_INDEX"
+orient refresh-shards --index-dir "$ORIENT_SHARDS"
 ```
 
 `ensure-shards` is the preferred shared-directory bootstrap. It adds missing
@@ -109,9 +115,9 @@ place them in a cache directory, do not commit them, and do not copy them to
 shared storage unless the indexed source is allowed there too.
 
 The daemon cache contains code-search artifacts only: opened index files,
-derived postings, repo metadata, and freshness state. It is not a memory layer
-for agent sessions.
+derived postings, repo metadata, and freshness state. It is not an agent memory
+layer, task log, transcript store, or analytics sink.
 
-Public docs and examples should use placeholders such as `/path/to/repo` and
-`/path/to/workspaces`. Keep machine-specific paths, user names, and private
-workspace layouts out of shared documentation.
+Public docs and examples should use environment variables or neutral
+placeholders. Keep machine-specific paths, user names, and private workspace
+layouts out of shared documentation.
