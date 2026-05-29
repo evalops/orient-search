@@ -449,6 +449,11 @@ impl ToolRuntime {
         Ok(warmed)
     }
 
+    pub fn register_shards(&self, index_dir: PathBuf) -> Result<usize> {
+        let manifest = self.cached_shard_manifest(&index_dir)?;
+        Ok(manifest.shards.len())
+    }
+
     pub fn search_warm_shards(
         &self,
         index_dir: &Path,
@@ -553,7 +558,7 @@ pub fn tool_manifest() -> Value {
         ),
         tool_entry(
             "daemon_status",
-            "Return local daemon runtime cache status for warm-index clients.",
+            "Return local daemon runtime cache status for registered shard and warm-index clients.",
             &[],
             &[],
         ),
@@ -579,6 +584,12 @@ pub fn tool_manifest() -> Value {
             "index_status",
             "Report whether a persistent single-repo index is stale versus its live repository.",
             &["index"],
+            &[],
+        ),
+        tool_entry(
+            "register_shards",
+            "Load only the shard manifest into the daemon cache so searches can lazily load matching shard indexes.",
+            &["index_dir"],
             &[],
         ),
         tool_entry(
@@ -656,7 +667,7 @@ pub fn tool_manifest() -> Value {
         ),
         tool_entry(
             "search_auto",
-            "Search the best available local surface: explicit shard/index, single warmed daemon target, or a supplied live repo.",
+            "Search the best available local surface: explicit shard/index, single registered daemon shard directory, single warmed index, or a supplied live repo.",
             &["query"],
             SEARCH_AUTO_OPTIONAL_ARGS,
         ),
@@ -764,7 +775,7 @@ pub fn tool_manifest() -> Value {
         ),
         tool_entry(
             "ensure_shards",
-            "Build or refresh a local multi-repo shard directory, then warm its indexes in the daemon cache.",
+            "Build or refresh a local multi-repo shard directory, then register its manifest in the daemon cache.",
             &["output_dir"],
             SHARD_BUILD_OPTIONAL_ARGS,
         ),
@@ -1124,7 +1135,7 @@ Prefer the shared daemon when it is running: `{client_command}`.\n\
 For many local repos, bootstrap it with `orient ensure-shards --discover-root /path/to/workspaces --output-dir {index_dir} --family-limit 2` and `orient serve-tcp --addr {addr} --index-dir {index_dir}`.\n\
 For one repo, bootstrap it with `orient ensure-index --repo {repo} --index {index}` and `orient serve-tcp --addr {addr} --index {index}`.\n\
 Start each session with `daemon_status` or `agent_guide`, then use `search_auto` for normal lookup and `search_auto_batch` for alternate query phrasings.\n\
-Trust `daemon_status.search_auto_default` to see whether no-target `search_auto` will use a warmed shard directory, warmed index, or the daemon current directory; use `daemon_status.default_requests` for copyable first repo-map/search/query-plan calls.\n\
+Trust `daemon_status.search_auto_default` to see whether no-target `search_auto` will use a registered shard directory, warmed index, or the daemon current directory; use `daemon_status.default_requests` for copyable first repo-map/search/query-plan calls.\n\
 When calling `search`, `search_batch`, `search_auto`, `search_auto_batch`, `repo_map`, `search_plan`, `find_symbol`, `read_range`, `read_ranges`, `related_files`, or `related_symbols` through JSON-lines/MCP without an explicit target, pass `cwd` so shared shard daemons scope results to the current git checkout.\n\
 Use query filters directly: `file:`, `path:`, `lang:`, `ext:`, `symbol:`, `type:`, `repo:`, `test:`, `generated:`, `code:`, `is:code`, `is:docs`, quoted literals, and negative filters like `-path:vendor` or `-is:generated`.\n\
 Generated paths, including hashed JavaScript bundles, are demoted by default; use `generated:true` or `is:generated` when intentionally inspecting generated output.\n\
@@ -1206,6 +1217,7 @@ fn mcp_tool_annotations(name: &str) -> Value {
     let mutating = matches!(
         name,
         "warm_index"
+            | "register_shards"
             | "ensure_index"
             | "refresh_index"
             | "warm_shards"
@@ -1405,8 +1417,8 @@ fn tool_daemon_default(tool_name: &str) -> Option<Value> {
         })),
         DaemonDefaultKind::ShardDir => Some(json!({
             "argument": "index_dir",
-            "source": "single_warmed_shard_dir",
-            "when": "argument omitted and exactly one shard directory is warmed in the daemon"
+            "source": "single_registered_shard_dir",
+            "when": "argument omitted and exactly one shard directory is registered in the daemon"
         })),
     }
 }
@@ -1414,7 +1426,7 @@ fn tool_daemon_default(tool_name: &str) -> Option<Value> {
 fn argument_daemon_default(tool_name: &str, name: &str) -> Option<Value> {
     match (daemon_default_kind(tool_name)?, name) {
         (DaemonDefaultKind::Index, "index") => Some(json!("single_warmed_index")),
-        (DaemonDefaultKind::ShardDir, "index_dir") => Some(json!("single_warmed_shard_dir")),
+        (DaemonDefaultKind::ShardDir, "index_dir") => Some(json!("single_registered_shard_dir")),
         _ => None,
     }
 }
@@ -1589,7 +1601,7 @@ fn argument_description(tool_name: &str, name: &str) -> &'static str {
         "repo" => "Local repository root or shard repo filter, depending on the tool.",
         "repo_filter" => "Repository name filter when repo is already used as a root path.",
         "cwd" => {
-            "Client working directory used by no-target daemon tools to scope warmed searches and context reads to the current git checkout."
+            "Client working directory used by no-target daemon tools to scope registered shard searches and context reads to the current git checkout."
         }
         "branch" | "git_branch" => "Git branch substring filter for shard-aware agent searches.",
         "origin" | "remote" | "remote_origin" => {
@@ -1599,7 +1611,7 @@ fn argument_description(tool_name: &str, name: &str) -> &'static str {
             "Path to a persistent single-repo Orient index. Daemon tools may omit this when exactly one index is warmed."
         }
         "index_dir" => {
-            "Path to a local multi-repo shard directory. Daemon tools may omit this when exactly one shard directory is warmed."
+            "Path to a local multi-repo shard directory. Daemon tools may omit this when exactly one shard directory is registered."
         }
         "addr" => "Local TCP daemon address for generated setup and client commands.",
         "output_dir" => "Directory where shard indexes and manifest.json should be written.",
@@ -3468,10 +3480,10 @@ impl ToolRuntime {
                 let output_dir = path_arg(&request.arguments, "output_dir")?;
                 let stats = ensure_shards(&selection.repos, &output_dir)?;
                 self.clear_runtime_caches()?;
-                let warmed_indexes = self.warm_shards(output_dir)?;
+                let registered_indexes = self.register_shards(output_dir)?;
                 Ok(json!({
                     "stats": shard_bootstrap_output(stats, selection.discovery)?,
-                    "warmed_indexes": warmed_indexes,
+                    "registered_indexes": registered_indexes,
                     "cached_indexes": self.cached_index_count()
                 }))
             }
@@ -4190,6 +4202,16 @@ impl ToolRuntime {
                     "warmed_shards": self.shard_manifest_detail(&index_dir)
                 }))
             }
+            "register_shards" => {
+                let index_dir = path_arg(&request.arguments, "index_dir")?;
+                let index_dir = canonical_cache_key(&index_dir);
+                let registered_indexes = self.register_shards(index_dir.clone())?;
+                Ok(json!({
+                    "cached_indexes": self.cached_index_count(),
+                    "registered_indexes": registered_indexes,
+                    "registered_shards": self.shard_manifest_detail(&index_dir)
+                }))
+            }
             "daemon_status" => Ok(self.daemon_status()),
             "tool_manifest" => Ok(tool_manifest()),
             "mcp_manifest" => Ok(mcp_tool_manifest()),
@@ -4249,10 +4271,10 @@ impl ToolRuntime {
         match paths.as_slice() {
             [path] => Ok(path.clone()),
             [] => Err(anyhow!(
-                "index_dir is required unless exactly one shard directory is warmed in the daemon"
+                "index_dir is required unless exactly one shard directory is registered in the daemon"
             )),
             _ => Err(anyhow!(
-                "index_dir is required because multiple shard directories are warmed in the daemon: {}",
+                "index_dir is required because multiple shard directories are registered in the daemon: {}",
                 join_paths_for_error(&paths)
             )),
         }
@@ -4262,7 +4284,7 @@ impl ToolRuntime {
         if let Ok(index_dir) = self.single_cached_shard_manifest_path() {
             return json!({
                 "surface": "shards",
-                "source": "single_warmed_shard_dir",
+                "source": "single_registered_shard_dir",
                 "target": index_dir.to_string_lossy()
             });
         }

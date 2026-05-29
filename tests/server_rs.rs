@@ -386,7 +386,7 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
     );
     assert_eq!(
         shard_plan_alias["daemon_default"]["source"],
-        serde_json::json!("single_warmed_shard_dir")
+        serde_json::json!("single_registered_shard_dir")
     );
     assert!(search.get("daemon_default").is_none());
     assert_eq!(search_batch["required"], serde_json::json!(["queries"]));
@@ -479,11 +479,11 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
     );
     assert_eq!(
         shard_plan_batch["daemon_default"]["source"],
-        serde_json::json!("single_warmed_shard_dir")
+        serde_json::json!("single_registered_shard_dir")
     );
     assert_eq!(
         shard_status["input_schema"]["properties"]["index_dir"]["x-daemon-default"],
-        serde_json::json!("single_warmed_shard_dir")
+        serde_json::json!("single_registered_shard_dir")
     );
     assert_eq!(
         shard_status["input_schema"]["properties"]["cwd"]["type"],
@@ -823,6 +823,7 @@ fn server_reports_tool_manifest_for_agent_wrappers() {
     assert!(stdout.contains("find_symbol_batch"));
     assert!(stdout.contains("daemon_status"));
     assert!(stdout.contains("warm_index"));
+    assert!(stdout.contains("register_shards"));
     assert!(stdout.contains("warm_shards"));
     assert!(stdout.contains("ensure_shards"));
     assert!(stdout.contains("shard_status"));
@@ -4371,7 +4372,7 @@ fn runtime_index_shards_refuses_accidental_manifest_shrink_without_force() {
 }
 
 #[test]
-fn runtime_ensures_shards_builds_refreshes_and_warms() {
+fn runtime_ensures_shards_builds_refreshes_and_registers() {
     let root = tempfile::tempdir().unwrap();
     write(
         &root.path().join("service/src/lib.rs"),
@@ -4400,8 +4401,8 @@ fn runtime_ensures_shards_builds_refreshes_and_warms() {
         build_result["stats"]["discovery"][0]["selected_repos"],
         serde_json::json!(1)
     );
-    assert_eq!(build_result["warmed_indexes"], serde_json::json!(1));
-    assert_eq!(build_result["cached_indexes"], serde_json::json!(1));
+    assert_eq!(build_result["registered_indexes"], serde_json::json!(1));
+    assert_eq!(build_result["cached_indexes"], serde_json::json!(0));
 
     write(
         &root.path().join("service/src/extra.rs"),
@@ -4420,8 +4421,8 @@ fn runtime_ensures_shards_builds_refreshes_and_warms() {
         refresh_result["stats"]["action"],
         serde_json::json!("refresh")
     );
-    assert_eq!(refresh_result["warmed_indexes"], serde_json::json!(1));
-    assert_eq!(refresh_result["cached_indexes"], serde_json::json!(1));
+    assert_eq!(refresh_result["registered_indexes"], serde_json::json!(1));
+    assert_eq!(refresh_result["cached_indexes"], serde_json::json!(0));
     assert!(refresh_result["stats"]["refreshed_files"].as_u64().unwrap() >= 1);
 
     write(
@@ -4449,7 +4450,7 @@ fn runtime_ensures_shards_builds_refreshes_and_warms() {
     );
     assert_eq!(add_result["stats"]["added_shards"], serde_json::json!(1));
     assert_eq!(add_result["stats"]["shards"], serde_json::json!(2));
-    assert_eq!(add_result["warmed_indexes"], serde_json::json!(2));
+    assert_eq!(add_result["registered_indexes"], serde_json::json!(2));
 
     let search = runtime.dispatch(ToolRequest {
         id: serde_json::json!("search-added"),
@@ -5649,6 +5650,19 @@ fn runtime_warms_shards_by_tool_request() {
         }),
     });
     assert!(build.error.is_none(), "{:?}", build.error);
+
+    let register = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("register-shards"),
+        tool: "register_shards".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": shard_dir.path()
+        }),
+    });
+    assert!(register.error.is_none(), "{:?}", register.error);
+    let result = register.result.unwrap();
+    assert_eq!(result["cached_indexes"], serde_json::json!(0));
+    assert_eq!(result["registered_indexes"], serde_json::json!(1));
+    assert_eq!(result["registered_shards"]["shards"], serde_json::json!(1));
 
     let warm = runtime.dispatch(ToolRequest {
         id: serde_json::json!("warm-shards"),
@@ -7987,7 +8001,7 @@ fn tcp_daemon_starts_with_warmed_index() {
 }
 
 #[test]
-fn tcp_daemon_can_ensure_and_warm_shards_on_startup() {
+fn tcp_daemon_can_ensure_and_register_shards_on_startup() {
     let repo = tempfile::tempdir().unwrap();
     write(
         &repo.path().join("src/auth.rs"),
@@ -8032,7 +8046,7 @@ fn tcp_daemon_can_ensure_and_warm_shards_on_startup() {
     );
     assert_eq!(
         startup_json["daemon_status"]["cached_indexes"],
-        serde_json::json!(1)
+        serde_json::json!(0)
     );
     assert_eq!(
         startup_json["daemon_status"]["search_auto_default"]["surface"],
@@ -8040,7 +8054,7 @@ fn tcp_daemon_can_ensure_and_warm_shards_on_startup() {
     );
     assert_eq!(
         startup_json["daemon_status"]["search_auto_default"]["source"],
-        serde_json::json!("single_warmed_shard_dir")
+        serde_json::json!("single_registered_shard_dir")
     );
 
     let response = tcp_tool_request(
@@ -8144,7 +8158,7 @@ fn tcp_daemon_serves_parallel_cached_index_requests() {
 }
 
 #[test]
-fn tcp_daemon_starts_with_warmed_shards() {
+fn tcp_daemon_starts_with_warm_index_dir() {
     let repo = tempfile::tempdir().unwrap();
     write(
         &repo.path().join("src/billing.rs"),
@@ -8176,7 +8190,7 @@ fn tcp_daemon_starts_with_warmed_shards() {
             "serve-tcp",
             "--addr",
             "127.0.0.1:0",
-            "--index-dir",
+            "--warm-index-dir",
             shard_dir.path().to_str().unwrap(),
         ])
         .stdout(Stdio::piped())
@@ -8268,6 +8282,86 @@ fn tcp_daemon_starts_with_warmed_shards() {
     assert!(response.contains("src/billing.rs"));
     assert!(read_response.contains("\"id\":\"read\""));
     assert!(read_response.contains("invoice_total"));
+}
+
+#[test]
+fn tcp_daemon_registers_shards_without_warming_indexes() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/billing.rs"),
+        "pub fn invoice_total() -> usize { 42 }\n",
+    );
+    write(
+        &repo.path().join("Cargo.toml"),
+        "[package]\nname='billing'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    let shard_dir = tempfile::tempdir().unwrap();
+    let runtime = ToolRuntime::default();
+    let build = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("build"),
+        tool: "index_shards".to_string(),
+        arguments: serde_json::json!({
+            "repos": [repo.path()],
+            "output_dir": shard_dir.path()
+        }),
+    });
+    assert!(build.error.is_none(), "{:?}", build.error);
+
+    let binary = assert_cmd::cargo::cargo_bin("orient");
+    let mut child = Command::new(binary)
+        .args([
+            "serve-tcp",
+            "--addr",
+            "127.0.0.1:0",
+            "--index-dir",
+            shard_dir.path().to_str().unwrap(),
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let stdout = child.stdout.take().unwrap();
+    let mut startup_reader = BufReader::new(stdout);
+    let mut startup = String::new();
+    startup_reader.read_line(&mut startup).unwrap();
+    let startup_json: serde_json::Value = serde_json::from_str(&startup).unwrap();
+    let addr = startup_json["addr"].as_str().unwrap();
+    assert_eq!(startup_json["cached_indexes"], serde_json::json!(0));
+    assert_eq!(
+        startup_json["daemon_status"]["cached_shard_manifests"],
+        serde_json::json!(1)
+    );
+
+    let response = tcp_tool_request(
+        addr,
+        serde_json::json!({
+            "id": "search",
+            "tool": "search_shards",
+            "arguments": {
+                "query": "invoice total",
+                "limit": 3,
+                "require_all": true
+            }
+        }),
+    );
+    let status = tcp_tool_request(
+        addr,
+        serde_json::json!({
+            "id": "status",
+            "tool": "daemon_status",
+            "arguments": {}
+        }),
+    );
+
+    child.kill().unwrap();
+    let _ = child.wait();
+
+    assert!(response.contains("\"id\":\"search\""));
+    assert!(response.contains("src/billing.rs"));
+    assert!(
+        status.contains("\"cached_indexes\":1"),
+        "search should lazily load only the touched shard: {status}"
+    );
 }
 
 #[test]

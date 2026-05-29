@@ -18,8 +18,8 @@ structured enough that agents stop spending turns on repeated `rg`, `find`,
 - Incremental single-repo refresh for add, edit, delete, and rename cases.
 - Multi-repo shard directories with one index per repo and a validated manifest.
 - TCP, Unix-socket, stdio JSON-lines, and MCP-style transports.
-- A shared daemon that can warm index and shard targets once and serve many
-  local agents.
+- A shared daemon that can register shard directories, lazily warm touched
+  shard indexes, and serve many local agents.
 - Repo maps, related-file lookup, related-symbol lookup, and bounded range
   reads from live repos, indexes, and shard directories.
 - Query plans with missing-term diagnostics, filter rejection counts, and safe

@@ -850,6 +850,8 @@ enum Commands {
         indexes: Vec<PathBuf>,
         #[arg(long = "index-dir")]
         index_dirs: Vec<PathBuf>,
+        #[arg(long = "warm-index-dir")]
+        warm_index_dirs: Vec<PathBuf>,
         #[arg(long = "ensure-shards-dir")]
         ensure_shard_dirs: Vec<PathBuf>,
         #[arg(long = "repo")]
@@ -873,6 +875,8 @@ enum Commands {
         indexes: Vec<PathBuf>,
         #[arg(long = "index-dir")]
         index_dirs: Vec<PathBuf>,
+        #[arg(long = "warm-index-dir")]
+        warm_index_dirs: Vec<PathBuf>,
         #[arg(long = "ensure-shards-dir")]
         ensure_shard_dirs: Vec<PathBuf>,
         #[arg(long = "repo")]
@@ -4639,6 +4643,7 @@ fn run() -> Result<()> {
             addr,
             indexes,
             index_dirs,
+            warm_index_dirs,
             ensure_shard_dirs,
             repos,
             discover_roots,
@@ -4651,6 +4656,7 @@ fn run() -> Result<()> {
             let (runtime, ensured_shards) = bootstrap_runtime(
                 indexes,
                 index_dirs,
+                warm_index_dirs,
                 ensure_shard_dirs,
                 repos,
                 discover_roots,
@@ -4677,6 +4683,7 @@ fn run() -> Result<()> {
             socket,
             indexes,
             index_dirs,
+            warm_index_dirs,
             ensure_shard_dirs,
             repos,
             discover_roots,
@@ -4693,6 +4700,7 @@ fn run() -> Result<()> {
             let (runtime, ensured_shards) = bootstrap_runtime(
                 indexes,
                 index_dirs,
+                warm_index_dirs,
                 ensure_shard_dirs,
                 repos,
                 discover_roots,
@@ -4727,6 +4735,7 @@ fn run() -> Result<()> {
 fn bootstrap_runtime(
     indexes: Vec<PathBuf>,
     index_dirs: Vec<PathBuf>,
+    warm_index_dirs: Vec<PathBuf>,
     ensure_shard_dirs: Vec<PathBuf>,
     repos: Vec<PathBuf>,
     discover_roots: Vec<PathBuf>,
@@ -4740,6 +4749,9 @@ fn bootstrap_runtime(
         runtime.warm_index(index)?;
     }
     for index_dir in index_dirs {
+        runtime.register_shards(index_dir)?;
+    }
+    for index_dir in warm_index_dirs {
         runtime.warm_shards(index_dir)?;
     }
     let mut ensured_shards = Vec::new();
@@ -4754,7 +4766,7 @@ fn bootstrap_runtime(
         )?;
         for index_dir in ensure_shard_dirs {
             let stats = ensure_shards(&selection.repos, &index_dir)?;
-            runtime.warm_shards(index_dir)?;
+            runtime.register_shards(index_dir)?;
             ensured_shards.push(shard_bootstrap_output(stats, selection.discovery.clone())?);
         }
     }

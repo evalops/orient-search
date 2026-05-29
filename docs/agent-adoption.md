@@ -21,7 +21,7 @@ The rule should tell agents:
 - Start with `daemon_status` or `agent_guide`.
 - Use `search_auto` for normal lookup and `search_auto_batch` for alternate
   query phrasings.
-- For CLI use, prefer bare `orient search-auto ...`; it uses the warm TCP
+- For CLI use, prefer bare `orient search-auto ...`; it uses the shared TCP
   daemon first when no explicit target is supplied and falls back locally when
   no daemon is reachable. From inside a git checkout, bare CLI searches are
   scoped to that checkout. Use `--no-daemon` only when forcing

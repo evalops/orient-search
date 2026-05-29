@@ -1,6 +1,6 @@
 # Shared Daemon
 
-Run one warmed Orient daemon for the repos agents are actively editing. Local
+Run one shared Orient daemon for the repos agents are actively editing. Local
 agents share repo maps, indexes, query plans, and bounded reads without each one
 rescanning the same files. The daemon stays local and does not collect telemetry.
 
@@ -18,6 +18,11 @@ orient serve-tcp \
   --addr 127.0.0.1:8796 \
   --index-dir /tmp/orient-shards
 ```
+
+`--index-dir` registers the shard manifest and loads individual repo indexes
+lazily when a search, read, map, or symbol request touches them. Use
+`--warm-index-dir /tmp/orient-shards` only when you explicitly want every shard
+index resident at startup.
 
 For one repo, use a single persisted index:
 
@@ -73,8 +78,8 @@ orient daemon-status
 orient daemon-status --format json
 ```
 
-The compact status is meant for humans. JSON status adds warmed-target summaries
-and copyable default requests.
+The compact status is meant for humans. JSON status adds registered shard and
+warmed-index summaries plus copyable default requests.
 
 Refresh explicitly when needed:
 

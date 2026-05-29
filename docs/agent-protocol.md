@@ -27,7 +27,7 @@ Each request is one JSON object per line:
 ```
 
 Responses preserve `id` and return either `result` or `error`. Use `tool_manifest` for the complete tool list, argument metadata, daemon-default hints, defaults, enums, and JSON-schema-like input schemas.
-Adapters that want MCP-shaped definitions can call `mcp_manifest` or `orient mcp-manifest`; it returns `tools` entries with `name`, `description`, `inputSchema`, and `annotations`. Search, read, map, status, and plan tools are marked read-only. Index/shard build, refresh, and warm-cache tools are marked non-destructive but not read-only. `orient serve-mcp` exposes the same runtime over stdio JSON-RPC for MCP clients, supporting `initialize`, `tools/list`, and `tools/call`; native JSON-lines remains available through `serve-jsonl`, TCP, or Unix sockets.
+Adapters that want MCP-shaped definitions can call `mcp_manifest` or `orient mcp-manifest`; it returns `tools` entries with `name`, `description`, `inputSchema`, and `annotations`. Search, read, map, status, and plan tools are marked read-only. Index/shard build, refresh, register, and warm-cache tools are marked non-destructive but not read-only. `orient serve-mcp` exposes the same runtime over stdio JSON-RPC for MCP clients, supporting `initialize`, `tools/list`, and `tools/call`; native JSON-lines remains available through `serve-jsonl`, TCP, or Unix sockets.
 Agents and wrappers that want a compact first-use recipe can call `agent_guide` or run `orient agent-guide`; it returns install, shard bootstrap, daemon, client, status, one-shot search, local-rule commands, request templates, and follow-up guidance. For copyable local rule files, call `agent_instructions` or run `orient agent-instructions`; it emits a compact local-agent instruction snippet.
 
 ## Bootstrap
@@ -48,15 +48,19 @@ For many repos:
 {"id":"guide","tool":"agent_guide","arguments":{"index_dir":"/tmp/orient-shards"}}
 ```
 
+For an existing shard directory, call `register_shards` to cache only the
+manifest. Call `warm_shards` only when every shard index should be loaded
+immediately.
+
 `daemon_status`, or the direct CLI wrapper `orient daemon-status`, reports the
-daemon's warmed indexes and shard directories. The default CLI output is compact;
-use `orient daemon-status --format json` for warmed-target details,
+daemon's warmed indexes and registered shard directories. The default CLI output is compact;
+use `orient daemon-status --format json` for registered-target details,
 `search_auto_default`, and copyable `default_requests`.
 
-When exactly one index or shard directory is warmed, indexed and shard tools
+When exactly one index is warmed or one shard directory is registered, indexed and shard tools
 marked with `daemon_default.source` may omit `index` or `index_dir`; otherwise
 pass the target explicitly. `search_auto` and `search_auto_batch` use an
-explicit `index_dir`, `index`, or `repo` first, then one warmed daemon target,
+explicit `index_dir`, `index`, or `repo` first, then one registered shard directory or warmed index,
 then live fallback search from the daemon runtime.
 
 Generated follow-up objects such as `read_request`, `read_batch_request`, `related_request`, `related_symbols_request`, `repo_map_request`, `query_plan_request`, and query-plan `retry_requests` are complete tool requests. They include an `id`, `tool`, `arguments`, raw `jsonl`, a shell-native `client_cli` pipe for `orient client-jsonl`, and, when there is a compact human CLI equivalent, a `cli` hint.
@@ -81,7 +85,7 @@ Use `ensure_shards` for shard directories shared by several local agents. The lo
 
 Use the fastest surface that matches your setup:
 
-- `search_auto` when a daemon has exactly one warmed shard directory or index, when the request supplies `index_dir`, `index`, or a live `repo`, or when the daemon was started from the desired repo directory. It returns `{query,surface,target,query_plan_request,repo_map_request,results}` and keeps result follow-up requests aligned with the chosen surface.
+- `search_auto` when a daemon has exactly one registered shard directory or warmed index, when the request supplies `index_dir`, `index`, or a live `repo`, or when the daemon was started from the desired repo directory. It returns `{query,surface,target,query_plan_request,repo_map_request,results}` and keeps result follow-up requests aligned with the chosen surface.
 - `search_code` for a live repo without a prebuilt index.
 - `indexed_search_code` for one persistent repo index.
 - `search_shards` for a multi-repo shard directory.
@@ -95,7 +99,7 @@ JSON-lines `search`, `search_batch`, `search_plan`, and `search_plan_batch`
 tools are forgiving targeted entrypoints: pass `repo`, `index`, or `index_dir`
 and they use the matching live, indexed, or shard surface.
 The CLI equivalent for automatic target selection is `orient search-auto`. When
-no target flag is supplied, it first tries the warm TCP daemon at
+no target flag is supplied, it first tries the shared TCP daemon at
 `127.0.0.1:8796`, infers the current git checkout as `repo_filter` when
 available, then searches the current directory as a live repo if no daemon is
 reachable. Use `--daemon-addr` for another TCP daemon or `--no-daemon` to force

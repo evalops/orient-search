@@ -6,7 +6,7 @@ code quickly without repeated filesystem scans.
 
 ## Shared Daemon
 
-Run one warmed daemon for the repos an agent is likely to touch:
+Run one shared daemon for the repos an agent is likely to touch:
 
 ```bash
 cargo install --git https://github.com/evalops/orient-search
@@ -21,6 +21,10 @@ orient serve-tcp \
   --index-dir /tmp/orient-shards
 ```
 
+`--index-dir` registers the shard manifest and lazily loads individual repo
+indexes on first use. Use `--warm-index-dir /tmp/orient-shards` only when you
+intentionally want to load every shard at startup.
+
 Then verify the daemon and generate the short agent rule:
 
 ```bash
@@ -30,8 +34,8 @@ orient daemon-status
 orient daemon-status --format json
 ```
 
-`daemon-status` reports what is warmed. Add `--format json` for copyable
-first requests and target details.
+`daemon-status` reports registered shard directories and warmed indexes. Add
+`--format json` for copyable first requests and target details.
 
 ## Search
 
@@ -45,11 +49,11 @@ orient read-range --index /tmp/repo.index src/lib.rs:40:80
 ```
 
 With no explicit `--repo`, `--index`, or `--index-dir`, `search-auto` first
-uses the warm daemon at `127.0.0.1:8796` when available, then falls back to a
+uses the shared daemon at `127.0.0.1:8796` when available, then falls back to a
 live search of the current directory. When run from inside a git checkout, the
 daemon request is scoped to that checkout so multi-repo shard daemons stay
-focused on the agent's current task. Use `--daemon-addr` for another TCP daemon
-or `--no-daemon` to force local fallback.
+focused on the agent's current task and only load matching shard indexes. Use
+`--daemon-addr` for another TCP daemon or `--no-daemon` to force local fallback.
 
 JSON-lines and MCP-style clients can pass `cwd` on no-target search, map, plan,
 symbol, read, and related-file calls. The daemon uses that checkout as the
