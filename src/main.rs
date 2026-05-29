@@ -4326,7 +4326,7 @@ fn run() -> Result<()> {
                 "max_cached_indexes": runtime.max_cached_indexes(),
                 "cached_indexes": runtime.cached_index_count(),
                 "ensured_shards": ensured_shards,
-                "daemon_status": runtime.daemon_status()
+                "daemon_status": runtime.daemon_status_for_arguments(&serde_json::json!({}))
             });
             retarget_client_cli_commands(&mut startup, &tcp_client_command(&addr));
             println!("{}", serde_json::to_string(&startup)?);
@@ -4372,7 +4372,7 @@ fn run() -> Result<()> {
                 "max_cached_indexes": runtime.max_cached_indexes(),
                 "cached_indexes": runtime.cached_index_count(),
                 "ensured_shards": ensured_shards,
-                "daemon_status": runtime.daemon_status()
+                "daemon_status": runtime.daemon_status_for_arguments(&serde_json::json!({}))
             });
             retarget_client_cli_commands(&mut startup, &unix_client_command(&socket));
             println!("{}", serde_json::to_string(&startup)?);
@@ -4497,7 +4497,7 @@ fn daemon_status_stream(stream: impl Read + Write) -> Result<Value> {
     let request = serde_json::json!({
         "id": "status",
         "tool": "daemon_status",
-        "arguments": {}
+        "arguments": {"details": true}
     });
     writeln!(reader.get_mut(), "{request}")?;
     reader.get_mut().flush()?;

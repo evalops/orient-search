@@ -573,12 +573,13 @@ impl ToolRuntime {
     }
 
     pub fn daemon_status(&self) -> Value {
-        self.daemon_status_for_arguments(&Value::Object(Map::new()))
+        self.daemon_status_for_arguments(&json!({ "details": true }))
     }
 
     pub fn daemon_status_for_arguments(&self, arguments: &Value) -> Value {
         let search_auto_default = self.search_auto_default_status();
         let client_cwd = optional_string_arg(arguments, "cwd");
+        let include_details = bool_arg(arguments, "details");
         let cached_index_details = self.cached_index_details();
         let cached_shard_manifest_details = self.cached_shard_manifest_details();
         let footprint =
@@ -593,13 +594,23 @@ impl ToolRuntime {
             "default_requests": default_requests,
             "max_cached_indexes": self.max_cached_indexes(),
             "cached_indexes": self.cached_index_count(),
-            "cached_index_paths": self.cached_index_paths(),
-            "cached_index_details": cached_index_details,
             "cached_shard_manifests": self.cached_shard_manifest_count(),
-            "cached_shard_manifest_paths": self.cached_shard_manifest_paths(),
-            "cached_shard_manifest_details": cached_shard_manifest_details,
-            "footprint": footprint
+            "footprint": footprint,
+            "details_omitted": !include_details
         });
+        if include_details {
+            status["cached_index_paths"] = serde_json::to_value(self.cached_index_paths())
+                .unwrap_or_else(|_| Value::Array(Vec::new()));
+            status["cached_index_details"] = Value::Array(cached_index_details);
+            status["cached_shard_manifest_paths"] =
+                serde_json::to_value(self.cached_shard_manifest_paths())
+                    .unwrap_or_else(|_| Value::Array(Vec::new()));
+            status["cached_shard_manifest_details"] = Value::Array(cached_shard_manifest_details);
+        } else {
+            status["full_status_hint"] = json!(
+                "rerun daemon_status with details:true for cached paths and per-target details"
+            );
+        }
         if !repair_requests.is_empty() {
             status["repair_requests"] = Value::Array(repair_requests);
         }
@@ -675,7 +686,7 @@ pub fn tool_manifest() -> Value {
             "daemon_status",
             "Return local daemon runtime cache status for registered shard and warm-index clients.",
             &[],
-            &[],
+            &["cwd", "details"],
         ),
         tool_entry(
             "warm_index",
@@ -1551,7 +1562,7 @@ fn argument_schema(tool_name: &str, name: &str) -> Value {
             schema.insert("type".to_string(), json!("array"));
             schema.insert("items".to_string(), json!({"type": "string"}));
         }
-        "test" | "generated" | "code" | "explain" | "require_all" | "any_terms"
+        "test" | "generated" | "code" | "explain" | "require_all" | "any_terms" | "details"
         | "refresh_if_stale" | "diagnose" | "retry_if_empty" | "git_metadata" | "tracked_files"
         | "nested_manifests" | "force" => {
             schema.insert("type".to_string(), json!("boolean"));
@@ -1862,6 +1873,9 @@ fn argument_description(tool_name: &str, name: &str) -> &'static str {
         "snippet" => "Snippet mode: short, medium, block, or symbol.",
         "detail" => {
             "Repo-map detail level: compact keeps first-orientation payloads small; full includes all available import hints."
+        }
+        "details" => {
+            "When true for daemon_status, include cached paths and per-target runtime details. The default compact status omits them."
         }
         "explain" => "Include structured rank signals and indexed query plans.",
         "require_all" => "Require all normalized query tokens to appear in each result.",

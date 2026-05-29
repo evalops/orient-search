@@ -5097,7 +5097,7 @@ fn runtime_warms_index_by_tool_request() {
     let status = runtime.dispatch(ToolRequest {
         id: serde_json::json!("status"),
         tool: "daemon_status".to_string(),
-        arguments: serde_json::json!({}),
+        arguments: serde_json::json!({ "details": true }),
     });
     let result = status.result.unwrap();
     assert_eq!(
@@ -5347,7 +5347,7 @@ fn runtime_reuses_cached_index_after_initial_load() {
     let status = runtime.dispatch(ToolRequest {
         id: serde_json::json!("missing-status"),
         tool: "daemon_status".to_string(),
-        arguments: serde_json::json!({}),
+        arguments: serde_json::json!({ "details": true }),
     });
     assert_eq!(
         status.result.unwrap()["cached_index_details"][0]["disk_missing"],
@@ -5482,7 +5482,7 @@ fn runtime_reloads_cached_index_when_file_changes() {
     let stale_status = runtime.dispatch(ToolRequest {
         id: serde_json::json!("stale-status"),
         tool: "daemon_status".to_string(),
-        arguments: serde_json::json!({}),
+        arguments: serde_json::json!({ "details": true }),
     });
     assert!(stale_status.error.is_none(), "{:?}", stale_status.error);
     let stale_status = stale_status.result.unwrap();
@@ -5642,7 +5642,7 @@ fn runtime_ensure_index_builds_missing_index_and_warms_cache() {
     let status = runtime.dispatch(ToolRequest {
         id: serde_json::json!("status"),
         tool: "daemon_status".to_string(),
-        arguments: serde_json::json!({}),
+        arguments: serde_json::json!({ "details": true }),
     });
     assert!(status.error.is_none(), "{:?}", status.error);
     let status = status.result.unwrap();
@@ -6180,7 +6180,7 @@ fn runtime_reuses_cached_shard_manifest_after_initial_load() {
     let status = runtime.dispatch(ToolRequest {
         id: serde_json::json!("status"),
         tool: "daemon_status".to_string(),
-        arguments: serde_json::json!({}),
+        arguments: serde_json::json!({ "details": true }),
     });
     let result = status.result.unwrap();
     assert_eq!(result["cached_indexes"], serde_json::json!(1));
@@ -6334,7 +6334,7 @@ fn runtime_reloads_cached_shard_manifest_when_file_changes() {
     let stale_status = runtime.dispatch(ToolRequest {
         id: serde_json::json!("stale-status"),
         tool: "daemon_status".to_string(),
-        arguments: serde_json::json!({}),
+        arguments: serde_json::json!({ "details": true }),
     });
     assert!(stale_status.error.is_none(), "{:?}", stale_status.error);
     let stale_status = stale_status.result.unwrap();
@@ -7754,6 +7754,11 @@ fn daemon_status_with_cwd_returns_checkout_scoped_default_requests() {
     });
     assert!(status.error.is_none(), "{:?}", status.error);
     let status = status.result.unwrap();
+    assert_eq!(status["details_omitted"], serde_json::json!(true));
+    assert!(
+        status.get("cached_shard_manifest_details").is_none(),
+        "{status}"
+    );
     assert_eq!(
         status["client_scope"]["cwd"],
         serde_json::json!(auth_repo.join("src"))
@@ -9382,6 +9387,16 @@ fn tcp_daemon_starts_with_warmed_index() {
         serde_json::json!(0)
     );
     assert_eq!(
+        startup_json["daemon_status"]["details_omitted"],
+        serde_json::json!(true)
+    );
+    assert!(
+        startup_json["daemon_status"]
+            .get("cached_index_details")
+            .is_none(),
+        "{startup_json}"
+    );
+    assert_eq!(
         startup_json["daemon_status"]["search_auto_default"]["surface"],
         serde_json::json!("indexed")
     );
@@ -9510,6 +9525,10 @@ fn tcp_daemon_can_ensure_and_register_shards_on_startup() {
     assert_eq!(
         startup_json["daemon_status"]["cached_indexes"],
         serde_json::json!(0)
+    );
+    assert_eq!(
+        startup_json["daemon_status"]["details_omitted"],
+        serde_json::json!(true)
     );
     assert_eq!(
         startup_json["daemon_status"]["search_auto_default"]["surface"],
@@ -9672,12 +9691,14 @@ fn tcp_daemon_starts_with_warm_index_dir() {
         serde_json::json!(1)
     );
     assert_eq!(
-        startup_json["daemon_status"]["cached_shard_manifest_details"][0]["shards"],
-        serde_json::json!(1)
+        startup_json["daemon_status"]["details_omitted"],
+        serde_json::json!(true)
     );
-    assert_eq!(
-        startup_json["daemon_status"]["cached_shard_manifest_details"][0]["repos"][0]["aliases"][0],
-        startup_json["daemon_status"]["cached_shard_manifest_details"][0]["repos"][0]["name"]
+    assert!(
+        startup_json["daemon_status"]
+            .get("cached_shard_manifest_details")
+            .is_none(),
+        "{startup_json}"
     );
     assert_eq!(
         startup_json["daemon_status"]["search_auto_default"]["surface"],
@@ -9812,7 +9833,7 @@ fn tcp_daemon_registers_shards_without_warming_indexes() {
         serde_json::json!({
             "id": "status",
             "tool": "daemon_status",
-            "arguments": {}
+            "arguments": {"details": true}
         }),
     );
 
@@ -9899,7 +9920,7 @@ fn tcp_daemon_honors_max_cached_indexes_for_lazy_shards() {
         serde_json::json!({
             "id": "status",
             "tool": "daemon_status",
-            "arguments": {}
+            "arguments": {"details": true}
         }),
     );
 

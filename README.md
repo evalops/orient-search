@@ -40,8 +40,9 @@ orient daemon-status
 orient daemon-status --format json
 ```
 
-`daemon-status` reports registered shard directories and warmed indexes. Add
-`--format json` for copyable first requests and target details.
+`daemon-status` reports registered shard directories and warmed indexes. The
+JSON-lines `daemon_status` tool is compact by default; pass `details:true` only
+when you need cached paths and per-target details.
 
 The daemon shares local search state only: indexes, shard manifests, repo maps,
 and cached file metadata. It does not collect telemetry.

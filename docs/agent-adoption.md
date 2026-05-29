@@ -70,6 +70,9 @@ printf '%s\n' \
   | orient client-jsonl
 ```
 
+Pass `details:true` to `daemon_status` only when an adapter needs cached paths
+or per-target runtime details.
+
 ```bash
 printf '%s\n' \
   '{"id":"search","tool":"search_auto","arguments":{"query":"repo:service branch:main symbol:SessionManager token","limit":10,"explain":true,"refresh_if_stale":true}}' \
