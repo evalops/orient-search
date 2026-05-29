@@ -1277,6 +1277,8 @@ struct QueryBench {
     min_ms: f64,
     p50_ms: f64,
     p95_ms: f64,
+    #[serde(default)]
+    p99_ms: f64,
     max_ms: f64,
     samples_ms: Vec<f64>,
 }
@@ -5312,12 +5314,14 @@ fn summarize_query(query: &str, result_count: usize, mut samples_ms: Vec<f64>) -
     let max_ms = *samples_ms.last().unwrap_or(&0.0);
     let p50_ms = percentile(&samples_ms, 0.50);
     let p95_ms = percentile(&samples_ms, 0.95);
+    let p99_ms = percentile(&samples_ms, 0.99);
     QueryBench {
         query: query.to_string(),
         result_count,
         min_ms: round_ms(min_ms),
         p50_ms: round_ms(p50_ms),
         p95_ms: round_ms(p95_ms),
+        p99_ms: round_ms(p99_ms),
         max_ms: round_ms(max_ms),
         samples_ms: samples_ms.into_iter().map(round_ms).collect(),
     }

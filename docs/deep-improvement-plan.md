@@ -153,7 +153,7 @@ Exit condition:
 - CI keeps deterministic repo-local p95 gates
 - a local script runs wide-corpus shard benches against `~/Documents/Projects`
 - reports include cold load, warm daemon, memory, index size, build time, and
-  p95/p99 search latency
+  p95/p99 search latency; benchmark JSON now includes p99 alongside p50/p95/max
 - failure output names the slow query and surface
 
 ## Immediate Build Order

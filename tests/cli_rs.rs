@@ -4108,7 +4108,8 @@ fn cli_reports_search_benchmarks() {
         .assert()
         .success()
         .stdout(predicate::str::contains("\"mode\":\"fallback\""))
-        .stdout(predicate::str::contains("\"p95_ms\""));
+        .stdout(predicate::str::contains("\"p95_ms\""))
+        .stdout(predicate::str::contains("\"p99_ms\""));
     assert!(baseline_path.exists());
 
     let mut baseline_check = Command::cargo_bin("orient").unwrap();
@@ -4163,7 +4164,8 @@ fn cli_reports_search_benchmarks() {
         .assert()
         .success()
         .stdout(predicate::str::contains("\"mode\":\"indexed\""))
-        .stdout(predicate::str::contains("\"p95_ms\""));
+        .stdout(predicate::str::contains("\"p95_ms\""))
+        .stdout(predicate::str::contains("\"p99_ms\""));
 
     let shard_dir = tempfile::tempdir().unwrap();
     let mut build_shards = Command::cargo_bin("orient").unwrap();
@@ -4195,7 +4197,8 @@ fn cli_reports_search_benchmarks() {
         .assert()
         .success()
         .stdout(predicate::str::contains("\"mode\":\"shards_cached\""))
-        .stdout(predicate::str::contains("\"p95_ms\""));
+        .stdout(predicate::str::contains("\"p95_ms\""))
+        .stdout(predicate::str::contains("\"p99_ms\""));
 
     let mut cold_shard_bench = Command::cargo_bin("orient").unwrap();
     cold_shard_bench
@@ -4215,7 +4218,8 @@ fn cli_reports_search_benchmarks() {
         .assert()
         .success()
         .stdout(predicate::str::contains("\"mode\":\"shards\""))
-        .stdout(predicate::str::contains("\"p95_ms\""));
+        .stdout(predicate::str::contains("\"p95_ms\""))
+        .stdout(predicate::str::contains("\"p99_ms\""));
 
     let mut cached_shard_bench = Command::cargo_bin("orient").unwrap();
     cached_shard_bench
@@ -4235,7 +4239,8 @@ fn cli_reports_search_benchmarks() {
         .assert()
         .success()
         .stdout(predicate::str::contains("\"mode\":\"shards_cached\""))
-        .stdout(predicate::str::contains("\"p95_ms\""));
+        .stdout(predicate::str::contains("\"p95_ms\""))
+        .stdout(predicate::str::contains("\"p99_ms\""));
 }
 
 #[test]
