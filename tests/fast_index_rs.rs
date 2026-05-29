@@ -494,7 +494,7 @@ fn indexed_search_warns_when_candidate_cap_is_hit() {
     assert!(plan.repair_hints.iter().any(|hint| {
         hint.kind == "narrow_query"
             && hint.message.contains("capped scoring at 1024")
-            && hint.suggested_query.as_deref() == Some("shared cap token")
+            && hint.suggested_query.is_none()
     }));
 }
 

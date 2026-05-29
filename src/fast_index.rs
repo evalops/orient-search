@@ -2746,7 +2746,7 @@ fn query_plan_repair_hints(
             format!(
                 "The indexed planner found {candidate_count} candidates and capped scoring at {candidate_cap}. Add a rarer term or file/path/lang/ext/symbol/generated filter for more complete results."
             ),
-            suggested_token_query(query_tokens),
+            None,
         ));
     }
     if final_match_count > 0 {
