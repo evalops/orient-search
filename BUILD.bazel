@@ -5,6 +5,10 @@ load("@rules_shell//shell:sh_test.bzl", "sh_test")
 
 package(default_visibility = ["//visibility:public"])
 
+COMMON_TEST_ENV = {
+    "PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/nix/var/nix/profiles/default/bin:/run/current-system/sw/bin",
+}
+
 rust_library(
     name = "orient_lib",
     srcs = glob(
@@ -37,8 +41,8 @@ rust_binary(
         aliases = aliases(),
         crate_name = "{}_rs".format(test_name),
         edition = "2024",
+        env = COMMON_TEST_ENV,
         proc_macro_deps = all_crate_deps(proc_macro_dev = True),
-        tags = ["manual"],
         deps = [
             ":orient_lib",
         ] + all_crate_deps(normal = True) + all_crate_deps(normal_dev = True),

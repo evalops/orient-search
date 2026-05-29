@@ -24,7 +24,7 @@ orient serve-tcp \
 
 ```bash
 bazel build -c opt //:orient
-bazel test //:orient_bazel_smoke
+bazel test //...
 bazel run //:ci_full_test
 bazel run //:ci_perf_gates
 ```

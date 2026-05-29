@@ -39,8 +39,8 @@ jobs:
       - name: Build Bazel release binary
         run: bazel build -c opt //:orient
 
-      - name: Smoke Bazel-built binary
-        run: bazel test //:orient_bazel_smoke
+      - name: Run Bazel-native tests
+        run: bazel test //...
 
       - name: Check formatting
         run: bazel run //:ci_fmt
