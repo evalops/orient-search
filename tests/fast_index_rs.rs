@@ -1976,6 +1976,25 @@ fn bare_path_like_queries_use_filter_only_fast_paths() {
         result_paths(&explicit_dot_path_fallback),
         vec!["src/lib.rs"]
     );
+    let absolute_source_path = repo
+        .path()
+        .join("src/lib.rs")
+        .to_string_lossy()
+        .replace('\\', "/");
+    let absolute_path_fallback =
+        search_repo_fast_filtered(repo.path(), &absolute_source_path, 10, &filters).unwrap();
+    assert_eq!(result_paths(&absolute_path_fallback), vec!["src/lib.rs"]);
+    let explicit_absolute_path_fallback = search_repo_fast_filtered(
+        repo.path(),
+        &format!("path:{absolute_source_path}"),
+        10,
+        &filters,
+    )
+    .unwrap();
+    assert_eq!(
+        result_paths(&explicit_absolute_path_fallback),
+        vec!["src/lib.rs"]
+    );
     let location_fallback =
         search_repo_fast_filtered(repo.path(), "src/lib.rs:40:9", 10, &filters).unwrap();
     assert_eq!(result_paths(&location_fallback), vec!["src/lib.rs"]);
@@ -2018,6 +2037,18 @@ fn bare_path_like_queries_use_filter_only_fast_paths() {
         vec!["src/lib.rs"]
     );
     assert_eq!(copied_column_line_fallback[0].match_lines, vec![40]);
+    let absolute_copied_line_fallback = search_repo_fast_filtered(
+        repo.path(),
+        &format!("{absolute_source_path}:40: pub fn target_entrypoint"),
+        10,
+        &filters,
+    )
+    .unwrap();
+    assert_eq!(
+        result_paths(&absolute_copied_line_fallback),
+        vec!["src/lib.rs"]
+    );
+    assert_eq!(absolute_copied_line_fallback[0].match_lines, vec![40]);
     assert!(
         search_repo_fast_filtered(repo.path(), "missing/src/lib.rs:40:9", 10, &filters)
             .unwrap()
@@ -2064,6 +2095,17 @@ fn bare_path_like_queries_use_filter_only_fast_paths() {
         .search_filtered("path:./src/lib.rs", 10, &filters)
         .unwrap();
     assert_eq!(result_paths(&explicit_dot_path_indexed), vec!["src/lib.rs"]);
+    let absolute_path_indexed = index
+        .search_filtered(&absolute_source_path, 10, &filters)
+        .unwrap();
+    assert_eq!(result_paths(&absolute_path_indexed), vec!["src/lib.rs"]);
+    let explicit_absolute_path_indexed = index
+        .search_filtered(&format!("path:{absolute_source_path}"), 10, &filters)
+        .unwrap();
+    assert_eq!(
+        result_paths(&explicit_absolute_path_indexed),
+        vec!["src/lib.rs"]
+    );
     let location_indexed = index
         .search_filtered("src/lib.rs:40:9", 10, &filters)
         .unwrap();
@@ -2092,6 +2134,18 @@ fn bare_path_like_queries_use_filter_only_fast_paths() {
         vec!["src/lib.rs"]
     );
     assert_eq!(copied_column_line_indexed[0].match_lines, vec![40]);
+    let absolute_copied_line_indexed = index
+        .search_filtered(
+            &format!("{absolute_source_path}:40: pub fn target_entrypoint"),
+            10,
+            &filters,
+        )
+        .unwrap();
+    assert_eq!(
+        result_paths(&absolute_copied_line_indexed),
+        vec!["src/lib.rs"]
+    );
+    assert_eq!(absolute_copied_line_indexed[0].match_lines, vec![40]);
 
     let go_mod_indexed = index.search_filtered("go.mod", 10, &filters).unwrap();
     assert_eq!(go_mod_indexed[0].path, "go.mod");

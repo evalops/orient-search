@@ -567,6 +567,67 @@ pub struct SearchFilters {
     pub exclude_content: Vec<String>,
 }
 
+pub(crate) fn normalize_search_filters_for_root(filters: &mut SearchFilters, root: &Path) {
+    if let Some(path) = filters
+        .path
+        .as_deref()
+        .and_then(|path| root_relative_path_filter(root, path))
+    {
+        filters.path = Some(path);
+    }
+    if let Some(path) = filters
+        .file
+        .as_deref()
+        .and_then(|file| root_relative_path_filter(root, file))
+    {
+        filters.path = Some(path);
+        filters.file = None;
+    }
+    filters.exclude_path = filters
+        .exclude_path
+        .iter()
+        .map(|path| root_relative_path_filter(root, path).unwrap_or_else(|| path.clone()))
+        .collect();
+    let mut exclude_path_from_file = Vec::new();
+    filters.exclude_file.retain(|file| {
+        if let Some(path) = root_relative_path_filter(root, file) {
+            exclude_path_from_file.push(path);
+            false
+        } else {
+            true
+        }
+    });
+    filters.exclude_path.extend(exclude_path_from_file);
+}
+
+fn root_relative_path_filter(root: &Path, value: &str) -> Option<String> {
+    let value = value.trim().replace('\\', "/");
+    if value.is_empty()
+        || value.contains('*')
+        || value.contains('?')
+        || value.contains('\0')
+        || !Path::new(&value).is_absolute()
+    {
+        return None;
+    }
+    let requested = Path::new(&value);
+    let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let requested = requested
+        .canonicalize()
+        .unwrap_or_else(|_| requested.to_path_buf());
+    let rel = requested.strip_prefix(&root).ok()?;
+    let mut parts = Vec::new();
+    for component in rel.components() {
+        match component {
+            Component::Normal(part) => parts.push(part.to_string_lossy().to_string()),
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => return None,
+        }
+    }
+    let rel = parts.join("/");
+    (!rel.is_empty()).then_some(rel)
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct FilterOnlyMatch {
     pub score: f64,
@@ -940,6 +1001,7 @@ pub fn search_repo_fast_filtered_with_timeout(
     let parsed = parse_query(query);
     let query_phrases = query_phrases(&parsed.terms);
     let mut filters = merge_filters(filters.clone(), parsed.filters);
+    normalize_search_filters_for_root(&mut filters, &root);
     if !repo_matches(&root, &filters) {
         return Ok(Vec::new());
     }

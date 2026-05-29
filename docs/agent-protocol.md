@@ -121,7 +121,8 @@ Query strings support filters such as `repo:service`, `branch:feature/auth`, `or
 Bare single-token filename and path-like queries such as `Cargo.toml`, `README.md`, or `src/lib.rs` are inferred as `file:` / `path:` filters so agents that type the file they want get the file, not references to its name. Use `content:Cargo.toml`, `text:README.md`, or `term:src/lib.rs` when the literal string is the target.
 Bare pasted locations such as `src/lib.rs:42`, `src/lib.rs:42:9`, and copied
 lines such as `src/lib.rs:42: pub fn issue_token` strip the line/column prefix
-for matching and anchor the returned snippet near the line.
+for matching and anchor the returned snippet near the line. Absolute pasted
+paths are normalized when they are inside the selected repo or index root.
 Use `content:` / `text:` / `term:` when an identifier-shaped string should stay a content lookup instead of narrowing indexed search through implicit symbol postings.
 Positive non-code language scopes such as `lang:md` keep identifier-shaped terms as content searches instead of requiring symbol postings, so docs/prose lookups stay consistent with live fallback search.
 The same applies when positive `file:`, `path:`, or `ext:` scopes clearly target non-code files, such as `path:docs/*.md SessionManager` or `ext:md agent_instructions`.

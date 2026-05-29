@@ -11,14 +11,15 @@ use crate::repo_index::{
     finalize_results_for_filters, import_hints_from_source_texts, is_entrypoint_path,
     is_generated_path, is_ignored, is_important_file, is_manifest_file, is_source_code_language,
     is_test_path, known_commands_from_hints, language_for,
-    matches_filters_with_compiled_path_metadata, normalize_language_filter, normalize_token,
-    referenced_symbol_name, regular_file_metadata, related_query_terms_symbol_and_filters,
-    related_stem_terms, repo_map_seed_paths, repo_matches, result_matches_all_tokens,
-    result_matches_symbol_filters, round4, score_filter_only_path_match,
-    select_repo_brief_import_hints, select_repo_map_top_symbols,
-    source_excluded_content_filters_match, source_import_filters_match, symbol_exact_phrase_bonus,
-    symbol_for_anchor, symbol_matches_related_filters, symbol_query_match_score,
-    symbol_scoped_window, token_counts, tokenize, unique_query_tokens,
+    matches_filters_with_compiled_path_metadata, normalize_language_filter,
+    normalize_search_filters_for_root, normalize_token, referenced_symbol_name,
+    regular_file_metadata, related_query_terms_symbol_and_filters, related_stem_terms,
+    repo_map_seed_paths, repo_matches, result_matches_all_tokens, result_matches_symbol_filters,
+    round4, score_filter_only_path_match, select_repo_brief_import_hints,
+    select_repo_map_top_symbols, source_excluded_content_filters_match,
+    source_import_filters_match, symbol_exact_phrase_bonus, symbol_for_anchor,
+    symbol_matches_related_filters, symbol_query_match_score, symbol_scoped_window, token_counts,
+    tokenize, unique_query_tokens,
 };
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use anyhow::{Context, Result};
@@ -1240,6 +1241,7 @@ impl FastIndex {
         let parsed = parse_query(query);
         let query_phrases = query_phrases(&parsed.terms);
         let mut filters = merge_filters(filters.clone(), parsed.filters);
+        normalize_search_filters_for_root(&mut filters, &self.root);
         if !repo_matches(&self.root, &filters) {
             return Ok(Vec::new());
         }
@@ -1499,6 +1501,7 @@ impl FastIndex {
     pub fn query_may_match(&self, query: &str, filters: &SearchFilters) -> bool {
         let parsed = parse_query(query);
         let mut filters = merge_filters(filters.clone(), parsed.filters);
+        normalize_search_filters_for_root(&mut filters, &self.root);
         if !repo_matches(&self.root, &filters) || !self.matches_dependency_filters(&filters) {
             return false;
         }
@@ -1687,6 +1690,7 @@ impl FastIndex {
         let parsed = parse_query(query);
         let query_phrases = query_phrases(&parsed.terms);
         let mut filters = merge_filters(filters.clone(), parsed.filters);
+        normalize_search_filters_for_root(&mut filters, &self.root);
         if !repo_matches(&self.root, &filters) {
             let retry_query = query_text(&parsed.terms, &filters);
             return Ok(QueryPlan {
