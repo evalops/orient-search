@@ -874,15 +874,25 @@ fn indexed_query_plan_reports_missing_terms_without_results() {
             },
         )
         .unwrap();
-    assert_eq!(filter_plan.strategy, "filter_scan");
+    assert_eq!(filter_plan.strategy, "attribute_filter_postings");
     assert_eq!(filter_plan.candidate_count, 1);
     assert_eq!(filter_plan.filtered_candidate_count, 1);
     assert_eq!(filter_plan.scored_candidate_count, 1);
     assert_eq!(filter_plan.final_match_count, 1);
     assert!(filter_plan.repair_hints.is_empty());
     assert!(filter_plan.missing_terms.is_empty());
-    let serialized_filter_plan = serde_json::to_value(&filter_plan).unwrap();
-    assert!(serialized_filter_plan.get("planned_postings").is_none());
+    assert!(
+        filter_plan
+            .planned_postings
+            .iter()
+            .any(|posting| posting.kind == "filter" && posting.value == "language:rust")
+    );
+    assert!(
+        filter_plan
+            .planned_postings
+            .iter()
+            .any(|posting| posting.kind == "filter" && posting.value == "test:true")
+    );
     assert!(
         filter_plan.active_filters.iter().any(|filter| {
             filter.field == "language" && filter.value == "rust" && !filter.negated
@@ -934,7 +944,7 @@ fn indexed_query_plan_reports_missing_terms_without_results() {
     let bad_file_plan = index
         .query_plan("file:not_real.rs lang:rust", &SearchFilters::default())
         .unwrap();
-    assert_eq!(bad_file_plan.strategy, "filter_scan");
+    assert_eq!(bad_file_plan.strategy, "attribute_filter_postings");
     assert_eq!(bad_file_plan.final_match_count, 0);
     assert_eq!(bad_file_plan.repair_hints[0].kind, "relax_file_filter");
     assert_eq!(
@@ -1658,9 +1668,18 @@ fn filter_only_queries_discover_files_without_content_terms() {
             .starts_with("1: use sample::SessionManager;")
     );
     let plan = indexed[0].query_plan.as_ref().unwrap();
-    assert_eq!(plan.strategy, "filter_scan");
+    assert_eq!(plan.strategy, "attribute_filter_postings");
     assert_eq!(plan.candidate_count, 1);
-    assert!(plan.planned_postings.is_empty());
+    assert!(
+        plan.planned_postings
+            .iter()
+            .any(|posting| posting.kind == "filter" && posting.value == "language:rust")
+    );
+    assert!(
+        plan.planned_postings
+            .iter()
+            .any(|posting| posting.kind == "filter" && posting.value == "test:true")
+    );
 
     let negative_only = index
         .search_filtered("-path:docs", 10, &SearchFilters::default())
@@ -2272,6 +2291,88 @@ fn indexed_search_uses_symbol_postings_for_identifier_queries() {
         "{:?}",
         direct_kind_plan.planned_postings
     );
+}
+
+#[test]
+fn indexed_attribute_filters_intersect_before_scoring() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/lib.rs"),
+        "pub fn sharedneedle_alpha() {}\n",
+    );
+    write(
+        &repo.path().join("src/worker.ts"),
+        "export function sharedneedleBeta() {}\n",
+    );
+    write(
+        &repo.path().join("docs/guide.md"),
+        "sharedneedle agent guide\n",
+    );
+
+    let index = FastIndex::build(repo.path()).unwrap();
+    assert!(index.attribute_postings.contains_key("code:true"));
+    assert!(index.attribute_postings.contains_key("code:false"));
+    assert!(index.attribute_postings.contains_key("language:rust"));
+    assert!(index.attribute_postings.contains_key("extension:md"));
+
+    let code_results = index
+        .search_filtered(
+            "sharedneedle code:true",
+            10,
+            &SearchFilters {
+                explain: true,
+                ..SearchFilters::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        result_paths(&code_results),
+        vec!["src/lib.rs".to_string(), "src/worker.ts".to_string()]
+    );
+    let code_plan = code_results[0].query_plan.as_ref().unwrap();
+    assert_eq!(code_plan.candidate_count, 2);
+    assert!(
+        code_plan
+            .planned_postings
+            .iter()
+            .any(|posting| posting.kind == "filter" && posting.value == "code:true"),
+        "{:?}",
+        code_plan.planned_postings
+    );
+
+    let prose_results = index
+        .search_filtered(
+            "sharedneedle code:false",
+            10,
+            &SearchFilters {
+                explain: true,
+                ..SearchFilters::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        result_paths(&prose_results),
+        vec!["docs/guide.md".to_string()]
+    );
+    let prose_plan = prose_results[0].query_plan.as_ref().unwrap();
+    assert_eq!(prose_plan.candidate_count, 1);
+    assert!(
+        prose_plan
+            .planned_postings
+            .iter()
+            .any(|posting| posting.kind == "filter" && posting.value == "code:false"),
+        "{:?}",
+        prose_plan.planned_postings
+    );
+
+    let impossible_plan = index
+        .query_plan(
+            "sharedneedle lang:rust code:false",
+            &SearchFilters::default(),
+        )
+        .unwrap();
+    assert_eq!(impossible_plan.candidate_count, 0);
+    assert_eq!(impossible_plan.final_match_count, 0);
 }
 
 #[test]
@@ -2943,8 +3044,13 @@ fn test_filter_recognizes_common_multilanguage_test_paths() {
         filter.field == "test"
             && filter.value == "false"
             && filter.candidate_matches == Some(3)
-            && filter.candidate_rejections == Some(6)
+            && filter.candidate_rejections == Some(0)
     }));
+    assert!(
+        plan.planned_postings
+            .iter()
+            .any(|posting| posting.kind == "filter" && posting.value == "test:false")
+    );
 
     let shard_dir = tempfile::tempdir().unwrap();
     build_shards(&[repo.path().to_path_buf()], shard_dir.path()).unwrap();

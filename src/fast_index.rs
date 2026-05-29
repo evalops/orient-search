@@ -31,9 +31,10 @@ use std::path::{Component, Path, PathBuf};
 use std::process;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const INDEX_VERSION: u32 = 12;
-const PREVIOUS_DISK_INDEX_VERSION: u32 = 11;
-const OLDER_DISK_INDEX_VERSION: u32 = 10;
+const INDEX_VERSION: u32 = 13;
+const PREVIOUS_DISK_INDEX_VERSION: u32 = 12;
+const OLDER_DISK_INDEX_VERSION: u32 = 11;
+const OLDEST_DISK_INDEX_VERSION: u32 = 10;
 const LEGACY_RAW_INDEX_VERSION: u32 = 9;
 const INDEX_MAGIC: &[u8] = b"ORIENTIDX\0";
 const INDEX_HEADER_LEN: usize = INDEX_MAGIC.len() + std::mem::size_of::<u32>();
@@ -53,12 +54,30 @@ pub struct FastIndex {
     pub symbol_postings: HashMap<String, Vec<Posting>>,
     #[serde(default)]
     pub symbol_kind_postings: HashMap<String, Vec<Posting>>,
+    #[serde(default)]
+    pub attribute_postings: HashMap<String, Vec<Posting>>,
     #[serde(skip)]
     path_ids: HashMap<String, u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct FastIndexDisk {
+    version: u32,
+    root: PathBuf,
+    files: Vec<IndexedPath>,
+    postings: HashMap<String, CompressedPostingList>,
+    path_postings: HashMap<String, CompressedPostingList>,
+    trigram_postings: HashMap<String, CompressedPostingList>,
+    #[serde(default)]
+    symbol_postings: HashMap<String, CompressedPostingList>,
+    #[serde(default)]
+    symbol_kind_postings: HashMap<String, CompressedPostingList>,
+    #[serde(default)]
+    attribute_postings: HashMap<String, CompressedPostingList>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+struct FastIndexDiskV12 {
     version: u32,
     root: PathBuf,
     files: Vec<IndexedPath>,
@@ -323,6 +342,7 @@ impl FastIndex {
         let trigram_postings = rebuild_postings(&files, |file| &file.trigrams);
         let symbol_postings = rebuild_symbol_postings(&files);
         let symbol_kind_postings = rebuild_symbol_kind_postings(&files);
+        let attribute_postings = rebuild_attribute_postings(&files);
         let path_ids = rebuild_path_ids(&files);
         Ok(Self {
             version: INDEX_VERSION,
@@ -333,6 +353,7 @@ impl FastIndex {
             trigram_postings,
             symbol_postings,
             symbol_kind_postings,
+            attribute_postings,
             path_ids,
         })
         .map(|index| RefreshOutcome {
@@ -371,12 +392,16 @@ impl FastIndex {
         let (payload, header_version) = index_payload(bytes)
             .with_context(|| format!("parse index header {}", path.display()))?;
         let mut index = match header_version {
-            Some(INDEX_VERSION | PREVIOUS_DISK_INDEX_VERSION | OLDER_DISK_INDEX_VERSION) => {
-                bincode::deserialize::<FastIndexDisk>(payload)
-                    .with_context(|| format!("parse index {}", path.display()))?
-                    .into_index()
-                    .with_context(|| format!("decode index {}", path.display()))?
-            }
+            Some(INDEX_VERSION) => bincode::deserialize::<FastIndexDisk>(payload)
+                .with_context(|| format!("parse index {}", path.display()))?
+                .into_index()
+                .with_context(|| format!("decode index {}", path.display()))?,
+            Some(
+                PREVIOUS_DISK_INDEX_VERSION | OLDER_DISK_INDEX_VERSION | OLDEST_DISK_INDEX_VERSION,
+            ) => bincode::deserialize::<FastIndexDiskV12>(payload)
+                .with_context(|| format!("parse index {}", path.display()))?
+                .into_index()
+                .with_context(|| format!("decode index {}", path.display()))?,
             Some(LEGACY_RAW_INDEX_VERSION) | None => load_raw_index(payload)
                 .with_context(|| format!("parse index {}", path.display()))?,
             Some(version) => anyhow::bail!("unsupported index version {}", version),
@@ -411,12 +436,14 @@ impl FastIndex {
                 + total_posting_entries(&self.path_postings)
                 + total_posting_entries(&self.trigram_postings)
                 + total_posting_entries(&self.symbol_postings)
-                + total_posting_entries(&self.symbol_kind_postings),
+                + total_posting_entries(&self.symbol_kind_postings)
+                + total_posting_entries(&self.attribute_postings),
             compressed_posting_bytes: total_compressed_posting_bytes(&self.postings)
                 + total_compressed_posting_bytes(&self.path_postings)
                 + total_compressed_posting_bytes(&self.trigram_postings)
                 + total_compressed_posting_bytes(&self.symbol_postings)
-                + total_compressed_posting_bytes(&self.symbol_kind_postings),
+                + total_compressed_posting_bytes(&self.symbol_kind_postings)
+                + total_compressed_posting_bytes(&self.attribute_postings),
             symbols: self.files.iter().map(|file| file.symbols.len()).sum(),
         }
     }
@@ -438,6 +465,11 @@ impl FastIndex {
         } else {
             normalize_posting_map(&mut self.symbol_kind_postings);
         }
+        if self.attribute_postings.is_empty() && !self.files.is_empty() {
+            self.attribute_postings = rebuild_attribute_postings(&self.files);
+        } else {
+            normalize_posting_map(&mut self.attribute_postings);
+        }
         self.path_ids = rebuild_path_ids(&self.files);
     }
 
@@ -454,12 +486,14 @@ impl FastIndex {
                 + total_posting_entries(&self.path_postings)
                 + total_posting_entries(&self.trigram_postings)
                 + total_posting_entries(&self.symbol_postings)
-                + total_posting_entries(&self.symbol_kind_postings),
+                + total_posting_entries(&self.symbol_kind_postings)
+                + total_posting_entries(&self.attribute_postings),
             compressed_posting_bytes: total_compressed_posting_bytes(&self.postings)
                 + total_compressed_posting_bytes(&self.path_postings)
                 + total_compressed_posting_bytes(&self.trigram_postings)
                 + total_compressed_posting_bytes(&self.symbol_postings)
-                + total_compressed_posting_bytes(&self.symbol_kind_postings),
+                + total_compressed_posting_bytes(&self.symbol_kind_postings)
+                + total_compressed_posting_bytes(&self.attribute_postings),
             symbols: self.files.iter().map(|file| file.symbols.len()).sum(),
             reused_files: outcome.reused_files,
             renamed_files: outcome.renamed_files,
@@ -1188,12 +1222,18 @@ impl FastIndex {
         let query_trigrams = query_trigrams(&query);
         let symbol_kind_postings =
             symbol_kind_postings_for_filters(&self.symbol_kind_postings, &filters);
+        let attribute_postings = attribute_postings_for_filters(&self.attribute_postings, &filters);
         if limit == 0 {
             return Ok(Vec::new());
         }
         if query_tokens.is_empty() && query_trigrams.is_empty() {
             return if filter_only_query(&filters) {
-                Ok(self.search_filter_only(limit, &filters, &symbol_kind_postings))
+                Ok(self.search_filter_only(
+                    limit,
+                    &filters,
+                    &symbol_kind_postings,
+                    &attribute_postings,
+                ))
             } else {
                 Ok(Vec::new())
             };
@@ -1310,6 +1350,7 @@ impl FastIndex {
             } else {
                 intersect_planned_postings(&planned_postings, filters.require_all)
             };
+        let candidate_ids = intersect_attribute_postings(candidate_ids, &attribute_postings);
         let candidate_count = candidate_ids.len();
 
         let posting_lists = token_postings
@@ -1378,6 +1419,7 @@ impl FastIndex {
                 &token_postings,
                 &symbol_postings,
                 &symbol_kind_postings,
+                &attribute_postings,
                 &path_postings,
                 &trigram_postings,
                 &missing_terms,
@@ -1459,6 +1501,7 @@ impl FastIndex {
         let query_trigrams = query_trigrams(&query);
         let symbol_kind_postings =
             symbol_kind_postings_for_filters(&self.symbol_kind_postings, &filters);
+        let attribute_postings = attribute_postings_for_filters(&self.attribute_postings, &filters);
         if query_tokens.len() > 1 && !filters.match_any {
             filters.require_all = true;
         }
@@ -1468,7 +1511,8 @@ impl FastIndex {
             planned_symbol_query_name(&parsed.terms, &filters, parsed.explicit_content_terms);
         if query_tokens.is_empty() && query_trigrams.is_empty() {
             if filter_only_query(&filters) {
-                let candidate_ids = filter_only_candidate_ids(&symbol_kind_postings, &filters);
+                let candidate_ids =
+                    filter_only_candidate_ids(&symbol_kind_postings, &attribute_postings, &filters);
                 let path_filters = PathFilterMatcher::from_filters(&filters);
                 let final_match_count = match &candidate_ids {
                     Some(candidate_ids) => candidate_ids
@@ -1500,6 +1544,7 @@ impl FastIndex {
                     planned_postings: symbol_kind_postings
                         .iter()
                         .map(|(kind, postings)| plan_posting("symbol_kind", kind, postings))
+                        .chain(attribute_postings.plan_postings())
                         .collect(),
                     missing_terms: Vec::new(),
                     missing_trigrams: Vec::new(),
@@ -1639,6 +1684,7 @@ impl FastIndex {
             } else {
                 intersect_planned_postings(&planned_postings, filters.require_all)
             };
+        let candidate_ids = intersect_attribute_postings(candidate_ids, &attribute_postings);
 
         let candidate_count = candidate_ids.len();
         let posting_lists = token_postings
@@ -1705,6 +1751,7 @@ impl FastIndex {
             &token_postings,
             &symbol_postings,
             &symbol_kind_postings,
+            &attribute_postings,
             &path_postings,
             &trigram_postings,
             &missing_terms,
@@ -1730,8 +1777,10 @@ impl FastIndex {
         limit: usize,
         filters: &SearchFilters,
         symbol_kind_postings: &[(&String, &Vec<Posting>)],
+        attribute_postings: &AttributeFilterPostings<'_>,
     ) -> Vec<SearchResult> {
-        let candidate_ids = filter_only_candidate_ids(symbol_kind_postings, filters);
+        let candidate_ids =
+            filter_only_candidate_ids(symbol_kind_postings, attribute_postings, filters);
         let mut results = match &candidate_ids {
             Some(candidate_ids) => candidate_ids
                 .iter()
@@ -1760,6 +1809,7 @@ impl FastIndex {
                 planned_postings: symbol_kind_postings
                     .iter()
                     .map(|(kind, postings)| plan_posting("symbol_kind", kind, postings))
+                    .chain(attribute_postings.plan_postings())
                     .collect(),
                 missing_terms: Vec::new(),
                 missing_trigrams: Vec::new(),
@@ -1918,6 +1968,7 @@ impl FastIndexDisk {
             trigram_postings: compress_posting_map(&index.trigram_postings),
             symbol_postings: compress_posting_map(&index.symbol_postings),
             symbol_kind_postings: compress_posting_map(&index.symbol_kind_postings),
+            attribute_postings: compress_posting_map(&index.attribute_postings),
         }
     }
 
@@ -1925,7 +1976,8 @@ impl FastIndexDisk {
         anyhow::ensure!(
             self.version == INDEX_VERSION
                 || self.version == PREVIOUS_DISK_INDEX_VERSION
-                || self.version == OLDER_DISK_INDEX_VERSION,
+                || self.version == OLDER_DISK_INDEX_VERSION
+                || self.version == OLDEST_DISK_INDEX_VERSION,
             "unsupported index version {}",
             self.version
         );
@@ -1938,6 +1990,47 @@ impl FastIndexDisk {
             trigram_postings: decompress_posting_map(self.trigram_postings)?,
             symbol_postings: decompress_posting_map(self.symbol_postings)?,
             symbol_kind_postings: decompress_posting_map(self.symbol_kind_postings)?,
+            attribute_postings: decompress_posting_map(self.attribute_postings)?,
+            path_ids: HashMap::new(),
+        })
+    }
+}
+
+impl FastIndexDiskV12 {
+    #[cfg(test)]
+    fn from_index_with_version(index: &FastIndex, version: u32) -> Self {
+        Self {
+            version,
+            root: index.root.clone(),
+            files: index.files.clone(),
+            postings: compress_posting_map(&index.postings),
+            path_postings: compress_posting_map(&index.path_postings),
+            trigram_postings: compress_posting_map(&index.trigram_postings),
+            symbol_postings: compress_posting_map(&index.symbol_postings),
+            symbol_kind_postings: compress_posting_map(&index.symbol_kind_postings),
+        }
+    }
+
+    fn into_index(self) -> Result<FastIndex> {
+        anyhow::ensure!(
+            self.version == PREVIOUS_DISK_INDEX_VERSION
+                || self.version == OLDER_DISK_INDEX_VERSION
+                || self.version == OLDEST_DISK_INDEX_VERSION,
+            "unsupported index version {}",
+            self.version
+        );
+        let files = self.files;
+        let attribute_postings = rebuild_attribute_postings(&files);
+        Ok(FastIndex {
+            version: INDEX_VERSION,
+            root: self.root,
+            postings: decompress_posting_map(self.postings)?,
+            path_postings: decompress_posting_map(self.path_postings)?,
+            trigram_postings: decompress_posting_map(self.trigram_postings)?,
+            symbol_postings: decompress_posting_map(self.symbol_postings)?,
+            symbol_kind_postings: decompress_posting_map(self.symbol_kind_postings)?,
+            attribute_postings,
+            files,
             path_ids: HashMap::new(),
         })
     }
@@ -1956,6 +2049,9 @@ fn load_raw_index(payload: &[u8]) -> Result<FastIndex> {
     }
     if index.symbol_kind_postings.is_empty() {
         index.symbol_kind_postings = rebuild_symbol_kind_postings(&index.files);
+    }
+    if index.attribute_postings.is_empty() && !index.files.is_empty() {
+        index.attribute_postings = rebuild_attribute_postings(&index.files);
     }
     Ok(index)
 }
@@ -2153,6 +2249,39 @@ mod compressed_posting_tests {
 
         let error = list.decompress().unwrap_err().to_string();
         assert!(error.contains("strictly increasing"), "{error}");
+    }
+
+    #[test]
+    fn version_12_disk_indexes_rebuild_attribute_postings_on_load() {
+        let repo = tempfile::tempdir().unwrap();
+        let source = repo.path().join("src/lib.rs");
+        std::fs::create_dir_all(source.parent().unwrap()).unwrap();
+        std::fs::write(&source, "pub fn sharedneedle() {}\n").unwrap();
+        let docs = repo.path().join("README.md");
+        std::fs::write(&docs, "sharedneedle docs\n").unwrap();
+
+        let index = FastIndex::build(repo.path()).unwrap();
+        let old_disk =
+            FastIndexDiskV12::from_index_with_version(&index, PREVIOUS_DISK_INDEX_VERSION);
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(INDEX_MAGIC);
+        bytes.extend_from_slice(&PREVIOUS_DISK_INDEX_VERSION.to_le_bytes());
+        bytes.extend_from_slice(&bincode::serialize(&old_disk).unwrap());
+        let path = repo.path().join(".orient/v12.index");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, bytes).unwrap();
+
+        let loaded = FastIndex::load(&path).unwrap();
+        assert_eq!(loaded.version, INDEX_VERSION);
+        assert!(loaded.attribute_postings.contains_key("code:true"));
+        assert!(loaded.attribute_postings.contains_key("code:false"));
+        assert_eq!(
+            loaded
+                .query_plan("sharedneedle code:false", &SearchFilters::default())
+                .unwrap()
+                .candidate_count,
+            1
+        );
     }
 }
 
@@ -2710,6 +2839,7 @@ fn indexed_query_plan(
     token_postings: &[(&String, &Vec<Posting>)],
     symbol_postings: &[(&String, &Vec<Posting>)],
     symbol_kind_postings: &[(&String, &Vec<Posting>)],
+    attribute_postings: &AttributeFilterPostings<'_>,
     path_postings: &[(&String, &Vec<Posting>)],
     trigram_postings: &[(&String, &Vec<Posting>)],
     missing_terms: &[String],
@@ -2741,6 +2871,7 @@ fn indexed_query_plan(
                 .iter()
                 .map(|(kind, postings)| plan_posting("symbol_kind", kind, postings)),
         )
+        .chain(attribute_postings.plan_postings())
         .chain(
             path_postings
                 .iter()
@@ -3727,31 +3858,138 @@ fn symbol_kind_postings_for_filters<'a>(
         .collect()
 }
 
+#[derive(Debug)]
+struct AttributeFilterPostings<'a> {
+    postings: Vec<(String, &'a Vec<Posting>)>,
+    missing: Vec<String>,
+}
+
+impl AttributeFilterPostings<'_> {
+    fn is_impossible(&self) -> bool {
+        !self.missing.is_empty()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.postings.is_empty() && self.missing.is_empty()
+    }
+
+    fn plan_postings(&self) -> Vec<QueryPlanPosting> {
+        self.postings
+            .iter()
+            .map(|(key, postings)| plan_posting("filter", key, postings))
+            .collect()
+    }
+}
+
+fn attribute_postings_for_filters<'a>(
+    postings: &'a HashMap<String, Vec<Posting>>,
+    filters: &SearchFilters,
+) -> AttributeFilterPostings<'a> {
+    let keys = attribute_filter_keys(filters);
+    let mut planned = Vec::with_capacity(keys.len());
+    let mut missing = Vec::new();
+    for key in keys {
+        match postings.get(&key) {
+            Some(values) => planned.push((key, values)),
+            None => missing.push(key),
+        }
+    }
+    AttributeFilterPostings {
+        postings: planned,
+        missing,
+    }
+}
+
+fn attribute_filter_keys(filters: &SearchFilters) -> Vec<String> {
+    let mut keys = Vec::new();
+    if let Some(language) = filters.language.as_deref() {
+        let language = normalize_language_filter(language);
+        if !language.is_empty() {
+            keys.push(attribute_posting_key("language", &language));
+        }
+    }
+    if let Some(extension) = filters.extension.as_deref() {
+        let extension = extension
+            .trim()
+            .trim_start_matches('.')
+            .to_ascii_lowercase();
+        if !extension.is_empty() {
+            keys.push(attribute_posting_key("extension", &extension));
+        }
+    }
+    if let Some(test) = filters.test {
+        keys.push(attribute_posting_key("test", bool_attribute_value(test)));
+    }
+    if let Some(generated) = filters.generated {
+        keys.push(attribute_posting_key(
+            "generated",
+            bool_attribute_value(generated),
+        ));
+    }
+    if let Some(code) = filters.code {
+        keys.push(attribute_posting_key("code", bool_attribute_value(code)));
+    }
+    keys
+}
+
 fn filter_only_candidate_ids(
     symbol_kind_postings: &[(&String, &Vec<Posting>)],
+    attribute_postings: &AttributeFilterPostings<'_>,
     filters: &SearchFilters,
 ) -> Option<Vec<u32>> {
     if filters.symbol_kind.is_some() && symbol_kind_postings.is_empty() {
         return Some(Vec::new());
     }
-    if symbol_kind_postings.is_empty() {
+    if attribute_postings.is_impossible() {
+        return Some(Vec::new());
+    }
+    if symbol_kind_postings.is_empty() && attribute_postings.is_empty() {
         return None;
     }
-    Some(intersect_planned_postings(
-        &symbol_kind_postings
-            .iter()
-            .map(|(_, postings)| *postings)
-            .collect::<Vec<_>>(),
-        true,
-    ))
+    let planned_postings = symbol_kind_postings
+        .iter()
+        .map(|(_, postings)| *postings)
+        .chain(
+            attribute_postings
+                .postings
+                .iter()
+                .map(|(_, postings)| *postings),
+        )
+        .collect::<Vec<_>>();
+    Some(intersect_planned_postings(&planned_postings, true))
 }
 
 fn filter_only_strategy(filters: &SearchFilters) -> &'static str {
     if filters.symbol_kind.is_some() {
         "symbol_kind_filter_postings"
+    } else if filters.language.is_some()
+        || filters.extension.is_some()
+        || filters.test.is_some()
+        || filters.generated.is_some()
+        || filters.code.is_some()
+    {
+        "attribute_filter_postings"
     } else {
         "filter_scan"
     }
+}
+
+fn intersect_attribute_postings(
+    candidate_ids: Vec<u32>,
+    attribute_postings: &AttributeFilterPostings<'_>,
+) -> Vec<u32> {
+    if candidate_ids.is_empty() || attribute_postings.is_empty() {
+        return candidate_ids;
+    }
+    if attribute_postings.is_impossible() {
+        return Vec::new();
+    }
+    attribute_postings
+        .postings
+        .iter()
+        .fold(candidate_ids, |candidate_ids, (_, postings)| {
+            intersect_sorted_ids_with_postings(&candidate_ids, postings)
+        })
 }
 
 fn has_unsatisfied_missing_terms(missing_terms: &[String], filters: &SearchFilters) -> bool {
@@ -4348,6 +4586,56 @@ fn rebuild_symbol_kind_postings(files: &[IndexedPath]) -> HashMap<String, Vec<Po
         values.sort_unstable_by_key(|posting| posting.file_id);
     }
     postings
+}
+
+fn rebuild_attribute_postings(files: &[IndexedPath]) -> HashMap<String, Vec<Posting>> {
+    let mut postings: HashMap<String, Vec<Posting>> = HashMap::new();
+    for (file_id, file) in files.iter().enumerate() {
+        for key in indexed_attribute_keys(file) {
+            postings.entry(key).or_default().push(Posting {
+                file_id: file_id as u32,
+                count: 1,
+            });
+        }
+    }
+    for values in postings.values_mut() {
+        values.sort_unstable_by_key(|posting| posting.file_id);
+    }
+    postings
+}
+
+fn indexed_attribute_keys(file: &IndexedPath) -> Vec<String> {
+    let mut keys = Vec::with_capacity(5);
+    let language = normalize_language_filter(&file.language);
+    if !language.is_empty() {
+        keys.push(attribute_posting_key("language", &language));
+    }
+    if let Some(extension) = &file.extension_lower {
+        if !extension.is_empty() {
+            keys.push(attribute_posting_key("extension", extension));
+        }
+    }
+    keys.push(attribute_posting_key(
+        "test",
+        bool_attribute_value(is_test_path(&file.path_lower)),
+    ));
+    keys.push(attribute_posting_key(
+        "generated",
+        bool_attribute_value(is_generated_path(&file.path_lower)),
+    ));
+    keys.push(attribute_posting_key(
+        "code",
+        bool_attribute_value(is_source_code_language(&file.language)),
+    ));
+    keys
+}
+
+fn bool_attribute_value(value: bool) -> &'static str {
+    if value { "true" } else { "false" }
+}
+
+fn attribute_posting_key(field: &str, value: &str) -> String {
+    format!("{field}:{value}")
 }
 
 fn indexed_candidate_cap(limit: usize) -> usize {

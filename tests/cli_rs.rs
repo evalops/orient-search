@@ -1832,7 +1832,9 @@ fn cli_search_surfaces_accept_structured_filters() {
         .assert()
         .success()
         .stdout(predicate::str::contains("tests/auth_test.rs"))
-        .stdout(predicate::str::contains("filter_scan"));
+        .stdout(predicate::str::contains("attribute_filter_postings"))
+        .stdout(predicate::str::contains("language:rust"))
+        .stdout(predicate::str::contains("test:true"));
 
     let mut search_plan = Command::cargo_bin("orient").unwrap();
     search_plan
