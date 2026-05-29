@@ -8047,8 +8047,71 @@ fn range_args(arguments: &Value) -> Result<Vec<RangeArg>> {
     for value in values {
         ranges.push(range_arg(value, default_scope)?);
     }
+    let ranges = compact_range_args(ranges);
     validate_batch_read_line_budget(&ranges)?;
     Ok(ranges)
+}
+
+fn compact_range_args(ranges: Vec<RangeArg>) -> Vec<RangeArg> {
+    let mut compacted = Vec::with_capacity(ranges.len());
+    for range in ranges {
+        if try_dedupe_or_merge_range_arg(&mut compacted, &range) {
+            continue;
+        }
+        compacted.push(range);
+    }
+    compacted
+}
+
+fn try_dedupe_or_merge_range_arg(ranges: &mut [RangeArg], range: &RangeArg) -> bool {
+    if ranges
+        .iter()
+        .any(|existing| same_range_arg(existing, range))
+    {
+        return true;
+    }
+    if range.scope != RangeScope::Exact {
+        return false;
+    }
+    if let Some(existing) = ranges
+        .iter_mut()
+        .find(|existing| can_merge_range_args(existing, range))
+    {
+        let start = existing.start.min(range.start);
+        let end = range_arg_end(existing).max(range_arg_end(range));
+        existing.start = start;
+        existing.lines = end.saturating_sub(start).saturating_add(1);
+        true
+    } else {
+        false
+    }
+}
+
+fn same_range_arg(left: &RangeArg, right: &RangeArg) -> bool {
+    left.path == right.path
+        && left.start == right.start
+        && left.lines == right.lines
+        && left.scope == right.scope
+}
+
+fn can_merge_range_args(left: &RangeArg, right: &RangeArg) -> bool {
+    if left.scope != RangeScope::Exact
+        || right.scope != RangeScope::Exact
+        || left.path != right.path
+    {
+        return false;
+    }
+    let start = left.start.min(right.start);
+    let end = range_arg_end(left).max(range_arg_end(right));
+    if end.saturating_sub(start).saturating_add(1) > MAX_READ_RANGE_LINES {
+        return false;
+    }
+    left.start <= range_arg_end(right).saturating_add(1)
+        && right.start <= range_arg_end(left).saturating_add(1)
+}
+
+fn range_arg_end(range: &RangeArg) -> usize {
+    range.start.saturating_add(range.lines.saturating_sub(1))
 }
 
 fn validate_batch_read_line_budget(ranges: &[RangeArg]) -> Result<()> {

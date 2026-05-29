@@ -3392,7 +3392,7 @@ fn runtime_rejects_oversized_batches() {
     let repo = tempfile::tempdir().unwrap();
     write(
         &repo.path().join("src/auth.rs"),
-        "pub struct SessionManager;\npub fn issue_token() {}\n",
+        "pub struct SessionManager;\npub fn issue_token() {}\n// line 3\n// line 4\n// line 5\n// line 6\n// line 7\n// line 8\n// line 9\n",
     );
     let runtime = ToolRuntime::default();
     let too_many_queries = (0..=MAX_BATCH_QUERIES)
@@ -3441,10 +3441,59 @@ fn runtime_rejects_oversized_batches() {
     let error = response.error.unwrap();
     assert!(error.contains("max 64"), "{error}");
 
+    let compacted_ranges = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("compacted-ranges"),
+        tool: "read_ranges".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "ranges": [
+                {"path": "src/auth.rs", "start": 1, "lines": 5},
+                {"path": "src/auth.rs", "start": 4, "lines": 5},
+                {"path": "src/auth.rs", "start": 1, "lines": 5}
+            ]
+        }),
+    });
+    assert!(
+        compacted_ranges.error.is_none(),
+        "{:?}",
+        compacted_ranges.error
+    );
+    let compacted_ranges = compacted_ranges.result.unwrap();
+    assert_eq!(compacted_ranges.as_array().unwrap().len(), 1);
+    assert_eq!(compacted_ranges[0]["start_line"], serde_json::json!(1));
+    assert_eq!(compacted_ranges[0]["end_line"], serde_json::json!(8));
+
+    let symbol_scoped_ranges = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("symbol-scoped-ranges"),
+        tool: "read_ranges".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "scope": "symbol",
+            "ranges": [
+                {"path": "src/auth.rs", "start": 2, "lines": 5},
+                {"path": "src/auth.rs", "start": 4, "lines": 5}
+            ]
+        }),
+    });
+    assert!(
+        symbol_scoped_ranges.error.is_none(),
+        "{:?}",
+        symbol_scoped_ranges.error
+    );
+    assert_eq!(
+        symbol_scoped_ranges
+            .result
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+
     let too_many_range_lines = (0..=(MAX_BATCH_READ_LINES / MAX_READ_RANGE_LINES))
-        .map(|_| {
+        .map(|index| {
             serde_json::json!({
-                "path": "src/auth.rs",
+                "path": format!("src/auth_{index}.rs"),
                 "start": 1,
                 "lines": MAX_READ_RANGE_LINES
             })

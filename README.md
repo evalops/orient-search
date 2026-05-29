@@ -135,7 +135,8 @@ The `read_range` / `read_ranges` protocol tools and `read-range` /
 `src/lib.rs:42`, copied `src/lib.rs:42: text` lines, `src/lib.rs#L42-L45`,
 Markdown links, and common hosted code links with fragment or query-string line
 anchors. Batch reads are capped by both range count and total requested lines,
-so large inspections should be split into smaller follow-up reads.
+so large inspections should be split into smaller follow-up reads. Identical
+entries and overlapping exact ranges are compacted before the line-budget check.
 
 ## Footprint
 

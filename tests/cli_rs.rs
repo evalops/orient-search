@@ -914,7 +914,7 @@ fn cli_rejects_oversized_batches() {
     let mut cmd = Command::cargo_bin("orient").unwrap();
     let mut args = vec!["read-ranges", "--repo", repo.path().to_str().unwrap()];
     let paths = (0..=(MAX_BATCH_READ_LINES / MAX_READ_RANGE_LINES))
-        .map(|_| format!("src/auth.rs:1:{MAX_READ_RANGE_LINES}"))
+        .map(|index| format!("src/auth_{index}.rs:1:{MAX_READ_RANGE_LINES}"))
         .collect::<Vec<_>>();
     args.extend(paths.iter().map(String::as_str));
     cmd.args(args)
@@ -1669,6 +1669,29 @@ fn cli_outputs_repo_map_and_reads_ranges() {
         .stdout(predicate::str::contains("issue_token"))
         .stdout(predicate::str::contains("\"start_line\":3"))
         .stdout(predicate::str::contains("issues_tokens"));
+
+    let mut compacted_read_ranges = Command::cargo_bin("orient").unwrap();
+    let compacted_output = compacted_read_ranges
+        .args([
+            "read-ranges",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--range",
+            "src/auth.rs:1:4",
+            "--range",
+            "src/auth.rs:3:4",
+            "--range",
+            "src/auth.rs:1:4",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let compacted: serde_json::Value = serde_json::from_slice(&compacted_output).unwrap();
+    assert_eq!(compacted.as_array().unwrap().len(), 1);
+    assert_eq!(compacted[0]["start_line"], serde_json::json!(1));
+    assert_eq!(compacted[0]["end_line"], serde_json::json!(6));
 
     let mut compact_symbol_read_ranges = Command::cargo_bin("orient").unwrap();
     compact_symbol_read_ranges

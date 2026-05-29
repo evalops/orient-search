@@ -2445,7 +2445,7 @@ fn run() -> Result<()> {
         } => {
             let mut results = Vec::new();
             let scope = RangeScope::from(scope);
-            for range in cli_ranges(paths, ranges, start, lines)? {
+            for range in cli_ranges(paths, ranges, start, lines, scope)? {
                 results.push(read_shard_range_scoped(
                     &index_dir,
                     &range.path,
@@ -2816,7 +2816,7 @@ fn run() -> Result<()> {
             let mut results = Vec::new();
             let scope = RangeScope::from(scope);
             if let Some(index_dir) = index_dir {
-                for range in cli_ranges(paths, ranges, start, lines)? {
+                for range in cli_ranges(paths, ranges, start, lines, scope)? {
                     results.push(read_shard_range_scoped(
                         &index_dir,
                         &range.path,
@@ -2827,7 +2827,7 @@ fn run() -> Result<()> {
                 }
             } else if let Some(index_path) = index {
                 let index = FastIndex::load(index_path)?;
-                for range in cli_ranges(paths, ranges, start, lines)? {
+                for range in cli_ranges(paths, ranges, start, lines, scope)? {
                     results.push(index.read_range_scoped(
                         &range.path,
                         range.start,
@@ -2836,7 +2836,7 @@ fn run() -> Result<()> {
                     )?);
                 }
             } else {
-                for range in cli_ranges(paths, ranges, start, lines)? {
+                for range in cli_ranges(paths, ranges, start, lines, scope)? {
                     results.push(read_file_range_scoped(
                         &repo,
                         &range.path,
@@ -3813,7 +3813,7 @@ fn run() -> Result<()> {
             let index = FastIndex::load(index)?;
             let mut results = Vec::new();
             let scope = RangeScope::from(scope);
-            for range in cli_ranges(paths, ranges, start, lines)? {
+            for range in cli_ranges(paths, ranges, start, lines, scope)? {
                 results.push(index.read_range_scoped(
                     &range.path,
                     range.start,
@@ -5310,6 +5310,7 @@ fn cli_ranges(
     mut ranges: Vec<CliRangeSpec>,
     start: usize,
     lines: usize,
+    default_scope: RangeScope,
 ) -> Result<Vec<CliRangeSpec>> {
     validate_cli_range_bounds(start, lines)?;
     ranges.extend(paths.into_iter().map(|path| {
@@ -5333,8 +5334,72 @@ fn cli_ranges(
             MAX_BATCH_RANGES
         );
     }
+    let ranges = compact_cli_ranges(ranges, default_scope);
     validate_cli_batch_read_line_budget(&ranges)?;
     Ok(ranges)
+}
+
+fn compact_cli_ranges(ranges: Vec<CliRangeSpec>, default_scope: RangeScope) -> Vec<CliRangeSpec> {
+    let mut compacted = Vec::with_capacity(ranges.len());
+    for mut range in ranges {
+        range.scope = Some(range.scope.unwrap_or(default_scope));
+        if try_dedupe_or_merge_cli_range(&mut compacted, &range) {
+            continue;
+        }
+        compacted.push(range);
+    }
+    compacted
+}
+
+fn try_dedupe_or_merge_cli_range(ranges: &mut [CliRangeSpec], range: &CliRangeSpec) -> bool {
+    if ranges
+        .iter()
+        .any(|existing| same_cli_range(existing, range))
+    {
+        return true;
+    }
+    if range.scope != Some(RangeScope::Exact) {
+        return false;
+    }
+    if let Some(existing) = ranges
+        .iter_mut()
+        .find(|existing| can_merge_cli_ranges(existing, range))
+    {
+        let start = existing.start.min(range.start);
+        let end = cli_range_end(existing).max(cli_range_end(range));
+        existing.start = start;
+        existing.lines = end.saturating_sub(start).saturating_add(1);
+        true
+    } else {
+        false
+    }
+}
+
+fn same_cli_range(left: &CliRangeSpec, right: &CliRangeSpec) -> bool {
+    left.path == right.path
+        && left.start == right.start
+        && left.lines == right.lines
+        && left.scope == right.scope
+}
+
+fn can_merge_cli_ranges(left: &CliRangeSpec, right: &CliRangeSpec) -> bool {
+    if left.scope != Some(RangeScope::Exact)
+        || right.scope != Some(RangeScope::Exact)
+        || left.path != right.path
+    {
+        return false;
+    }
+    let start = left.start.min(right.start);
+    let end = cli_range_end(left).max(cli_range_end(right));
+    if end.saturating_sub(start).saturating_add(1) > MAX_READ_RANGE_LINES {
+        return false;
+    }
+    left.start <= cli_range_end(right).saturating_add(1)
+        && right.start <= cli_range_end(left).saturating_add(1)
+}
+
+fn cli_range_end(range: &CliRangeSpec) -> usize {
+    range.start.saturating_add(range.lines.saturating_sub(1))
 }
 
 fn validate_cli_batch_read_line_budget(ranges: &[CliRangeSpec]) -> Result<()> {
