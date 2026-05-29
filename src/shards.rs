@@ -704,14 +704,11 @@ pub fn search_shards(
     let parsed = parse_query(query);
     let filters = merge_filters(filters.clone(), parsed.filters);
     let shard_query = query_text(&parsed.terms, &filters);
-    let query_tokens = unique_query_tokens(&shard_query);
-    let query_identifier = shard_query_identifier_prefilter(&shard_query, &query_tokens, &filters);
     let jobs = manifest
         .shards
         .into_iter()
         .filter_map(|shard| {
-            if !shard_sketch_may_match(&shard, &query_tokens, query_identifier.as_deref(), &filters)
-            {
+            if !shard_sketch_may_match_query(&shard, &shard_query, &filters) {
                 return None;
             }
             let scopes = shard_search_scopes(&shard, &filters);
@@ -1779,6 +1776,16 @@ pub(crate) fn shard_sketch_may_match(
             shard_sketch_token_may_match(sketch, token, filters, allow_trigram_fallback)
         })
     }
+}
+
+pub(crate) fn shard_sketch_may_match_query(
+    shard: &ShardEntry,
+    shard_query: &str,
+    filters: &SearchFilters,
+) -> bool {
+    let query_tokens = unique_query_tokens(shard_query);
+    let query_identifier = shard_query_identifier_prefilter(shard_query, &query_tokens, filters);
+    shard_sketch_may_match(shard, &query_tokens, query_identifier.as_deref(), filters)
 }
 
 fn shard_query_identifier_prefilter(

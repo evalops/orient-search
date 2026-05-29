@@ -19,7 +19,7 @@ use crate::shards::{
     append_shard_facet_repair_hints, build_shards_with_force, ensure_shards,
     filter_repo_map_by_prefix, filters_for_shard_scope, load_manifest, refresh_shards,
     related_query_without_shard_selectors, resolve_shard_path_from_manifest, shard_search_scopes,
-    shard_selection_miss_plan, shard_status,
+    shard_selection_miss_plan, shard_sketch_may_match_query, shard_status,
 };
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use anyhow::{Context, Result, anyhow};
@@ -4303,6 +4303,9 @@ impl ToolRuntime {
             .iter()
             .cloned()
             .filter_map(|shard| {
+                if !shard_sketch_may_match_query(&shard, &shard_query, &filters) {
+                    return None;
+                }
                 let scopes = shard_search_scopes(&shard, &filters);
                 (!scopes.is_empty()).then_some(ShardJob { shard, scopes })
             })
