@@ -100,7 +100,7 @@ const FD_PROSE_FILE_PATTERN: &str =
     r"^(README|Makefile|yarn\.lock|bun\.lock|bun\.lockb)$|\.(md|toml|json|ya?ml)$";
 static TOKEN_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[A-Za-z][A-Za-z0-9_]*").unwrap());
 static SYMBOL_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\b(?:(?:pub|export|default|declare|async)\s+)*(fn|function|class|interface|struct|enum|trait|type|const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)").unwrap()
+    Regex::new(r"\b(?:(?:pub(?:\([^)]*\))?|export|default|declare|async)\s+)*(fn|function|class|interface|struct|enum|trait|type|const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)").unwrap()
 });
 static PYTHON_SYMBOL_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^\s*(class|def|async\s+def)\s+([A-Za-z_][A-Za-z0-9_]*)").unwrap()
@@ -1954,6 +1954,7 @@ fn search_repo_ripgrep(
             query_tokens,
             query_phrases,
             filters.snippet,
+            filters.explain,
         );
     }
     Ok(Some(finalize_results_for_filters(results, limit, filters)))
@@ -2013,12 +2014,14 @@ fn refresh_result_snippets_from_files(
     query_tokens: &[String],
     query_phrases: &[String],
     snippet_mode: SnippetMode,
+    explain: bool,
 ) {
     for result in results {
         let text = fs::read_to_string(root.join(&result.path)).unwrap_or_default();
         if text.contains('\0') {
             continue;
         }
+        refresh_result_symbol_scores_from_text(result, &text, query_tokens, explain);
         let snippet = best_snippet_for_path_with_phrases(
             &result.path,
             &text,
@@ -2032,6 +2035,52 @@ fn refresh_result_snippets_from_files(
             result.match_lines =
                 ranked_match_lines_from_text(&result.path, &text, query_tokens, query_phrases, 16);
         }
+    }
+}
+
+fn refresh_result_symbol_scores_from_text(
+    result: &mut SearchResult,
+    text: &str,
+    query_tokens: &[String],
+    explain: bool,
+) {
+    if query_tokens.is_empty() {
+        return;
+    }
+    let Some(language) = language_for(Path::new(&result.path)) else {
+        return;
+    };
+    let query_name = query_tokens.join("");
+    let mut reasons = result
+        .reason
+        .trim_start_matches("matched ")
+        .split(", ")
+        .filter(|value| !value.is_empty())
+        .map(String::from)
+        .collect::<Vec<_>>();
+    let mut score = 0.0;
+    let mut signals = Vec::new();
+    for symbol in extract_symbols(&result.path, text, &language) {
+        apply_symbol_match(
+            &symbol.name,
+            query_tokens,
+            &query_name,
+            &mut score,
+            &mut reasons,
+            &mut signals,
+        );
+    }
+    if score == 0.0 {
+        return;
+    }
+    result.score = round4(result.score + score);
+    reasons.sort();
+    result.reason = format!("matched {}", reasons.join(", "));
+    if explain {
+        result
+            .explanation
+            .get_or_insert_with(Vec::new)
+            .extend(signals);
     }
 }
 
@@ -4461,6 +4510,13 @@ fn apply_symbol_match(
     signals: &mut Vec<RankSignal>,
 ) {
     let normalized = normalize_token(symbol_name);
+    if reasons.iter().any(|reason| {
+        reason
+            .strip_prefix("symbol:")
+            .is_some_and(|existing| normalize_token(existing) == normalized)
+    }) {
+        return;
+    }
     let symbol_tokens = tokenize(symbol_name);
     let Some((kind, amount)) =
         symbol_query_match_score(&normalized, &symbol_tokens, query_tokens, query_name)
@@ -4482,7 +4538,15 @@ pub(crate) fn symbol_query_match_score(
         || (query_tokens.len() == 1 && query_tokens[0] == symbol_normalized)
         || (symbol_tokens.len() > 1 && query_tokens.iter().any(|token| token == symbol_normalized))
     {
-        return Some(("symbol_exact", 25.0));
+        return Some(("symbol_exact", 44.0));
+    }
+    if query_tokens.len() > 1
+        && (symbol_normalized.starts_with(query_name) || symbol_normalized.ends_with(query_name))
+    {
+        return Some(("symbol_boundary_contains", 36.0));
+    }
+    if query_tokens.len() > 1 && symbol_normalized.contains(query_name) {
+        return Some(("symbol_contains", 12.0));
     }
     let overlap = symbol_tokens
         .iter()

@@ -1352,6 +1352,99 @@ fn fallback_search_boosts_exact_symbols() {
 }
 
 #[test]
+fn multi_token_identifier_fragments_boost_containing_symbols() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("docs/retry.md"),
+        "primary retry result primary retry result primary retry result notes.\n",
+    );
+    write(
+        &repo.path().join("tests/retry_test.rs"),
+        "fn cli_primary_retry_result_mentions() {}\n",
+    );
+    write(
+        &repo.path().join("src/server.rs"),
+        "pub(crate) fn search_auto_primary_retry_result() {}\n",
+    );
+
+    let filters = SearchFilters {
+        explain: true,
+        ..SearchFilters::default()
+    };
+    let fallback =
+        search_repo_fast_filtered(repo.path(), "primary_retry_result", 10, &filters).unwrap();
+    assert_eq!(fallback[0].path, "src/server.rs");
+    assert!(
+        fallback[0]
+            .explanation
+            .as_ref()
+            .unwrap()
+            .iter()
+            .any(|signal| {
+                signal.kind == "symbol_boundary_contains"
+                    && signal.value == "search_auto_primary_retry_result"
+            }),
+        "{fallback:?}"
+    );
+
+    let index = FastIndex::build(repo.path()).unwrap();
+    let indexed = index
+        .search_filtered("primary_retry_result", 10, &filters)
+        .unwrap();
+    assert_eq!(indexed[0].path, "src/server.rs");
+    assert!(
+        indexed[0]
+            .explanation
+            .as_ref()
+            .unwrap()
+            .iter()
+            .any(|signal| {
+                signal.kind == "symbol_boundary_contains"
+                    && signal.value == "search_auto_primary_retry_result"
+            }),
+        "{indexed:?}"
+    );
+}
+
+#[test]
+fn fallback_refresh_scores_symbols_beyond_ripgrep_match_cap() {
+    let repo = tempfile::tempdir().unwrap();
+    let mut noisy = String::new();
+    for index in 0..40 {
+        noisy.push_str(&format!("// symbol query padding {index}\n"));
+    }
+    noisy.push_str("pub(crate) fn symbol_query_match_score() {}\n");
+    write(&repo.path().join("src/noisy.rs"), &noisy);
+    write(
+        &repo.path().join("src/other.rs"),
+        "pub(crate) fn unrelated() {}\n// symbol query match once\n",
+    );
+
+    let filters = SearchFilters {
+        explain: true,
+        ..SearchFilters::default()
+    };
+    let results = search_repo_fast_filtered(repo.path(), "symbol_query_match", 10, &filters)
+        .expect("fallback search succeeds");
+    let noisy_result = results
+        .iter()
+        .find(|result| result.path == "src/noisy.rs")
+        .expect("noisy result survives strict phrase verification");
+    assert!(
+        noisy_result
+            .explanation
+            .as_ref()
+            .unwrap()
+            .iter()
+            .any(|signal| {
+                signal.kind == "symbol_boundary_contains"
+                    && signal.value == "symbol_query_match_score"
+            }),
+        "{noisy_result:?}"
+    );
+}
+
+#[test]
 fn generated_bundle_assets_are_demoted_unless_requested() {
     let repo = tempfile::tempdir().unwrap();
     write(
