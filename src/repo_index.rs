@@ -4719,6 +4719,7 @@ fn query_plan_cli_command_for_request(
     let mut parts = vec!["orient".to_string(), "search-plan".to_string()];
     append_target_cli_args(&mut parts, args);
     append_search_filter_cli_args(&mut parts, args);
+    parts.push("--query".to_string());
     parts.push(shell_quote(query));
     Some(parts.join(" "))
 }
@@ -4740,6 +4741,7 @@ fn search_cli_command_for_request(
     append_search_filter_cli_args(&mut parts, args);
     append_scalar_cli_arg(&mut parts, args, "context_lines", "--context-lines");
     append_bool_cli_arg(&mut parts, args, "diagnose", "--diagnose");
+    parts.push("--query".to_string());
     parts.push(shell_quote(query));
     Some(parts.join(" "))
 }
@@ -5762,6 +5764,39 @@ mod tests {
     }
 
     #[test]
+    fn search_tool_requests_include_query_flag_cli_hints() {
+        let request = ResultToolRequest::new(
+            "search_code",
+            serde_json::json!({
+                "repo": "/tmp/my repo",
+                "query": "issue token",
+                "limit": 3
+            }),
+        );
+
+        assert_eq!(
+            request.cli.as_deref(),
+            Some("orient search --repo '/tmp/my repo' --limit 3 --query 'issue token'")
+        );
+
+        let plan_request = ResultToolRequest::new(
+            "indexed_query_plan",
+            serde_json::json!({
+                "index": "/tmp/orient.index",
+                "query": "SessionManager definitely_missing",
+                "path": "src"
+            }),
+        );
+
+        assert_eq!(
+            plan_request.cli.as_deref(),
+            Some(
+                "orient search-plan --index /tmp/orient.index --path src --query 'SessionManager definitely_missing'"
+            )
+        );
+    }
+
+    #[test]
     fn batch_read_tool_requests_use_compact_ranges() {
         let request = ResultToolRequest::new(
             "read_index_ranges",
@@ -5871,7 +5906,7 @@ mod tests {
         assert_eq!(
             plan.cli.as_deref(),
             Some(
-                "orient search-plan --repo '/tmp/my repo' --path src/auth --language rust --require-all 'symbol:SessionManager issue token'"
+                "orient search-plan --repo '/tmp/my repo' --path src/auth --language rust --require-all --query 'symbol:SessionManager issue token'"
             )
         );
 
@@ -5889,7 +5924,7 @@ mod tests {
         assert_eq!(
             retry.cli.as_deref(),
             Some(
-                "orient search --repo '/tmp/my repo' --limit 5 --language rust --explain 'mode:any issue token'"
+                "orient search --repo '/tmp/my repo' --limit 5 --language rust --explain --query 'mode:any issue token'"
             )
         );
     }
