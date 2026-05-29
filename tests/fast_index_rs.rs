@@ -3126,10 +3126,10 @@ fn shard_manifest_sketch_prunes_impossible_cold_shards() {
     build_shards(&[hit_repo.clone(), miss_repo], shard_dir.path()).unwrap();
     let manifest: serde_json::Value =
         serde_json::from_slice(&fs::read(shard_dir.path().join("manifest.json")).unwrap()).unwrap();
+    assert!(manifest["shards"][0].get("sketch").is_none());
+    assert!(shard_dir.path().join("manifest.bin").exists());
     assert!(shard_dir.path().join("manifest.prefilter.bin").exists());
     assert!(shard_dir.path().join("manifest.route.bin").exists());
-    assert!(manifest["shards"][0]["sketch"]["exact_hashes"].is_array());
-    assert!(manifest["shards"][0]["sketch"]["trigram_bits"].is_array());
     let hit_index = manifest["shards"]
         .as_array()
         .unwrap()

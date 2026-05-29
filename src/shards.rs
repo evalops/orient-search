@@ -20,7 +20,7 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const SHARD_MANIFEST_VERSION: u32 = 1;
-const SHARD_MANIFEST_SIDECAR_VERSION: u32 = 1;
+const SHARD_MANIFEST_SIDECAR_VERSION: u32 = 2;
 const SHARD_MANIFEST_PREFILTER_VERSION: u32 = 1;
 const SHARD_MANIFEST_ROUTE_VERSION: u32 = 6;
 const SHARD_MANIFEST_FILE: &str = "manifest.json";
@@ -49,7 +49,23 @@ pub struct ShardManifest {
 struct ShardManifestSidecar {
     version: u32,
     json_fingerprint: ManifestFileFingerprint,
-    manifest: ShardManifest,
+    manifest: ShardManifestSidecarData,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct ShardManifestSidecarData {
+    version: u32,
+    shards: Vec<ShardManifestSidecarEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct ShardManifestSidecarEntry {
+    name: String,
+    root: PathBuf,
+    index: String,
+    aliases: Vec<ShardRouteAlias>,
+    git: Option<ShardRouteGitMetadata>,
+    sketch: Option<ShardQuerySketch>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -140,17 +156,19 @@ pub struct ShardEntry {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ShardQuerySketch {
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub exact_hashes: Vec<u32>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub trigram_hashes: Vec<u32>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub exact_bits: Vec<u64>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub trigram_bits: Vec<u64>,
-    #[serde(skip)]
+    #[serde(default)]
     pub substring_bits: Vec<u64>,
+    #[serde(default)]
     pub symbol_kind_bits: Vec<u64>,
+    #[serde(default)]
     pub filter_bits: Vec<u64>,
 }
 
@@ -199,6 +217,68 @@ impl ShardRouteEntry {
                 .collect(),
             git: self.git.map(ShardRouteGitMetadata::into_git),
             sketch: None,
+        }
+    }
+}
+
+impl ShardManifestSidecarData {
+    fn from_manifest(manifest: &ShardManifest) -> Self {
+        Self {
+            version: manifest.version,
+            shards: manifest
+                .shards
+                .iter()
+                .map(ShardManifestSidecarEntry::from_shard)
+                .collect(),
+        }
+    }
+
+    fn into_manifest(self) -> ShardManifest {
+        ShardManifest {
+            version: self.version,
+            shards: self
+                .shards
+                .into_iter()
+                .map(ShardManifestSidecarEntry::into_shard)
+                .collect(),
+        }
+    }
+}
+
+impl ShardManifestSidecarEntry {
+    fn from_shard(shard: &ShardEntry) -> Self {
+        Self {
+            name: shard.name.clone(),
+            root: shard.root.clone(),
+            index: shard.index.clone(),
+            aliases: shard
+                .aliases
+                .iter()
+                .map(|alias| ShardRouteAlias {
+                    name: alias.name.clone(),
+                    path_prefix: alias.path_prefix.clone(),
+                })
+                .collect(),
+            git: shard.git.as_ref().map(ShardRouteGitMetadata::from_git),
+            sketch: shard.sketch.clone(),
+        }
+    }
+
+    fn into_shard(self) -> ShardEntry {
+        ShardEntry {
+            name: self.name,
+            root: self.root,
+            index: self.index,
+            aliases: self
+                .aliases
+                .into_iter()
+                .map(|alias| ShardAlias {
+                    name: alias.name,
+                    path_prefix: alias.path_prefix,
+                })
+                .collect(),
+            git: self.git.map(ShardRouteGitMetadata::into_git),
+            sketch: self.sketch,
         }
     }
 }
@@ -2613,7 +2693,7 @@ fn load_manifest_sidecar(
     {
         return Ok(None);
     }
-    let manifest = sidecar.manifest;
+    let manifest = sidecar.manifest.into_manifest();
     if manifest.version != SHARD_MANIFEST_VERSION || validate_manifest(&manifest).is_err() {
         return Ok(None);
     }
@@ -2818,7 +2898,8 @@ fn save_manifest_with_mode(
 ) -> Result<()> {
     guard_manifest_write_preserves_existing_roots(index_dir, manifest, mode)?;
     let manifest_path = index_dir.join(SHARD_MANIFEST_FILE);
-    let bytes = serde_json::to_vec_pretty(manifest)?;
+    let json_manifest = slim_manifest_for_json(manifest);
+    let bytes = serde_json::to_vec_pretty(&json_manifest)?;
     atomic_write(&manifest_path, &bytes)
         .with_context(|| format!("write shard manifest {}", index_dir.display()))?;
     save_manifest_sidecar(index_dir, manifest)?;
@@ -2826,12 +2907,20 @@ fn save_manifest_with_mode(
     save_manifest_route(index_dir, manifest)
 }
 
+fn slim_manifest_for_json(manifest: &ShardManifest) -> ShardManifest {
+    let mut manifest = manifest.clone();
+    for shard in &mut manifest.shards {
+        shard.sketch = None;
+    }
+    manifest
+}
+
 fn save_manifest_sidecar(index_dir: &Path, manifest: &ShardManifest) -> Result<()> {
     let manifest_path = index_dir.join(SHARD_MANIFEST_FILE);
     let sidecar = ShardManifestSidecar {
         version: SHARD_MANIFEST_SIDECAR_VERSION,
         json_fingerprint: manifest_file_fingerprint(&manifest_path)?,
-        manifest: manifest.clone(),
+        manifest: ShardManifestSidecarData::from_manifest(manifest),
     };
     let bytes = bincode::serialize(&sidecar)?;
     atomic_write(&index_dir.join(SHARD_MANIFEST_SIDECAR_FILE), &bytes)
@@ -3345,6 +3434,43 @@ mod tests {
     }
 
     #[test]
+    fn manifest_json_omits_heavy_sketches_but_sidecar_preserves_them() {
+        let dir = tempfile::tempdir().unwrap();
+        let auth = dir.path().join("auth");
+        fs::create_dir_all(&auth).unwrap();
+
+        let mut manifest = test_manifest(&auth, None);
+        manifest.shards[0].sketch = Some(ShardQuerySketch {
+            exact_hashes: vec![sketch_fingerprint("routeprobe")],
+            trigram_hashes: vec![sketch_fingerprint("rou")],
+            exact_bits: Vec::new(),
+            trigram_bits: Vec::new(),
+            substring_bits: substring_bits_for("routeprobe"),
+            symbol_kind_bits: vec![1],
+            filter_bits: vec![2],
+        });
+        save_manifest(dir.path(), &manifest).unwrap();
+
+        let manifest_json = fs::read_to_string(dir.path().join(SHARD_MANIFEST_FILE)).unwrap();
+        assert!(!manifest_json.contains("\"sketch\""), "{manifest_json}");
+        let sidecar = bincode::deserialize::<ShardManifestSidecar>(
+            &fs::read(dir.path().join(SHARD_MANIFEST_SIDECAR_FILE)).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(sidecar.manifest.clone().into_manifest(), manifest);
+        assert_eq!(
+            sidecar.json_fingerprint,
+            manifest_file_fingerprint(&dir.path().join(SHARD_MANIFEST_FILE)).unwrap()
+        );
+        assert_eq!(load_manifest(dir.path()).unwrap(), manifest);
+
+        fs::write(dir.path().join(SHARD_MANIFEST_SIDECAR_FILE), b"not bincode").unwrap();
+        let fallback = load_manifest(dir.path()).unwrap();
+        assert_eq!(fallback, slim_manifest_for_json(&manifest));
+        assert!(fallback.shards[0].sketch.is_none());
+    }
+
+    #[test]
     fn manifest_sidecar_is_ignored_when_json_fingerprint_changes() {
         let dir = tempfile::tempdir().unwrap();
         let auth = dir.path().join("auth");
@@ -3377,7 +3503,7 @@ mod tests {
             version: SHARD_MANIFEST_SIDECAR_VERSION,
             json_fingerprint: manifest_file_fingerprint(&dir.path().join(SHARD_MANIFEST_FILE))
                 .unwrap(),
-            manifest: invalid_manifest,
+            manifest: ShardManifestSidecarData::from_manifest(&invalid_manifest),
         };
         fs::write(
             dir.path().join(SHARD_MANIFEST_SIDECAR_FILE),

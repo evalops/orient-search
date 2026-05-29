@@ -44,6 +44,11 @@ Useful counters:
   shard indexes
 - `largest_shards`: largest shard indexes in a shard directory
 
+`manifest.json` is intentionally slim and keeps only repo identity, roots,
+aliases, git metadata, and index filenames. Dense sketches and route filters
+live in binary sidecars so agents do not pay JSON parse costs for hot-path
+searches.
+
 ## Defaults
 
 Use `--family-limit` when discovering workspaces with repeated clones or
