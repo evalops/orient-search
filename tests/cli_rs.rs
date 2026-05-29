@@ -242,8 +242,10 @@ fn cli_doctor_strict_fails_on_unreadable_index() {
 fn cli_scores_adoption_eval_transcripts() {
     let temp = tempfile::tempdir().unwrap();
     let tasks = temp.path().join("tasks.jsonl");
-    let baseline = temp.path().join("auth-token-refresh.jsonl");
-    let orient = temp.path().join("orient-auth-token-refresh.jsonl");
+    let baseline_dir = temp.path().join("baseline");
+    let orient_dir = temp.path().join("orient");
+    let baseline = baseline_dir.join("auth-token-refresh.jsonl");
+    let orient = orient_dir.join("auth-token-refresh.jsonl");
     write(
         &tasks,
         r#"{"id":"auth-token-refresh","relevant_files":["src/auth/session.rs","tests/session_refresh.rs"]}
@@ -274,9 +276,9 @@ fn cli_scores_adoption_eval_transcripts() {
         "--tasks",
         tasks.to_str().unwrap(),
         "--baseline-transcript",
-        baseline.to_str().unwrap(),
+        baseline_dir.to_str().unwrap(),
         "--orient-transcript",
-        orient.to_str().unwrap(),
+        orient_dir.to_str().unwrap(),
         "--format",
         "json",
     ])
@@ -303,9 +305,9 @@ fn cli_scores_adoption_eval_transcripts() {
         "--tasks",
         tasks.to_str().unwrap(),
         "--baseline-transcript",
-        baseline.to_str().unwrap(),
+        baseline_dir.to_str().unwrap(),
         "--orient-transcript",
-        orient.to_str().unwrap(),
+        orient_dir.to_str().unwrap(),
     ])
     .assert()
     .success()

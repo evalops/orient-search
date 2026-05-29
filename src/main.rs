@@ -1413,10 +1413,10 @@ fn load_eval_run(
     task_by_id: &HashMap<String, EvalTask>,
 ) -> Result<HashMap<String, EvalTaskMetrics>> {
     let mut metrics = HashMap::new();
-    for path in paths {
-        let events = load_eval_events(path)
+    for path in expand_eval_transcript_inputs(paths)? {
+        let events = load_eval_events(&path)
             .with_context(|| format!("loading transcript {}", path.display()))?;
-        let task_id = transcript_task_id(path, &events);
+        let task_id = transcript_task_id(&path, &events);
         let task = task_by_id.get(&task_id).ok_or_else(|| {
             anyhow::anyhow!(
                 "transcript {} maps to unknown task id `{}`",
@@ -1424,9 +1424,50 @@ fn load_eval_run(
                 task_id
             )
         })?;
-        metrics.insert(task_id.clone(), score_eval_transcript(task, events));
+        if metrics
+            .insert(task_id.clone(), score_eval_transcript(task, events))
+            .is_some()
+        {
+            bail!("multiple transcripts map to task id `{task_id}`");
+        }
     }
     Ok(metrics)
+}
+
+fn expand_eval_transcript_inputs(paths: &[PathBuf]) -> Result<Vec<PathBuf>> {
+    let mut expanded = Vec::new();
+    for path in paths {
+        if path.is_dir() {
+            collect_eval_transcripts_from_dir(path, &mut expanded)?;
+        } else {
+            expanded.push(path.clone());
+        }
+    }
+    expanded.sort();
+    Ok(expanded)
+}
+
+fn collect_eval_transcripts_from_dir(dir: &Path, expanded: &mut Vec<PathBuf>) -> Result<()> {
+    let mut entries = fs::read_dir(dir)
+        .with_context(|| format!("reading transcript directory {}", dir.display()))?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    entries.sort_by_key(|entry| entry.path());
+    for entry in entries {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_eval_transcripts_from_dir(&path, expanded)?;
+        } else if path_is_json_like(&path) {
+            expanded.push(path);
+        }
+    }
+    Ok(())
+}
+
+fn path_is_json_like(path: &Path) -> bool {
+    matches!(
+        path.extension().and_then(|extension| extension.to_str()),
+        Some("json") | Some("jsonl")
+    )
 }
 
 fn load_eval_events(path: &Path) -> Result<Vec<EvalTranscriptEvent>> {

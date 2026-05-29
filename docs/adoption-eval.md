@@ -105,5 +105,6 @@ orient eval-adoption \
 ```
 
 Shell globs can pass many transcript paths by repeating `--baseline-transcript`
-and `--orient-transcript`. `--format text` prints a compact local summary for
-quick iteration.
+and `--orient-transcript`. Passing a directory recursively loads `.json` and
+`.jsonl` transcripts in deterministic path order. `--format text` prints a
+compact local summary for quick iteration.

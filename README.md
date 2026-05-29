@@ -89,8 +89,8 @@ wall-clock time.
 ```bash
 orient eval-adoption \
   --tasks eval/tasks.jsonl \
-  --baseline-transcript eval/baseline/auth-token-refresh.jsonl \
-  --orient-transcript eval/orient/auth-token-refresh.jsonl
+  --baseline-transcript eval/baseline \
+  --orient-transcript eval/orient
 ```
 
 ## Docs
