@@ -3061,7 +3061,7 @@ fn shard_manifest_sketch_prunes_impossible_cold_shards() {
     let manifest: serde_json::Value =
         serde_json::from_slice(&fs::read(shard_dir.path().join("manifest.json")).unwrap()).unwrap();
     assert!(manifest["shards"][0]["sketch"]["exact_hashes"].is_array());
-    assert!(manifest["shards"][0]["sketch"]["trigram_hashes"].is_array());
+    assert!(manifest["shards"][0]["sketch"]["trigram_bits"].is_array());
     let miss_index = manifest["shards"]
         .as_array()
         .unwrap()
@@ -3088,6 +3088,15 @@ fn shard_manifest_sketch_prunes_impossible_cold_shards() {
         result_paths(&substring_results),
         vec!["hit-service/src/lib.rs"]
     );
+
+    let absent_identifier_results = search_shards(
+        shard_dir.path(),
+        "definitely_absent_orient_prefilter_probe",
+        10,
+        &SearchFilters::default(),
+    )
+    .unwrap();
+    assert!(absent_identifier_results.is_empty());
 }
 
 #[test]

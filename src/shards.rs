@@ -24,8 +24,10 @@ const SHARD_WRITE_LOCK_FILE: &str = ".orient-shards.lock";
 const SHARD_WRITE_LOCK_TIMEOUT: Duration = Duration::from_secs(120);
 const SHARD_WRITE_LOCK_STALE_AFTER: Duration = Duration::from_secs(30 * 60);
 const SHARD_WRITE_LOCK_RETRY: Duration = Duration::from_millis(25);
+const SHARD_TRIGRAM_SKETCH_WORDS: usize = 512;
 const SHARD_KIND_SKETCH_WORDS: usize = 16;
 const SHARD_FILTER_SKETCH_WORDS: usize = 64;
+const SHARD_SUBSTRING_PREFILTER_MAX_TOKEN_CHARS: usize = 20;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ShardManifest {
@@ -703,11 +705,13 @@ pub fn search_shards(
     let filters = merge_filters(filters.clone(), parsed.filters);
     let shard_query = query_text(&parsed.terms, &filters);
     let query_tokens = unique_query_tokens(&shard_query);
+    let query_identifier = shard_query_identifier_prefilter(&shard_query, &query_tokens, &filters);
     let jobs = manifest
         .shards
         .into_iter()
         .filter_map(|shard| {
-            if !shard_sketch_may_match(&shard, &query_tokens, &filters) {
+            if !shard_sketch_may_match(&shard, &query_tokens, query_identifier.as_deref(), &filters)
+            {
                 return None;
             }
             let scopes = shard_search_scopes(&shard, &filters);
@@ -1704,7 +1708,7 @@ fn shard_query_sketch(index: &FastIndex) -> ShardQuerySketch {
     let mut exact_hashes = Vec::with_capacity(
         index.postings.len() + index.path_postings.len() + index.symbol_postings.len(),
     );
-    let mut trigram_hashes = Vec::with_capacity(index.trigram_postings.len());
+    let mut trigram_bits = vec![0; SHARD_TRIGRAM_SKETCH_WORDS];
     let mut symbol_kind_bits = vec![0; SHARD_KIND_SKETCH_WORDS];
     let mut filter_bits = vec![0; SHARD_FILTER_SKETCH_WORDS];
 
@@ -1716,13 +1720,14 @@ fn shard_query_sketch(index: &FastIndex) -> ShardQuerySketch {
     {
         exact_hashes.push(sketch_fingerprint(key));
     }
+    for file in &index.files {
+        push_content_identifier_hashes(&file.content, &mut exact_hashes);
+    }
     exact_hashes.sort_unstable();
     exact_hashes.dedup();
     for key in index.trigram_postings.keys() {
-        trigram_hashes.push(sketch_fingerprint(key));
+        sketch_insert(&mut trigram_bits, key);
     }
-    trigram_hashes.sort_unstable();
-    trigram_hashes.dedup();
     for key in index.symbol_kind_postings.keys() {
         sketch_insert(&mut symbol_kind_bits, key);
     }
@@ -1732,9 +1737,9 @@ fn shard_query_sketch(index: &FastIndex) -> ShardQuerySketch {
 
     ShardQuerySketch {
         exact_hashes,
-        trigram_hashes,
+        trigram_hashes: Vec::new(),
         exact_bits: Vec::new(),
-        trigram_bits: Vec::new(),
+        trigram_bits,
         symbol_kind_bits,
         filter_bits,
     }
@@ -1743,6 +1748,7 @@ fn shard_query_sketch(index: &FastIndex) -> ShardQuerySketch {
 pub(crate) fn shard_sketch_may_match(
     shard: &ShardEntry,
     query_tokens: &[String],
+    query_identifier: Option<&str>,
     filters: &SearchFilters,
 ) -> bool {
     let Some(sketch) = &shard.sketch else {
@@ -1755,9 +1761,15 @@ pub(crate) fn shard_sketch_may_match(
     if query_tokens.is_empty() {
         return true;
     }
+    if let Some(identifier) = query_identifier {
+        if !shard_sketch_exact_may_contain(sketch, identifier) {
+            return false;
+        }
+    }
 
     let require_all = filters.require_all || (query_tokens.len() > 1 && !filters.match_any);
-    let allow_trigram_fallback = query_tokens.len() == 1 || filters.match_any;
+    let allow_trigram_fallback = filters.match_any
+        || (query_tokens.len() == 1 && shard_allows_substring_prefilter(&query_tokens[0]));
     if require_all {
         query_tokens.iter().all(|token| {
             shard_sketch_token_may_match(sketch, token, filters, allow_trigram_fallback)
@@ -1767,6 +1779,18 @@ pub(crate) fn shard_sketch_may_match(
             shard_sketch_token_may_match(sketch, token, filters, allow_trigram_fallback)
         })
     }
+}
+
+fn shard_query_identifier_prefilter(
+    shard_query: &str,
+    query_tokens: &[String],
+    filters: &SearchFilters,
+) -> Option<String> {
+    if filters.match_any || query_tokens.len() <= 1 || !shard_query.contains('_') {
+        return None;
+    }
+    let normalized = normalize_token(shard_query);
+    (normalized.chars().count() > SHARD_SUBSTRING_PREFILTER_MAX_TOKEN_CHARS).then_some(normalized)
 }
 
 fn shard_sketch_token_may_match(
@@ -1787,6 +1811,38 @@ fn shard_sketch_token_may_match(
         && trigrams
             .iter()
             .all(|trigram| shard_sketch_trigram_may_contain(sketch, trigram))
+}
+
+fn shard_allows_substring_prefilter(token: &str) -> bool {
+    token.chars().count() <= SHARD_SUBSTRING_PREFILTER_MAX_TOKEN_CHARS && !token.contains('_')
+}
+
+fn push_content_identifier_hashes(content: &str, exact_hashes: &mut Vec<u32>) {
+    let mut identifier = String::new();
+    for ch in content.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '_' {
+            identifier.push(ch);
+            continue;
+        }
+        push_identifier_hash(&mut identifier, exact_hashes);
+    }
+    push_identifier_hash(&mut identifier, exact_hashes);
+}
+
+fn push_identifier_hash(identifier: &mut String, exact_hashes: &mut Vec<u32>) {
+    if identifier.len() > 1
+        && identifier.contains('_')
+        && identifier
+            .bytes()
+            .next()
+            .is_some_and(|byte| byte.is_ascii_alphabetic())
+    {
+        let normalized = normalize_token(identifier);
+        if normalized.chars().count() > SHARD_SUBSTRING_PREFILTER_MAX_TOKEN_CHARS {
+            exact_hashes.push(sketch_fingerprint(&normalized));
+        }
+    }
+    identifier.clear();
 }
 
 fn shard_sketch_exact_may_contain(sketch: &ShardQuerySketch, token: &str) -> bool {
