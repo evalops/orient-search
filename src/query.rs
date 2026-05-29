@@ -104,8 +104,20 @@ fn apply_filter(filters: &mut SearchFilters, token: &str, negated: bool) -> bool
     }
 
     match (negated, key.as_str()) {
-        (false, "file" | "filename" | "file_name" | "basename") => filters.file = Some(value),
-        (false, "path" | "dir" | "directory" | "folder") => filters.path = Some(value),
+        (false, "file" | "filename" | "file_name" | "basename") => {
+            let (value, target_line) = strip_location_suffix(&value);
+            if target_line.is_some() && value.contains('/') {
+                filters.path = Some(value);
+            } else {
+                filters.file = Some(value);
+            }
+            filters.target_line = target_line.or(filters.target_line);
+        }
+        (false, "path" | "dir" | "directory" | "folder") => {
+            let (value, target_line) = strip_location_suffix(&value);
+            filters.path = Some(value);
+            filters.target_line = target_line.or(filters.target_line);
+        }
         (false, "lang" | "language") => filters.language = Some(normalize_language_filter(&value)),
         (false, "ext" | "extension") => {
             filters.extension = Some(value.trim_start_matches('.').to_ascii_lowercase())
@@ -224,7 +236,8 @@ fn infer_path_like_single_term(
         return;
     }
 
-    let term = terms[0].trim().replace('\\', "/");
+    let (term, target_line) = strip_location_suffix(&terms[0]);
+    let term = term.trim().replace('\\', "/");
     if term.is_empty()
         || term.chars().any(char::is_whitespace)
         || term.starts_with('.')
@@ -235,6 +248,7 @@ fn infer_path_like_single_term(
 
     if term.contains('/') {
         filters.path = Some(term);
+        filters.target_line = target_line;
         terms.clear();
         filters.require_all = false;
         return;
@@ -242,9 +256,39 @@ fn infer_path_like_single_term(
 
     if looks_like_file_name_query(&term) {
         filters.file = Some(term);
+        filters.target_line = target_line;
         terms.clear();
         filters.require_all = false;
     }
+}
+
+fn strip_location_suffix(value: &str) -> (String, Option<usize>) {
+    let normalized = value.trim().replace('\\', "/");
+    let Some((prefix, column_or_line)) = split_numeric_suffix(&normalized) else {
+        return (normalized, None);
+    };
+    let (path, line) = split_numeric_suffix(prefix).unwrap_or((prefix, column_or_line));
+    if looks_like_location_path(path) {
+        (path.to_string(), Some(line))
+    } else {
+        (normalized, None)
+    }
+}
+
+fn split_numeric_suffix(value: &str) -> Option<(&str, usize)> {
+    let (prefix, suffix) = value.rsplit_once(':')?;
+    if suffix.is_empty() || !suffix.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    let number = suffix.parse::<usize>().ok()?;
+    (number > 0).then_some((prefix, number))
+}
+
+fn looks_like_location_path(path: &str) -> bool {
+    !path.is_empty()
+        && !path.contains("://")
+        && !path.ends_with(':')
+        && (path.contains('/') || looks_like_file_name_query(path))
 }
 
 fn looks_like_file_name_query(term: &str) -> bool {
@@ -549,6 +593,9 @@ pub fn merge_filters(mut base: SearchFilters, parsed: SearchFilters) -> SearchFi
     if parsed.code.is_some() {
         base.code = parsed.code;
     }
+    if parsed.target_line.is_some() {
+        base.target_line = parsed.target_line;
+    }
     if base.match_any || parsed.match_any {
         base.match_any |= parsed.match_any;
         base.require_all = false;
@@ -655,6 +702,27 @@ mod tests {
     }
 
     #[test]
+    fn parses_location_suffixes_on_explicit_file_and_path_filters() {
+        let path = parse_query("path:src/server.rs:42:9");
+        assert!(path.terms.is_empty());
+        assert_eq!(path.filters.path.as_deref(), Some("src/server.rs"));
+        assert_eq!(path.filters.target_line, Some(42));
+
+        let file = parse_query("file:Cargo.toml:12");
+        assert!(file.terms.is_empty());
+        assert_eq!(file.filters.file.as_deref(), Some("Cargo.toml"));
+        assert_eq!(file.filters.target_line, Some(12));
+
+        let accidental_path = parse_query("file:src/server.rs:42");
+        assert!(accidental_path.terms.is_empty());
+        assert_eq!(
+            accidental_path.filters.path.as_deref(),
+            Some("src/server.rs")
+        );
+        assert_eq!(accidental_path.filters.target_line, Some(42));
+    }
+
+    #[test]
     fn infers_bare_filename_and_path_queries_as_fast_filters() {
         let manifest = parse_query("Cargo.toml");
         assert!(manifest.terms.is_empty());
@@ -664,10 +732,27 @@ mod tests {
         let source_path = parse_query("src/server.rs");
         assert!(source_path.terms.is_empty());
         assert_eq!(source_path.filters.path.as_deref(), Some("src/server.rs"));
+        assert_eq!(source_path.filters.target_line, None);
+
+        let source_location = parse_query("src/server.rs:42:9");
+        assert!(source_location.terms.is_empty());
+        assert_eq!(
+            source_location.filters.path.as_deref(),
+            Some("src/server.rs")
+        );
+        assert_eq!(source_location.filters.target_line, Some(42));
 
         let go_mod = parse_query("go.mod");
         assert!(go_mod.terms.is_empty());
         assert_eq!(go_mod.filters.file.as_deref(), Some("go.mod"));
+
+        let manifest_location = parse_query("Cargo.toml:12");
+        assert!(manifest_location.terms.is_empty());
+        assert_eq!(
+            manifest_location.filters.file.as_deref(),
+            Some("Cargo.toml")
+        );
+        assert_eq!(manifest_location.filters.target_line, Some(12));
 
         let dockerfile = parse_query("Dockerfile");
         assert!(dockerfile.terms.is_empty());

@@ -408,6 +408,7 @@ pub struct SearchFilters {
     pub test: Option<bool>,
     pub generated: Option<bool>,
     pub code: Option<bool>,
+    pub target_line: Option<usize>,
     pub require_all: bool,
     pub match_any: bool,
     pub snippet: SnippetMode,
@@ -611,6 +612,7 @@ impl Default for SearchFilters {
             test: None,
             generated: None,
             code: None,
+            target_line: None,
             require_all: false,
             match_any: false,
             snippet: SnippetMode::Medium,
@@ -908,13 +910,7 @@ fn search_repo_filter_only(
         if !source_content_filters_match(&path, &text, filters) {
             continue;
         }
-        results.push(filter_only_search_result(
-            &path,
-            &text,
-            matched,
-            filters.snippet,
-            filters.explain,
-        ));
+        results.push(filter_only_search_result(&path, &text, matched, filters));
     }
 
     Ok(finalize_results_for_filters(results, limit, filters))
@@ -4371,6 +4367,15 @@ pub(crate) fn best_snippet_for_path_with_phrases(
         .collect()
 }
 
+pub(crate) fn best_snippet_at_line(text: &str, line: usize, mode: SnippetMode) -> String {
+    let lines = text.lines().collect::<Vec<_>>();
+    if lines.is_empty() {
+        return String::new();
+    }
+    let center = line.saturating_sub(1).min(lines.len().saturating_sub(1));
+    format_snippet_window(&lines, center, mode)
+}
+
 fn line_scores_for_path(
     path: &str,
     text: &str,
@@ -5174,6 +5179,7 @@ fn append_search_filter_cli_args(
     append_bool_value_cli_arg(parts, args, "test", "--test");
     append_bool_value_cli_arg(parts, args, "generated", "--generated");
     append_bool_value_cli_arg(parts, args, "code", "--code");
+    append_line_cli_arg(parts, args);
     append_bool_cli_arg(parts, args, "require_all", "--require-all");
     append_bool_cli_arg(parts, args, "any_terms", "--any-terms");
     append_string_cli_arg(parts, args, "snippet", "--snippet");
@@ -5238,6 +5244,14 @@ fn append_scalar_cli_arg(
     };
     parts.push(flag.to_string());
     parts.push(shell_quote(&value));
+}
+
+fn append_line_cli_arg(parts: &mut Vec<String>, args: &serde_json::Map<String, serde_json::Value>) {
+    if args.get("line").and_then(scalar_cli_arg_value).is_some() {
+        append_scalar_cli_arg(parts, args, "line", "--line");
+    } else {
+        append_scalar_cli_arg(parts, args, "target_line", "--line");
+    }
 }
 
 fn append_string_cli_arg(
@@ -5895,6 +5909,18 @@ pub(crate) fn score_filter_only_path_match(
             &mut signals,
         );
     }
+    if let Some(line) = filters.target_line {
+        let value = line.to_string();
+        add_filter_signal(
+            "line_filter",
+            &value,
+            0.5,
+            explain,
+            &mut score,
+            &mut reasons,
+            &mut signals,
+        );
+    }
     if is_important_file(path) {
         score += 1.5;
         reasons.push("important_file".to_string());
@@ -5921,17 +5947,27 @@ pub(crate) fn filter_only_search_result(
     path: &str,
     text: &str,
     matched: FilterOnlyMatch,
-    snippet_mode: SnippetMode,
-    explain: bool,
+    filters: &SearchFilters,
 ) -> SearchResult {
+    let snippet_mode = filters.snippet;
+    let snippet = filters
+        .target_line
+        .map(|line| best_snippet_at_line(text, line, snippet_mode))
+        .filter(|snippet| !snippet.is_empty())
+        .unwrap_or_else(|| best_snippet_for_path(path, text, &[], snippet_mode));
+    let match_lines = filters
+        .target_line
+        .map(|line| vec![line])
+        .unwrap_or_default();
+
     SearchResult {
         path: path.to_string(),
         score: matched.score,
         reason: format!("filter match {}", matched.reasons.join(", ")),
-        snippet: best_snippet_for_path(path, text, &[], snippet_mode),
+        snippet,
         line_range: None,
-        match_lines: Vec::new(),
-        explanation: explain.then_some(matched.signals),
+        match_lines,
+        explanation: filters.explain.then_some(matched.signals),
         query_plan: None,
         duplicate_group: None,
         context: None,

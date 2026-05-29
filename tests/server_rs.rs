@@ -258,6 +258,16 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         search["input_schema"]["properties"]["code"]["description"],
         "When true, include only implementation source-code paths; when false, exclude implementation source-code paths."
     );
+    assert_eq!(
+        search["input_schema"]["properties"]["line"]["type"],
+        "integer"
+    );
+    assert!(
+        search["input_schema"]["properties"]["line"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("anchor snippets")
+    );
     assert!(
         search["input_schema"]["properties"]["generated"]["description"]
             .as_str()
@@ -3671,6 +3681,43 @@ fn runtime_accepts_structured_negative_search_filters() {
     assert!(result.contains("src/auth.rs"), "{result}");
     assert!(result.contains("path_filter_trigram_postings"), "{result}");
     assert!(result.contains("file_filter"), "{result}");
+
+    let location_filter = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("location-filter"),
+        tool: "indexed_search".to_string(),
+        arguments: serde_json::json!({
+            "index": index_path,
+            "query": "file:auth.rs",
+            "limit": 10,
+            "dir": "src",
+            "line": 2,
+            "explain": true
+        }),
+    });
+    assert!(
+        location_filter.error.is_none(),
+        "{:?}",
+        location_filter.error
+    );
+    let first = &location_filter.result.as_ref().unwrap()[0];
+    assert_eq!(first["path"], serde_json::json!("src/auth.rs"));
+    assert_eq!(first["match_lines"], serde_json::json!([2]));
+    assert!(
+        first["snippet"]
+            .as_str()
+            .unwrap()
+            .contains("2: pub fn issue_token"),
+        "{first}"
+    );
+    assert!(
+        first["explanation"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|signal| signal["kind"] == serde_json::json!("line_filter")
+                && signal["value"] == serde_json::json!("2")),
+        "{first}"
+    );
 
     let generated_true = runtime.dispatch(ToolRequest {
         id: serde_json::json!("generated-true"),

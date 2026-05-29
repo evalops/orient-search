@@ -928,6 +928,8 @@ struct CommonSearchArgs {
     extension: Option<String>,
     #[arg(long, alias = "filename", alias = "file-name", alias = "file_name")]
     file: Option<String>,
+    #[arg(long, alias = "target-line", alias = "target_line")]
+    line: Option<usize>,
     #[arg(long)]
     symbol: Option<String>,
     #[arg(
@@ -1054,6 +1056,8 @@ struct RelatedSymbolFilterArgs {
     extension: Option<String>,
     #[arg(long, alias = "filename", alias = "file-name", alias = "file_name")]
     file: Option<String>,
+    #[arg(long, alias = "target-line", alias = "target_line")]
+    line: Option<usize>,
     #[arg(long)]
     symbol: Option<String>,
     #[arg(
@@ -1170,6 +1174,9 @@ fn search_filters_from_args(
     args: &CommonSearchArgs,
     repo: Option<String>,
 ) -> Result<SearchFilters> {
+    if args.line == Some(0) {
+        bail!("--line must be a positive integer");
+    }
     Ok(SearchFilters {
         file: args.file.clone(),
         path: args.path.clone(),
@@ -1197,6 +1204,7 @@ fn search_filters_from_args(
         test: args.test,
         generated: args.generated,
         code: args.code,
+        target_line: args.line,
         require_all: args.require_all && !args.any_terms,
         match_any: args.any_terms,
         snippet: snippet_mode_arg(&args.snippet)?,
@@ -1267,6 +1275,7 @@ fn related_symbol_filters_from_args(
         test: args.test,
         generated: args.generated,
         code: args.code,
+        target_line: args.line,
         exclude_file: args.exclude_file.clone(),
         exclude_path: args.exclude_path.clone(),
         exclude_language: args
@@ -2169,6 +2178,9 @@ fn add_filter_retry_args(
     {
         arguments.insert("code".to_string(), serde_json::json!(code));
     }
+    if let Some(line) = filters.target_line {
+        arguments.insert("line".to_string(), serde_json::json!(line));
+    }
     insert_string_array_arg(arguments, "exclude_file", &filters.exclude_file);
     insert_string_array_arg(arguments, "exclude_path", &filters.exclude_path);
     insert_string_array_arg(arguments, "exclude_language", &filters.exclude_language);
@@ -2268,6 +2280,11 @@ fn plan_filter_argument_value(filter: &QueryPlanFilter) -> Value {
             filter.value.to_ascii_lowercase().as_str(),
             "1" | "true" | "yes" | "y"
         )),
+        "line" => filter
+            .value
+            .parse::<usize>()
+            .map(Value::from)
+            .unwrap_or_else(|_| serde_json::json!(filter.value)),
         _ => serde_json::json!(filter.value),
     }
 }
@@ -2420,6 +2437,7 @@ fn search_filter_arguments(filters: &SearchFilters) -> Map<String, Value> {
     insert_optional_bool(&mut arguments, "test", filters.test);
     insert_optional_bool(&mut arguments, "generated", filters.generated);
     insert_optional_bool(&mut arguments, "code", filters.code);
+    insert_optional_usize(&mut arguments, "line", filters.target_line);
     arguments.insert(
         "require_all".to_string(),
         serde_json::json!(filters.require_all),
@@ -2471,6 +2489,12 @@ fn insert_optional_string(arguments: &mut Map<String, Value>, name: &str, value:
 }
 
 fn insert_optional_bool(arguments: &mut Map<String, Value>, name: &str, value: Option<bool>) {
+    if let Some(value) = value {
+        arguments.insert(name.to_string(), serde_json::json!(value));
+    }
+}
+
+fn insert_optional_usize(arguments: &mut Map<String, Value>, name: &str, value: Option<usize>) {
     if let Some(value) = value {
         arguments.insert(name.to_string(), serde_json::json!(value));
     }
@@ -2606,11 +2630,11 @@ fn run() -> Result<()> {
             context_lines,
             refresh_if_stale,
         } => {
-            let query = cli_single_query(query, query_arg)?;
             if refresh_if_stale && shard_status(&index_dir)?.stale {
                 refresh_shards(&index_dir)?;
             }
             let filters = search_filters_from_args(&filters, repo)?;
+            let query = cli_single_query_for_filters(query, query_arg, &filters)?;
             let mut results = search_shards(&index_dir, &query, limit, &filters)?;
             attach_result_context(&mut results, context_lines, |path, start, lines| {
                 read_shard_range(&index_dir, path, start, lines)
@@ -2692,11 +2716,11 @@ fn run() -> Result<()> {
             filters,
             refresh_if_stale,
         } => {
-            let query = cli_single_query(query, query_arg)?;
             if refresh_if_stale && shard_status(&index_dir)?.stale {
                 refresh_shards(&index_dir)?;
             }
             let filters = search_filters_from_args(&filters, repo)?;
+            let query = cli_single_query_for_filters(query, query_arg, &filters)?;
             let mut plans = shard_query_plans(&index_dir, &query, &filters)?;
             attach_cli_shard_retry_requests(&mut plans, &index_dir, &filters);
             println!("{}", serde_json::to_string(&plans)?);
@@ -2940,10 +2964,10 @@ fn run() -> Result<()> {
             filters,
             refresh_if_stale,
         } => {
-            let query = cli_single_query(query, query_arg)?;
             let index_path = index;
             let index = load_index_for_search(index_path.clone(), refresh_if_stale)?;
             let filters = search_filters_from_args(&filters, repo_filter)?;
+            let query = cli_single_query_for_filters(query, query_arg, &filters)?;
             let plan = attach_cli_retry_requests(
                 index.query_plan(&query, &filters)?,
                 "indexed_search_code",
@@ -2987,8 +3011,8 @@ fn run() -> Result<()> {
             filters,
             refresh_if_stale,
         } => {
-            let query = cli_single_query(query, query_arg)?;
             let filters = search_filters_from_args(&filters, repo_filter)?;
+            let query = cli_single_query_for_filters(query, query_arg, &filters)?;
             if let Some(index_dir) = index_dir {
                 if refresh_if_stale && shard_status(&index_dir)?.stale {
                     refresh_shards(&index_dir)?;
@@ -3170,8 +3194,8 @@ fn run() -> Result<()> {
             context_lines,
             refresh_if_stale,
         } => {
-            let query = cli_single_query(query, query_arg)?;
             let filters = search_filters_from_args(&filters, repo_filter)?;
+            let query = cli_single_query_for_filters(query, query_arg, &filters)?;
             let results = if let Some(index_dir) = index_dir {
                 if refresh_if_stale && shard_status(&index_dir)?.stale {
                     refresh_shards(&index_dir)?;
@@ -3271,9 +3295,10 @@ fn run() -> Result<()> {
             daemon_addr,
             no_daemon,
         } => {
-            let query = cli_single_query(query, query_arg)?;
+            let filters = search_filters_from_args(&filters, repo_filter.clone())?;
+            let query = cli_single_query_for_filters(query, query_arg, &filters)?;
             if repo.is_none() && index.is_none() && index_dir.is_none() && !no_daemon {
-                let mut filters = search_filters_from_args(&filters, repo_filter.clone())?;
+                let mut filters = filters.clone();
                 infer_current_repo_filter_if_missing(&mut filters);
                 let arguments = daemon_search_auto_arguments(
                     &query,
@@ -3296,7 +3321,6 @@ fn run() -> Result<()> {
                 if refresh_if_stale && shard_status(&index_dir)?.stale {
                     refresh_shards(&index_dir)?;
                 }
-                let filters = search_filters_from_args(&filters, repo_filter)?;
                 let shard_scope_filters = shard_scope_filters_for_query(&filters, &query);
                 let mut results = search_shards(&index_dir, &query, limit, &filters)?;
                 attach_result_context(&mut results, context_lines, |path, start, lines| {
@@ -3364,7 +3388,6 @@ fn run() -> Result<()> {
                 println!("{}", serde_json::to_string(&output)?);
             } else if let Some(index_path) = index {
                 let index = load_index_for_search(index_path.clone(), refresh_if_stale)?;
-                let filters = search_filters_from_args(&filters, repo_filter)?;
                 let mut results = index.search_filtered(&query, limit, &filters)?;
                 attach_cli_result_query_plan_retry_requests(
                     &mut results,
@@ -3446,7 +3469,6 @@ fn run() -> Result<()> {
                 println!("{}", serde_json::to_string(&output)?);
             } else {
                 let repo = repo.unwrap_or_else(|| PathBuf::from("."));
-                let filters = search_filters_from_args(&filters, repo_filter)?;
                 let mut results = search_repo_fast_filtered(&repo, &query, limit, &filters)?;
                 attach_result_context(&mut results, context_lines, |path, start, lines| {
                     read_file_range(&repo, path, start, lines)
@@ -3939,10 +3961,10 @@ fn run() -> Result<()> {
             context_lines,
             refresh_if_stale,
         } => {
-            let query = cli_single_query(query, query_arg)?;
             let index_path = index;
             let index = load_index_for_search(index_path.clone(), refresh_if_stale)?;
             let filters = search_filters_from_args(&filters, repo_filter)?;
+            let query = cli_single_query_for_filters(query, query_arg, &filters)?;
             let mut results = index.search_filtered(&query, limit, &filters)?;
             attach_cli_result_query_plan_retry_requests(
                 &mut results,
@@ -5519,11 +5541,32 @@ fn cli_single_path(path: Option<String>, path_arg: Option<String>) -> Result<Str
         .ok_or_else(|| anyhow::anyhow!("provide a path or --path PATH"))
 }
 
-fn cli_single_query(query: Option<String>, query_arg: Option<String>) -> Result<String> {
-    query
-        .or(query_arg)
-        .filter(|query| !query.is_empty())
-        .ok_or_else(|| anyhow::anyhow!("provide a query or --query QUERY"))
+fn cli_single_query_for_filters(
+    query: Option<String>,
+    query_arg: Option<String>,
+    filters: &SearchFilters,
+) -> Result<String> {
+    let query = query.or(query_arg).unwrap_or_default();
+    if query.is_empty() && !cli_filter_only_query(filters) {
+        bail!("provide a query or --query QUERY");
+    }
+    Ok(query)
+}
+
+fn cli_filter_only_query(filters: &SearchFilters) -> bool {
+    filters.file.is_some()
+        || filters.path.is_some()
+        || filters.language.is_some()
+        || filters.extension.is_some()
+        || filters.symbol_kind.is_some()
+        || filters.repo.is_some()
+        || filters.branch.is_some()
+        || filters.origin.is_some()
+        || filters.dependency.is_some()
+        || filters.import.is_some()
+        || filters.test.is_some()
+        || filters.generated.is_some()
+        || filters.code.is_some()
 }
 
 fn validate_cli_range_bounds(start: usize, lines: usize) -> Result<()> {

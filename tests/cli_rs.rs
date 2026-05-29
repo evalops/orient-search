@@ -109,6 +109,30 @@ fn cli_outputs_tool_manifest() {
 }
 
 #[test]
+fn cli_search_line_filter_anchors_file_results() {
+    let repo = sample_repo();
+
+    let mut cmd = Command::cargo_bin("orient").unwrap();
+    cmd.args([
+        "search",
+        "--repo",
+        repo.path().to_str().unwrap(),
+        "--file",
+        "auth.rs",
+        "--line",
+        "5",
+        "--explain",
+        "",
+    ])
+    .assert()
+    .success()
+    .stdout(predicate::str::contains("\"path\":\"src/auth.rs\""))
+    .stdout(predicate::str::contains("\"match_lines\":[5]"))
+    .stdout(predicate::str::contains("5:     pub fn issue_token"))
+    .stdout(predicate::str::contains("\"kind\":\"line_filter\""));
+}
+
+#[test]
 fn cli_suppresses_broken_pipe_when_output_consumer_closes() {
     let binary = assert_cmd::cargo::cargo_bin("orient");
     let mut child = ProcessCommand::new(binary)

@@ -5,7 +5,7 @@ use crate::repo_index::{
     FileRange, GENERATED_PATH_SCORE_MULTIPLIER, MAX_READ_RANGE_LINES, PathFilterMatcher, QueryPlan,
     QueryPlanFilter, QueryPlanPosting, QueryPlanRepairHint, RangeScope, RankSignal, RelatedFile,
     RelatedSymbol, RepoBrief, RepoMap, RepoMapDetail, SearchFilters, SearchResult, SnippetMode,
-    Symbol, best_snippet_for_path_with_phrases, capped_search_limit,
+    Symbol, best_snippet_at_line, best_snippet_for_path_with_phrases, capped_search_limit,
     command_hints_from_manifest_texts, dependency_filters_match,
     dependency_hints_from_manifest_texts, extract_symbols, filter_only_query, filter_value_matches,
     finalize_results_for_filters, import_hints_from_source_texts, is_entrypoint_path,
@@ -2780,6 +2780,9 @@ fn query_plan_filters(filters: &SearchFilters) -> Vec<QueryPlanFilter> {
     if let Some(value) = filters.code {
         active.push(plan_filter("code", &value.to_string(), false));
     }
+    if let Some(value) = filters.target_line {
+        active.push(plan_filter("line", &value.to_string(), false));
+    }
     for value in &filters.exclude_file {
         active.push(plan_filter("file", value, true));
     }
@@ -2840,7 +2843,7 @@ fn query_plan_filters_for_candidates(
         .map(|mut filter| {
             if !matches!(
                 filter.field.as_str(),
-                "repo" | "branch" | "origin" | "dependency"
+                "repo" | "branch" | "origin" | "dependency" | "line"
             ) {
                 let matched = candidate_ids
                     .iter()
@@ -3011,13 +3014,18 @@ fn indexed_filter_only_result(file: &IndexedPath, filters: &SearchFilters) -> Op
         return None;
     }
     let matched = score_filter_only_path_match(&file.path, filters, filters.explain);
+    let snippet = indexed_filter_only_snippet(file, filters.snippet, filters.target_line);
+    let match_lines = filters
+        .target_line
+        .map(|line| vec![line])
+        .unwrap_or_default();
     let mut result = SearchResult {
         path: file.path.clone(),
         score: matched.score,
         reason: format!("filter match {}", matched.reasons.join(", ")),
-        snippet: indexed_filter_only_snippet(file, filters.snippet),
+        snippet,
         line_range: None,
-        match_lines: Vec::new(),
+        match_lines,
         explanation: filters.explain.then_some(matched.signals),
         query_plan: None,
         duplicate_group: None,
@@ -3033,7 +3041,9 @@ fn indexed_filter_only_result(file: &IndexedPath, filters: &SearchFilters) -> Op
         .and_then(|kind| indexed_symbol_kind_filter_symbol(file, kind))
     {
         let line = symbol.line;
-        if let Some(snippet) = indexed_symbol_filter_snippet(file, line, filters.snippet) {
+        if filters.target_line.is_none()
+            && let Some(snippet) = indexed_symbol_filter_snippet(file, line, filters.snippet)
+        {
             result.snippet = snippet;
             result.match_lines = vec![line];
         }
@@ -3042,9 +3052,16 @@ fn indexed_filter_only_result(file: &IndexedPath, filters: &SearchFilters) -> Op
     Some(result)
 }
 
-fn indexed_filter_only_snippet(file: &IndexedPath, mode: SnippetMode) -> String {
+fn indexed_filter_only_snippet(
+    file: &IndexedPath,
+    mode: SnippetMode,
+    target_line: Option<usize>,
+) -> String {
     if file.content.is_empty() || file.line_offsets.is_empty() {
         return String::new();
+    }
+    if let Some(line) = target_line {
+        return best_snippet_at_line(&file.content, line, mode);
     }
     render_indexed_window(file.content.as_bytes(), &file.line_offsets, 1, mode)
 }

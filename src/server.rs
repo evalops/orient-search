@@ -1362,7 +1362,7 @@ fn argument_schema(tool_name: &str, name: &str) -> Value {
             schema.insert("type".to_string(), json!("boolean"));
         }
         "limit" | "max_depth" | "discover_limit" | "family_limit" | "symbols" | "start"
-        | "lines" | "tests" | "context_lines" | "read_limit" => {
+        | "lines" | "tests" | "context_lines" | "read_limit" | "line" | "target_line" => {
             schema.insert("type".to_string(), json!("integer"));
             schema.insert(
                 "minimum".to_string(),
@@ -1464,7 +1464,7 @@ fn daemon_default_kind(tool_name: &str) -> Option<DaemonDefaultKind> {
 fn argument_type(name: &str) -> &'static str {
     match name {
         "limit" | "max_depth" | "discover_limit" | "family_limit" | "symbols" | "start"
-        | "lines" | "tests" | "context_lines" | "read_limit" => "integer",
+        | "lines" | "tests" | "context_lines" | "read_limit" | "line" | "target_line" => "integer",
         "test" | "generated" | "code" | "explain" | "require_all" | "any_terms"
         | "refresh_if_stale" | "git_metadata" | "tracked_files" | "nested_manifests" => "boolean",
         name if string_list_argument(name) => "string|string[]",
@@ -1649,6 +1649,9 @@ fn argument_description(tool_name: &str, name: &str) -> &'static str {
         "import" => "Imported module substring used as a file-level search filter.",
         "module" | "modules" | "imports" | "use" | "uses" => "Alias for import.",
         "file" => "File basename substring filter.",
+        "line" | "target_line" => {
+            "Line number used to anchor snippets and read ranges for file/path-filter searches."
+        }
         "test" => "When true, include only test paths; when false, exclude test paths.",
         "generated" => {
             "When true, include only generated-code paths; when false, exclude generated-code paths. Without this filter, generated paths are searchable but demoted in ranking."
@@ -5794,6 +5797,8 @@ const SEARCH_OPTIONAL_ARGS: &[&str] = &[
     "use",
     "uses",
     "file",
+    "line",
+    "target_line",
     "repo_filter",
     "branch",
     "origin",
@@ -5858,6 +5863,8 @@ const SEARCH_TARGET_OPTIONAL_ARGS: &[&str] = &[
     "use",
     "uses",
     "file",
+    "line",
+    "target_line",
     "repo_filter",
     "branch",
     "origin",
@@ -6064,6 +6071,8 @@ const RELATED_SYMBOLS_TARGET_OPTIONAL_ARGS: &[&str] = &[
     "use",
     "uses",
     "file",
+    "line",
+    "target_line",
     "repo_filter",
     "branch",
     "origin",
@@ -6118,6 +6127,8 @@ const RELATED_INDEX_SYMBOLS_OPTIONAL_ARGS: &[&str] = &[
     "use",
     "uses",
     "file",
+    "line",
+    "target_line",
     "repo",
     "repo_filter",
     "branch",
@@ -6172,6 +6183,8 @@ const RELATED_SHARD_SYMBOLS_OPTIONAL_ARGS: &[&str] = &[
     "use",
     "uses",
     "file",
+    "line",
+    "target_line",
     "repo",
     "repo_filter",
     "branch",
@@ -6231,6 +6244,8 @@ const SYMBOL_TARGET_OPTIONAL_ARGS: &[&str] = &[
     "use",
     "uses",
     "file",
+    "line",
+    "target_line",
     "repo_filter",
     "branch",
     "origin",
@@ -6346,6 +6361,8 @@ const SEARCH_AUTO_OPTIONAL_ARGS: &[&str] = &[
     "use",
     "uses",
     "file",
+    "line",
+    "target_line",
     "repo_filter",
     "branch",
     "origin",
@@ -6409,6 +6426,8 @@ const SEARCH_INDEX_OPTIONAL_ARGS: &[&str] = &[
     "use",
     "uses",
     "file",
+    "line",
+    "target_line",
     "repo",
     "repo_filter",
     "branch",
@@ -6470,6 +6489,8 @@ const PLAN_OPTIONAL_ARGS: &[&str] = &[
     "use",
     "uses",
     "file",
+    "line",
+    "target_line",
     "repo_filter",
     "branch",
     "origin",
@@ -7142,6 +7163,15 @@ fn optional_string_arg_any(arguments: &Value, names: &[&str]) -> Option<String> 
         .find_map(|name| optional_string_arg(arguments, name))
 }
 
+fn optional_positive_usize_arg_any(arguments: &Value, names: &[&str]) -> Result<Option<usize>> {
+    for name in names {
+        if let Some(value) = optional_positive_usize_arg(arguments, name)? {
+            return Ok(Some(value));
+        }
+    }
+    Ok(None)
+}
+
 fn optional_string_list_arg(arguments: &Value, name: &str) -> Result<Vec<String>> {
     let Some(value) = arguments.get(name) else {
         return Ok(Vec::new());
@@ -7222,6 +7252,7 @@ fn search_filters(arguments: &Value, allow_repo_alias: bool) -> Result<SearchFil
         test: arguments.get("test").and_then(Value::as_bool),
         generated: arguments.get("generated").and_then(Value::as_bool),
         code: arguments.get("code").and_then(Value::as_bool),
+        target_line: optional_positive_usize_arg_any(arguments, &["line", "target_line"])?,
         snippet: optional_string_arg(arguments, "snippet")
             .as_deref()
             .and_then(SnippetMode::parse)

@@ -1863,10 +1863,16 @@ fn bare_path_like_queries_use_filter_only_fast_paths() {
         &repo.path().join("Cargo.toml"),
         "[package]\nname='sample'\nversion='0.1.0'\n",
     );
-    write(
-        &repo.path().join("src/lib.rs"),
-        "pub fn target_entrypoint() {}\n",
-    );
+    let source_text = (1..=60)
+        .map(|line| {
+            if line == 40 {
+                "pub fn target_entrypoint() {}\n".to_string()
+            } else {
+                format!("// filler line {line}\n")
+            }
+        })
+        .collect::<String>();
+    write(&repo.path().join("src/lib.rs"), &source_text);
     write(
         &repo.path().join("go.mod"),
         "module example.com/sample\n\ngo 1.22\n",
@@ -1916,6 +1922,23 @@ fn bare_path_like_queries_use_filter_only_fast_paths() {
             .iter()
             .any(|signal| signal.kind == "path_filter" && signal.value == "src/lib.rs")
     );
+    let location_fallback =
+        search_repo_fast_filtered(repo.path(), "src/lib.rs:40:9", 10, &filters).unwrap();
+    assert_eq!(location_fallback[0].path, "src/lib.rs");
+    assert!(
+        location_fallback[0]
+            .snippet
+            .contains("40: pub fn target_entrypoint()")
+    );
+    assert_eq!(location_fallback[0].match_lines, vec![40]);
+    assert!(
+        location_fallback[0]
+            .explanation
+            .as_ref()
+            .unwrap()
+            .iter()
+            .any(|signal| signal.kind == "line_filter" && signal.value == "40")
+    );
     let go_mod_fallback = search_repo_fast_filtered(repo.path(), "go.mod", 10, &filters).unwrap();
     assert_eq!(go_mod_fallback[0].path, "go.mod");
 
@@ -1951,6 +1974,16 @@ fn bare_path_like_queries_use_filter_only_fast_paths() {
             .iter()
             .any(|posting| posting.kind == "path_filter_trigram")
     );
+    let location_indexed = index
+        .search_filtered("src/lib.rs:40:9", 10, &filters)
+        .unwrap();
+    assert_eq!(location_indexed[0].path, "src/lib.rs");
+    assert!(
+        location_indexed[0]
+            .snippet
+            .contains("40: pub fn target_entrypoint()")
+    );
+    assert_eq!(location_indexed[0].match_lines, vec![40]);
 
     let go_mod_indexed = index.search_filtered("go.mod", 10, &filters).unwrap();
     assert_eq!(go_mod_indexed[0].path, "go.mod");
