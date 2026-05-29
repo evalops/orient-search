@@ -3015,20 +3015,48 @@ impl ToolRuntime {
                 let queries = string_array_arg(&request.arguments, "queries")?;
                 let limit = search_limit_arg(&request.arguments)?;
                 let context_lines = context_lines_arg(&request.arguments)?;
-                let refresh_if_stale = bool_arg(&request.arguments, "refresh_if_stale");
+                let mut refresh_if_stale = bool_arg(&request.arguments, "refresh_if_stale");
                 let diagnose = bool_arg(&request.arguments, "diagnose");
                 let retry_if_empty = bool_arg(&request.arguments, "retry_if_empty");
+                let refreshed_shard_dir = if refresh_if_stale {
+                    self.refresh_search_auto_batch_shards_if_stale(&request.arguments, &queries)?
+                } else {
+                    None
+                };
+                if refreshed_shard_dir.is_some() {
+                    refresh_if_stale = false;
+                }
                 let mut batch = Vec::new();
-                for query in queries {
-                    batch.push(self.search_auto(
-                        &request.arguments,
-                        &query,
-                        limit,
-                        context_lines,
-                        refresh_if_stale,
-                        diagnose,
-                        retry_if_empty,
-                    )?);
+                if let Some(index_dir) = refreshed_shard_dir {
+                    for query in queries {
+                        let scoped_arguments = if request.arguments.get("index_dir").is_some() {
+                            request.arguments.clone()
+                        } else {
+                            arguments_scoped_to_client_cwd_for_query(&request.arguments, &query)?
+                        };
+                        batch.push(self.search_auto_shards(
+                            index_dir.clone(),
+                            &scoped_arguments,
+                            &query,
+                            limit,
+                            context_lines,
+                            false,
+                            diagnose,
+                            retry_if_empty,
+                        )?);
+                    }
+                } else {
+                    for query in queries {
+                        batch.push(self.search_auto(
+                            &request.arguments,
+                            &query,
+                            limit,
+                            context_lines,
+                            refresh_if_stale,
+                            diagnose,
+                            retry_if_empty,
+                        )?);
+                    }
                 }
                 Ok(serde_json::to_value(batch)?)
             }
@@ -4653,6 +4681,29 @@ impl ToolRuntime {
             diagnose,
             retry_if_empty,
         )
+    }
+
+    fn refresh_search_auto_batch_shards_if_stale(
+        &self,
+        arguments: &Value,
+        queries: &[String],
+    ) -> Result<Option<PathBuf>> {
+        if let Some(index_dir) = optional_string_arg(arguments, "index_dir").map(PathBuf::from) {
+            let filters = search_filters(arguments, true)?;
+            self.refresh_shards_for_query_batch_if_stale(&index_dir, arguments, &filters, queries)?;
+            return Ok(Some(index_dir));
+        }
+        if optional_string_arg(arguments, "index").is_some()
+            || optional_string_arg(arguments, "repo").is_some()
+        {
+            return Ok(None);
+        }
+        let Ok(index_dir) = self.single_cached_shard_manifest_path() else {
+            return Ok(None);
+        };
+        let filters = search_filters(arguments, true)?;
+        self.refresh_shards_for_query_batch_if_stale(&index_dir, arguments, &filters, queries)?;
+        Ok(Some(index_dir))
     }
 
     fn search_auto_primary_retry_result(
