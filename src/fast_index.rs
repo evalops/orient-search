@@ -1345,18 +1345,19 @@ impl FastIndex {
             .iter()
             .filter(|(token, _)| filters.match_any || !content_tokens.contains(token.as_str()))
             .collect::<Vec<_>>();
+        let candidate_trigram_postings = candidate_trigram_postings(
+            &trigram_postings,
+            &missing_trigrams,
+            &query_tokens,
+            use_trigrams,
+        );
 
         let mut planned_postings = token_postings
             .iter()
             .map(|(_, postings)| *postings)
             .chain(symbol_postings.iter().map(|(_, postings)| *postings))
             .chain(path_plan_postings.iter().map(|(_, postings)| *postings))
-            .chain(
-                trigram_postings
-                    .iter()
-                    .take(8)
-                    .map(|(_, postings)| *postings),
-            )
+            .chain(candidate_trigram_postings.iter().copied())
             .collect::<Vec<_>>();
         planned_postings.sort_by_key(|postings| postings.len());
         let candidate_ids =
@@ -1371,14 +1372,9 @@ impl FastIndex {
                     .map(|(_, postings)| *postings)
                     .chain(path_plan_postings.iter().map(|(_, postings)| *postings))
                     .collect::<Vec<_>>();
-                let trigram_only = trigram_postings
-                    .iter()
-                    .take(8)
-                    .map(|(_, postings)| *postings)
-                    .collect::<Vec<_>>();
                 union_candidates(
                     intersect_planned_postings(&token_only, false),
-                    intersect_planned_postings(&trigram_only, true),
+                    intersect_planned_postings(&candidate_trigram_postings, true),
                 )
             } else {
                 intersect_planned_postings(&planned_postings, filters.require_all)
@@ -1388,12 +1384,11 @@ impl FastIndex {
         let candidate_ids = intersect_attribute_postings(candidate_ids, &attribute_postings);
         let candidate_ids =
             intersect_path_filter_trigram_postings(candidate_ids, &path_filter_postings);
-        let candidate_ids = filter_symbol_kind_trigram_candidates(
+        let candidate_ids = filter_single_literal_trigram_candidates(
             candidate_ids,
             &self.files,
             &query_tokens,
             use_trigrams,
-            &filters,
         );
         let candidate_count = candidate_ids.len();
 
@@ -1581,6 +1576,11 @@ impl FastIndex {
             &symbol_postings,
             &path_postings,
         );
+        let missing_trigrams = if use_trigrams {
+            missing_query_trigrams(&query_trigrams, &trigram_postings)
+        } else {
+            Vec::new()
+        };
         if filters.require_all && has_unsatisfied_missing_terms(&missing_terms, &filters) {
             return false;
         }
@@ -1596,17 +1596,18 @@ impl FastIndex {
             .iter()
             .filter(|(token, _)| filters.match_any || !content_tokens.contains(token.as_str()))
             .collect::<Vec<_>>();
+        let candidate_trigram_postings = candidate_trigram_postings(
+            &trigram_postings,
+            &missing_trigrams,
+            &query_tokens,
+            use_trigrams,
+        );
         let mut planned_postings = token_postings
             .iter()
             .map(|(_, postings)| *postings)
             .chain(symbol_postings.iter().map(|(_, postings)| *postings))
             .chain(path_plan_postings.iter().map(|(_, postings)| *postings))
-            .chain(
-                trigram_postings
-                    .iter()
-                    .take(8)
-                    .map(|(_, postings)| *postings),
-            )
+            .chain(candidate_trigram_postings.iter().copied())
             .collect::<Vec<_>>();
         planned_postings.sort_by_key(|postings| postings.len());
 
@@ -1619,14 +1620,9 @@ impl FastIndex {
                 .map(|(_, postings)| *postings)
                 .chain(path_plan_postings.iter().map(|(_, postings)| *postings))
                 .collect::<Vec<_>>();
-            let trigram_only = trigram_postings
-                .iter()
-                .take(8)
-                .map(|(_, postings)| *postings)
-                .collect::<Vec<_>>();
             union_candidates(
                 intersect_planned_postings(&token_only, false),
-                intersect_planned_postings(&trigram_only, true),
+                intersect_planned_postings(&candidate_trigram_postings, true),
             )
         } else {
             intersect_planned_postings(&planned_postings, filters.require_all)
@@ -1636,12 +1632,11 @@ impl FastIndex {
         let candidate_ids = intersect_attribute_postings(candidate_ids, &attribute_postings);
         let candidate_ids =
             intersect_path_filter_trigram_postings(candidate_ids, &path_filter_postings);
-        let candidate_ids = filter_symbol_kind_trigram_candidates(
+        let candidate_ids = filter_single_literal_trigram_candidates(
             candidate_ids,
             &self.files,
             &query_tokens,
             use_trigrams,
-            &filters,
         );
         !indexed_filter_candidate_ids(&self.files, candidate_ids, &filters).is_empty()
     }
@@ -1863,17 +1858,18 @@ impl FastIndex {
             .iter()
             .filter(|(token, _)| filters.match_any || !content_tokens.contains(token.as_str()))
             .collect::<Vec<_>>();
+        let candidate_trigram_postings = candidate_trigram_postings(
+            &trigram_postings,
+            &missing_trigrams,
+            &query_tokens,
+            use_trigrams,
+        );
         let mut planned_postings = token_postings
             .iter()
             .map(|(_, postings)| *postings)
             .chain(symbol_postings.iter().map(|(_, postings)| *postings))
             .chain(path_plan_postings.iter().map(|(_, postings)| *postings))
-            .chain(
-                trigram_postings
-                    .iter()
-                    .take(8)
-                    .map(|(_, postings)| *postings),
-            )
+            .chain(candidate_trigram_postings.iter().copied())
             .collect::<Vec<_>>();
         planned_postings.sort_by_key(|postings| postings.len());
         let candidate_ids =
@@ -1888,14 +1884,9 @@ impl FastIndex {
                     .map(|(_, postings)| *postings)
                     .chain(path_plan_postings.iter().map(|(_, postings)| *postings))
                     .collect::<Vec<_>>();
-                let trigram_only = trigram_postings
-                    .iter()
-                    .take(8)
-                    .map(|(_, postings)| *postings)
-                    .collect::<Vec<_>>();
                 union_candidates(
                     intersect_planned_postings(&token_only, false),
-                    intersect_planned_postings(&trigram_only, true),
+                    intersect_planned_postings(&candidate_trigram_postings, true),
                 )
             } else {
                 intersect_planned_postings(&planned_postings, filters.require_all)
@@ -1905,12 +1896,11 @@ impl FastIndex {
         let candidate_ids = intersect_attribute_postings(candidate_ids, &attribute_postings);
         let candidate_ids =
             intersect_path_filter_trigram_postings(candidate_ids, &path_filter_postings);
-        let candidate_ids = filter_symbol_kind_trigram_candidates(
+        let candidate_ids = filter_single_literal_trigram_candidates(
             candidate_ids,
             &self.files,
             &query_tokens,
             use_trigrams,
-            &filters,
         );
 
         let candidate_count = candidate_ids.len();
@@ -4398,14 +4388,38 @@ fn intersect_symbol_kind_postings(
         })
 }
 
-fn filter_symbol_kind_trigram_candidates(
+fn candidate_trigram_postings<'a>(
+    trigram_postings: &'a [(&'a String, &'a Vec<Posting>)],
+    missing_trigrams: &[String],
+    query_tokens: &[String],
+    use_trigrams: bool,
+) -> Vec<&'a Vec<Posting>> {
+    if !use_trigrams {
+        return Vec::new();
+    }
+    if query_tokens.len() == 1 {
+        if !missing_trigrams.is_empty() {
+            return Vec::new();
+        }
+        return trigram_postings
+            .iter()
+            .map(|(_, postings)| *postings)
+            .collect();
+    }
+    trigram_postings
+        .iter()
+        .take(8)
+        .map(|(_, postings)| *postings)
+        .collect()
+}
+
+fn filter_single_literal_trigram_candidates(
     candidate_ids: Vec<u32>,
     files: &[IndexedPath],
     query_tokens: &[String],
     use_trigrams: bool,
-    filters: &SearchFilters,
 ) -> Vec<u32> {
-    if !use_trigrams || filters.symbol_kind.is_none() || query_tokens.len() != 1 {
+    if !use_trigrams || query_tokens.len() != 1 {
         return candidate_ids;
     }
     let token = &query_tokens[0];

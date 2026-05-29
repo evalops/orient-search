@@ -2744,6 +2744,25 @@ fn indexed_trigram_planner_unions_single_literal_and_substring_candidates() {
 }
 
 #[test]
+fn indexed_single_literal_trigram_search_rejects_partial_overlap() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/near.rs"),
+        "const NEAR: &str = \"abc def unique needle\";\n",
+    );
+
+    let index = FastIndex::build(repo.path()).unwrap();
+    let results = index.search("abcdef", 10).unwrap();
+    assert!(results.is_empty(), "{results:?}");
+
+    let plan = index
+        .query_plan("abcdef", &SearchFilters::default())
+        .unwrap();
+    assert_eq!(plan.final_match_count, 0);
+    assert!(plan.missing_trigrams.iter().any(|value| value == "bcd"));
+}
+
+#[test]
 fn search_explain_mode_returns_structured_rank_signals() {
     let repo = tempfile::tempdir().unwrap();
     write(
