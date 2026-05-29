@@ -746,6 +746,7 @@ impl FastIndex {
             related_files,
             related_symbols,
             read_batch_request: None,
+            next_action: None,
         }
     }
 

@@ -1002,6 +1002,16 @@ pub struct RepoMap {
     pub related_symbols: Vec<RepoMapRelatedSymbol>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub read_batch_request: Option<ResultToolRequest>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_action: Option<RepoMapNextAction>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RepoMapNextAction {
+    pub kind: String,
+    pub source: String,
+    pub summary: String,
+    pub request: ResultToolRequest,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -3042,6 +3052,7 @@ impl RepoIndex {
             related_files,
             related_symbols,
             read_batch_request: None,
+            next_action: None,
         }
     }
 
@@ -5541,6 +5552,21 @@ pub fn attach_repo_map_read_batch_request_with_limit(
         base_arguments,
         read_limit,
     );
+    map.next_action = map
+        .read_batch_request
+        .clone()
+        .map(RepoMapNextAction::read_batch);
+}
+
+impl RepoMapNextAction {
+    fn read_batch(request: ResultToolRequest) -> Self {
+        Self {
+            kind: "read".to_string(),
+            source: "read_batch_request".to_string(),
+            summary: "Read the repo map's most actionable files and definitions.".to_string(),
+            request,
+        }
+    }
 }
 
 fn read_request_from_range(
@@ -7342,6 +7368,7 @@ mod tests {
             related_files: Vec::new(),
             related_symbols: Vec::new(),
             read_batch_request: None,
+            next_action: None,
         };
 
         attach_repo_map_read_batch_request_with_limit(
@@ -7352,6 +7379,11 @@ mod tests {
         );
 
         let request = map.read_batch_request.unwrap();
+        assert_eq!(
+            map.next_action.as_ref().unwrap().source,
+            "read_batch_request"
+        );
+        assert_eq!(map.next_action.as_ref().unwrap().request, request);
         let ranges = request.arguments["ranges"].as_array().unwrap();
         assert_eq!(ranges.len(), 4);
         assert_eq!(ranges[0]["path"], serde_json::json!("src/main.rs"));

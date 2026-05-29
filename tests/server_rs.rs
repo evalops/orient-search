@@ -1365,6 +1365,14 @@ fn runtime_repo_map_detail_defaults_to_compact_and_allows_full_imports() {
             .len(),
         2
     );
+    assert_eq!(
+        narrow_reads["next_action"]["source"],
+        serde_json::json!("read_batch_request")
+    );
+    assert_eq!(
+        narrow_reads["next_action"]["request"],
+        narrow_reads["read_batch_request"]
+    );
 
     let full = runtime.dispatch(ToolRequest {
         id: serde_json::json!("full"),
@@ -1424,6 +1432,10 @@ fn runtime_repo_map_detail_defaults_to_compact_and_allows_full_imports() {
     assert!(indexed["brief"]["manifest_files"].is_array());
     assert_eq!(indexed["read_batch_request"]["tool"], "read_ranges");
     assert_eq!(
+        indexed["next_action"]["request"],
+        indexed["read_batch_request"]
+    );
+    assert_eq!(
         indexed["read_batch_request"]["arguments"]["index"],
         serde_json::json!(index_path)
     );
@@ -1444,6 +1456,10 @@ fn runtime_repo_map_detail_defaults_to_compact_and_allows_full_imports() {
     assert_eq!(
         sharded[0]["map"]["read_batch_request"]["tool"],
         "read_ranges"
+    );
+    assert_eq!(
+        sharded[0]["map"]["next_action"]["request"],
+        sharded[0]["map"]["read_batch_request"]
     );
     assert_eq!(
         sharded[0]["map"]["read_batch_request"]["arguments"]["index_dir"],

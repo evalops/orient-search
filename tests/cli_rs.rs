@@ -1430,6 +1430,10 @@ fn cli_outputs_repo_map_and_reads_ranges() {
         .stdout(predicate::str::contains("\"related_files\""))
         .stdout(predicate::str::contains("\"related_symbols\""))
         .stdout(predicate::str::contains("\"read_batch_request\""))
+        .stdout(predicate::str::contains("\"next_action\""))
+        .stdout(predicate::str::contains(
+            "\"source\":\"read_batch_request\"",
+        ))
         .stdout(predicate::str::contains("\"tool\":\"read_ranges\""))
         .stdout(predicate::str::contains(
             "\"cli\":\"orient read-ranges --repo",
