@@ -4142,6 +4142,8 @@ fn runtime_ensures_shards_builds_refreshes_and_warms() {
     assert_eq!(status["stale_shards"], serde_json::json!(1));
     assert!(status["index_bytes"].as_u64().unwrap() > 0);
     assert!(status["source_bytes"].as_u64().unwrap() > 0);
+    assert!(status["content_snapshot_bytes"].as_u64().unwrap() > 0);
+    assert!(status["line_offset_bytes"].as_u64().unwrap() > 0);
     assert!(status["posting_entries"].as_u64().unwrap() > 0);
     assert!(status["compressed_posting_bytes"].as_u64().unwrap() > 0);
     let shard_names = status["shards"]
@@ -4153,6 +4155,12 @@ fn runtime_ensures_shards_builds_refreshes_and_warms() {
     assert_eq!(shard_names, vec!["platform", "billing"]);
     assert!(
         status["shards"][0]["status"]["source_bytes"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
+    assert!(
+        status["shards"][0]["status"]["content_snapshot_bytes"]
             .as_u64()
             .unwrap()
             > 0
@@ -4259,6 +4267,18 @@ fn runtime_warms_index_by_tool_request() {
     );
     assert!(
         result["cached_index_details"][0]["index_bytes"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
+    assert!(
+        result["cached_index_details"][0]["content_snapshot_bytes"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
+    assert!(
+        result["cached_index_details"][0]["line_offset_bytes"]
             .as_u64()
             .unwrap()
             > 0
@@ -4533,6 +4553,8 @@ fn runtime_reports_index_status_for_cached_indexes() {
     assert_eq!(clean_result["stale"], serde_json::json!(false));
     assert!(clean_result["index_bytes"].as_u64().unwrap() > 0);
     assert!(clean_result["source_bytes"].as_u64().unwrap() > 0);
+    assert!(clean_result["content_snapshot_bytes"].as_u64().unwrap() > 0);
+    assert!(clean_result["line_offset_bytes"].as_u64().unwrap() > 0);
     assert!(clean_result["posting_entries"].as_u64().unwrap() > 0);
     assert!(clean_result["compressed_posting_bytes"].as_u64().unwrap() > 0);
 
@@ -4949,7 +4971,31 @@ fn runtime_reuses_cached_shard_manifest_after_initial_load() {
             > 0
     );
     assert!(
+        result["cached_shard_manifest_details"][0]["content_snapshot_bytes"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
+    assert!(
+        result["cached_shard_manifest_details"][0]["line_offset_bytes"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
+    assert!(
         result["cached_shard_manifest_details"][0]["repos"][0]["index_bytes"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
+    assert!(
+        result["cached_shard_manifest_details"][0]["repos"][0]["content_snapshot_bytes"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
+    assert!(
+        result["cached_shard_manifest_details"][0]["repos"][0]["line_offset_bytes"]
             .as_u64()
             .unwrap()
             > 0

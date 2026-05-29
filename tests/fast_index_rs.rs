@@ -2085,6 +2085,8 @@ fn indexed_search_uses_trigram_postings_for_substring_queries() {
     let stats = index.stats();
     assert!(stats.trigrams > 0);
     assert!(stats.source_bytes > 0);
+    assert!(stats.content_snapshot_bytes > 0);
+    assert!(stats.line_offset_bytes > 0);
     assert!(stats.posting_entries > 0);
     assert!(stats.compressed_posting_bytes > 0);
     let auth = index

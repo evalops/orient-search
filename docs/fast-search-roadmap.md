@@ -60,6 +60,7 @@ Implemented now:
 - The golden retrieval suite reports Recall@10 and MRR across fallback, indexed, shard, and `search_auto` surfaces on adversarial source/docs/tests/generated/lockfile fixtures, so relevance regressions fail locally and in Bazel CI.
 - Indexed filter-only scans use cached path metadata plus persisted line offsets for snippet rendering, so broad scoped lookups such as `lang:rust -file:*spec.rs` avoid generic content rescans.
 - Indexed files persist line-offset and token-to-line tables for bounded snippet rendering and exact match-line metadata.
+- Index, shard, and daemon status report `content_snapshot_bytes` and `line_offset_bytes` alongside source, index, posting-entry, and compressed-posting footprints, making the current snapshot-backed layout visible before deeper sectioned-index work.
 - Result de-duping and grouping for repeated worktree copies using normalized path suffixes and snippet signatures, with compact duplicate metadata on the kept result.
 - Exact symbol definition boosting in both fallback and indexed search.
 - Direct symbol lookup and related-context lookup from live and persistent indexes, including filter-aware single and batch `find_symbol`/`find_index_symbol`/`find_shard_symbol` tools, ready-to-send symbol `read_request` payloads, batch symbol `read_batch_request` payloads, and test-to-source stem matching for common `_test`, `test_`, `.test`, and `.spec` naming, so agent wrappers can jump to definitions and nearby tests/files without rebuilding a repo index.

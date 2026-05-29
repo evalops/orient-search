@@ -1084,6 +1084,8 @@ fn cli_indexes_shards_from_discovered_root() {
         .success()
         .stdout(predicate::str::contains("\"shards\":2"))
         .stdout(predicate::str::contains("\"posting_entries\""))
+        .stdout(predicate::str::contains("\"content_snapshot_bytes\""))
+        .stdout(predicate::str::contains("\"line_offset_bytes\""))
         .stdout(predicate::str::contains("\"compressed_posting_bytes\""));
 
     let mut search = Command::cargo_bin("orient").unwrap();
@@ -1729,6 +1731,8 @@ fn cli_search_surfaces_accept_structured_filters() {
         .assert()
         .success()
         .stdout(predicate::str::contains("\"source_bytes\""))
+        .stdout(predicate::str::contains("\"content_snapshot_bytes\""))
+        .stdout(predicate::str::contains("\"line_offset_bytes\""))
         .stdout(predicate::str::contains("\"posting_entries\""))
         .stdout(predicate::str::contains("\"compressed_posting_bytes\""));
 
@@ -2469,6 +2473,8 @@ fn cli_reports_index_and_shard_freshness() {
         .stdout(predicate::str::contains("\"stale\":false"))
         .stdout(predicate::str::contains("\"index_bytes\""))
         .stdout(predicate::str::contains("\"source_bytes\""))
+        .stdout(predicate::str::contains("\"content_snapshot_bytes\""))
+        .stdout(predicate::str::contains("\"line_offset_bytes\""))
         .stdout(predicate::str::contains("\"posting_entries\""))
         .stdout(predicate::str::contains("\"compressed_posting_bytes\""));
 
@@ -2555,6 +2561,8 @@ fn cli_reports_index_and_shard_freshness() {
         .stdout(predicate::str::contains("\"stale_shards\":1"))
         .stdout(predicate::str::contains("\"index_bytes\""))
         .stdout(predicate::str::contains("\"source_bytes\""))
+        .stdout(predicate::str::contains("\"content_snapshot_bytes\""))
+        .stdout(predicate::str::contains("\"line_offset_bytes\""))
         .stdout(predicate::str::contains("\"posting_entries\""))
         .stdout(predicate::str::contains("\"compressed_posting_bytes\""))
         .stdout(predicate::str::contains("src/after_shard.rs"));

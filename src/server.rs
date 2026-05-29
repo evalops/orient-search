@@ -304,6 +304,12 @@ struct IndexCacheEntry {
     ready: Condvar,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+struct CachedIndexFootprint {
+    content_snapshot_bytes: u64,
+    line_offset_bytes: usize,
+}
+
 enum IndexCacheState {
     Loading,
     Ready(Arc<FastIndex>),
@@ -4032,6 +4038,8 @@ impl ToolRuntime {
                                 "files": stats.files,
                                 "index_bytes": index_bytes,
                                 "source_bytes": stats.source_bytes,
+                                "content_snapshot_bytes": stats.content_snapshot_bytes,
+                                "line_offset_bytes": stats.line_offset_bytes,
                                 "terms": stats.terms,
                                 "path_terms": stats.path_terms,
                                 "trigrams": stats.trigrams,
@@ -4089,13 +4097,14 @@ impl ToolRuntime {
     }
 
     fn cached_shard_manifest_details(&self) -> Vec<Value> {
+        let footprints = self.cached_index_footprints();
         let mut details = self
             .shard_manifests
             .lock()
             .map(|manifests| {
                 manifests
                     .iter()
-                    .map(|(path, manifest)| shard_manifest_detail(path, manifest))
+                    .map(|(path, manifest)| shard_manifest_detail(path, manifest, &footprints))
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
@@ -4109,11 +4118,12 @@ impl ToolRuntime {
 
     fn shard_manifest_detail(&self, index_dir: &Path) -> Value {
         let key = canonical_cache_key(index_dir);
+        let footprints = self.cached_index_footprints();
         self.shard_manifests
             .lock()
             .ok()
             .and_then(|manifests| manifests.get(&key).cloned())
-            .map(|manifest| shard_manifest_detail(&key, &manifest))
+            .map(|manifest| shard_manifest_detail(&key, &manifest, &footprints))
             .unwrap_or_else(|| {
                 json!({
                     "index_dir": key.to_string_lossy(),
@@ -4121,6 +4131,29 @@ impl ToolRuntime {
                     "repos": []
                 })
             })
+    }
+
+    fn cached_index_footprints(&self) -> HashMap<PathBuf, CachedIndexFootprint> {
+        self.indexes
+            .lock()
+            .map(|indexes| {
+                indexes
+                    .iter()
+                    .filter_map(|(path, entry)| {
+                        entry.ready_index().map(|index| {
+                            let stats = index.stats();
+                            (
+                                path.clone(),
+                                CachedIndexFootprint {
+                                    content_snapshot_bytes: stats.content_snapshot_bytes,
+                                    line_offset_bytes: stats.line_offset_bytes,
+                                },
+                            )
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     fn resolve_shard_path_cached(
@@ -4547,23 +4580,38 @@ impl ToolRuntime {
     }
 }
 
-fn shard_manifest_detail(index_dir: &Path, manifest: &ShardManifest) -> Value {
+fn shard_manifest_detail(
+    index_dir: &Path,
+    manifest: &ShardManifest,
+    footprints: &HashMap<PathBuf, CachedIndexFootprint>,
+) -> Value {
     let mut total_index_bytes = 0u64;
+    let mut total_content_snapshot_bytes = 0u64;
+    let mut total_line_offset_bytes = 0usize;
     let repos = manifest
         .shards
         .iter()
         .map(|shard| {
-            let index_bytes = fs::metadata(index_dir.join(&shard.index))
+            let index_path = index_dir.join(&shard.index);
+            let index_bytes = fs::metadata(&index_path)
                 .map(|metadata| metadata.len())
                 .ok();
             if let Some(index_bytes) = index_bytes {
                 total_index_bytes += index_bytes;
             }
+            let footprint = footprints
+                .get(&canonical_cache_key(&index_path))
+                .copied()
+                .unwrap_or_default();
+            total_content_snapshot_bytes += footprint.content_snapshot_bytes;
+            total_line_offset_bytes += footprint.line_offset_bytes;
             json!({
                 "name": shard.name,
                 "root": shard.root,
                 "index": shard.index,
                 "index_bytes": index_bytes,
+                "content_snapshot_bytes": footprint.content_snapshot_bytes,
+                "line_offset_bytes": footprint.line_offset_bytes,
                 "aliases": shard
                     .aliases
                     .iter()
@@ -4577,6 +4625,8 @@ fn shard_manifest_detail(index_dir: &Path, manifest: &ShardManifest) -> Value {
         "index_dir": index_dir.to_string_lossy().to_string(),
         "shards": manifest.shards.len(),
         "index_bytes": total_index_bytes,
+        "content_snapshot_bytes": total_content_snapshot_bytes,
+        "line_offset_bytes": total_line_offset_bytes,
         "repos": repos
     })
 }

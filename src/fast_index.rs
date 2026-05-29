@@ -156,6 +156,8 @@ pub struct IndexStats {
     pub root: PathBuf,
     pub files: usize,
     pub source_bytes: u64,
+    pub content_snapshot_bytes: u64,
+    pub line_offset_bytes: usize,
     pub terms: usize,
     pub path_terms: usize,
     pub trigrams: usize,
@@ -170,6 +172,8 @@ pub struct RefreshStats {
     pub root: PathBuf,
     pub files: usize,
     pub source_bytes: u64,
+    pub content_snapshot_bytes: u64,
+    pub line_offset_bytes: usize,
     pub terms: usize,
     pub path_terms: usize,
     pub trigrams: usize,
@@ -191,6 +195,8 @@ pub struct IndexFreshness {
     pub indexed_files: usize,
     pub index_bytes: u64,
     pub source_bytes: u64,
+    pub content_snapshot_bytes: u64,
+    pub line_offset_bytes: usize,
     pub terms: usize,
     pub path_terms: usize,
     pub trigrams: usize,
@@ -429,6 +435,8 @@ impl FastIndex {
             root: self.root.clone(),
             files: self.files.len(),
             source_bytes: indexed_source_bytes(&self.files),
+            content_snapshot_bytes: indexed_content_snapshot_bytes(&self.files),
+            line_offset_bytes: indexed_line_offset_bytes(&self.files),
             terms: self.postings.len(),
             path_terms: self.path_postings.len(),
             trigrams: self.trigram_postings.len(),
@@ -479,6 +487,8 @@ impl FastIndex {
             root: self.root.clone(),
             files: self.files.len(),
             source_bytes: indexed_source_bytes(&self.files),
+            content_snapshot_bytes: indexed_content_snapshot_bytes(&self.files),
+            line_offset_bytes: indexed_line_offset_bytes(&self.files),
             terms: self.postings.len(),
             path_terms: self.path_postings.len(),
             trigrams: self.trigram_postings.len(),
@@ -530,6 +540,8 @@ impl FastIndex {
                 indexed_files: self.files.len(),
                 index_bytes,
                 source_bytes: stats.source_bytes,
+                content_snapshot_bytes: stats.content_snapshot_bytes,
+                line_offset_bytes: stats.line_offset_bytes,
                 terms: stats.terms,
                 path_terms: stats.path_terms,
                 trigrams: stats.trigrams,
@@ -606,6 +618,8 @@ impl FastIndex {
             indexed_files: self.files.len(),
             index_bytes,
             source_bytes: stats.source_bytes,
+            content_snapshot_bytes: stats.content_snapshot_bytes,
+            line_offset_bytes: stats.line_offset_bytes,
             terms: stats.terms,
             path_terms: stats.path_terms,
             trigrams: stats.trigrams,
@@ -2077,6 +2091,17 @@ fn compress_posting_map(
 
 fn indexed_source_bytes(files: &[IndexedPath]) -> u64 {
     files.iter().map(|file| file.size).sum()
+}
+
+fn indexed_content_snapshot_bytes(files: &[IndexedPath]) -> u64 {
+    files.iter().map(|file| file.content.len() as u64).sum()
+}
+
+fn indexed_line_offset_bytes(files: &[IndexedPath]) -> usize {
+    files
+        .iter()
+        .map(|file| file.line_offsets.len() * std::mem::size_of::<u32>())
+        .sum()
 }
 
 fn total_posting_entries(postings: &HashMap<String, Vec<Posting>>) -> usize {

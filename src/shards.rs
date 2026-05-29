@@ -56,6 +56,8 @@ pub struct ShardBuildStats {
     pub shards: usize,
     pub files: usize,
     pub source_bytes: u64,
+    pub content_snapshot_bytes: u64,
+    pub line_offset_bytes: usize,
     pub terms: usize,
     pub path_terms: usize,
     pub trigrams: usize,
@@ -71,6 +73,8 @@ pub struct ShardRefreshStats {
     pub shards: usize,
     pub files: usize,
     pub source_bytes: u64,
+    pub content_snapshot_bytes: u64,
+    pub line_offset_bytes: usize,
     pub terms: usize,
     pub path_terms: usize,
     pub trigrams: usize,
@@ -94,6 +98,8 @@ pub struct ShardEnsureStats {
     pub removed_shards: usize,
     pub files: usize,
     pub source_bytes: u64,
+    pub content_snapshot_bytes: u64,
+    pub line_offset_bytes: usize,
     pub terms: usize,
     pub path_terms: usize,
     pub trigrams: usize,
@@ -135,6 +141,8 @@ pub struct ShardFreshness {
     pub stale_shards: usize,
     pub index_bytes: u64,
     pub source_bytes: u64,
+    pub content_snapshot_bytes: u64,
+    pub line_offset_bytes: usize,
     pub terms: usize,
     pub path_terms: usize,
     pub trigrams: usize,
@@ -183,6 +191,8 @@ fn build_shards_unlocked(repos: &[PathBuf], output_dir: &Path) -> Result<ShardBu
         shards: 0,
         files: 0,
         source_bytes: 0,
+        content_snapshot_bytes: 0,
+        line_offset_bytes: 0,
         terms: 0,
         path_terms: 0,
         trigrams: 0,
@@ -261,6 +271,8 @@ pub fn ensure_shards(repos: &[PathBuf], output_dir: impl AsRef<Path>) -> Result<
             removed_shards: stats.removed_shards,
             files: stats.files,
             source_bytes: stats.source_bytes,
+            content_snapshot_bytes: stats.content_snapshot_bytes,
+            line_offset_bytes: stats.line_offset_bytes,
             terms: stats.terms,
             path_terms: stats.path_terms,
             trigrams: stats.trigrams,
@@ -291,6 +303,8 @@ pub fn ensure_shards(repos: &[PathBuf], output_dir: impl AsRef<Path>) -> Result<
         removed_shards: 0,
         files: stats.files,
         source_bytes: stats.source_bytes,
+        content_snapshot_bytes: stats.content_snapshot_bytes,
+        line_offset_bytes: stats.line_offset_bytes,
         terms: stats.terms,
         path_terms: stats.path_terms,
         trigrams: stats.trigrams,
@@ -318,6 +332,8 @@ fn refresh_shards_unlocked(index_dir: &Path) -> Result<ShardRefreshStats> {
         shards: manifest.shards.len(),
         files: 0,
         source_bytes: 0,
+        content_snapshot_bytes: 0,
+        line_offset_bytes: 0,
         terms: 0,
         path_terms: 0,
         trigrams: 0,
@@ -380,6 +396,8 @@ pub fn shard_status(index_dir: impl AsRef<Path>) -> Result<ShardFreshness> {
     let mut added_files = 0usize;
     let mut index_bytes = 0u64;
     let mut source_bytes = 0u64;
+    let mut content_snapshot_bytes = 0u64;
+    let mut line_offset_bytes = 0usize;
     let mut terms = 0usize;
     let mut path_terms = 0usize;
     let mut trigrams = 0usize;
@@ -397,6 +415,8 @@ pub fn shard_status(index_dir: impl AsRef<Path>) -> Result<ShardFreshness> {
         added_files += status.added_files;
         index_bytes += status.index_bytes;
         source_bytes += status.source_bytes;
+        content_snapshot_bytes += status.content_snapshot_bytes;
+        line_offset_bytes += status.line_offset_bytes;
         terms += status.terms;
         path_terms += status.path_terms;
         trigrams += status.trigrams;
@@ -413,6 +433,8 @@ pub fn shard_status(index_dir: impl AsRef<Path>) -> Result<ShardFreshness> {
         stale_shards,
         index_bytes,
         source_bytes,
+        content_snapshot_bytes,
+        line_offset_bytes,
         terms,
         path_terms,
         trigrams,
@@ -1858,6 +1880,8 @@ fn metadata_filter_matches(value: &str, filter: &str) -> bool {
 fn add_stats(total: &mut ShardBuildStats, stats: &IndexStats) {
     total.files += stats.files;
     total.source_bytes += stats.source_bytes;
+    total.content_snapshot_bytes += stats.content_snapshot_bytes;
+    total.line_offset_bytes += stats.line_offset_bytes;
     total.terms += stats.terms;
     total.path_terms += stats.path_terms;
     total.trigrams += stats.trigrams;
@@ -1869,6 +1893,8 @@ fn add_stats(total: &mut ShardBuildStats, stats: &IndexStats) {
 fn add_index_stats(total: &mut ShardRefreshStats, stats: &IndexStats) {
     total.files += stats.files;
     total.source_bytes += stats.source_bytes;
+    total.content_snapshot_bytes += stats.content_snapshot_bytes;
+    total.line_offset_bytes += stats.line_offset_bytes;
     total.terms += stats.terms;
     total.path_terms += stats.path_terms;
     total.trigrams += stats.trigrams;
@@ -1880,6 +1906,8 @@ fn add_index_stats(total: &mut ShardRefreshStats, stats: &IndexStats) {
 fn add_ensure_stats(total: &mut ShardEnsureStats, stats: &IndexStats) {
     total.files += stats.files;
     total.source_bytes += stats.source_bytes;
+    total.content_snapshot_bytes += stats.content_snapshot_bytes;
+    total.line_offset_bytes += stats.line_offset_bytes;
     total.terms += stats.terms;
     total.path_terms += stats.path_terms;
     total.trigrams += stats.trigrams;
