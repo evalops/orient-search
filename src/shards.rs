@@ -22,11 +22,12 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 const SHARD_MANIFEST_VERSION: u32 = 1;
 const SHARD_MANIFEST_SIDECAR_VERSION: u32 = 1;
 const SHARD_MANIFEST_PREFILTER_VERSION: u32 = 1;
-const SHARD_MANIFEST_ROUTE_VERSION: u32 = 3;
+const SHARD_MANIFEST_ROUTE_VERSION: u32 = 4;
 const SHARD_MANIFEST_FILE: &str = "manifest.json";
 const SHARD_MANIFEST_SIDECAR_FILE: &str = "manifest.bin";
 const SHARD_MANIFEST_PREFILTER_FILE: &str = "manifest.prefilter.bin";
 const SHARD_MANIFEST_ROUTE_FILE: &str = "manifest.route.bin";
+const SHARD_ROUTE_MAX_POSTING_SHARDS: usize = 64;
 const SHARD_WRITE_LOCK_FILE: &str = ".orient-shards.lock";
 const SHARD_WRITE_LOCK_TIMEOUT: Duration = Duration::from_secs(120);
 const SHARD_WRITE_LOCK_STALE_AFTER: Duration = Duration::from_secs(30 * 60);
@@ -62,6 +63,7 @@ struct ShardManifestRoute {
     json_fingerprint: ManifestFileFingerprint,
     shards: Vec<ShardRouteEntry>,
     exact_terms: Vec<ShardRouteTerm>,
+    omitted_hashes: Vec<u32>,
     shard_ids: Vec<u8>,
 }
 
@@ -100,6 +102,7 @@ struct ShardRouteTerm {
 enum ShardRouteLookup {
     Candidates(Vec<u16>),
     MissingHash,
+    Omitted,
     Corrupt,
 }
 
@@ -2184,6 +2187,7 @@ pub(crate) fn shard_route_entries(
     let candidate_ids = match shard_route_candidate_ids(&route, &required_hashes) {
         ShardRouteLookup::Candidates(candidate_ids) => candidate_ids,
         ShardRouteLookup::MissingHash => return Ok(Some(Vec::new())),
+        ShardRouteLookup::Omitted => return Ok(None),
         ShardRouteLookup::Corrupt => return Ok(None),
     };
     let shards = candidate_ids
@@ -2209,9 +2213,14 @@ fn shard_route_candidate_ids(
     required_hashes: &[u32],
 ) -> ShardRouteLookup {
     let mut candidate_ids: Option<Vec<u16>> = None;
+    let mut saw_omitted = false;
     for hash in required_hashes {
         let postings = match shard_route_postings(route, *hash) {
             Ok(Some(postings)) => postings,
+            Ok(None) if route.omitted_hashes.binary_search(hash).is_ok() => {
+                saw_omitted = true;
+                continue;
+            }
             Ok(None) => return ShardRouteLookup::MissingHash,
             Err(()) => return ShardRouteLookup::Corrupt,
         };
@@ -2223,7 +2232,11 @@ fn shard_route_candidate_ids(
             break;
         }
     }
-    ShardRouteLookup::Candidates(candidate_ids.unwrap_or_default())
+    match candidate_ids {
+        Some(candidate_ids) => ShardRouteLookup::Candidates(candidate_ids),
+        None if saw_omitted => ShardRouteLookup::Omitted,
+        None => ShardRouteLookup::Candidates(Vec::new()),
+    }
 }
 
 fn shard_route_postings(route: &ShardManifestRoute, hash: u32) -> Result<Option<Vec<u16>>, ()> {
@@ -2682,21 +2695,28 @@ fn save_manifest_route(index_dir: &Path, manifest: &ShardManifest) -> Result<()>
     let mut terms = postings.into_iter().collect::<Vec<_>>();
     terms.sort_unstable_by_key(|(hash, _)| *hash);
     let mut exact_terms = Vec::with_capacity(terms.len());
+    let mut omitted_hashes = Vec::new();
     let mut shard_ids = Vec::new();
     for (hash, mut ids) in terms {
         ids.sort_unstable();
         ids.dedup();
+        if ids.len() > SHARD_ROUTE_MAX_POSTING_SHARDS {
+            omitted_hashes.push(hash);
+            continue;
+        }
         let start = shard_ids.len() as u32;
         let len = ids.len() as u16;
         encode_route_shard_ids(&ids, &mut shard_ids);
         exact_terms.push(ShardRouteTerm { hash, start, len });
     }
+    omitted_hashes.sort_unstable();
 
     let route = ShardManifestRoute {
         version: SHARD_MANIFEST_ROUTE_VERSION,
         json_fingerprint: manifest_file_fingerprint(&manifest_path)?,
         shards,
         exact_terms,
+        omitted_hashes,
         shard_ids,
     };
     let bytes = bincode::serialize(&route)?;
@@ -3179,6 +3199,56 @@ mod tests {
     }
 
     #[test]
+    fn manifest_route_omits_broad_terms_for_manifest_fallback() {
+        let dir = tempfile::tempdir().unwrap();
+        let broad_hash = sketch_fingerprint("broadrouteprobe");
+        let narrow_hash = sketch_fingerprint("narrowrouteprobe");
+        let shards = (0..=SHARD_ROUTE_MAX_POSTING_SHARDS)
+            .map(|index| ShardEntry {
+                name: format!("repo-{index}"),
+                root: dir.path().join(format!("repo-{index}")),
+                index: format!("repo-{index}.orient"),
+                aliases: Vec::new(),
+                git: None,
+                sketch: Some(ShardQuerySketch {
+                    exact_hashes: if index == 0 {
+                        vec![broad_hash, narrow_hash]
+                    } else {
+                        vec![broad_hash]
+                    },
+                    trigram_hashes: Vec::new(),
+                    exact_bits: Vec::new(),
+                    trigram_bits: Vec::new(),
+                    symbol_kind_bits: Vec::new(),
+                    filter_bits: Vec::new(),
+                }),
+            })
+            .collect();
+        let manifest = ShardManifest {
+            version: SHARD_MANIFEST_VERSION,
+            shards,
+        };
+        save_manifest(dir.path(), &manifest).unwrap();
+
+        let route = load_manifest_route(dir.path()).unwrap().unwrap();
+        assert!(route.omitted_hashes.binary_search(&broad_hash).is_ok());
+        assert!(
+            route
+                .exact_terms
+                .binary_search_by_key(&broad_hash, |term| term.hash)
+                .is_err()
+        );
+        assert_eq!(
+            shard_route_candidate_ids(&route, &[broad_hash]),
+            ShardRouteLookup::Omitted
+        );
+        assert_eq!(
+            shard_route_candidate_ids(&route, &[broad_hash, narrow_hash]),
+            ShardRouteLookup::Candidates(vec![0])
+        );
+    }
+
+    #[test]
     fn route_shard_id_varints_round_trip_sparse_ids() {
         let ids = vec![0, 1, 127, 128, 255, 16_384, u16::MAX];
         let mut bytes = Vec::new();
@@ -3209,6 +3279,7 @@ mod tests {
                 start: 0,
                 len: 1,
             }],
+            omitted_hashes: Vec::new(),
             shard_ids: vec![0x80],
         };
 
