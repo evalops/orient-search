@@ -7,10 +7,11 @@ use crate::query::{merge_filters, normalize_symbol_kind, parse_query, query_text
 pub use crate::repo_index::MAX_BATCH_READ_LINES;
 use crate::repo_index::{
     DEFAULT_REPO_MAP_READ_BATCH_RANGES, MAX_ATTACHED_CONTEXT_LINES, MAX_READ_RANGE_LINES,
-    MAX_RESULT_READ_BATCH_RANGES, MAX_SEARCH_RESULTS, QueryPlan, QueryPlanFilter, RangeScope,
-    RepoIndexer, RepoMapDetail, ResultToolRequest, SearchFilters, SearchResult, SnippetMode,
-    Symbol, SymbolLookupResult, attach_repo_map_read_batch_request_with_limit,
-    attach_result_context, attach_result_read_requests, attach_result_related_requests,
+    MAX_RESULT_READ_BATCH_RANGES, MAX_SEARCH_RESULTS, QueryPlan, QueryPlanFilter,
+    QueryPlanNextAction, RangeScope, RepoIndexer, RepoMapDetail, ResultToolRequest, SearchFilters,
+    SearchResult, SnippetMode, Symbol, SymbolLookupResult,
+    attach_repo_map_read_batch_request_with_limit, attach_result_context,
+    attach_result_read_requests, attach_result_related_requests,
     attach_result_related_symbol_requests, finalize_results_for_filters, normalize_language_filter,
     normalize_token, query_plan_filter_field_present, read_file_range, read_file_range_scoped,
     related_file_lookup_results, related_symbol_lookup_results, result_read_batch_request,
@@ -149,19 +150,57 @@ struct SearchFreshness {
 #[derive(Debug, Serialize)]
 struct IndexedQueryPlanBatchResult {
     query: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    next_action: Option<QueryPlanNextAction>,
     plan: QueryPlan,
 }
 
 #[derive(Debug, Serialize)]
 struct QueryPlanBatchResult {
     query: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    next_action: Option<QueryPlanNextAction>,
     plan: QueryPlan,
 }
 
 #[derive(Debug, Serialize)]
 struct ShardQueryPlanBatchResult {
     query: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    next_action: Option<QueryPlanNextAction>,
     plans: Vec<ShardQueryPlan>,
+}
+
+fn indexed_query_plan_batch_result(query: String, plan: QueryPlan) -> IndexedQueryPlanBatchResult {
+    let next_action = plan.next_action.clone();
+    IndexedQueryPlanBatchResult {
+        query,
+        next_action,
+        plan,
+    }
+}
+
+fn query_plan_batch_result(query: String, plan: QueryPlan) -> QueryPlanBatchResult {
+    let next_action = plan.next_action.clone();
+    QueryPlanBatchResult {
+        query,
+        next_action,
+        plan,
+    }
+}
+
+fn shard_query_plan_batch_result(
+    query: String,
+    plans: Vec<ShardQueryPlan>,
+) -> ShardQueryPlanBatchResult {
+    let next_action = plans
+        .iter()
+        .find_map(|shard_plan| shard_plan.plan.next_action.clone());
+    ShardQueryPlanBatchResult {
+        query,
+        next_action,
+        plans,
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -867,13 +906,13 @@ pub fn tool_manifest() -> Value {
         ),
         tool_entry(
             "search_query_plan_batch",
-            "Build transient live-repo query plans for several searches in one request.",
+            "Build transient live-repo query plans for several searches in one request; each repaired item promotes next_action.",
             &["repo", "queries"],
             PLAN_OPTIONAL_ARGS,
         ),
         tool_entry(
             "search_plan_batch",
-            "Return query plans for several searches against one live repo, persistent index, or shard directory.",
+            "Return query plans for several searches against one live repo, persistent index, or shard directory; each repaired item promotes next_action.",
             &["queries"],
             PLAN_TARGET_OPTIONAL_ARGS,
         ),
@@ -909,7 +948,7 @@ pub fn tool_manifest() -> Value {
         ),
         tool_entry(
             "indexed_query_plan_batch",
-            "Return query plans for several searches against one persistent index.",
+            "Return query plans for several searches against one persistent index; each repaired item promotes next_action.",
             &["index", "queries"],
             PLAN_INDEX_OPTIONAL_ARGS,
         ),
@@ -987,7 +1026,7 @@ pub fn tool_manifest() -> Value {
         ),
         tool_entry(
             "shard_query_plan_batch",
-            "Return shard query plans for several searches against one local multi-repo shard directory.",
+            "Return shard query plans for several searches against one local multi-repo shard directory; each repaired item promotes next_action.",
             &["index_dir", "queries"],
             PLAN_INDEX_OPTIONAL_ARGS,
         ),
@@ -3906,7 +3945,7 @@ impl ToolRuntime {
                         &index.root,
                         &request.arguments,
                     );
-                    batch.push(QueryPlanBatchResult { query, plan });
+                    batch.push(query_plan_batch_result(query, plan));
                 }
                 Ok(serde_json::to_value(batch)?)
             }
@@ -3941,7 +3980,7 @@ impl ToolRuntime {
                             &index_dir,
                             &request.arguments,
                         );
-                        batch.push(ShardQueryPlanBatchResult { query, plans });
+                        batch.push(shard_query_plan_batch_result(query, plans));
                     }
                     return Ok(serde_json::to_value(batch)?);
                 }
@@ -3961,7 +4000,7 @@ impl ToolRuntime {
                             &index_path,
                             &request.arguments,
                         );
-                        batch.push(QueryPlanBatchResult { query, plan });
+                        batch.push(query_plan_batch_result(query, plan));
                     }
                     return Ok(serde_json::to_value(batch)?);
                 }
@@ -3991,7 +4030,7 @@ impl ToolRuntime {
                                 &index_dir,
                                 &scoped_arguments,
                             );
-                            batch.push(ShardQueryPlanBatchResult { query, plans });
+                            batch.push(shard_query_plan_batch_result(query, plans));
                         }
                         return Ok(serde_json::to_value(batch)?);
                     }
@@ -4014,7 +4053,7 @@ impl ToolRuntime {
                                     &index_path,
                                     &scoped_arguments,
                                 );
-                                batch.push(QueryPlanBatchResult { query, plan });
+                                batch.push(query_plan_batch_result(query, plan));
                             }
                             return Ok(serde_json::to_value(batch)?);
                         }
@@ -4037,7 +4076,7 @@ impl ToolRuntime {
                         &index.root,
                         &request.arguments,
                     );
-                    batch.push(QueryPlanBatchResult { query, plan });
+                    batch.push(query_plan_batch_result(query, plan));
                 }
                 Ok(serde_json::to_value(batch)?)
             }
@@ -4159,7 +4198,7 @@ impl ToolRuntime {
                         &index_path,
                         &request.arguments,
                     );
-                    batch.push(IndexedQueryPlanBatchResult { query, plan });
+                    batch.push(indexed_query_plan_batch_result(query, plan));
                 }
                 Ok(serde_json::to_value(batch)?)
             }
@@ -4333,7 +4372,7 @@ impl ToolRuntime {
                     }
                     let mut plans = self.shard_query_plans_cached(&index_dir, &query, &filters)?;
                     attach_shard_retry_requests(&mut plans, &index_dir, &scoped_arguments);
-                    batch.push(ShardQueryPlanBatchResult { query, plans });
+                    batch.push(shard_query_plan_batch_result(query, plans));
                 }
                 Ok(serde_json::to_value(batch)?)
             }

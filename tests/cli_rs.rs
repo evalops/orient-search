@@ -2222,6 +2222,7 @@ fn cli_search_surfaces_accept_structured_filters() {
         .stdout(predicate::str::contains("\"query\":\"issue absentterm\""))
         .stdout(predicate::str::contains("\"missing_terms\""))
         .stdout(predicate::str::contains("absentterm"))
+        .stdout(predicate::str::contains("\"next_action\""))
         .stdout(predicate::str::contains("drop_missing_terms"));
 
     let mut index_plan = Command::cargo_bin("orient").unwrap();
@@ -2294,6 +2295,7 @@ fn cli_search_surfaces_accept_structured_filters() {
         .stdout(predicate::str::contains("\"query\":\"issue absentterm\""))
         .stdout(predicate::str::contains("\"missing_terms\""))
         .stdout(predicate::str::contains("absentterm"))
+        .stdout(predicate::str::contains("\"next_action\""))
         .stdout(predicate::str::contains("drop_missing_terms"));
 
     let mut generic_index_plan_batch = Command::cargo_bin("orient").unwrap();
@@ -2314,6 +2316,7 @@ fn cli_search_surfaces_accept_structured_filters() {
         .stdout(predicate::str::contains("\"query\":\"issue absentterm\""))
         .stdout(predicate::str::contains("\"missing_terms\""))
         .stdout(predicate::str::contains("drop_missing_terms"))
+        .stdout(predicate::str::contains("\"next_action\""))
         .stdout(predicate::str::contains("\"tool\":\"search\""))
         .stdout(predicate::str::contains("\"index\""));
 
@@ -2720,6 +2723,7 @@ fn cli_batches_searches_across_fallback_indexed_and_shards() {
         ))
         .stdout(predicate::str::contains("\"query\":\"invoice absentterm\""))
         .stdout(predicate::str::contains("\"missing_terms\""))
+        .stdout(predicate::str::contains("\"next_action\""))
         .stdout(predicate::str::contains("drop_missing_terms"));
 
     let mut shard_plan_batch = Command::cargo_bin("orient").unwrap();
@@ -2740,6 +2744,7 @@ fn cli_batches_searches_across_fallback_indexed_and_shards() {
         .stdout(predicate::str::contains("\"query\":\"invoice absentterm\""))
         .stdout(predicate::str::contains("\"plans\""))
         .stdout(predicate::str::contains("\"missing_terms\""))
+        .stdout(predicate::str::contains("\"next_action\""))
         .stdout(predicate::str::contains("drop_missing_terms"));
 
     let mut generic_shard_plan_batch = Command::cargo_bin("orient").unwrap();
@@ -2761,6 +2766,7 @@ fn cli_batches_searches_across_fallback_indexed_and_shards() {
         .stdout(predicate::str::contains("\"plans\""))
         .stdout(predicate::str::contains("\"missing_terms\""))
         .stdout(predicate::str::contains("drop_missing_terms"))
+        .stdout(predicate::str::contains("\"next_action\""))
         .stdout(predicate::str::contains("\"tool\":\"search\""))
         .stdout(predicate::str::contains("\"index_dir\""));
 }

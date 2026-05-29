@@ -125,6 +125,9 @@ for all returned context.
 which points to the best immediate batch read after normal results or an
 automatic retry. Their `next_action` field wraps the best immediate follow-up
 request with a compact `kind`, `source`, and `summary`.
+Plan batch responses also promote each repaired item's `next_action`, so
+wrappers can retry from `item.next_action` without digging through nested plan
+objects.
 Generated batch read requests include `read_budget` so wrappers can see the
 range count and total line budget before sending the follow-up.
 For manual context reads, pass `scope:"symbol"` or `orient read-range --scope

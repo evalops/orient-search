@@ -3224,6 +3224,10 @@ fn runtime_search_plan_alias_accepts_live_index_and_shard_targets() {
         "search"
     );
     assert_eq!(
+        indexed_batch[0]["next_action"],
+        indexed_batch[0]["plan"]["next_action"]
+    );
+    assert_eq!(
         indexed_batch[0]["plan"]["retry_requests"][0]["arguments"]["index"],
         serde_json::json!(index_path)
     );
@@ -3241,6 +3245,10 @@ fn runtime_search_plan_alias_accepts_live_index_and_shard_targets() {
     assert_eq!(
         shard_batch[0]["plans"][0]["plan"]["retry_requests"][0]["tool"],
         "search"
+    );
+    assert_eq!(
+        shard_batch[0]["next_action"],
+        shard_batch[0]["plans"][0]["plan"]["next_action"]
     );
     assert_eq!(
         shard_batch[0]["plans"][0]["plan"]["retry_requests"][0]["arguments"]["index_dir"],
@@ -3873,6 +3881,7 @@ fn runtime_batches_searches_and_query_plans_against_repo_index_and_shards() {
     assert!(result.contains("missingterm"), "{result}");
     assert!(result.contains("absentterm"), "{result}");
     assert!(result.contains("drop_missing_terms"), "{result}");
+    assert!(result.contains("\"next_action\""), "{result}");
 
     let indexed_plan_alias = runtime.dispatch(ToolRequest {
         id: serde_json::json!("index-plan-alias"),
@@ -3950,6 +3959,11 @@ fn runtime_batches_searches_and_query_plans_against_repo_index_and_shards() {
     assert!(result.contains("missingterm"), "{result}");
     assert!(result.contains("absentterm"), "{result}");
     assert!(result.contains("drop_missing_terms"), "{result}");
+    let shard_plans = shard_plans.result.unwrap();
+    assert_eq!(
+        shard_plans[0]["next_action"],
+        shard_plans[0]["plans"][0]["plan"]["next_action"]
+    );
 
     let shard_plan_alias = runtime.dispatch(ToolRequest {
         id: serde_json::json!("shard-plan-alias"),

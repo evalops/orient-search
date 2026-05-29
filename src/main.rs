@@ -8,8 +8,8 @@ use orient::fast_index::{FastIndex, RefreshStats};
 use orient::query::{merge_filters, normalize_symbol_kind, parse_query};
 use orient::repo_index::{
     DEFAULT_REPO_MAP_READ_BATCH_RANGES, MAX_READ_RANGE_LINES, MAX_RESULT_READ_BATCH_RANGES,
-    QueryPlan, QueryPlanFilter, RangeScope, RepoIndexer, RepoMapDetail, ResultToolRequest,
-    SearchFilters, SearchResult, SnippetMode, SymbolLookupResult,
+    QueryPlan, QueryPlanFilter, QueryPlanNextAction, RangeScope, RepoIndexer, RepoMapDetail,
+    ResultToolRequest, SearchFilters, SearchResult, SnippetMode, SymbolLookupResult,
     attach_repo_map_read_batch_request_with_limit, attach_result_context,
     attach_result_read_requests, attach_result_related_requests,
     attach_result_related_symbol_requests, normalize_language_filter,
@@ -1409,19 +1409,57 @@ fn read_batch_next_action(read_batch_request: &Option<ResultToolRequest>) -> Opt
 #[derive(Debug, Clone, Serialize)]
 struct IndexedQueryPlanBatchResult {
     query: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    next_action: Option<QueryPlanNextAction>,
     plan: QueryPlan,
 }
 
 #[derive(Debug, Clone, Serialize)]
 struct QueryPlanBatchResult {
     query: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    next_action: Option<QueryPlanNextAction>,
     plan: QueryPlan,
 }
 
 #[derive(Debug, Clone, Serialize)]
 struct ShardQueryPlanBatchResult {
     query: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    next_action: Option<QueryPlanNextAction>,
     plans: Vec<ShardQueryPlan>,
+}
+
+fn indexed_query_plan_batch_result(query: String, plan: QueryPlan) -> IndexedQueryPlanBatchResult {
+    let next_action = plan.next_action.clone();
+    IndexedQueryPlanBatchResult {
+        query,
+        next_action,
+        plan,
+    }
+}
+
+fn query_plan_batch_result(query: String, plan: QueryPlan) -> QueryPlanBatchResult {
+    let next_action = plan.next_action.clone();
+    QueryPlanBatchResult {
+        query,
+        next_action,
+        plan,
+    }
+}
+
+fn shard_query_plan_batch_result(
+    query: String,
+    plans: Vec<ShardQueryPlan>,
+) -> ShardQueryPlanBatchResult {
+    let next_action = plans
+        .iter()
+        .find_map(|shard_plan| shard_plan.plan.next_action.clone());
+    ShardQueryPlanBatchResult {
+        query,
+        next_action,
+        plans,
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -2411,7 +2449,7 @@ fn run() -> Result<()> {
             for query in queries {
                 let mut plans = shard_query_plans(&index_dir, &query, &filters)?;
                 attach_cli_shard_retry_requests(&mut plans, &index_dir, &filters);
-                batch.push(ShardQueryPlanBatchResult { query, plans });
+                batch.push(shard_query_plan_batch_result(query, plans));
             }
             println!("{}", serde_json::to_string(&batch)?);
         }
@@ -2663,7 +2701,7 @@ fn run() -> Result<()> {
                     &index_path,
                     &filters,
                 );
-                batch.push(IndexedQueryPlanBatchResult { query, plan });
+                batch.push(indexed_query_plan_batch_result(query, plan));
             }
             println!("{}", serde_json::to_string(&batch)?);
         }
@@ -2731,7 +2769,7 @@ fn run() -> Result<()> {
                     attach_cli_shard_retry_requests_with_tool(
                         &mut plans, "search", &index_dir, &filters,
                     );
-                    batch.push(ShardQueryPlanBatchResult { query, plans });
+                    batch.push(shard_query_plan_batch_result(query, plans));
                 }
                 println!("{}", serde_json::to_string(&batch)?);
             } else if let Some(index_path) = index {
@@ -2745,7 +2783,7 @@ fn run() -> Result<()> {
                         &index_path,
                         &filters,
                     );
-                    batch.push(QueryPlanBatchResult { query, plan });
+                    batch.push(query_plan_batch_result(query, plan));
                 }
                 println!("{}", serde_json::to_string(&batch)?);
             } else {
@@ -2759,7 +2797,7 @@ fn run() -> Result<()> {
                         &index.root,
                         &filters,
                     );
-                    batch.push(QueryPlanBatchResult { query, plan });
+                    batch.push(query_plan_batch_result(query, plan));
                 }
                 println!("{}", serde_json::to_string(&batch)?);
             }
