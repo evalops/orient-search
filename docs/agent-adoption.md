@@ -27,8 +27,9 @@ The rule should tell agents:
   scoped to that checkout in the shared shard daemon. Use `--no-daemon` only
   when forcing current-directory fallback.
 - For JSON-lines or MCP-style clients, include `"cwd"` on no-target
-  `search_auto` / `search_auto_batch` calls so the shared daemon applies the
-  same current-checkout scope.
+  `search_auto`, `search_auto_batch`, `repo_map`, `search_plan`, and
+  `find_symbol` calls so the shared daemon applies the same current-checkout
+  scope.
 - Follow returned `read_*`, `related_*`, `repo_map_request`, and
   `query_plan_request` objects directly.
 - Use `refresh_if_stale:true` when indexed files may have changed.

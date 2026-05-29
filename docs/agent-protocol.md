@@ -81,9 +81,10 @@ reachable. Use `--daemon-addr` for another TCP daemon or `--no-daemon` to force
 current-directory fallback. `orient search-auto-batch` follows the same
 daemon-first rule.
 Protocol clients should pass `"cwd": "/path/inside/checkout"` on no-target
-`search_auto` and `search_auto_batch` requests so a shared shard daemon scopes
-results to the agent's active checkout. Explicit `repo`, `index`, `index_dir`,
-or `repo_filter` arguments still win.
+`search_auto`, `search_auto_batch`, `repo_map`, `search_plan`, and
+`find_symbol` requests so a shared shard daemon scopes results to the agent's
+active checkout. Explicit `repo`, `index`, `index_dir`, or `repo_filter`
+arguments still win.
 The plain CLI `orient search` command also accepts `--index` and `--index-dir`
 as convenience target flags for agents that reach first for `search` and then
 add the available search surface.

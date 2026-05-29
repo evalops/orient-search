@@ -52,7 +52,8 @@ focused on the agent's current task. Use `--daemon-addr` for another TCP daemon
 or `--no-daemon` to force local fallback.
 
 JSON-lines and MCP-style clients can pass `"cwd": "/path/inside/checkout"` to
-`search_auto` or `search_auto_batch` for the same scoped-daemon behavior.
+no-target `search_auto`, `search_auto_batch`, `repo_map`, `search_plan`, or
+`find_symbol` calls for the same scoped-daemon behavior.
 
 Useful filters: `repo:`, `path:`/`dir:`, `file:`, `lang:`, `ext:`, `symbol:`,
 `kind:`/`type:`, `dep:`, `import:`, `test:`, `generated:`, `code:`,

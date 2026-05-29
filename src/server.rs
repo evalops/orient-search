@@ -1124,7 +1124,7 @@ For many local repos, bootstrap it with `orient ensure-shards --discover-root /p
 For one repo, bootstrap it with `orient ensure-index --repo {repo} --index {index}` and `orient serve-tcp --addr {addr} --index {index}`.\n\
 Start each session with `daemon_status` or `agent_guide`, then use `search_auto` for normal lookup and `search_auto_batch` for alternate query phrasings.\n\
 Trust `daemon_status.search_auto_default` to see whether no-target `search_auto` will use a warmed shard directory, warmed index, or the daemon current directory; use `daemon_status.default_requests` for copyable first repo-map/search/query-plan calls.\n\
-When calling `search_auto` or `search_auto_batch` through JSON-lines/MCP without an explicit target, pass `cwd` so shared shard daemons scope results to the current git checkout.\n\
+When calling `search_auto`, `search_auto_batch`, `repo_map`, `search_plan`, or `find_symbol` through JSON-lines/MCP without an explicit target, pass `cwd` so shared shard daemons scope results to the current git checkout.\n\
 Use query filters directly: `file:`, `path:`, `lang:`, `ext:`, `symbol:`, `type:`, `repo:`, `test:`, `generated:`, `code:`, `is:code`, `is:docs`, quoted literals, and negative filters like `-path:vendor` or `-is:generated`.\n\
 Generated paths, including hashed JavaScript bundles, are demoted by default; use `generated:true` or `is:generated` when intentionally inspecting generated output.\n\
 After search, follow returned `read_batch_request`, `read_request`, `related_request`, and `related_symbols_request`; each includes `jsonl` and `client_cli` for direct replay through `orient client-jsonl`.\n\
@@ -1930,11 +1930,11 @@ fn primary_retry_result_value(request: &ResultToolRequest, result: Value) -> Res
     }))
 }
 
-fn search_auto_arguments_scoped_to_cwd(arguments: &Value) -> Result<Value> {
+fn arguments_scoped_to_client_cwd(arguments: &Value) -> Result<Value> {
     if optional_string_arg(arguments, "repo_filter").is_some() {
         return Ok(arguments.clone());
     }
-    let Some(repo_root) = search_auto_git_root_from_cwd(arguments)? else {
+    let Some(repo_root) = git_root_from_client_cwd(arguments, "cwd")? else {
         return Ok(arguments.clone());
     };
     let mut scoped = arguments.clone();
@@ -1948,29 +1948,51 @@ fn search_auto_arguments_scoped_to_cwd(arguments: &Value) -> Result<Value> {
     Ok(scoped)
 }
 
-fn search_auto_live_repo_from_cwd(arguments: &Value) -> Result<PathBuf> {
-    if let Some(repo_root) = search_auto_git_root_from_cwd(arguments)? {
+fn arguments_scoped_to_client_cwd_for_query(arguments: &Value, query: &str) -> Result<Value> {
+    let query_filters = parse_query(query).filters;
+    if query_filters.repo.is_some()
+        || query_filters.branch.is_some()
+        || query_filters.origin.is_some()
+    {
+        return Ok(arguments.clone());
+    }
+    arguments_scoped_to_client_cwd(arguments)
+}
+
+fn live_repo_from_client_cwd(arguments: &Value, tool_name: &str) -> Result<PathBuf> {
+    if let Some(repo_root) = git_root_from_client_cwd(arguments, tool_name)? {
         return Ok(repo_root);
     }
     if let Some(cwd) = optional_string_arg(arguments, "cwd") {
         return PathBuf::from(cwd)
             .canonicalize()
-            .context("canonicalize search_auto cwd");
+            .with_context(|| format!("canonicalize {tool_name} cwd"));
     }
-    std::env::current_dir().context("resolve current directory for search_auto")
+    std::env::current_dir().with_context(|| format!("resolve current directory for {tool_name}"))
 }
 
-fn search_auto_git_root_from_cwd(arguments: &Value) -> Result<Option<PathBuf>> {
+fn git_root_from_client_cwd(arguments: &Value, tool_name: &str) -> Result<Option<PathBuf>> {
     let Some(cwd) = optional_string_arg(arguments, "cwd") else {
         return Ok(None);
     };
     let cwd = PathBuf::from(cwd)
         .canonicalize()
-        .context("canonicalize search_auto cwd")?;
+        .with_context(|| format!("canonicalize {tool_name} cwd"))?;
     Ok(cwd
         .ancestors()
         .find(|ancestor| ancestor.join(".git").exists())
         .map(Path::to_path_buf))
+}
+
+fn index_matches_client_cwd(index: &FastIndex, arguments: &Value) -> Result<bool> {
+    let Some(repo_root) = git_root_from_client_cwd(arguments, "cwd")? else {
+        return Ok(false);
+    };
+    Ok(index
+        .root
+        .canonicalize()
+        .unwrap_or_else(|_| index.root.clone())
+        == repo_root)
 }
 
 fn retry_search_requests<T: Serialize>(
@@ -2250,12 +2272,38 @@ impl ToolRuntime {
                     );
                     return Ok(serde_json::to_value(map)?);
                 }
+                if optional_string_arg(&request.arguments, "cwd").is_some() {
+                    let scoped_arguments = arguments_scoped_to_client_cwd(&request.arguments)?;
+                    if let Ok(index_dir) = self.single_cached_shard_manifest_path() {
+                        return Ok(serde_json::to_value(self.shard_repo_maps_cached(
+                            &index_dir,
+                            symbol_limit,
+                            test_limit,
+                            detail,
+                            read_limit,
+                            &search_filters(&scoped_arguments, true)?,
+                            "read_ranges",
+                        )?)?);
+                    }
+                    if let Ok(index_path) = self.single_cached_index_path() {
+                        let index = self.cached_index(index_path.clone())?;
+                        if index_matches_client_cwd(&index, &request.arguments)? {
+                            let mut map =
+                                index.repo_map_with_detail(symbol_limit, test_limit, detail);
+                            attach_repo_map_read_batch_request_with_limit(
+                                &mut map,
+                                "read_ranges",
+                                read_request_args("index", &index_path),
+                                read_limit,
+                            );
+                            return Ok(serde_json::to_value(map)?);
+                        }
+                    }
+                }
                 let repo = optional_string_arg(&request.arguments, "repo")
                     .map(PathBuf::from)
                     .map(Ok)
-                    .unwrap_or_else(|| {
-                        std::env::current_dir().context("resolve current directory for repo_map")
-                    })?;
+                    .unwrap_or_else(|| live_repo_from_client_cwd(&request.arguments, "repo_map"))?;
                 let index = RepoIndexer::new(&repo).build()?;
                 let mut map = index.repo_map_with_detail(symbol_limit, test_limit, detail);
                 attach_repo_map_read_batch_request_with_limit(
@@ -2743,11 +2791,48 @@ impl ToolRuntime {
                         &request.arguments,
                     ))?);
                 }
+                if optional_string_arg(&request.arguments, "cwd").is_some() {
+                    let scoped_arguments =
+                        arguments_scoped_to_client_cwd_for_query(&request.arguments, &query)?;
+                    if let Ok(index_dir) = self.single_cached_shard_manifest_path() {
+                        if bool_arg(&request.arguments, "refresh_if_stale") {
+                            self.refresh_shards_if_stale(&index_dir)?;
+                        }
+                        let mut plans = self.shard_query_plans_cached(
+                            &index_dir,
+                            &query,
+                            &search_filters(&scoped_arguments, true)?,
+                        )?;
+                        attach_shard_retry_requests_with_tool(
+                            &mut plans,
+                            "search",
+                            &index_dir,
+                            &scoped_arguments,
+                        );
+                        return Ok(serde_json::to_value(plans)?);
+                    }
+                    if let Ok(index_path) = self.single_cached_index_path() {
+                        let refresh_if_stale = bool_arg(&request.arguments, "refresh_if_stale");
+                        let index =
+                            self.cached_index_maybe_refresh(index_path.clone(), refresh_if_stale)?;
+                        if index_matches_client_cwd(&index, &request.arguments)? {
+                            let plan = index
+                                .query_plan(&query, &search_filters(&scoped_arguments, true)?)?;
+                            return Ok(serde_json::to_value(attach_retry_requests(
+                                plan,
+                                "search",
+                                "index",
+                                index_path,
+                                &scoped_arguments,
+                            ))?);
+                        }
+                    }
+                }
                 let repo = optional_string_arg(&request.arguments, "repo")
                     .map(PathBuf::from)
                     .map(Ok)
                     .unwrap_or_else(|| {
-                        std::env::current_dir().context("resolve current directory for search_plan")
+                        live_repo_from_client_cwd(&request.arguments, "search_plan")
                     })?;
                 let index = FastIndex::build(repo)?;
                 let plan = index.query_plan(&query, &search_filters(&request.arguments, false)?)?;
@@ -2827,12 +2912,58 @@ impl ToolRuntime {
                     }
                     return Ok(serde_json::to_value(batch)?);
                 }
+                if optional_string_arg(&request.arguments, "cwd").is_some() {
+                    if let Ok(index_dir) = self.single_cached_shard_manifest_path() {
+                        if bool_arg(&request.arguments, "refresh_if_stale") {
+                            self.refresh_shards_if_stale(&index_dir)?;
+                        }
+                        let mut batch = Vec::new();
+                        for query in queries {
+                            let scoped_arguments =
+                                arguments_scoped_to_client_cwd_for_query(&request.arguments, &query)?;
+                            let filters = search_filters(&scoped_arguments, true)?;
+                            let mut plans =
+                                self.shard_query_plans_cached(&index_dir, &query, &filters)?;
+                            attach_shard_retry_requests_with_tool(
+                                &mut plans,
+                                "search",
+                                &index_dir,
+                                &scoped_arguments,
+                            );
+                            batch.push(ShardQueryPlanBatchResult { query, plans });
+                        }
+                        return Ok(serde_json::to_value(batch)?);
+                    }
+                    if let Ok(index_path) = self.single_cached_index_path() {
+                        let refresh_if_stale = bool_arg(&request.arguments, "refresh_if_stale");
+                        let index =
+                            self.cached_index_maybe_refresh(index_path.clone(), refresh_if_stale)?;
+                        if index_matches_client_cwd(&index, &request.arguments)? {
+                            let mut batch = Vec::new();
+                            for query in queries {
+                                let scoped_arguments = arguments_scoped_to_client_cwd_for_query(
+                                    &request.arguments,
+                                    &query,
+                                )?;
+                                let filters = search_filters(&scoped_arguments, true)?;
+                                let plan = attach_retry_requests(
+                                    index.query_plan(&query, &filters)?,
+                                    "search",
+                                    "index",
+                                    &index_path,
+                                    &scoped_arguments,
+                                );
+                                batch.push(QueryPlanBatchResult { query, plan });
+                            }
+                            return Ok(serde_json::to_value(batch)?);
+                        }
+                    }
+                }
                 let repo = optional_string_arg(&request.arguments, "repo")
                     .map(PathBuf::from)
                     .map(Ok)
                     .unwrap_or_else(|| {
-                        std::env::current_dir()
-                            .context("resolve current directory for search_plan_batch")
+                        live_repo_from_client_cwd(&request.arguments, "search_plan_batch")
                     })?;
                 let index = FastIndex::build(repo)?;
                 let filters = search_filters(&request.arguments, false)?;
@@ -3228,11 +3359,39 @@ impl ToolRuntime {
                         read_request_args("index", &index_path),
                     ))?);
                 }
+                if optional_string_arg(&request.arguments, "cwd").is_some() {
+                    let scoped_arguments = arguments_scoped_to_client_cwd(&request.arguments)?;
+                    if let Ok(index_dir) = self.single_cached_shard_manifest_path() {
+                        let symbols = self.find_shard_symbol_cached(
+                            &index_dir,
+                            &name,
+                            limit,
+                            &search_filters(&scoped_arguments, true)?,
+                        )?;
+                        return Ok(serde_json::to_value(symbol_lookup_results(
+                            symbols,
+                            "read_range",
+                            read_request_args("index_dir", &index_dir),
+                        ))?);
+                    }
+                    if let Ok(index_path) = self.single_cached_index_path() {
+                        let index = self.cached_index(index_path.clone())?;
+                        if index_matches_client_cwd(&index, &request.arguments)? {
+                            let filters = search_filters(&scoped_arguments, true)?;
+                            let symbols = index.find_symbol_filtered(&name, limit, &filters);
+                            return Ok(serde_json::to_value(symbol_lookup_results(
+                                symbols,
+                                "read_range",
+                                read_request_args("index", &index_path),
+                            ))?);
+                        }
+                    }
+                }
                 let repo = optional_string_arg(&request.arguments, "repo")
                     .map(PathBuf::from)
                     .map(Ok)
                     .unwrap_or_else(|| {
-                        std::env::current_dir().context("resolve current directory for find_symbol")
+                        live_repo_from_client_cwd(&request.arguments, "find_symbol")
                     })?;
                 let filters = search_filters(&request.arguments, false)?;
                 let index = RepoIndexer::new(&repo).build()?;
@@ -3306,12 +3465,65 @@ impl ToolRuntime {
                         .collect::<Vec<_>>();
                     return Ok(serde_json::to_value(batch)?);
                 }
+                if optional_string_arg(&request.arguments, "cwd").is_some() {
+                    let scoped_arguments = arguments_scoped_to_client_cwd(&request.arguments)?;
+                    if let Ok(index_dir) = self.single_cached_shard_manifest_path() {
+                        let filters = search_filters(&scoped_arguments, true)?;
+                        let mut batch = Vec::new();
+                        for name in names {
+                            let symbols =
+                                self.find_shard_symbol_cached(&index_dir, &name, limit, &filters)?;
+                            let symbols = symbol_lookup_results(
+                                symbols,
+                                "read_range",
+                                read_request_args("index_dir", &index_dir),
+                            );
+                            let read_batch_request = symbol_lookup_read_batch_request(
+                                &symbols,
+                                "read_ranges",
+                                read_request_args("index_dir", &index_dir),
+                            );
+                            batch.push(SymbolBatchResult {
+                                name,
+                                read_batch_request,
+                                symbols,
+                            });
+                        }
+                        return Ok(serde_json::to_value(batch)?);
+                    }
+                    if let Ok(index_path) = self.single_cached_index_path() {
+                        let index = self.cached_index(index_path.clone())?;
+                        if index_matches_client_cwd(&index, &request.arguments)? {
+                            let filters = search_filters(&scoped_arguments, true)?;
+                            let batch = names
+                                .into_iter()
+                                .map(|name| {
+                                    let symbols = symbol_lookup_results(
+                                        index.find_symbol_filtered(&name, limit, &filters),
+                                        "read_range",
+                                        read_request_args("index", &index_path),
+                                    );
+                                    let read_batch_request = symbol_lookup_read_batch_request(
+                                        &symbols,
+                                        "read_ranges",
+                                        read_request_args("index", &index_path),
+                                    );
+                                    SymbolBatchResult {
+                                        name,
+                                        read_batch_request,
+                                        symbols,
+                                    }
+                                })
+                                .collect::<Vec<_>>();
+                            return Ok(serde_json::to_value(batch)?);
+                        }
+                    }
+                }
                 let repo = optional_string_arg(&request.arguments, "repo")
                     .map(PathBuf::from)
                     .map(Ok)
                     .unwrap_or_else(|| {
-                        std::env::current_dir()
-                            .context("resolve current directory for find_symbol_batch")
+                        live_repo_from_client_cwd(&request.arguments, "find_symbol_batch")
                     })?;
                 let filters = search_filters(&request.arguments, false)?;
                 let index = RepoIndexer::new(&repo).build()?;
@@ -3722,7 +3934,7 @@ impl ToolRuntime {
                 retry_if_empty,
             );
         }
-        let scoped_arguments = search_auto_arguments_scoped_to_cwd(arguments)?;
+        let scoped_arguments = arguments_scoped_to_client_cwd_for_query(arguments, query)?;
         if let Ok(index_dir) = self.single_cached_shard_manifest_path() {
             return self.search_auto_shards(
                 index_dir,
@@ -3747,7 +3959,7 @@ impl ToolRuntime {
                 retry_if_empty,
             );
         }
-        let repo = search_auto_live_repo_from_cwd(arguments)?;
+        let repo = live_repo_from_client_cwd(arguments, "search_auto")?;
         self.search_auto_live(
             repo,
             &scoped_arguments,
@@ -5116,6 +5328,7 @@ const REPO_MAP_TARGET_OPTIONAL_ARGS: &[&str] = &[
     "repo",
     "index",
     "index_dir",
+    "cwd",
     "symbols",
     "tests",
     "detail",
@@ -5409,6 +5622,7 @@ const SYMBOL_TARGET_OPTIONAL_ARGS: &[&str] = &[
     "repo",
     "index",
     "index_dir",
+    "cwd",
     "limit",
     "path",
     "dir",
@@ -5708,6 +5922,7 @@ const PLAN_TARGET_OPTIONAL_ARGS: &[&str] = &[
     "repo",
     "index",
     "index_dir",
+    "cwd",
     "path",
     "dir",
     "language",
