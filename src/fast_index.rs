@@ -3134,6 +3134,14 @@ fn query_plan_repair_hints(
         ));
     }
     if final_match_count > 0 {
+        if !candidate_cap_hit {
+            hints.extend(candidate_facet_repair_hints(
+                query_tokens,
+                filters,
+                files,
+                facet_candidate_ids,
+            ));
+        }
         return hints;
     }
 

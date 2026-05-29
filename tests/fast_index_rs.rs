@@ -1067,6 +1067,36 @@ fn indexed_query_plan_suggests_any_terms_for_strict_and_misses() {
 }
 
 #[test]
+fn indexed_query_plan_suggests_facets_for_noisy_successful_queries() {
+    let repo = tempfile::tempdir().unwrap();
+    for index in 0..5 {
+        write(
+            &repo.path().join(format!("src/worker_{index}.rs")),
+            &format!("pub fn sharedneedle_worker_{index}() {{}}\n"),
+        );
+    }
+    for index in 0..17 {
+        write(
+            &repo.path().join(format!("docs/guide_{index}.md")),
+            &format!("sharedneedle setup guide {index}\n"),
+        );
+    }
+
+    let index = FastIndex::build(repo.path()).unwrap();
+    let plan = index
+        .query_plan("sharedneedle", &SearchFilters::default())
+        .unwrap();
+
+    assert!(plan.final_match_count > 0);
+    assert!(!plan.candidate_cap_hit);
+    assert!(plan.repair_hints.iter().any(|hint| {
+        hint.kind == "narrow_by_code"
+            && hint.suggested_query.as_deref() == Some("code:true sharedneedle")
+            && hint.message.contains("from 22 files to 5")
+    }));
+}
+
+#[test]
 fn indexed_query_plan_counts_filter_and_phrase_rejections() {
     let repo = tempfile::tempdir().unwrap();
     write(
