@@ -46,6 +46,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 const DEFAULT_DAEMON_ADDR: &str = "127.0.0.1:8796";
+const DEFAULT_CLI_READ_RANGE_LINES: usize = 80;
 
 #[derive(Debug, Parser)]
 #[command(name = "orient")]
@@ -209,7 +210,7 @@ enum Commands {
         path_arg: Option<String>,
         #[arg(long, default_value_t = 1)]
         start: usize,
-        #[arg(long, default_value_t = 80)]
+        #[arg(long, default_value_t = DEFAULT_CLI_READ_RANGE_LINES)]
         lines: usize,
         #[arg(long, value_enum, default_value_t = ReadScopeArg::Exact)]
         scope: ReadScopeArg,
@@ -223,7 +224,7 @@ enum Commands {
         paths: Vec<String>,
         #[arg(long, default_value_t = 1)]
         start: usize,
-        #[arg(long, default_value_t = 80)]
+        #[arg(long, default_value_t = DEFAULT_CLI_READ_RANGE_LINES)]
         lines: usize,
         #[arg(long, value_enum, default_value_t = ReadScopeArg::Exact)]
         scope: ReadScopeArg,
@@ -4834,59 +4835,52 @@ impl FromStr for CliRangeSpec {
     type Err = String;
 
     fn from_str(value: &str) -> std::result::Result<Self, Self::Err> {
-        if let Some(range) = parse_scoped_cli_range(value)? {
+        let (value, scope) = split_cli_range_scope(value);
+        if let Some(range) = parse_compact_cli_range(value, scope)? {
             return Ok(range);
         }
-        let mut parts = value.rsplitn(3, ':');
-        let lines = parts
-            .next()
-            .ok_or_else(|| "range must be PATH:START:LINES".to_string())?
-            .parse::<usize>()
-            .map_err(|_| "range lines must be a positive integer".to_string())?;
-        let start = parts
-            .next()
-            .ok_or_else(|| "range must be PATH:START:LINES".to_string())?
-            .parse::<usize>()
-            .map_err(|_| "range start must be a positive integer".to_string())?;
-        let path = parts
-            .next()
-            .filter(|path| !path.is_empty())
-            .ok_or_else(|| "range must be PATH:START:LINES".to_string())?
-            .to_string();
-        if start == 0 || lines == 0 {
-            return Err("range start and lines must be positive integers".to_string());
+        if let Some(range) = parse_copied_location_cli_range(value, scope) {
+            return Ok(range);
         }
-        Ok(Self {
-            path,
-            start,
-            lines,
-            scope: None,
-        })
+        Err("range must be PATH:START:LINES[:SCOPE] or a copied PATH:LINE location".to_string())
     }
 }
 
-fn parse_scoped_cli_range(value: &str) -> std::result::Result<Option<CliRangeSpec>, String> {
-    let mut parts = value.rsplitn(4, ':');
-    let Some(scope_text) = parts.next() else {
-        return Ok(None);
+fn split_cli_range_scope(value: &str) -> (&str, Option<RangeScope>) {
+    let Some((base, scope_text)) = value.rsplit_once(':') else {
+        return (value, None);
     };
     let Some(scope) = RangeScope::parse(scope_text) else {
-        return Ok(None);
+        return (value, None);
     };
+    (base, Some(scope))
+}
+
+fn parse_compact_cli_range(
+    value: &str,
+    scope: Option<RangeScope>,
+) -> std::result::Result<Option<CliRangeSpec>, String> {
+    let mut parts = value.rsplitn(3, ':');
     let lines = parts
         .next()
-        .ok_or_else(|| "range must be PATH:START:LINES[:SCOPE]".to_string())?
+        .ok_or_else(|| "range must be PATH:START:LINES".to_string())?
         .parse::<usize>()
-        .map_err(|_| "range lines must be a positive integer".to_string())?;
+        .ok();
+    let Some(lines) = lines else {
+        return Ok(None);
+    };
     let start = parts
         .next()
-        .ok_or_else(|| "range must be PATH:START:LINES[:SCOPE]".to_string())?
+        .ok_or_else(|| "range must be PATH:START:LINES".to_string())?
         .parse::<usize>()
-        .map_err(|_| "range start must be a positive integer".to_string())?;
+        .ok();
+    let Some(start) = start else {
+        return Ok(None);
+    };
     let path = parts
         .next()
         .filter(|path| !path.is_empty())
-        .ok_or_else(|| "range must be PATH:START:LINES[:SCOPE]".to_string())?
+        .ok_or_else(|| "range must be PATH:START:LINES".to_string())?
         .to_string();
     if start == 0 || lines == 0 {
         return Err("range start and lines must be positive integers".to_string());
@@ -4895,8 +4889,49 @@ fn parse_scoped_cli_range(value: &str) -> std::result::Result<Option<CliRangeSpe
         path,
         start,
         lines,
-        scope: Some(scope),
+        scope,
     }))
+}
+
+fn parse_copied_location_cli_range(value: &str, scope: Option<RangeScope>) -> Option<CliRangeSpec> {
+    let parsed = parse_query(value);
+    let start = parsed.filters.target_line?;
+    let path = parsed
+        .filters
+        .path
+        .or(parsed.filters.file)
+        .filter(|path| !path.is_empty())?;
+    Some(CliRangeSpec {
+        path,
+        start,
+        lines: copied_hash_anchor_lines(value).unwrap_or(DEFAULT_CLI_READ_RANGE_LINES),
+        scope,
+    })
+}
+
+fn copied_hash_anchor_lines(value: &str) -> Option<usize> {
+    let lower = value.to_ascii_lowercase();
+    let marker = lower.find("#l")?;
+    let after_marker = &value[marker + 2..];
+    let (start, after_start) = split_leading_digits(after_marker)?;
+    let after_start = after_start.trim_start();
+    let after_dash = after_start.strip_prefix('-')?.trim_start();
+    let after_optional_l = after_dash
+        .strip_prefix('L')
+        .or_else(|| after_dash.strip_prefix('l'))
+        .unwrap_or(after_dash);
+    let (end, _) = split_leading_digits(after_optional_l)?;
+    (end >= start).then_some(end - start + 1)
+}
+
+fn split_leading_digits(value: &str) -> Option<(usize, &str)> {
+    let digit_end = value
+        .char_indices()
+        .take_while(|(_, ch)| ch.is_ascii_digit())
+        .map(|(index, ch)| index + ch.len_utf8())
+        .last()?;
+    let number = value[..digit_end].parse::<usize>().ok()?;
+    Some((number, &value[digit_end..]))
 }
 
 fn cli_ranges(
@@ -4948,12 +4983,12 @@ fn cli_single_range(
         return Ok(range);
     }
     if let Some(path) = path_arg {
-        let range = CliRangeSpec {
+        let range = CliRangeSpec::from_str(&path).unwrap_or(CliRangeSpec {
             path,
             start,
             lines,
             scope: None,
-        };
+        });
         validate_cli_range_spec(&range)?;
         return Ok(range);
     }
@@ -5420,6 +5455,32 @@ mod tests {
 
         let exact = CliRangeSpec::from_str("src/auth.rs:12:4:exact").unwrap();
         assert_eq!(exact.scope, Some(RangeScope::Exact));
+    }
+
+    #[test]
+    fn cli_range_spec_accepts_copied_locations() {
+        let line = CliRangeSpec::from_str("src/auth.rs:12").unwrap();
+        assert_eq!(line.path, "src/auth.rs");
+        assert_eq!(line.start, 12);
+        assert_eq!(line.lines, DEFAULT_CLI_READ_RANGE_LINES);
+        assert_eq!(line.scope, None);
+
+        let copied_line = CliRangeSpec::from_str("src/auth.rs:12: pub fn issue_token").unwrap();
+        assert_eq!(copied_line.path, "src/auth.rs");
+        assert_eq!(copied_line.start, 12);
+        assert_eq!(copied_line.lines, DEFAULT_CLI_READ_RANGE_LINES);
+
+        let hash = CliRangeSpec::from_str("src/auth.rs#L12-L15").unwrap();
+        assert_eq!(hash.path, "src/auth.rs");
+        assert_eq!(hash.start, 12);
+        assert_eq!(hash.lines, 4);
+
+        let wrapped =
+            CliRangeSpec::from_str("at Object.handle (src/auth.rs#L12-L15):symbol").unwrap();
+        assert_eq!(wrapped.path, "src/auth.rs");
+        assert_eq!(wrapped.start, 12);
+        assert_eq!(wrapped.lines, 4);
+        assert_eq!(wrapped.scope, Some(RangeScope::Symbol));
     }
 
     #[test]

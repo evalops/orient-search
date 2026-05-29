@@ -52,6 +52,7 @@ orient search --repo . "issue token"
 orient search --index /tmp/repo.index "issue token"
 orient search --index-dir /tmp/orient-shards "repo:service issue token"
 orient read-range --index /tmp/repo.index src/lib.rs:40:80
+orient read-range --repo . src/lib.rs#L40-L45
 ```
 
 With no explicit `--repo`, `--index`, or `--index-dir`, `search-auto` first
@@ -103,6 +104,9 @@ and query-plan follow-ups with `jsonl`, `client_cli`, and compact CLI hints.
 For manual context reads, pass `scope:"symbol"` or `orient read-range --scope
 symbol` to anchor the returned window at the nearest function, class, or type
 definition instead of opening an exact line window.
+The `read-range` and `read-ranges` CLIs accept the same copied file locations
+as search for positional paths, including `src/lib.rs:42`, copied
+`src/lib.rs:42: text` lines, and `src/lib.rs#L42-L45`.
 
 ## Footprint
 

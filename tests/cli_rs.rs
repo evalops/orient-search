@@ -1339,6 +1339,33 @@ fn cli_outputs_repo_map_and_reads_ranges() {
         .stdout(predicate::str::contains("\"start_line\":3"))
         .stdout(predicate::str::contains("issue_token"));
 
+    let mut copied_location_read_range = Command::cargo_bin("orient").unwrap();
+    copied_location_read_range
+        .args([
+            "read-range",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "src/auth.rs:5",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"start_line\":5"))
+        .stdout(predicate::str::contains("issue_token"));
+
+    let mut hash_anchor_read_range = Command::cargo_bin("orient").unwrap();
+    hash_anchor_read_range
+        .args([
+            "read-range",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "src/auth.rs#L5-L6",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"start_line\":5"))
+        .stdout(predicate::str::contains("\"end_line\":6"))
+        .stdout(predicate::str::contains("issue_token"));
+
     let mut oversized_compact_read_range = Command::cargo_bin("orient").unwrap();
     oversized_compact_read_range
         .args([
@@ -1439,6 +1466,22 @@ fn cli_outputs_repo_map_and_reads_ranges() {
         .stdout(predicate::str::contains("\"symbol\""))
         .stdout(predicate::str::contains("\"name\":\"issue_token\""))
         .stdout(predicate::str::contains("SessionManager"));
+
+    let mut copied_location_read_ranges = Command::cargo_bin("orient").unwrap();
+    copied_location_read_ranges
+        .args([
+            "read-ranges",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "src/auth.rs:5: pub fn issue_token",
+            "tests/auth_test.rs#L3-L3",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"path\":\"src/auth.rs\""))
+        .stdout(predicate::str::contains("\"start_line\":5"))
+        .stdout(predicate::str::contains("\"path\":\"tests/auth_test.rs\""))
+        .stdout(predicate::str::contains("\"start_line\":3"));
 }
 
 #[test]
