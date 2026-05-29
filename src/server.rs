@@ -309,11 +309,11 @@ struct IndexCacheEntry {
 #[derive(Clone)]
 struct CachedShardManifest {
     manifest: Arc<ShardManifest>,
-    fingerprint: Option<ShardManifestFingerprint>,
+    fingerprint: Option<CacheFileFingerprint>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct ShardManifestFingerprint {
+struct CacheFileFingerprint {
     len: u64,
     modified: Option<SystemTime>,
 }
@@ -326,7 +326,10 @@ struct CachedIndexFootprint {
 
 enum IndexCacheState {
     Loading,
-    Ready(Arc<FastIndex>),
+    Ready {
+        index: Arc<FastIndex>,
+        fingerprint: Option<CacheFileFingerprint>,
+    },
     Failed(String),
 }
 
@@ -343,9 +346,9 @@ impl IndexCacheEntry {
         }
     }
 
-    fn ready(index: Arc<FastIndex>) -> Self {
+    fn ready(index: Arc<FastIndex>, fingerprint: Option<CacheFileFingerprint>) -> Self {
         Self {
-            state: Mutex::new(IndexCacheState::Ready(index)),
+            state: Mutex::new(IndexCacheState::Ready { index, fingerprint }),
             ready: Condvar::new(),
         }
     }
@@ -353,15 +356,30 @@ impl IndexCacheEntry {
     fn is_ready(&self) -> bool {
         self.state
             .lock()
-            .map(|state| matches!(*state, IndexCacheState::Ready(_)))
+            .map(|state| matches!(*state, IndexCacheState::Ready { .. }))
             .unwrap_or(false)
     }
 
     fn ready_index(&self) -> Option<Arc<FastIndex>> {
         self.state.lock().ok().and_then(|state| match &*state {
-            IndexCacheState::Ready(index) => Some(Arc::clone(index)),
+            IndexCacheState::Ready { index, .. } => Some(Arc::clone(index)),
             IndexCacheState::Loading | IndexCacheState::Failed(_) => None,
         })
+    }
+
+    fn ready_is_stale(&self, current_fingerprint: Option<CacheFileFingerprint>) -> bool {
+        let Some(current_fingerprint) = current_fingerprint else {
+            return false;
+        };
+        self.state
+            .lock()
+            .map(|state| match &*state {
+                IndexCacheState::Ready { fingerprint, .. } => {
+                    *fingerprint != Some(current_fingerprint)
+                }
+                IndexCacheState::Loading | IndexCacheState::Failed(_) => false,
+            })
+            .unwrap_or(false)
     }
 }
 
@@ -3938,79 +3956,103 @@ impl ToolRuntime {
 
     fn replace_cached_index(&self, index_path: PathBuf, index: Arc<FastIndex>) -> Result<PathBuf> {
         let key = canonical_cache_key(&index_path);
+        let fingerprint = index_file_fingerprint(&key);
         self.indexes
             .lock()
             .map_err(|_| anyhow!("index cache lock poisoned"))?
-            .insert(key.clone(), Arc::new(IndexCacheEntry::ready(index)));
+            .insert(
+                key.clone(),
+                Arc::new(IndexCacheEntry::ready(index, fingerprint)),
+            );
         Ok(key)
     }
 
     fn cached_index_with_key(&self, index_path: PathBuf) -> Result<(PathBuf, Arc<FastIndex>)> {
         let key = canonical_cache_key(&index_path);
-        let (entry, should_load) = {
-            let mut indexes = self
-                .indexes
-                .lock()
-                .map_err(|_| anyhow!("index cache lock poisoned"))?;
-            if let Some(entry) = indexes.get(&key) {
-                (Arc::clone(entry), false)
-            } else {
-                let entry = Arc::new(IndexCacheEntry::loading());
-                indexes.insert(key.clone(), Arc::clone(&entry));
-                (entry, true)
-            }
-        };
-
-        if should_load {
-            let loaded = FastIndex::load(&index_path).map(Arc::new);
-            let result = match loaded {
-                Ok(index) => {
-                    *entry
-                        .state
-                        .lock()
-                        .map_err(|_| anyhow!("index cache entry lock poisoned"))? =
-                        IndexCacheState::Ready(Arc::clone(&index));
-                    Ok((key.clone(), index))
-                }
-                Err(error) => {
-                    let message = error.to_string();
-                    *entry
-                        .state
-                        .lock()
-                        .map_err(|_| anyhow!("index cache entry lock poisoned"))? =
-                        IndexCacheState::Failed(message.clone());
-                    Err(anyhow!(message))
-                }
-            };
-            entry.ready.notify_all();
-            if result.is_err() {
+        loop {
+            let current_fingerprint = index_file_fingerprint(&key);
+            let (entry, should_load) = {
                 let mut indexes = self
                     .indexes
                     .lock()
                     .map_err(|_| anyhow!("index cache lock poisoned"))?;
-                if indexes
-                    .get(&key)
-                    .is_some_and(|cached| Arc::ptr_eq(cached, &entry))
-                {
-                    indexes.remove(&key);
+                if let Some(entry) = indexes.get(&key) {
+                    if entry.ready_is_stale(current_fingerprint) {
+                        let entry = Arc::new(IndexCacheEntry::loading());
+                        indexes.insert(key.clone(), Arc::clone(&entry));
+                        (entry, true)
+                    } else {
+                        (Arc::clone(entry), false)
+                    }
+                } else {
+                    let entry = Arc::new(IndexCacheEntry::loading());
+                    indexes.insert(key.clone(), Arc::clone(&entry));
+                    (entry, true)
                 }
-            }
-            return result;
-        }
+            };
 
-        let mut state = entry
-            .state
-            .lock()
-            .map_err(|_| anyhow!("index cache entry lock poisoned"))?;
-        loop {
-            match &*state {
-                IndexCacheState::Ready(index) => return Ok((key, Arc::clone(index))),
-                IndexCacheState::Failed(message) => return Err(anyhow!(message.clone())),
-                IndexCacheState::Loading => {
-                    state = entry
-                        .ready
-                        .wait(state)
-                        .map_err(|_| anyhow!("index cache entry lock poisoned"))?;
+            if should_load {
+                let loaded = FastIndex::load(&key).map(Arc::new);
+                let result = match loaded {
+                    Ok(index) => {
+                        let fingerprint = index_file_fingerprint(&key);
+                        *entry
+                            .state
+                            .lock()
+                            .map_err(|_| anyhow!("index cache entry lock poisoned"))? =
+                            IndexCacheState::Ready {
+                                index: Arc::clone(&index),
+                                fingerprint,
+                            };
+                        Ok((key.clone(), index))
+                    }
+                    Err(error) => {
+                        let message = error.to_string();
+                        *entry
+                            .state
+                            .lock()
+                            .map_err(|_| anyhow!("index cache entry lock poisoned"))? =
+                            IndexCacheState::Failed(message.clone());
+                        Err(anyhow!(message))
+                    }
+                };
+                entry.ready.notify_all();
+                if result.is_err() {
+                    let mut indexes = self
+                        .indexes
+                        .lock()
+                        .map_err(|_| anyhow!("index cache lock poisoned"))?;
+                    if indexes
+                        .get(&key)
+                        .is_some_and(|cached| Arc::ptr_eq(cached, &entry))
+                    {
+                        indexes.remove(&key);
+                    }
+                }
+                return result;
+            }
+
+            let mut state = entry
+                .state
+                .lock()
+                .map_err(|_| anyhow!("index cache entry lock poisoned"))?;
+            loop {
+                match &*state {
+                    IndexCacheState::Ready { index, fingerprint } => {
+                        let current_fingerprint = index_file_fingerprint(&key);
+                        if current_fingerprint.is_some() && *fingerprint != current_fingerprint {
+                            drop(state);
+                            break;
+                        }
+                        return Ok((key, Arc::clone(index)));
+                    }
+                    IndexCacheState::Failed(message) => return Err(anyhow!(message.clone())),
+                    IndexCacheState::Loading => {
+                        state = entry
+                            .ready
+                            .wait(state)
+                            .map_err(|_| anyhow!("index cache entry lock poisoned"))?;
+                    }
                 }
             }
         }
@@ -4685,9 +4727,17 @@ fn canonical_cache_key(path: &Path) -> PathBuf {
     path.to_path_buf()
 }
 
-fn shard_manifest_fingerprint(index_dir: &Path) -> Option<ShardManifestFingerprint> {
-    let metadata = fs::metadata(index_dir.join("manifest.json")).ok()?;
-    Some(ShardManifestFingerprint {
+fn index_file_fingerprint(index_path: &Path) -> Option<CacheFileFingerprint> {
+    file_fingerprint(index_path)
+}
+
+fn shard_manifest_fingerprint(index_dir: &Path) -> Option<CacheFileFingerprint> {
+    file_fingerprint(&index_dir.join("manifest.json"))
+}
+
+fn file_fingerprint(path: &Path) -> Option<CacheFileFingerprint> {
+    let metadata = fs::metadata(path).ok()?;
+    Some(CacheFileFingerprint {
         len: metadata.len(),
         modified: metadata.modified().ok(),
     })
