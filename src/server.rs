@@ -18,10 +18,10 @@ use crate::shards::{
     ShardEntry, ShardManifest, ShardQueryPlan, ShardRepoMap, ShardSearchScope,
     append_shard_facet_repair_hints, build_shards_with_force, ensure_shards,
     filter_repo_map_by_prefix, filters_for_shard_scope, load_manifest, refresh_shards,
-    related_query_without_shard_selectors, resolve_shard_path_from_manifest,
-    shard_prefilter_query_impossible, shard_route_entries, shard_search_scopes,
-    shard_selection_miss_plan, shard_sketch_may_diagnose_query, shard_sketch_may_match_query,
-    shard_status,
+    refresh_shards_by_root, related_query_without_shard_selectors,
+    resolve_shard_path_from_manifest, shard_prefilter_query_impossible, shard_route_entries,
+    shard_search_scopes, shard_selection_miss_plan, shard_sketch_may_diagnose_query,
+    shard_sketch_may_match_query, shard_status,
 };
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use anyhow::{Context, Result, anyhow};
@@ -1124,7 +1124,7 @@ For many local repos, bootstrap it with `orient ensure-shards --discover-root /p
 For one repo, bootstrap it with `orient ensure-index --repo {repo} --index {index}` and `orient serve-tcp --addr {addr} --index {index}`.\n\
 Start each session with `daemon_status` or `agent_guide`, then use `search_auto` for normal lookup and `search_auto_batch` for alternate query phrasings.\n\
 Trust `daemon_status.search_auto_default` to see whether no-target `search_auto` will use a warmed shard directory, warmed index, or the daemon current directory; use `daemon_status.default_requests` for copyable first repo-map/search/query-plan calls.\n\
-When calling `search_auto`, `search_auto_batch`, `repo_map`, `search_plan`, `find_symbol`, `read_range`, `read_ranges`, `related_files`, or `related_symbols` through JSON-lines/MCP without an explicit target, pass `cwd` so shared shard daemons scope results to the current git checkout.\n\
+When calling `search`, `search_batch`, `search_auto`, `search_auto_batch`, `repo_map`, `search_plan`, `find_symbol`, `read_range`, `read_ranges`, `related_files`, or `related_symbols` through JSON-lines/MCP without an explicit target, pass `cwd` so shared shard daemons scope results to the current git checkout.\n\
 Use query filters directly: `file:`, `path:`, `lang:`, `ext:`, `symbol:`, `type:`, `repo:`, `test:`, `generated:`, `code:`, `is:code`, `is:docs`, quoted literals, and negative filters like `-path:vendor` or `-is:generated`.\n\
 Generated paths, including hashed JavaScript bundles, are demoted by default; use `generated:true` or `is:generated` when intentionally inspecting generated output.\n\
 After search, follow returned `read_batch_request`, `read_request`, `related_request`, and `related_symbols_request`; each includes `jsonl` and `client_cli` for direct replay through `orient client-jsonl`.\n\
@@ -1995,6 +1995,27 @@ fn index_matches_client_cwd(index: &FastIndex, arguments: &Value) -> Result<bool
         == repo_root)
 }
 
+fn scoped_refresh_root(arguments: &Value) -> Result<Option<PathBuf>> {
+    let repo_filter = optional_string_arg(arguments, "repo_filter");
+    if let Some(repo_root) = git_root_from_client_cwd(arguments, "refresh_if_stale")? {
+        let repo_root_text = repo_root.to_string_lossy().to_string();
+        if repo_filter.as_deref() == Some(repo_root_text.as_str()) {
+            return Ok(Some(repo_root));
+        }
+    }
+    let Some(repo_filter) = repo_filter else {
+        return Ok(None);
+    };
+    let path = PathBuf::from(&repo_filter);
+    if path.is_absolute() && path.exists() {
+        return path
+            .canonicalize()
+            .map(Some)
+            .with_context(|| format!("canonicalize refresh_if_stale repo_filter {repo_filter}"));
+    }
+    Ok(None)
+}
+
 fn retry_search_requests<T: Serialize>(
     plan: &QueryPlan,
     search_tool: &str,
@@ -2515,7 +2536,7 @@ impl ToolRuntime {
                     optional_string_arg(&request.arguments, "index_dir").map(PathBuf::from)
                 {
                     if bool_arg(&request.arguments, "refresh_if_stale") {
-                        self.refresh_shards_if_stale(&index_dir)?;
+                        self.refresh_shards_for_arguments_if_stale(&index_dir, &request.arguments)?;
                     }
                     let filters = search_filters(&request.arguments, true)?;
                     let mut results = self.search_shards_cached(
@@ -2581,12 +2602,87 @@ impl ToolRuntime {
                     );
                     return Ok(serde_json::to_value(results)?);
                 }
+                if optional_string_arg(&request.arguments, "cwd").is_some() {
+                    let scoped_arguments =
+                        arguments_scoped_to_client_cwd_for_query(&request.arguments, &query)?;
+                    if let Ok(index_dir) = self.single_cached_shard_manifest_path() {
+                        if bool_arg(&request.arguments, "refresh_if_stale") {
+                            self.refresh_shards_for_arguments_if_stale(
+                                &index_dir,
+                                &scoped_arguments,
+                            )?;
+                        }
+                        let filters = search_filters(&scoped_arguments, true)?;
+                        let mut results = self.search_shards_cached(
+                            &index_dir,
+                            &query,
+                            limit,
+                            &filters,
+                            context_lines,
+                        )?;
+                        attach_result_read_requests(
+                            &mut results,
+                            "read_range",
+                            read_request_args("index_dir", &index_dir),
+                        );
+                        attach_result_related_requests(
+                            &mut results,
+                            "related_files",
+                            read_request_args("index_dir", &index_dir),
+                            Some(&filters),
+                        );
+                        attach_result_related_symbol_requests(
+                            &mut results,
+                            "related_symbols",
+                            Some(&query),
+                            read_request_args("index_dir", &index_dir),
+                        );
+                        return Ok(serde_json::to_value(results)?);
+                    }
+                    if let Ok(index_path) = self.single_cached_index_path() {
+                        let refresh_if_stale = bool_arg(&request.arguments, "refresh_if_stale");
+                        let index =
+                            self.cached_index_maybe_refresh(index_path.clone(), refresh_if_stale)?;
+                        if index_matches_client_cwd(&index, &request.arguments)? {
+                            let filters = search_filters(&scoped_arguments, true)?;
+                            let mut results = index.search_filtered(&query, limit, &filters)?;
+                            attach_result_query_plan_retry_requests(
+                                &mut results,
+                                "indexed_search_code",
+                                "index",
+                                &index_path,
+                                &scoped_arguments,
+                            );
+                            attach_result_context(
+                                &mut results,
+                                context_lines,
+                                |path, start, lines| index.read_range(path, start, lines),
+                            )?;
+                            attach_result_read_requests(
+                                &mut results,
+                                "read_range",
+                                read_request_args("index", &index_path),
+                            );
+                            attach_result_related_requests(
+                                &mut results,
+                                "related_files",
+                                read_request_args("index", &index_path),
+                                Some(&filters),
+                            );
+                            attach_result_related_symbol_requests(
+                                &mut results,
+                                "related_symbols",
+                                Some(&query),
+                                read_request_args("index", &index_path),
+                            );
+                            return Ok(serde_json::to_value(results)?);
+                        }
+                    }
+                }
                 let repo = optional_string_arg(&request.arguments, "repo")
                     .map(PathBuf::from)
                     .map(Ok)
-                    .unwrap_or_else(|| {
-                        std::env::current_dir().context("resolve current directory for search")
-                    })?;
+                    .unwrap_or_else(|| live_repo_from_client_cwd(&request.arguments, "search"))?;
                 let filters = search_filters(&request.arguments, false)?;
                 let mut results = search_repo_fast_filtered(&repo, &query, limit, &filters)?;
                 attach_result_context(&mut results, context_lines, |path, start, lines| {
@@ -2666,7 +2762,7 @@ impl ToolRuntime {
                     optional_string_arg(&request.arguments, "index_dir").map(PathBuf::from)
                 {
                     if bool_arg(&request.arguments, "refresh_if_stale") {
-                        self.refresh_shards_if_stale(&index_dir)?;
+                        self.refresh_shards_for_arguments_if_stale(&index_dir, &request.arguments)?;
                     }
                     let filters = search_filters(&request.arguments, true)?;
                     for query in queries {
@@ -2751,12 +2847,111 @@ impl ToolRuntime {
                     }
                     return Ok(serde_json::to_value(batch)?);
                 }
+                if optional_string_arg(&request.arguments, "cwd").is_some() {
+                    if let Ok(index_dir) = self.single_cached_shard_manifest_path() {
+                        if bool_arg(&request.arguments, "refresh_if_stale") {
+                            self.refresh_shards_for_arguments_if_stale(
+                                &index_dir,
+                                &request.arguments,
+                            )?;
+                        }
+                        for query in &queries {
+                            let scoped_arguments = arguments_scoped_to_client_cwd_for_query(
+                                &request.arguments,
+                                query,
+                            )?;
+                            let filters = search_filters(&scoped_arguments, true)?;
+                            let mut results = self.search_shards_cached(
+                                &index_dir,
+                                query,
+                                limit,
+                                &filters,
+                                context_lines,
+                            )?;
+                            attach_result_read_requests(
+                                &mut results,
+                                "read_range",
+                                read_request_args("index_dir", &index_dir),
+                            );
+                            attach_result_related_requests(
+                                &mut results,
+                                "related_files",
+                                read_request_args("index_dir", &index_dir),
+                                Some(&filters),
+                            );
+                            attach_result_related_symbol_requests(
+                                &mut results,
+                                "related_symbols",
+                                Some(query),
+                                read_request_args("index_dir", &index_dir),
+                            );
+                            let read_batch_request = result_read_batch_request(
+                                &results,
+                                "read_ranges",
+                                read_request_args("index_dir", &index_dir),
+                            );
+                            batch.push(SearchBatchResult {
+                                query: query.clone(),
+                                read_batch_request,
+                                results,
+                            });
+                        }
+                        return Ok(serde_json::to_value(batch)?);
+                    }
+                    if let Ok(index_path) = self.single_cached_index_path() {
+                        let refresh_if_stale = bool_arg(&request.arguments, "refresh_if_stale");
+                        let index =
+                            self.cached_index_maybe_refresh(index_path.clone(), refresh_if_stale)?;
+                        if index_matches_client_cwd(&index, &request.arguments)? {
+                            for query in &queries {
+                                let scoped_arguments = arguments_scoped_to_client_cwd_for_query(
+                                    &request.arguments,
+                                    query,
+                                )?;
+                                let filters = search_filters(&scoped_arguments, true)?;
+                                let mut results = index.search_filtered(query, limit, &filters)?;
+                                attach_result_context(
+                                    &mut results,
+                                    context_lines,
+                                    |path, start, lines| index.read_range(path, start, lines),
+                                )?;
+                                attach_result_read_requests(
+                                    &mut results,
+                                    "read_range",
+                                    read_request_args("index", &index_path),
+                                );
+                                attach_result_related_requests(
+                                    &mut results,
+                                    "related_files",
+                                    read_request_args("index", &index_path),
+                                    Some(&filters),
+                                );
+                                attach_result_related_symbol_requests(
+                                    &mut results,
+                                    "related_symbols",
+                                    Some(query),
+                                    read_request_args("index", &index_path),
+                                );
+                                let read_batch_request = result_read_batch_request(
+                                    &results,
+                                    "read_ranges",
+                                    read_request_args("index", &index_path),
+                                );
+                                batch.push(SearchBatchResult {
+                                    query: query.clone(),
+                                    read_batch_request,
+                                    results,
+                                });
+                            }
+                            return Ok(serde_json::to_value(batch)?);
+                        }
+                    }
+                }
                 let repo = optional_string_arg(&request.arguments, "repo")
                     .map(PathBuf::from)
                     .map(Ok)
                     .unwrap_or_else(|| {
-                        std::env::current_dir()
-                            .context("resolve current directory for search_batch")
+                        live_repo_from_client_cwd(&request.arguments, "search_batch")
                     })?;
                 let filters = search_filters(&request.arguments, false)?;
                 for query in queries {
@@ -2820,7 +3015,7 @@ impl ToolRuntime {
                     optional_string_arg(&request.arguments, "index_dir").map(PathBuf::from)
                 {
                     if bool_arg(&request.arguments, "refresh_if_stale") {
-                        self.refresh_shards_if_stale(&index_dir)?;
+                        self.refresh_shards_for_arguments_if_stale(&index_dir, &request.arguments)?;
                     }
                     let mut plans = self.shard_query_plans_cached(
                         &index_dir,
@@ -2856,7 +3051,10 @@ impl ToolRuntime {
                         arguments_scoped_to_client_cwd_for_query(&request.arguments, &query)?;
                     if let Ok(index_dir) = self.single_cached_shard_manifest_path() {
                         if bool_arg(&request.arguments, "refresh_if_stale") {
-                            self.refresh_shards_if_stale(&index_dir)?;
+                            self.refresh_shards_for_arguments_if_stale(
+                                &index_dir,
+                                &scoped_arguments,
+                            )?;
                         }
                         let mut plans = self.shard_query_plans_cached(
                             &index_dir,
@@ -2935,7 +3133,7 @@ impl ToolRuntime {
                     optional_string_arg(&request.arguments, "index_dir").map(PathBuf::from)
                 {
                     if bool_arg(&request.arguments, "refresh_if_stale") {
-                        self.refresh_shards_if_stale(&index_dir)?;
+                        self.refresh_shards_for_arguments_if_stale(&index_dir, &request.arguments)?;
                     }
                     let filters = search_filters(&request.arguments, true)?;
                     let mut batch = Vec::new();
@@ -2975,7 +3173,10 @@ impl ToolRuntime {
                 if optional_string_arg(&request.arguments, "cwd").is_some() {
                     if let Ok(index_dir) = self.single_cached_shard_manifest_path() {
                         if bool_arg(&request.arguments, "refresh_if_stale") {
-                            self.refresh_shards_if_stale(&index_dir)?;
+                            self.refresh_shards_for_arguments_if_stale(
+                                &index_dir,
+                                &request.arguments,
+                            )?;
                         }
                         let mut batch = Vec::new();
                         for query in queries {
@@ -3233,7 +3434,7 @@ impl ToolRuntime {
                 let limit = search_limit_arg(&request.arguments)?;
                 let context_lines = context_lines_arg(&request.arguments)?;
                 if bool_arg(&request.arguments, "refresh_if_stale") {
-                    self.refresh_shards_if_stale(&index_dir)?;
+                    self.refresh_shards_for_arguments_if_stale(&index_dir, &request.arguments)?;
                 }
                 Ok(serde_json::to_value(self.search_shards_cached(
                     &index_dir,
@@ -3249,7 +3450,7 @@ impl ToolRuntime {
                 let limit = search_limit_arg(&request.arguments)?;
                 let context_lines = context_lines_arg(&request.arguments)?;
                 if bool_arg(&request.arguments, "refresh_if_stale") {
-                    self.refresh_shards_if_stale(&index_dir)?;
+                    self.refresh_shards_for_arguments_if_stale(&index_dir, &request.arguments)?;
                 }
                 let filters = search_filters(&request.arguments, true)?;
                 let mut batch = Vec::new();
@@ -3278,7 +3479,7 @@ impl ToolRuntime {
                 let index_dir = self.shard_dir_arg_or_single_cached(&request.arguments)?;
                 let query = string_arg(&request.arguments, "query")?;
                 if bool_arg(&request.arguments, "refresh_if_stale") {
-                    self.refresh_shards_if_stale(&index_dir)?;
+                    self.refresh_shards_for_arguments_if_stale(&index_dir, &request.arguments)?;
                 }
                 let mut plans = self.shard_query_plans_cached(
                     &index_dir,
@@ -3292,7 +3493,7 @@ impl ToolRuntime {
                 let index_dir = self.shard_dir_arg_or_single_cached(&request.arguments)?;
                 let queries = string_array_arg(&request.arguments, "queries")?;
                 if bool_arg(&request.arguments, "refresh_if_stale") {
-                    self.refresh_shards_if_stale(&index_dir)?;
+                    self.refresh_shards_for_arguments_if_stale(&index_dir, &request.arguments)?;
                 }
                 let filters = search_filters(&request.arguments, true)?;
                 let mut batch = Vec::new();
@@ -4212,7 +4413,7 @@ impl ToolRuntime {
         retry_if_empty: bool,
     ) -> Result<SearchAutoResult> {
         if refresh_if_stale {
-            self.refresh_shards_if_stale(&index_dir)?;
+            self.refresh_shards_for_arguments_if_stale(&index_dir, arguments)?;
         }
         let filters = search_filters(arguments, true)?;
         let shard_scope_filters = merge_filters(filters.clone(), parse_query(query).filters);
@@ -4395,6 +4596,18 @@ impl ToolRuntime {
         }
         refresh_shards(index_dir)?;
         self.clear_runtime_caches()
+    }
+
+    fn refresh_shards_for_arguments_if_stale(
+        &self,
+        index_dir: &Path,
+        arguments: &Value,
+    ) -> Result<()> {
+        if let Some(root) = scoped_refresh_root(arguments)? {
+            refresh_shards_by_root(index_dir, &[root])?;
+            return self.clear_runtime_caches();
+        }
+        self.refresh_shards_if_stale(index_dir)
     }
 
     fn replace_cached_index(&self, index_path: PathBuf, index: Arc<FastIndex>) -> Result<PathBuf> {
@@ -5542,6 +5755,7 @@ const SEARCH_TARGET_OPTIONAL_ARGS: &[&str] = &[
     "repo",
     "index",
     "index_dir",
+    "cwd",
     "limit",
     "path",
     "dir",

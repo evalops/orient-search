@@ -189,6 +189,14 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         "string"
     );
     assert_eq!(
+        search_alias["input_schema"]["properties"]["cwd"]["type"],
+        "string"
+    );
+    assert_eq!(
+        search_batch["input_schema"]["properties"]["cwd"]["type"],
+        "string"
+    );
+    assert_eq!(
         repo_map["input_schema"]["properties"]["cwd"]["type"],
         "string"
     );
@@ -2353,6 +2361,43 @@ fn runtime_context_tools_scope_live_fallback_to_client_cwd() {
             .contains("AgentCwdMarker"),
         "{:?}",
         read.result
+    );
+
+    let search = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("cwd-search"),
+        tool: "search".to_string(),
+        arguments: serde_json::json!({
+            "cwd": repo.path().join("src"),
+            "query": "AgentCwdMarker",
+            "limit": 5
+        }),
+    });
+    assert!(search.error.is_none(), "{:?}", search.error);
+    let search = search.result.unwrap();
+    assert_eq!(search[0]["path"], serde_json::json!("src/agent_context.rs"));
+    assert_eq!(
+        search[0]["read_request"]["arguments"]["repo"],
+        serde_json::json!(repo.path().canonicalize().unwrap())
+    );
+
+    let search_batch = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("cwd-search-batch"),
+        tool: "search_batch".to_string(),
+        arguments: serde_json::json!({
+            "cwd": repo.path().join("src"),
+            "queries": ["AgentCwdMarker"],
+            "limit": 5
+        }),
+    });
+    assert!(search_batch.error.is_none(), "{:?}", search_batch.error);
+    let search_batch = search_batch.result.unwrap();
+    assert_eq!(
+        search_batch[0]["results"][0]["path"],
+        serde_json::json!("src/agent_context.rs")
+    );
+    assert_eq!(
+        search_batch[0]["read_batch_request"]["arguments"]["repo"],
+        serde_json::json!(repo.path().canonicalize().unwrap())
     );
 
     let batch = runtime.dispatch(ToolRequest {
@@ -5596,6 +5641,74 @@ fn runtime_search_auto_scopes_warmed_shards_to_client_cwd() {
 }
 
 #[test]
+fn runtime_search_auto_refreshes_only_client_cwd_shard_when_scoped() {
+    let workspace = tempfile::tempdir().unwrap();
+    let current_repo = workspace.path().join("current-app");
+    let other_repo = workspace.path().join("other-app");
+    fs::create_dir_all(current_repo.join(".git")).unwrap();
+    fs::create_dir_all(other_repo.join(".git")).unwrap();
+    write(
+        &current_repo.join("src/lib.rs"),
+        "pub fn baseline_current_token() {}\n",
+    );
+    write(
+        &other_repo.join("src/lib.rs"),
+        "pub fn baseline_other_token() {}\n",
+    );
+    let shard_dir = workspace.path().join("shards");
+    build_shards(
+        &[PathBuf::from(&current_repo), PathBuf::from(&other_repo)],
+        &shard_dir,
+    )
+    .unwrap();
+
+    write(
+        &current_repo.join("src/new_current.rs"),
+        "pub fn current_after_refresh_token() {}\n",
+    );
+    write(
+        &other_repo.join("src/new_other.rs"),
+        "pub fn other_after_refresh_token() {}\n",
+    );
+
+    let runtime = ToolRuntime::default();
+    runtime.warm_shards(shard_dir.clone()).unwrap();
+
+    let current_search = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("fresh-current"),
+        tool: "search_auto".to_string(),
+        arguments: serde_json::json!({
+            "cwd": current_repo.join("src"),
+            "query": "current_after_refresh_token",
+            "limit": 5,
+            "refresh_if_stale": true
+        }),
+    });
+    assert!(current_search.error.is_none(), "{:?}", current_search.error);
+    let current_search = serde_json::to_string(&current_search.result).unwrap();
+    assert!(
+        current_search.contains("current-app/src/new_current.rs"),
+        "{current_search}"
+    );
+
+    let other_search = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("stale-other"),
+        tool: "search_shards".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": shard_dir,
+            "query": "repo:other-app other_after_refresh_token",
+            "limit": 5
+        }),
+    });
+    assert!(other_search.error.is_none(), "{:?}", other_search.error);
+    let other_search = serde_json::to_string(&other_search.result).unwrap();
+    assert!(
+        !other_search.contains("other-app/src/new_other.rs"),
+        "{other_search}"
+    );
+}
+
+#[test]
 fn runtime_orientation_tools_scope_warmed_shards_to_client_cwd() {
     let workspace = tempfile::tempdir().unwrap();
     let current_repo = workspace.path().join("current-app");
@@ -5626,7 +5739,7 @@ fn runtime_orientation_tools_scope_warmed_shards_to_client_cwd() {
     .unwrap();
 
     let runtime = ToolRuntime::default();
-    runtime.warm_shards(shard_dir).unwrap();
+    runtime.warm_shards(shard_dir.clone()).unwrap();
     let cwd = current_repo.join("src");
     let current_root = current_repo
         .canonicalize()
@@ -5655,6 +5768,88 @@ fn runtime_orientation_tools_scope_warmed_shards_to_client_cwd() {
         !serde_json::to_string(&repo_map)
             .unwrap()
             .contains("other-app/src/lib.rs")
+    );
+
+    let search = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("search-cwd"),
+        tool: "search".to_string(),
+        arguments: serde_json::json!({
+            "cwd": current_repo.join("src"),
+            "query": "shared_lookup_token",
+            "limit": 5
+        }),
+    });
+    assert!(search.error.is_none(), "{:?}", search.error);
+    let search = search.result.unwrap();
+    let search_json = serde_json::to_string(&search).unwrap();
+    assert!(
+        search_json.contains("current-app/src/lib.rs"),
+        "{search_json}"
+    );
+    assert!(
+        !search_json.contains("other-app/src/lib.rs"),
+        "{search_json}"
+    );
+    assert_eq!(
+        search[0]["read_request"]["arguments"]["index_dir"],
+        serde_json::json!(shard_dir.canonicalize().unwrap())
+    );
+
+    let explicit_search = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("search-cwd-explicit-repo"),
+        tool: "search".to_string(),
+        arguments: serde_json::json!({
+            "cwd": current_repo.join("src"),
+            "query": "repo:other-app shared_lookup_token",
+            "limit": 5
+        }),
+    });
+    assert!(
+        explicit_search.error.is_none(),
+        "{:?}",
+        explicit_search.error
+    );
+    let explicit_search = serde_json::to_string(&explicit_search.result.unwrap()).unwrap();
+    assert!(
+        explicit_search.contains("other-app/src/lib.rs"),
+        "{explicit_search}"
+    );
+    assert!(
+        !explicit_search.contains("current-app/src/lib.rs"),
+        "{explicit_search}"
+    );
+
+    let search_batch = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("search-batch-cwd"),
+        tool: "search_batch".to_string(),
+        arguments: serde_json::json!({
+            "cwd": current_repo.join("src"),
+            "queries": [
+                "shared_lookup_token",
+                "repo:other-app shared_lookup_token"
+            ],
+            "limit": 5
+        }),
+    });
+    assert!(search_batch.error.is_none(), "{:?}", search_batch.error);
+    let search_batch = search_batch.result.unwrap();
+    let first_search_batch_item = serde_json::to_string(&search_batch[0]).unwrap();
+    assert!(
+        first_search_batch_item.contains("current-app/src/lib.rs"),
+        "{first_search_batch_item}"
+    );
+    assert!(
+        !first_search_batch_item.contains("other-app/src/lib.rs"),
+        "{first_search_batch_item}"
+    );
+    let second_search_batch_item = serde_json::to_string(&search_batch[1]).unwrap();
+    assert!(
+        second_search_batch_item.contains("other-app/src/lib.rs"),
+        "{second_search_batch_item}"
+    );
+    assert!(
+        !second_search_batch_item.contains("current-app/src/lib.rs"),
+        "{second_search_batch_item}"
     );
 
     let read = runtime.dispatch(ToolRequest {

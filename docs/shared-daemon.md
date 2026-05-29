@@ -52,13 +52,16 @@ The generated rule should keep agents on this loop:
   current-directory fallback. When the shell is inside a git checkout, the
   daemon request is scoped to that checkout.
 - From JSON-lines or MCP-style clients, pass `"cwd"` on no-target
-  `search_auto`, `search_auto_batch`, `repo_map`, `search_plan`, and
-  `find_symbol` requests to get the same current-checkout scope against the
-  shared daemon. No-target `read_range`, `read_ranges`, `related_files`, and
-  `related_symbols` requests also accept `cwd` for manual context calls.
+  `search`, `search_batch`, `search_auto`, `search_auto_batch`, `repo_map`,
+  `search_plan`, and `find_symbol` requests to get the same current-checkout
+  scope against the shared daemon. No-target `read_range`, `read_ranges`,
+  `related_files`, and `related_symbols` requests also accept `cwd` for manual
+  context calls.
 - Follow returned `read_*`, `related_*`, `repo_map_request`, and
   `query_plan_request` objects directly.
-- Pass `refresh_if_stale:true` when live files may have changed.
+- Pass `refresh_if_stale:true` when live files may have changed. With `cwd`
+  scoped to the active checkout, this refreshes that checkout's shard instead
+  of rebuilding every warmed repo.
 - Treat generated bundle output as searchable but lower-priority by default;
   use `generated:true` only when intentionally inspecting generated files.
 - Fall back to shell search only when Orient is unavailable or unhelpful.

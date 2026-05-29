@@ -27,14 +27,16 @@ The rule should tell agents:
   scoped to that checkout in the shared shard daemon. Use `--no-daemon` only
   when forcing current-directory fallback.
 - For JSON-lines or MCP-style clients, include `"cwd"` on no-target
-  `search_auto`, `search_auto_batch`, `repo_map`, `search_plan`, and
-  `find_symbol` calls so the shared daemon applies the same current-checkout
-  scope. Include it on no-target `read_range`, `read_ranges`, `related_files`,
-  and `related_symbols` when opening context manually rather than following a
-  returned request.
+  `search`, `search_batch`, `search_auto`, `search_auto_batch`, `repo_map`,
+  `search_plan`, and `find_symbol` calls so the shared daemon applies the same
+  current-checkout scope. Include it on no-target `read_range`, `read_ranges`,
+  `related_files`, and `related_symbols` when opening context manually rather
+  than following a returned request.
 - Follow returned `read_*`, `related_*`, `repo_map_request`, and
   `query_plan_request` objects directly.
-- Use `refresh_if_stale:true` when indexed files may have changed.
+- Use `refresh_if_stale:true` when indexed files may have changed. With `cwd`
+  on a shared shard daemon, Orient refreshes the active checkout's shard rather
+  than rebuilding every warmed repo.
 - Treat generated hits as searchable but lower-priority by default; use
   `generated:true` / `is:generated` only when intentionally inspecting
   generated output.

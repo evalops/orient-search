@@ -602,12 +602,73 @@ pub fn refresh_shards(index_dir: impl AsRef<Path>) -> Result<ShardRefreshStats> 
     refresh_shards_unlocked(index_dir)
 }
 
+pub fn refresh_shards_by_root(
+    index_dir: impl AsRef<Path>,
+    roots: &[PathBuf],
+) -> Result<ShardRefreshStats> {
+    let index_dir = index_dir.as_ref();
+    let _lock = ShardWriteLock::acquire(index_dir)?;
+    refresh_shards_by_root_unlocked(index_dir, roots)
+}
+
 fn refresh_shards_unlocked(index_dir: &Path) -> Result<ShardRefreshStats> {
     let mut manifest = load_manifest(index_dir)?;
-    let mut total = ShardRefreshStats {
+    let mut total = empty_shard_refresh_stats(index_dir, manifest.shards.len());
+
+    let mut kept_shards = Vec::with_capacity(manifest.shards.len());
+    for mut shard in manifest.shards {
+        if !shard.root.exists() {
+            let _ = fs::remove_file(index_dir.join(&shard.index));
+            total.removed_shards += 1;
+            continue;
+        }
+        refresh_existing_shard(index_dir, &mut shard, &mut total)?;
+        kept_shards.push(shard);
+    }
+
+    manifest.shards = kept_shards;
+    total.shards = manifest.shards.len();
+    save_manifest_with_mode(index_dir, &manifest, ShardManifestWriteMode::AllowShrink)?;
+    Ok(total)
+}
+
+fn refresh_shards_by_root_unlocked(
+    index_dir: &Path,
+    roots: &[PathBuf],
+) -> Result<ShardRefreshStats> {
+    let mut manifest = load_manifest(index_dir)?;
+    let roots = roots
+        .iter()
+        .map(|root| canonical_or_self(root))
+        .collect::<HashSet<_>>();
+    let mut total = empty_shard_refresh_stats(index_dir, manifest.shards.len());
+    let mut kept_shards = Vec::with_capacity(manifest.shards.len());
+
+    for mut shard in manifest.shards {
+        if !roots.contains(&canonical_or_self(&shard.root)) {
+            kept_shards.push(shard);
+            continue;
+        }
+        if !shard.root.exists() {
+            let _ = fs::remove_file(index_dir.join(&shard.index));
+            total.removed_shards += 1;
+            continue;
+        }
+        refresh_existing_shard(index_dir, &mut shard, &mut total)?;
+        kept_shards.push(shard);
+    }
+
+    manifest.shards = kept_shards;
+    total.shards = manifest.shards.len();
+    save_manifest_with_mode(index_dir, &manifest, ShardManifestWriteMode::AllowShrink)?;
+    Ok(total)
+}
+
+fn empty_shard_refresh_stats(index_dir: &Path, shards: usize) -> ShardRefreshStats {
+    ShardRefreshStats {
         version: SHARD_MANIFEST_VERSION,
         output_dir: index_dir.to_path_buf(),
-        shards: manifest.shards.len(),
+        shards,
         files: 0,
         source_bytes: 0,
         content_snapshot_bytes: 0,
@@ -623,46 +684,39 @@ fn refresh_shards_unlocked(index_dir: &Path) -> Result<ShardRefreshStats> {
         renamed_files: 0,
         refreshed_files: 0,
         deleted_files: 0,
-    };
-
-    let mut kept_shards = Vec::with_capacity(manifest.shards.len());
-    for mut shard in manifest.shards {
-        if !shard.root.exists() {
-            let _ = fs::remove_file(index_dir.join(&shard.index));
-            total.removed_shards += 1;
-            continue;
-        }
-        let index_path = index_dir.join(&shard.index);
-        let previous = if index_path.exists() {
-            FastIndex::load_reusable(&index_path)
-                .with_context(|| format!("load shard {}", shard.index))?
-        } else {
-            None
-        };
-        let outcome = FastIndex::refresh(&shard.root, previous.as_ref())
-            .with_context(|| format!("refresh shard {}", shard.name))?;
-        outcome.index.save(&index_path)?;
-        let stats = outcome.index.stats();
-        add_index_stats(&mut total, &stats);
-        total.reused_files += outcome.reused_files;
-        total.renamed_files += outcome.renamed_files;
-        total.refreshed_files += outcome.refreshed_files;
-        total.deleted_files += outcome.deleted_files;
-        let base_name = shard
-            .root
-            .file_name()
-            .map(|value| value.to_string_lossy().to_string())
-            .unwrap_or_else(|| shard.name.clone());
-        shard.aliases = shard_aliases(&shard.root, &base_name)?;
-        shard.git = shard_git_metadata(&shard.root);
-        shard.sketch = Some(shard_query_sketch(&outcome.index));
-        kept_shards.push(shard);
     }
+}
 
-    manifest.shards = kept_shards;
-    total.shards = manifest.shards.len();
-    save_manifest_with_mode(index_dir, &manifest, ShardManifestWriteMode::AllowShrink)?;
-    Ok(total)
+fn refresh_existing_shard(
+    index_dir: &Path,
+    shard: &mut ShardEntry,
+    total: &mut ShardRefreshStats,
+) -> Result<()> {
+    let index_path = index_dir.join(&shard.index);
+    let previous = if index_path.exists() {
+        FastIndex::load_reusable(&index_path)
+            .with_context(|| format!("load shard {}", shard.index))?
+    } else {
+        None
+    };
+    let outcome = FastIndex::refresh(&shard.root, previous.as_ref())
+        .with_context(|| format!("refresh shard {}", shard.name))?;
+    outcome.index.save(&index_path)?;
+    let stats = outcome.index.stats();
+    add_index_stats(total, &stats);
+    total.reused_files += outcome.reused_files;
+    total.renamed_files += outcome.renamed_files;
+    total.refreshed_files += outcome.refreshed_files;
+    total.deleted_files += outcome.deleted_files;
+    let base_name = shard
+        .root
+        .file_name()
+        .map(|value| value.to_string_lossy().to_string())
+        .unwrap_or_else(|| shard.name.clone());
+    shard.aliases = shard_aliases(&shard.root, &base_name)?;
+    shard.git = shard_git_metadata(&shard.root);
+    shard.sketch = Some(shard_query_sketch(&outcome.index));
+    Ok(())
 }
 
 pub fn shard_status(index_dir: impl AsRef<Path>) -> Result<ShardFreshness> {
