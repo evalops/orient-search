@@ -1312,7 +1312,8 @@ fn indexed_related_context_uses_persisted_metadata() {
         test_related_symbols
             .iter()
             .any(|symbol| symbol.symbol.name == "SessionManager"
-                && symbol.symbol.path == "src/auth.rs"),
+                && symbol.symbol.path == "src/auth.rs"
+                && symbol.reason.contains("referenced by source")),
         "{test_related_symbols:?}"
     );
     let fuzzy_query_symbols = loaded.related_symbols(None, Some("issue"), 10);

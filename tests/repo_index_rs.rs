@@ -126,7 +126,9 @@ def test_issue_token_round_trip():
     assert!(
         test_related_symbols
             .iter()
-            .any(|item| item.symbol.name == "SessionManager" && item.symbol.path == "src/auth.py"),
+            .any(|item| item.symbol.name == "SessionManager"
+                && item.symbol.path == "src/auth.py"
+                && item.reason.contains("referenced by source")),
         "{test_related_symbols:?}"
     );
     assert!(

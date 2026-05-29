@@ -19,7 +19,8 @@ use crate::repo_index::{
     select_repo_brief_import_hints, select_repo_map_top_symbols,
     source_excluded_content_filters_match, source_import_filters_match, symbol_exact_phrase_bonus,
     symbol_filter_matches_name, symbol_for_anchor, symbol_matches_related_filters,
-    symbol_query_match_score, symbol_scoped_window, token_counts, tokenize, unique_query_tokens,
+    symbol_query_match_score, symbol_scoped_window, text_references_symbol_name, token_counts,
+    tokenize, unique_query_tokens,
 };
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use anyhow::{Context, Result};
@@ -1070,6 +1071,12 @@ impl FastIndex {
             .and_then(|path| Path::new(path).parent())
             .map(|value| value.to_string_lossy().to_string())
             .unwrap_or_default();
+        let source_reference_text = normalized_path
+            .as_ref()
+            .and_then(|path| self.indexed_file(path))
+            .map(|file| file.content.as_str());
+        let source_reference_text_lower =
+            source_reference_text.map(|text| text.to_ascii_lowercase());
         let mut related = Vec::new();
         let mut seen = HashSet::new();
         let path_filters = PathFilterMatcher::from_filters(&filters);
@@ -1183,6 +1190,23 @@ impl FastIndex {
                         }) {
                             score += 3.0;
                             reasons.push("shares normalized stem".to_string());
+                        }
+                        if &symbol.path != path
+                            && related_file_reference_symbol_candidate(
+                                &indexed_symbol.name,
+                                &indexed_symbol.kind,
+                            )
+                            && source_reference_text.is_some_and(|text| {
+                                text_references_symbol_name(
+                                    text,
+                                    source_reference_text_lower.as_deref(),
+                                    &indexed_symbol.name,
+                                    &indexed_symbol.name_lower,
+                                )
+                            })
+                        {
+                            score += 34.0;
+                            reasons.push("referenced by source".to_string());
                         }
                     }
 

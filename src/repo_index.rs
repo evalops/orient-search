@@ -2700,6 +2700,12 @@ impl RepoIndex {
             .and_then(|path| Path::new(path).parent())
             .map(|value| value.to_string_lossy().to_string())
             .unwrap_or_default();
+        let source_reference_text = normalized_path
+            .as_ref()
+            .and_then(|path| self.files.get(path))
+            .map(|file| file.text.as_str());
+        let source_reference_text_lower =
+            source_reference_text.map(|text| text.to_ascii_lowercase());
         let mut related = Vec::new();
 
         for symbol in &self.symbols {
@@ -2736,6 +2742,20 @@ impl RepoIndex {
                 }) {
                     score += 3.0;
                     reasons.push("shares normalized stem".to_string());
+                }
+                if &symbol.path != path
+                    && related_file_reference_symbol_candidate(&symbol.name, &symbol.kind)
+                    && source_reference_text.is_some_and(|text| {
+                        text_references_symbol_name(
+                            text,
+                            source_reference_text_lower.as_deref(),
+                            &symbol.name,
+                            &symbol_name_lower,
+                        )
+                    })
+                {
+                    score += 34.0;
+                    reasons.push("referenced by source".to_string());
                 }
             }
 
@@ -4698,6 +4718,17 @@ pub(crate) fn referenced_symbol_name<'a>(
         .iter()
         .find(|(symbol, _)| contains_ascii_case_insensitive(text, symbol))
         .map(|(symbol, _)| symbol.as_str())
+}
+
+pub(crate) fn text_references_symbol_name(
+    text: &str,
+    text_lower: Option<&str>,
+    symbol: &str,
+    symbol_lower: &str,
+) -> bool {
+    text_lower
+        .map(|text_lower| text_lower.contains(symbol_lower))
+        .unwrap_or_else(|| contains_ascii_case_insensitive(text, symbol))
 }
 
 pub(crate) fn related_file_reference_symbol_candidate(name: &str, kind: &str) -> bool {
