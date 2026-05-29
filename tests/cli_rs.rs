@@ -489,6 +489,21 @@ fn cli_search_auto_selects_live_indexed_and_shard_surfaces() {
         .stdout(predicate::str::contains("drop_missing_terms"))
         .stdout(predicate::str::contains("\"tool\":\"search_code\""));
 
+    let mut auto_retry_live = Command::cargo_bin("orient").unwrap();
+    auto_retry_live
+        .args([
+            "search-auto",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--retry-if-empty",
+            "issue_token definitely_missing",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"primary_retry_result\""))
+        .stdout(predicate::str::contains("\"request\""))
+        .stdout(predicate::str::contains("src/auth.rs"));
+
     let mut diagnosed_live = Command::cargo_bin("orient").unwrap();
     diagnosed_live
         .args([
@@ -691,6 +706,20 @@ fn cli_search_auto_batch_returns_query_surfaces() {
         .stdout(predicate::str::contains("\"query_plan_result\""))
         .stdout(predicate::str::contains("\"primary_retry_request\""))
         .stdout(predicate::str::contains("\"tool\":\"indexed_search_code\""));
+
+    let mut auto_retry_batch = Command::cargo_bin("orient").unwrap();
+    auto_retry_batch
+        .args([
+            "search-auto-batch",
+            "--index",
+            index_path.to_str().unwrap(),
+            "--retry-if-empty",
+            "issue_token definitely_missing",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"primary_retry_result\""))
+        .stdout(predicate::str::contains("src/auth.rs"));
 
     let mut diagnosed_batch = Command::cargo_bin("orient").unwrap();
     diagnosed_batch

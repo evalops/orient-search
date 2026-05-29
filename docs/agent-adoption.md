@@ -59,7 +59,7 @@ the same for generated search/read/related follow-up requests.
 Start with `agent_guide` or `tool_manifest` once, then use `search_auto`.
 Follow returned `read_batch_request`, `read_request`, `related_request`,
 `related_symbols_request`, `query_plan_result`, `query_plan_request`,
-`repo_map_request`, and query-plan `retry_requests` objects directly. These
+`primary_retry_request`, `primary_retry_result`, `repo_map_request`, and query-plan `retry_requests` objects directly. These
 follow-up request objects include complete `jsonl` and `client_cli` fields, so
 shell-native agents can replay the exact next call through `orient client-jsonl`
 without constructing JSON by hand.
@@ -119,10 +119,12 @@ simple JSON-lines over stdio, TCP, or Unix sockets.
    neighboring files. Related-file and related-symbol results carry their own
    `read_request` objects; search-generated `related_symbols_request` objects
    also carry the originating query so agents can follow them directly.
-5. For empty automatic searches, inspect `query_plan_result`; use
-   `diagnose:true` on `search_auto` / `search_auto_batch` when results are
-   noisy or suspicious and the agent wants search plus diagnostics in one call.
-   Otherwise use `query_plan_request`, then follow any returned `retry_requests`.
+5. For empty automatic searches, inspect `query_plan_result` or pass
+   `retry_if_empty:true` / `--retry-if-empty` to run the promoted retry once in
+   the same call. Use `diagnose:true` on `search_auto` / `search_auto_batch`
+   when results are noisy or suspicious and the agent wants search plus
+   diagnostics in one call. Otherwise use `query_plan_request`, then follow any
+   returned `retry_requests`.
 6. Use `repo_map_request` when the agent needs entrypoints, tests, commands, or
    top symbols for the chosen search surface. Repo-map responses include a
    `read_batch_request` for the map's highest-value files and definitions.

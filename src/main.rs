@@ -16,7 +16,7 @@ use orient::repo_index::{
     search_repo_fast_filtered, symbol_lookup_read_batch_request, symbol_lookup_results,
 };
 use orient::server::{
-    MAX_BATCH_QUERIES, MAX_BATCH_RANGES, ToolRuntime, agent_guide, agent_instructions,
+    MAX_BATCH_QUERIES, MAX_BATCH_RANGES, ToolRequest, ToolRuntime, agent_guide, agent_instructions,
     mcp_tool_manifest, retarget_client_cli_commands, serve_jsonl,
     serve_jsonl_stream_with_client_command, serve_mcp, serve_tcp, tcp_client_command,
     tool_manifest, unix_client_command,
@@ -452,6 +452,8 @@ enum Commands {
         refresh_if_stale: bool,
         #[arg(long)]
         diagnose: bool,
+        #[arg(long)]
+        retry_if_empty: bool,
     },
     SearchAutoBatch {
         #[arg(required = true, allow_hyphen_values = true)]
@@ -474,6 +476,8 @@ enum Commands {
         refresh_if_stale: bool,
         #[arg(long)]
         diagnose: bool,
+        #[arg(long)]
+        retry_if_empty: bool,
     },
     SearchBatch {
         #[arg(long, default_value = ".")]
@@ -2260,6 +2264,38 @@ fn primary_cli_retry_request_from_shard_plans(plans: &[ShardQueryPlan]) -> Optio
         .find_map(|shard_plan| primary_cli_retry_request_from_plan(&shard_plan.plan))
 }
 
+fn primary_cli_retry_result(
+    retry_if_empty: bool,
+    original_results_empty: bool,
+    request: Option<&Value>,
+) -> Result<Option<Value>> {
+    if !retry_if_empty || !original_results_empty {
+        return Ok(None);
+    }
+    let Some(request) = request else {
+        return Ok(None);
+    };
+    let Some(tool) = request.get("tool").and_then(Value::as_str) else {
+        return Ok(None);
+    };
+    let arguments = request
+        .get("arguments")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
+    let response = ToolRuntime::default().dispatch(ToolRequest {
+        id: serde_json::json!("primary-retry"),
+        tool: tool.to_string(),
+        arguments,
+    });
+    if let Some(error) = response.error {
+        bail!("primary retry request failed: {error}");
+    }
+    Ok(Some(serde_json::json!({
+        "request": request,
+        "results": response.result.unwrap_or(Value::Null)
+    })))
+}
+
 fn insert_optional_json_field(object: &mut Value, name: &str, value: Option<Value>) {
     if let (Value::Object(object), Some(value)) = (object, value) {
         object.insert(name.to_string(), value);
@@ -3010,6 +3046,7 @@ fn run() -> Result<()> {
             context_lines,
             refresh_if_stale,
             diagnose,
+            retry_if_empty,
         } => {
             let query = cli_single_query(query, query_arg)?;
             if let Some(index_dir) = index_dir {
@@ -3049,6 +3086,11 @@ fn run() -> Result<()> {
                 } else {
                     (None, None)
                 };
+                let primary_retry_result = primary_cli_retry_result(
+                    retry_if_empty,
+                    results.is_empty(),
+                    primary_retry_request.as_ref(),
+                )?;
                 let mut output = serde_json::json!({
                     "query": query,
                     "surface": "shards",
@@ -3070,6 +3112,11 @@ fn run() -> Result<()> {
                     &mut output,
                     "primary_retry_request",
                     primary_retry_request,
+                );
+                insert_optional_json_field(
+                    &mut output,
+                    "primary_retry_result",
+                    primary_retry_result,
                 );
                 println!("{}", serde_json::to_string(&output)?);
             } else if let Some(index_path) = index {
@@ -3118,6 +3165,11 @@ fn run() -> Result<()> {
                 } else {
                     (None, None)
                 };
+                let primary_retry_result = primary_cli_retry_result(
+                    retry_if_empty,
+                    results.is_empty(),
+                    primary_retry_request.as_ref(),
+                )?;
                 let mut output = serde_json::json!({
                     "query": query,
                     "surface": "indexed",
@@ -3142,6 +3194,11 @@ fn run() -> Result<()> {
                     &mut output,
                     "primary_retry_request",
                     primary_retry_request,
+                );
+                insert_optional_json_field(
+                    &mut output,
+                    "primary_retry_result",
+                    primary_retry_result,
                 );
                 println!("{}", serde_json::to_string(&output)?);
             } else {
@@ -3184,6 +3241,11 @@ fn run() -> Result<()> {
                 } else {
                     (None, None)
                 };
+                let primary_retry_result = primary_cli_retry_result(
+                    retry_if_empty,
+                    results.is_empty(),
+                    primary_retry_request.as_ref(),
+                )?;
                 let mut output = serde_json::json!({
                     "query": query,
                     "surface": "fallback",
@@ -3209,6 +3271,11 @@ fn run() -> Result<()> {
                     "primary_retry_request",
                     primary_retry_request,
                 );
+                insert_optional_json_field(
+                    &mut output,
+                    "primary_retry_result",
+                    primary_retry_result,
+                );
                 println!("{}", serde_json::to_string(&output)?);
             }
         }
@@ -3223,6 +3290,7 @@ fn run() -> Result<()> {
             context_lines,
             refresh_if_stale,
             diagnose,
+            retry_if_empty,
         } => {
             let queries = cli_batch_queries(queries)?;
             let mut batch = Vec::new();
@@ -3265,6 +3333,11 @@ fn run() -> Result<()> {
                         } else {
                             (None, None)
                         };
+                    let primary_retry_result = primary_cli_retry_result(
+                        retry_if_empty,
+                        results.is_empty(),
+                        primary_retry_request.as_ref(),
+                    )?;
                     let mut item = serde_json::json!({
                         "query": query,
                         "surface": "shards",
@@ -3286,6 +3359,11 @@ fn run() -> Result<()> {
                         &mut item,
                         "primary_retry_request",
                         primary_retry_request,
+                    );
+                    insert_optional_json_field(
+                        &mut item,
+                        "primary_retry_result",
+                        primary_retry_result,
                     );
                     batch.push(item);
                 }
@@ -3337,6 +3415,11 @@ fn run() -> Result<()> {
                         } else {
                             (None, None)
                         };
+                    let primary_retry_result = primary_cli_retry_result(
+                        retry_if_empty,
+                        results.is_empty(),
+                        primary_retry_request.as_ref(),
+                    )?;
                     let mut item = serde_json::json!({
                         "query": query,
                         "surface": "indexed",
@@ -3361,6 +3444,11 @@ fn run() -> Result<()> {
                         &mut item,
                         "primary_retry_request",
                         primary_retry_request,
+                    );
+                    insert_optional_json_field(
+                        &mut item,
+                        "primary_retry_result",
+                        primary_retry_result,
                     );
                     batch.push(item);
                 }
@@ -3406,6 +3494,11 @@ fn run() -> Result<()> {
                         } else {
                             (None, None)
                         };
+                    let primary_retry_result = primary_cli_retry_result(
+                        retry_if_empty,
+                        results.is_empty(),
+                        primary_retry_request.as_ref(),
+                    )?;
                     let mut item = serde_json::json!({
                         "query": query,
                         "surface": "fallback",
@@ -3430,6 +3523,11 @@ fn run() -> Result<()> {
                         &mut item,
                         "primary_retry_request",
                         primary_retry_request,
+                    );
+                    insert_optional_json_field(
+                        &mut item,
+                        "primary_retry_result",
+                        primary_retry_result,
                     );
                     batch.push(item);
                 }

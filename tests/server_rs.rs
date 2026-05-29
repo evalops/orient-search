@@ -1,5 +1,5 @@
 use std::fs;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
 #[cfg(unix)]
 use std::os::unix::net::UnixStream;
@@ -1491,6 +1491,28 @@ fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
             .unwrap()
             .contains("src/auth.rs")
     );
+    let auto_retry = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("empty-live-auto-retry"),
+        tool: "search_auto".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "query": "issue_token definitely_missing",
+            "limit": 5,
+            "retry_if_empty": true
+        }),
+    });
+    assert!(auto_retry.error.is_none(), "{:?}", auto_retry.error);
+    let auto_retry = auto_retry.result.unwrap();
+    assert!(auto_retry["results"].as_array().unwrap().is_empty());
+    assert_eq!(
+        auto_retry["primary_retry_result"]["request"],
+        auto_retry["primary_retry_request"]
+    );
+    assert!(
+        serde_json::to_string(&auto_retry["primary_retry_result"]["results"])
+            .unwrap()
+            .contains("src/auth.rs")
+    );
 
     let git_scope_miss = runtime.dispatch(ToolRequest {
         id: serde_json::json!("git-scope-miss"),
@@ -1600,6 +1622,30 @@ fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
     assert_eq!(
         empty_indexed["primary_retry_request"],
         empty_indexed["query_plan_result"]["retry_requests"][0]
+    );
+    let auto_retry_indexed = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("empty-indexed-auto-retry"),
+        tool: "search_auto".to_string(),
+        arguments: serde_json::json!({
+            "query": "issue_token definitely_missing",
+            "limit": 5,
+            "retry_if_empty": true
+        }),
+    });
+    assert!(
+        auto_retry_indexed.error.is_none(),
+        "{:?}",
+        auto_retry_indexed.error
+    );
+    let auto_retry_indexed = auto_retry_indexed.result.unwrap();
+    assert_eq!(
+        auto_retry_indexed["primary_retry_result"]["request"],
+        auto_retry_indexed["primary_retry_request"]
+    );
+    assert!(
+        serde_json::to_string(&auto_retry_indexed["primary_retry_result"]["results"])
+            .unwrap()
+            .contains("src/auth.rs")
     );
 
     let kind_typo = runtime.dispatch(ToolRequest {
@@ -5723,8 +5769,25 @@ fn tcp_client_uses_default_addr_when_omitted() {
     let mut startup_reader = BufReader::new(stdout);
     let mut startup = String::new();
     startup_reader.read_line(&mut startup).unwrap();
-    let startup_json: serde_json::Value = serde_json::from_str(&startup).unwrap();
-    assert_eq!(startup_json["addr"], serde_json::json!("127.0.0.1:8796"));
+    let owns_daemon = if startup.trim().is_empty() {
+        let mut stderr = String::new();
+        child
+            .stderr
+            .take()
+            .unwrap()
+            .read_to_string(&mut stderr)
+            .unwrap();
+        let _ = child.wait();
+        assert!(
+            stderr.contains("Address already in use"),
+            "serve-tcp produced no startup JSON: {stderr}"
+        );
+        false
+    } else {
+        let startup_json: serde_json::Value = serde_json::from_str(&startup).unwrap();
+        assert_eq!(startup_json["addr"], serde_json::json!("127.0.0.1:8796"));
+        true
+    };
 
     let mut client = Command::new(binary)
         .arg("client-jsonl")
@@ -5741,8 +5804,10 @@ fn tcp_client_uses_default_addr_when_omitted() {
     drop(client.stdin.take());
     let output = client.wait_with_output().unwrap();
 
-    child.kill().unwrap();
-    let _ = child.wait();
+    if owns_daemon {
+        child.kill().unwrap();
+        let _ = child.wait();
+    }
 
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).unwrap();
