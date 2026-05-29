@@ -1874,6 +1874,10 @@ fn bare_path_like_queries_use_filter_only_fast_paths() {
         .collect::<String>();
     write(&repo.path().join("src/lib.rs"), &source_text);
     write(
+        &repo.path().join("other/src/lib.rs"),
+        "pub fn wrong_suffix_match() {}\n",
+    );
+    write(
         &repo.path().join("go.mod"),
         "module example.com/sample\n\ngo 1.22\n",
     );
@@ -1924,7 +1928,7 @@ fn bare_path_like_queries_use_filter_only_fast_paths() {
     );
     let location_fallback =
         search_repo_fast_filtered(repo.path(), "src/lib.rs:40:9", 10, &filters).unwrap();
-    assert_eq!(location_fallback[0].path, "src/lib.rs");
+    assert_eq!(result_paths(&location_fallback), vec!["src/lib.rs"]);
     assert!(
         location_fallback[0]
             .snippet
@@ -1938,6 +1942,11 @@ fn bare_path_like_queries_use_filter_only_fast_paths() {
             .unwrap()
             .iter()
             .any(|signal| signal.kind == "line_filter" && signal.value == "40")
+    );
+    assert!(
+        search_repo_fast_filtered(repo.path(), "missing/src/lib.rs:40:9", 10, &filters)
+            .unwrap()
+            .is_empty()
     );
     let go_mod_fallback = search_repo_fast_filtered(repo.path(), "go.mod", 10, &filters).unwrap();
     assert_eq!(go_mod_fallback[0].path, "go.mod");

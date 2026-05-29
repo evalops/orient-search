@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fs;
 use std::io::{BufRead, BufReader};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{LazyLock, mpsc};
 use std::thread;
@@ -878,16 +878,24 @@ fn search_repo_filter_only(
 ) -> Result<Vec<SearchResult>> {
     let candidate_cap = filter_only_candidate_cap(limit, filters);
     let deadline = Instant::now() + timeout;
-    let mut candidates =
-        filter_only_candidates_from_fd_files(root, filters, candidate_cap, deadline)?
-            .unwrap_or_default();
-    if candidates.is_empty() && Instant::now() < deadline {
-        candidates = filter_only_candidates_from_rg_files(root, filters, candidate_cap, deadline)?
-            .unwrap_or_default();
-    }
-    if candidates.is_empty() && Instant::now() < deadline {
-        candidates = filter_only_candidates_from_walk(root, filters, candidate_cap, deadline)?;
-    }
+    let mut candidates = if let Some(candidates) =
+        filter_only_candidates_from_direct_location(root, filters, deadline)?
+    {
+        candidates
+    } else {
+        let mut candidates =
+            filter_only_candidates_from_fd_files(root, filters, candidate_cap, deadline)?
+                .unwrap_or_default();
+        if candidates.is_empty() && Instant::now() < deadline {
+            candidates =
+                filter_only_candidates_from_rg_files(root, filters, candidate_cap, deadline)?
+                    .unwrap_or_default();
+        }
+        if candidates.is_empty() && Instant::now() < deadline {
+            candidates = filter_only_candidates_from_walk(root, filters, candidate_cap, deadline)?;
+        }
+        candidates
+    };
 
     candidates.sort_by(|(left_path, left), (right_path, right)| {
         right
@@ -914,6 +922,89 @@ fn search_repo_filter_only(
     }
 
     Ok(finalize_results_for_filters(results, limit, filters))
+}
+
+fn filter_only_candidates_from_direct_location(
+    root: &Path,
+    filters: &SearchFilters,
+    deadline: Instant,
+) -> Result<Option<Vec<(String, FilterOnlyMatch)>>> {
+    if filters.target_line.is_none() {
+        return Ok(None);
+    }
+    let Some((path, authoritative)) = direct_location_filter_path(filters) else {
+        return Ok(None);
+    };
+    if Instant::now() >= deadline {
+        return Ok(Some(Vec::new()));
+    }
+    let Some(path) = normalize_direct_repo_relative_path(&path) else {
+        return Ok(Some(Vec::new()));
+    };
+    let Ok(root) = root.canonicalize() else {
+        return Ok(Some(Vec::new()));
+    };
+    let Ok(absolute) = root.join(&path).canonicalize() else {
+        return if authoritative {
+            Ok(Some(Vec::new()))
+        } else {
+            Ok(None)
+        };
+    };
+    if !absolute.starts_with(&root) || !absolute.is_file() {
+        return if authoritative {
+            Ok(Some(Vec::new()))
+        } else {
+            Ok(None)
+        };
+    }
+    let rel = absolute
+        .strip_prefix(&root)?
+        .to_string_lossy()
+        .replace('\\', "/");
+    let mut candidates = Vec::new();
+    let _ = push_filter_only_candidate(&root, filters, &rel, &mut candidates)?;
+    Ok(Some(candidates))
+}
+
+fn direct_location_filter_path(filters: &SearchFilters) -> Option<(String, bool)> {
+    if let Some(path) = filters
+        .path
+        .as_deref()
+        .filter(|path| exact_direct_path_filter(path))
+    {
+        return Some((path.to_string(), true));
+    }
+    filters
+        .file
+        .as_deref()
+        .filter(|file| exact_direct_path_filter(file))
+        .map(|file| (file.to_string(), false))
+}
+
+fn exact_direct_path_filter(path: &str) -> bool {
+    let path = path.trim();
+    !path.is_empty()
+        && !path.contains('*')
+        && !path.contains('?')
+        && !path.contains('\0')
+        && Path::new(&path.replace('\\', "/")).is_relative()
+}
+
+fn normalize_direct_repo_relative_path(path: &str) -> Option<String> {
+    let normalized = path.trim().replace('\\', "/");
+    let requested = Path::new(&normalized);
+    if !requested.is_relative()
+        || requested.components().any(|component| {
+            matches!(
+                component,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
+        })
+    {
+        return None;
+    }
+    Some(normalized.trim_start_matches('/').to_string())
 }
 
 fn filter_only_candidates_from_fd_files(
