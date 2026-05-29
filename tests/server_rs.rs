@@ -1594,6 +1594,46 @@ fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
             .contains("SessionManager")
     );
 
+    let path_typo = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("path-typo"),
+        tool: "search_auto".to_string(),
+        arguments: serde_json::json!({
+            "query": "path:src/ath.rs",
+            "limit": 5
+        }),
+    });
+    assert!(path_typo.error.is_none(), "{:?}", path_typo.error);
+    let path_typo = path_typo.result.unwrap();
+    assert_eq!(
+        path_typo["query_plan_result"]["repair_hints"][0]["kind"],
+        "replace_path_filter"
+    );
+    assert_eq!(
+        path_typo["query_plan_result"]["retry_requests"][0]["arguments"]["query"],
+        "path:src/auth.rs"
+    );
+    assert!(
+        path_typo["query_plan_result"]["retry_requests"][0]["arguments"]
+            .get("path")
+            .is_none(),
+        "{:?}",
+        path_typo["query_plan_result"]["retry_requests"][0]["arguments"]
+    );
+    let path_retry = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("path-typo-retry"),
+        tool: path_typo["query_plan_result"]["retry_requests"][0]["tool"]
+            .as_str()
+            .unwrap()
+            .to_string(),
+        arguments: path_typo["query_plan_result"]["retry_requests"][0]["arguments"].clone(),
+    });
+    assert!(path_retry.error.is_none(), "{:?}", path_retry.error);
+    assert!(
+        serde_json::to_string(&path_retry.result)
+            .unwrap()
+            .contains("src/auth.rs")
+    );
+
     let map_request = indexed["repo_map_request"].clone();
     let map = runtime.dispatch(ToolRequest {
         id: serde_json::json!("map"),

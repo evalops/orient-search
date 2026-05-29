@@ -1462,6 +1462,7 @@ impl FastIndex {
                     repair_hints: filter_scan_repair_hints(
                         &filters,
                         &self.symbol_kind_postings,
+                        &self.files,
                         final_match_count,
                     ),
                     retry_requests: Vec::new(),
@@ -1719,6 +1720,7 @@ impl FastIndex {
                 repair_hints: filter_scan_repair_hints(
                     filters,
                     &self.symbol_kind_postings,
+                    &self.files,
                     final_match_count,
                 ),
                 retry_requests: Vec::new(),
@@ -2911,6 +2913,7 @@ fn repo_scope_mismatch_repair_hints(
 fn filter_scan_repair_hints(
     filters: &SearchFilters,
     symbol_kind_postings: &HashMap<String, Vec<Posting>>,
+    files: &[IndexedPath],
     candidate_count: usize,
 ) -> Vec<QueryPlanRepairHint> {
     if candidate_count != 0 {
@@ -2932,6 +2935,24 @@ fn filter_scan_repair_hints(
                 "replace_symbol_kind_filter",
                 message,
                 suggested_query,
+            )];
+        }
+    }
+    if let Some(file) = filters.file.as_ref() {
+        if let Some(query) = suggested_file_filter_query(file, files) {
+            return vec![repair_hint(
+                "replace_file_filter",
+                format!("No indexed file name matches `file:{file}`. Retry with `{query}`."),
+                Some(query),
+            )];
+        }
+    }
+    if let Some(path) = filters.path.as_ref() {
+        if let Some(query) = suggested_path_filter_query(path, files) {
+            return vec![repair_hint(
+                "replace_path_filter",
+                format!("No indexed path matches `path:{path}`. Retry with `{query}`."),
+                Some(query),
             )];
         }
     }
@@ -3073,6 +3094,69 @@ fn suggested_symbol_query(wanted: &str, files: &[IndexedPath]) -> Option<String>
     best.first()
         .filter(|(_, _, distance)| *distance <= 3)
         .map(|(name, _, _)| format!("symbol:{name}"))
+}
+
+fn suggested_file_filter_query(wanted: &str, files: &[IndexedPath]) -> Option<String> {
+    let wanted = wanted.trim().trim_start_matches('/').to_ascii_lowercase();
+    if wanted.is_empty() {
+        return None;
+    }
+    let mut best = files
+        .iter()
+        .map(|file| {
+            (
+                file.file_name_lower.as_str(),
+                edit_distance_at_most(&wanted, &file.file_name_lower, 4),
+            )
+        })
+        .filter_map(|(file_name, distance)| distance.map(|distance| (file_name, distance)))
+        .collect::<Vec<_>>();
+    best.sort_by(|left, right| {
+        left.1
+            .cmp(&right.1)
+            .then_with(|| left.0.len().cmp(&right.0.len()))
+            .then_with(|| left.0.cmp(right.0))
+    });
+    best.first()
+        .filter(|(_, distance)| *distance <= 3)
+        .map(|(file_name, _)| format!("file:{file_name}"))
+}
+
+fn suggested_path_filter_query(wanted: &str, files: &[IndexedPath]) -> Option<String> {
+    let wanted = normalize_filter_path_for_suggestion(wanted);
+    if wanted.is_empty() {
+        return None;
+    }
+    let mut best = files
+        .iter()
+        .map(|file| {
+            (
+                file.path.as_str(),
+                file.path_lower.as_str(),
+                edit_distance_at_most(&wanted, &file.path_lower, 6),
+            )
+        })
+        .filter_map(|(path, path_lower, distance)| {
+            distance.map(|distance| (path, path_lower, distance))
+        })
+        .collect::<Vec<_>>();
+    best.sort_by(|left, right| {
+        left.2
+            .cmp(&right.2)
+            .then_with(|| left.1.len().cmp(&right.1.len()))
+            .then_with(|| left.1.cmp(right.1))
+    });
+    best.first()
+        .filter(|(_, _, distance)| *distance <= 4)
+        .map(|(path, _, _)| format!("path:{path}"))
+}
+
+fn normalize_filter_path_for_suggestion(path: &str) -> String {
+    path.trim()
+        .trim_start_matches("./")
+        .trim_start_matches('/')
+        .replace('\\', "/")
+        .to_ascii_lowercase()
 }
 
 fn edit_distance_at_most(left: &str, right: &str, max_distance: usize) -> Option<usize> {

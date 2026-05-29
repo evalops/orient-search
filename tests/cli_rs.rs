@@ -383,6 +383,27 @@ fn cli_search_auto_selects_live_indexed_and_shard_surfaces() {
     assert_eq!(plan["retry_requests"][0]["arguments"]["language"], "rust");
     assert!(plan["retry_requests"][0]["arguments"]["file"].is_null());
 
+    let mut diagnosed_path_typo = Command::cargo_bin("orient").unwrap();
+    let output = diagnosed_path_typo
+        .args([
+            "search-auto",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--diagnose",
+            "path:src/ath.rs",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let plan = &value["query_plan_result"];
+    assert_eq!(plan["repair_hints"][0]["kind"], "replace_path_filter");
+    assert_eq!(
+        plan["retry_requests"][0]["arguments"]["query"],
+        "path:src/auth.rs"
+    );
+    assert!(plan["retry_requests"][0]["arguments"]["path"].is_null());
+
     let mut diagnosed_git_scope = Command::cargo_bin("orient").unwrap();
     let output = diagnosed_git_scope
         .args([

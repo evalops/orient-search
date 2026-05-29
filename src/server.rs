@@ -1678,8 +1678,13 @@ fn retry_search_requests<T: Serialize>(
             continue;
         }
         let mut arguments = Map::new();
-        let replace_symbol = hint.kind == "replace_symbol_filter";
-        let replace_symbol_kind = hint.kind == "replace_symbol_kind_filter";
+        let replace_filter_field = match hint.kind.as_str() {
+            "replace_file_filter" => Some("file"),
+            "replace_path_filter" => Some("path"),
+            "replace_symbol_filter" => Some("symbol"),
+            "replace_symbol_kind_filter" => Some("symbol_kind"),
+            _ => None,
+        };
         let relaxed_field = retry_relaxed_filter_field(&hint.kind);
         if hint.kind == "relax_filters" {
             if let Some(source) = source_arguments.as_object() {
@@ -1691,13 +1696,7 @@ fn retry_search_requests<T: Serialize>(
             }
         } else if let Some(source) = source_arguments.as_object() {
             for (name, value) in source {
-                if replace_symbol && matches!(name.as_str(), "symbol") {
-                    continue;
-                }
-                if replace_symbol_kind && matches!(name.as_str(), "symbol_kind" | "kind" | "type") {
-                    continue;
-                }
-                if retry_source_arg_matches_filter(name, relaxed_field) {
+                if retry_source_arg_matches_filter(name, replace_filter_field.or(relaxed_field)) {
                     continue;
                 }
                 if retry_search_passthrough_arg(name, target_name) {
@@ -1710,10 +1709,7 @@ fn retry_search_requests<T: Serialize>(
                 &mut arguments,
                 plan,
                 target_name,
-                replace_symbol
-                    .then_some("symbol")
-                    .or_else(|| replace_symbol_kind.then_some("symbol_kind"))
-                    .or(relaxed_field),
+                replace_filter_field.or(relaxed_field),
             );
         }
         arguments.insert(target_name.to_string(), json!(target_value));
@@ -1750,6 +1746,7 @@ fn retry_source_arg_matches_filter(name: &str, field: Option<&str>) -> bool {
         (field, name),
         (Some("file"), "file" | "filename" | "file_name")
             | (Some("path"), "path" | "dir" | "directory" | "folder")
+            | (Some("symbol"), "symbol")
             | (Some("language"), "language" | "lang")
             | (Some("extension"), "extension" | "ext")
             | (Some("test"), "test" | "tests")

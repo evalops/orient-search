@@ -1331,8 +1331,7 @@ fn cli_retry_requests<T: Serialize>(
         }
         let mut arguments = Map::new();
         if hint.kind != "relax_filters" {
-            let skip_field = (hint.kind == "replace_symbol_kind_filter")
-                .then_some("symbol_kind")
+            let skip_field = cli_replaced_filter_field(&hint.kind)
                 .or_else(|| cli_relaxed_filter_field(&hint.kind));
             add_filter_retry_args(&mut arguments, filters, target_name, skip_field);
             add_plan_filter_retry_args(&mut arguments, plan, target_name, skip_field);
@@ -1346,6 +1345,16 @@ fn cli_retry_requests<T: Serialize>(
         ));
     }
     requests
+}
+
+fn cli_replaced_filter_field(kind: &str) -> Option<&'static str> {
+    match kind {
+        "replace_file_filter" => Some("file"),
+        "replace_path_filter" => Some("path"),
+        "replace_symbol_filter" => Some("symbol"),
+        "replace_symbol_kind_filter" => Some("symbol_kind"),
+        _ => None,
+    }
 }
 
 fn cli_relaxed_filter_field(kind: &str) -> Option<&'static str> {
@@ -1384,7 +1393,9 @@ fn add_filter_retry_args(
     if skip_field != Some("extension") {
         insert_string_arg(arguments, "extension", filters.extension.as_ref());
     }
-    insert_string_arg(arguments, "symbol", filters.symbol.as_ref());
+    if skip_field != Some("symbol") {
+        insert_string_arg(arguments, "symbol", filters.symbol.as_ref());
+    }
     if skip_field != Some("symbol_kind") {
         insert_string_arg(arguments, "symbol_kind", filters.symbol_kind.as_ref());
     }

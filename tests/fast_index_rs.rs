@@ -929,6 +929,24 @@ fn indexed_query_plan_reports_missing_terms_without_results() {
     assert_eq!(single_filter_plan.repair_hints[0].kind, "relax_file_filter");
     assert!(single_filter_plan.repair_hints[0].suggested_query.is_none());
 
+    let file_typo_plan = index
+        .query_plan("file:athu.rs", &SearchFilters::default())
+        .unwrap();
+    assert_eq!(file_typo_plan.repair_hints[0].kind, "replace_file_filter");
+    assert_eq!(
+        file_typo_plan.repair_hints[0].suggested_query.as_deref(),
+        Some("file:auth.rs")
+    );
+
+    let path_typo_plan = index
+        .query_plan("path:src/ath.rs", &SearchFilters::default())
+        .unwrap();
+    assert_eq!(path_typo_plan.repair_hints[0].kind, "replace_path_filter");
+    assert_eq!(
+        path_typo_plan.repair_hints[0].suggested_query.as_deref(),
+        Some("path:src/auth.rs")
+    );
+
     let branch_mismatch = index
         .query_plan(
             "branch:not-real-branch SessionManager",
