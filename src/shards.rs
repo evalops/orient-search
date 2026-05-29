@@ -302,6 +302,14 @@ pub struct ShardFreshness {
     pub version: u32,
     pub index_dir: PathBuf,
     pub shard_count: usize,
+    pub manifest_bytes: u64,
+    pub manifest_sidecar_bytes: u64,
+    pub manifest_prefilter_bytes: u64,
+    pub manifest_route_bytes: u64,
+    pub manifest_route_exact_terms: usize,
+    pub manifest_route_trigram_terms: usize,
+    pub manifest_route_omitted_exact_terms: usize,
+    pub manifest_route_omitted_trigram_terms: usize,
     pub stale: bool,
     pub stale_shards: usize,
     pub index_bytes: u64,
@@ -568,6 +576,7 @@ fn refresh_shards_unlocked(index_dir: &Path) -> Result<ShardRefreshStats> {
 pub fn shard_status(index_dir: impl AsRef<Path>) -> Result<ShardFreshness> {
     let index_dir = index_dir.as_ref();
     let manifest = load_manifest(index_dir)?;
+    let route = load_manifest_route(index_dir)?;
     let shards = shard_status_jobs(index_dir, &manifest.shards)?;
     let mut stale_shards = 0usize;
     let mut changed_files = 0usize;
@@ -608,6 +617,26 @@ pub fn shard_status(index_dir: impl AsRef<Path>) -> Result<ShardFreshness> {
         version: SHARD_MANIFEST_VERSION,
         index_dir: index_dir.to_path_buf(),
         shard_count: manifest.shards.len(),
+        manifest_bytes: file_len(index_dir.join(SHARD_MANIFEST_FILE)),
+        manifest_sidecar_bytes: file_len(index_dir.join(SHARD_MANIFEST_SIDECAR_FILE)),
+        manifest_prefilter_bytes: file_len(index_dir.join(SHARD_MANIFEST_PREFILTER_FILE)),
+        manifest_route_bytes: file_len(index_dir.join(SHARD_MANIFEST_ROUTE_FILE)),
+        manifest_route_exact_terms: route
+            .as_ref()
+            .map(|route| route.exact_terms.len())
+            .unwrap_or_default(),
+        manifest_route_trigram_terms: route
+            .as_ref()
+            .map(|route| route.trigram_terms.len())
+            .unwrap_or_default(),
+        manifest_route_omitted_exact_terms: route
+            .as_ref()
+            .map(|route| route.omitted_hashes.len())
+            .unwrap_or_default(),
+        manifest_route_omitted_trigram_terms: route
+            .as_ref()
+            .map(|route| route.omitted_trigram_hashes.len())
+            .unwrap_or_default(),
         stale: stale_shards > 0,
         stale_shards,
         index_bytes,
@@ -625,6 +654,12 @@ pub fn shard_status(index_dir: impl AsRef<Path>) -> Result<ShardFreshness> {
         added_files,
         shards,
     })
+}
+
+fn file_len(path: impl AsRef<Path>) -> u64 {
+    fs::metadata(path)
+        .map(|metadata| metadata.len())
+        .unwrap_or(0)
 }
 
 fn shard_status_jobs(index_dir: &Path, shards: &[ShardEntry]) -> Result<Vec<ShardIndexFreshness>> {

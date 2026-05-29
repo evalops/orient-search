@@ -4134,6 +4134,12 @@ fn runtime_ensures_shards_builds_refreshes_and_warms() {
     assert_eq!(status["stale"], serde_json::json!(true));
     assert_eq!(status["shard_count"], serde_json::json!(2));
     assert_eq!(status["stale_shards"], serde_json::json!(1));
+    assert!(status["manifest_bytes"].as_u64().unwrap() > 0);
+    assert!(status["manifest_sidecar_bytes"].as_u64().unwrap() > 0);
+    assert!(status["manifest_prefilter_bytes"].as_u64().unwrap() > 0);
+    assert!(status["manifest_route_bytes"].as_u64().unwrap() > 0);
+    assert!(status["manifest_route_exact_terms"].as_u64().unwrap() > 0);
+    assert!(status["manifest_route_trigram_terms"].as_u64().unwrap() > 0);
     assert!(status["index_bytes"].as_u64().unwrap() > 0);
     assert!(status["source_bytes"].as_u64().unwrap() > 0);
     assert!(status["content_snapshot_bytes"].as_u64().unwrap() > 0);

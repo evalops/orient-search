@@ -36,6 +36,9 @@ Useful counters:
 - `line_offset_bytes`: line/range lookup table bytes
 - `posting_entries`: logical posting-list entries
 - `compressed_posting_bytes`: compressed posting-map bytes
+- `manifest_route_bytes`: compact shard-route sidecar bytes
+- `manifest_route_exact_terms` / `manifest_route_trigram_terms`: routeable exact
+  and trigram keys in the shard sidecar
 - `largest_shards`: largest shard indexes in a shard directory
 
 ## Defaults
