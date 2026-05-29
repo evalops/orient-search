@@ -5390,9 +5390,6 @@ impl ToolRuntime {
             let index = self.cached_index(index_dir.join(&job.shard.index))?;
             for scope in &job.scopes {
                 let scoped_filters = filters_for_shard_scope(filters, scope.path_prefix.as_deref());
-                if !index.query_may_match(query, &scoped_filters) {
-                    continue;
-                }
                 for mut result in index.search_filtered(query, limit, &scoped_filters)? {
                     if let Some(prefix) = &scope.path_prefix {
                         if !result.path.starts_with(prefix) {
