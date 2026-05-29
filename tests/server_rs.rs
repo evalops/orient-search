@@ -6972,6 +6972,98 @@ fn runtime_search_auto_batch_refreshes_selected_shards_without_unselected_shards
 }
 
 #[test]
+fn runtime_search_shards_batch_refreshes_selected_shards_without_unselected_shards() {
+    let workspace = tempfile::tempdir().unwrap();
+    let current_repo = workspace.path().join("current-app");
+    let other_repo = workspace.path().join("other-app");
+    let third_repo = workspace.path().join("third-app");
+    fs::create_dir_all(current_repo.join(".git")).unwrap();
+    fs::create_dir_all(other_repo.join(".git")).unwrap();
+    fs::create_dir_all(third_repo.join(".git")).unwrap();
+    write(
+        &current_repo.join("src/lib.rs"),
+        "pub fn baseline_current_token() {}\n",
+    );
+    write(
+        &other_repo.join("src/lib.rs"),
+        "pub fn baseline_other_token() {}\n",
+    );
+    write(
+        &third_repo.join("src/lib.rs"),
+        "pub fn baseline_third_token() {}\n",
+    );
+    let shard_dir = workspace.path().join("shards");
+    build_shards(
+        &[
+            PathBuf::from(&current_repo),
+            PathBuf::from(&other_repo),
+            PathBuf::from(&third_repo),
+        ],
+        &shard_dir,
+    )
+    .unwrap();
+
+    write(
+        &current_repo.join("src/new_current.rs"),
+        "pub fn direct_current_batch_refresh_token() {}\n",
+    );
+    write(
+        &other_repo.join("src/new_other.rs"),
+        "pub fn direct_other_batch_refresh_token() {}\n",
+    );
+    write(
+        &third_repo.join("src/new_third.rs"),
+        "pub fn direct_third_batch_refresh_token() {}\n",
+    );
+
+    let runtime = ToolRuntime::default();
+    runtime.warm_shards(shard_dir.clone()).unwrap();
+
+    let batch = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("fresh-direct-batch"),
+        tool: "search_shards_batch".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": shard_dir.clone(),
+            "cwd": current_repo.join("src"),
+            "queries": [
+                "direct_current_batch_refresh_token",
+                "repo:other-app direct_other_batch_refresh_token"
+            ],
+            "limit": 5,
+            "refresh_if_stale": true
+        }),
+    });
+    assert!(batch.error.is_none(), "{:?}", batch.error);
+    let batch = batch.result.unwrap();
+    let first_batch_item = serde_json::to_string(&batch[0]).unwrap();
+    assert!(
+        first_batch_item.contains("current-app/src/new_current.rs"),
+        "{first_batch_item}"
+    );
+    let second_batch_item = serde_json::to_string(&batch[1]).unwrap();
+    assert!(
+        second_batch_item.contains("other-app/src/new_other.rs"),
+        "{second_batch_item}"
+    );
+
+    let third_search = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("stale-third"),
+        tool: "search_shards".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": shard_dir,
+            "query": "repo:third-app direct_third_batch_refresh_token",
+            "limit": 5
+        }),
+    });
+    assert!(third_search.error.is_none(), "{:?}", third_search.error);
+    let third_search = serde_json::to_string(&third_search.result).unwrap();
+    assert!(
+        !third_search.contains("third-app/src/new_third.rs"),
+        "{third_search}"
+    );
+}
+
+#[test]
 fn runtime_search_auto_reports_stale_shard_refresh_request_on_empty_results() {
     let workspace = tempfile::tempdir().unwrap();
     let current_repo = workspace.path().join("current-app");
