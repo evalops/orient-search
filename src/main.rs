@@ -218,7 +218,7 @@ enum Commands {
     ReadShardRanges {
         #[arg(long)]
         index_dir: PathBuf,
-        #[arg(long = "range", value_name = "PATH:START:LINES")]
+        #[arg(long = "range", value_name = "PATH:START:LINES[:SCOPE]")]
         ranges: Vec<CliRangeSpec>,
         paths: Vec<String>,
         #[arg(long, default_value_t = 1)]
@@ -412,7 +412,7 @@ enum Commands {
         index: Option<PathBuf>,
         #[arg(long, conflicts_with = "index")]
         index_dir: Option<PathBuf>,
-        #[arg(long = "range", value_name = "PATH:START:LINES")]
+        #[arg(long = "range", value_name = "PATH:START:LINES[:SCOPE]")]
         ranges: Vec<CliRangeSpec>,
         paths: Vec<String>,
         #[arg(long, default_value_t = 1)]
@@ -568,18 +568,22 @@ enum Commands {
         start: usize,
         #[arg(long, default_value_t = 80)]
         lines: usize,
+        #[arg(long, value_enum, default_value_t = ReadScopeArg::Exact)]
+        scope: ReadScopeArg,
     },
     #[command(alias = "open-index-ranges")]
     ReadIndexRanges {
         #[arg(long)]
         index: PathBuf,
-        #[arg(long = "range", value_name = "PATH:START:LINES")]
+        #[arg(long = "range", value_name = "PATH:START:LINES[:SCOPE]")]
         ranges: Vec<CliRangeSpec>,
         paths: Vec<String>,
         #[arg(long, default_value_t = 1)]
         start: usize,
         #[arg(long, default_value_t = 80)]
         lines: usize,
+        #[arg(long, value_enum, default_value_t = ReadScopeArg::Exact)]
+        scope: ReadScopeArg,
     },
     Symbol {
         #[arg(long, default_value = ".")]
@@ -2733,7 +2737,7 @@ fn run() -> Result<()> {
                     &range.path,
                     range.start,
                     range.lines,
-                    RangeScope::from(scope),
+                    range.scope.unwrap_or_else(|| RangeScope::from(scope)),
                 )?)?
             );
         }
@@ -2753,7 +2757,7 @@ fn run() -> Result<()> {
                     &range.path,
                     range.start,
                     range.lines,
-                    scope,
+                    range.scope.unwrap_or(scope),
                 )?);
             }
             println!("{}", serde_json::to_string(&results)?);
@@ -3082,6 +3086,7 @@ fn run() -> Result<()> {
         } => {
             let range_spec = cli_single_range(path, path_arg, start, lines)?;
             let scope = RangeScope::from(scope);
+            let scope = range_spec.scope.unwrap_or(scope);
             let range = if let Some(index_dir) = index_dir {
                 read_shard_range_scoped(
                     &index_dir,
@@ -3127,7 +3132,7 @@ fn run() -> Result<()> {
                         &range.path,
                         range.start,
                         range.lines,
-                        scope,
+                        range.scope.unwrap_or(scope),
                     )?);
                 }
             } else if let Some(index_path) = index {
@@ -3137,7 +3142,7 @@ fn run() -> Result<()> {
                         &range.path,
                         range.start,
                         range.lines,
-                        scope,
+                        range.scope.unwrap_or(scope),
                     )?);
                 }
             } else {
@@ -3147,7 +3152,7 @@ fn run() -> Result<()> {
                         &range.path,
                         range.start,
                         range.lines,
-                        scope,
+                        range.scope.unwrap_or(scope),
                     )?);
                 }
             }
@@ -4030,12 +4035,18 @@ fn run() -> Result<()> {
             path_arg,
             start,
             lines,
+            scope,
         } => {
             let range = cli_single_range(path, path_arg, start, lines)?;
             let index = FastIndex::load(index)?;
             println!(
                 "{}",
-                serde_json::to_string(&index.read_range(&range.path, range.start, range.lines)?)?
+                serde_json::to_string(&index.read_range_scoped(
+                    &range.path,
+                    range.start,
+                    range.lines,
+                    range.scope.unwrap_or_else(|| RangeScope::from(scope)),
+                )?)?
             );
         }
         Commands::ReadIndexRanges {
@@ -4044,11 +4055,18 @@ fn run() -> Result<()> {
             paths,
             start,
             lines,
+            scope,
         } => {
             let index = FastIndex::load(index)?;
             let mut results = Vec::new();
+            let scope = RangeScope::from(scope);
             for range in cli_ranges(paths, ranges, start, lines)? {
-                results.push(index.read_range(&range.path, range.start, range.lines)?);
+                results.push(index.read_range_scoped(
+                    &range.path,
+                    range.start,
+                    range.lines,
+                    range.scope.unwrap_or(scope),
+                )?);
             }
             println!("{}", serde_json::to_string(&results)?);
         }
@@ -5362,12 +5380,16 @@ struct CliRangeSpec {
     path: String,
     start: usize,
     lines: usize,
+    scope: Option<RangeScope>,
 }
 
 impl FromStr for CliRangeSpec {
     type Err = String;
 
     fn from_str(value: &str) -> std::result::Result<Self, Self::Err> {
+        if let Some(range) = parse_scoped_cli_range(value)? {
+            return Ok(range);
+        }
         let mut parts = value.rsplitn(3, ':');
         let lines = parts
             .next()
@@ -5387,8 +5409,47 @@ impl FromStr for CliRangeSpec {
         if start == 0 || lines == 0 {
             return Err("range start and lines must be positive integers".to_string());
         }
-        Ok(Self { path, start, lines })
+        Ok(Self {
+            path,
+            start,
+            lines,
+            scope: None,
+        })
     }
+}
+
+fn parse_scoped_cli_range(value: &str) -> std::result::Result<Option<CliRangeSpec>, String> {
+    let mut parts = value.rsplitn(4, ':');
+    let Some(scope_text) = parts.next() else {
+        return Ok(None);
+    };
+    let Some(scope) = RangeScope::parse(scope_text) else {
+        return Ok(None);
+    };
+    let lines = parts
+        .next()
+        .ok_or_else(|| "range must be PATH:START:LINES[:SCOPE]".to_string())?
+        .parse::<usize>()
+        .map_err(|_| "range lines must be a positive integer".to_string())?;
+    let start = parts
+        .next()
+        .ok_or_else(|| "range must be PATH:START:LINES[:SCOPE]".to_string())?
+        .parse::<usize>()
+        .map_err(|_| "range start must be a positive integer".to_string())?;
+    let path = parts
+        .next()
+        .filter(|path| !path.is_empty())
+        .ok_or_else(|| "range must be PATH:START:LINES[:SCOPE]".to_string())?
+        .to_string();
+    if start == 0 || lines == 0 {
+        return Err("range start and lines must be positive integers".to_string());
+    }
+    Ok(Some(CliRangeSpec {
+        path,
+        start,
+        lines,
+        scope: Some(scope),
+    }))
 }
 
 fn cli_ranges(
@@ -5398,13 +5459,16 @@ fn cli_ranges(
     lines: usize,
 ) -> Result<Vec<CliRangeSpec>> {
     validate_cli_range_bounds(start, lines)?;
-    ranges.extend(
-        paths.into_iter().map(|path| {
-            CliRangeSpec::from_str(&path).unwrap_or(CliRangeSpec { path, start, lines })
-        }),
-    );
+    ranges.extend(paths.into_iter().map(|path| {
+        CliRangeSpec::from_str(&path).unwrap_or(CliRangeSpec {
+            path,
+            start,
+            lines,
+            scope: None,
+        })
+    }));
     if ranges.is_empty() {
-        bail!("provide at least one path or --range PATH:START:LINES");
+        bail!("provide at least one path or --range PATH:START:LINES[:SCOPE]");
     }
     for range in &ranges {
         validate_cli_range_spec(range)?;
@@ -5427,16 +5491,26 @@ fn cli_single_range(
 ) -> Result<CliRangeSpec> {
     validate_cli_range_bounds(start, lines)?;
     if let Some(path) = path {
-        let range = CliRangeSpec::from_str(&path).unwrap_or(CliRangeSpec { path, start, lines });
+        let range = CliRangeSpec::from_str(&path).unwrap_or(CliRangeSpec {
+            path,
+            start,
+            lines,
+            scope: None,
+        });
         validate_cli_range_spec(&range)?;
         return Ok(range);
     }
     if let Some(path) = path_arg {
-        let range = CliRangeSpec { path, start, lines };
+        let range = CliRangeSpec {
+            path,
+            start,
+            lines,
+            scope: None,
+        };
         validate_cli_range_spec(&range)?;
         return Ok(range);
     }
-    bail!("provide a path, PATH:START:LINES, or --path PATH")
+    bail!("provide a path, PATH:START:LINES[:SCOPE], or --path PATH")
 }
 
 fn cli_single_path(path: Option<String>, path_arg: Option<String>) -> Result<String> {
@@ -5864,6 +5938,20 @@ mod tests {
         assert_eq!(range.path, "src/auth:token.rs");
         assert_eq!(range.start, 12);
         assert_eq!(range.lines, 4);
+        assert_eq!(range.scope, None);
+    }
+
+    #[test]
+    fn cli_range_spec_accepts_optional_trailing_scope() {
+        let range = CliRangeSpec::from_str("src/auth:token.rs:12:4:symbol").unwrap();
+
+        assert_eq!(range.path, "src/auth:token.rs");
+        assert_eq!(range.start, 12);
+        assert_eq!(range.lines, 4);
+        assert_eq!(range.scope, Some(RangeScope::Symbol));
+
+        let exact = CliRangeSpec::from_str("src/auth.rs:12:4:exact").unwrap();
+        assert_eq!(exact.scope, Some(RangeScope::Exact));
     }
 
     #[test]

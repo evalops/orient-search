@@ -5316,7 +5316,13 @@ fn compact_range_arg(args: &serde_json::Map<String, serde_json::Value>) -> Optio
     let path = args.get("path")?.as_str()?;
     let start = args.get("start")?.as_u64()?;
     let lines = args.get("lines")?.as_u64()?;
-    Some(shell_quote(&format!("{path}:{start}:{lines}")))
+    let scope = args.get("scope").and_then(|value| value.as_str());
+    let range = if let Some(scope) = scope {
+        format!("{path}:{start}:{lines}:{scope}")
+    } else {
+        format!("{path}:{start}:{lines}")
+    };
+    Some(shell_quote(&range))
 }
 
 fn shell_quote(value: &str) -> String {
@@ -6336,6 +6342,27 @@ mod tests {
             request.cli.as_deref(),
             Some(
                 "orient read-index-ranges --index /tmp/orient.index src/lib.rs:1:80 'tests/auth test.rs:3:4'"
+            )
+        );
+    }
+
+    #[test]
+    fn batch_read_tool_request_cli_preserves_per_range_scope() {
+        let request = ResultToolRequest::new(
+            "read_ranges",
+            serde_json::json!({
+                "repo": "/tmp/my repo",
+                "ranges": [
+                    {"path": "src/lib.rs", "start": 1, "lines": 80},
+                    {"path": "src/auth.rs", "start": 26, "lines": 80, "scope": "symbol"}
+                ]
+            }),
+        );
+
+        assert_eq!(
+            request.cli.as_deref(),
+            Some(
+                "orient read-ranges --repo '/tmp/my repo' src/lib.rs:1:80 src/auth.rs:26:80:symbol"
             )
         );
     }
