@@ -63,6 +63,30 @@ const GENERATED_FILE_GLOBS: &[&str] = &[
     "*.pb.rs",
     "*.g.dart",
 ];
+const CODE_FILE_GLOBS: &[&str] = &[
+    "**/*.py",
+    "**/*.rs",
+    "**/*.js",
+    "**/*.jsx",
+    "**/*.ts",
+    "**/*.tsx",
+    "**/*.go",
+    "**/*.rb",
+    "**/*.java",
+    "**/*.kt",
+    "**/*.swift",
+];
+const PROSE_FILE_GLOBS: &[&str] = &["**/*.md", "**/*.toml", "**/*.json", "**/*.yaml", "**/*.yml"];
+const PROSE_FILE_NAME_GLOBS: &[&str] = &[
+    "**/README",
+    "**/Makefile",
+    "**/yarn.lock",
+    "**/bun.lock",
+    "**/bun.lockb",
+];
+const FD_CODE_FILE_PATTERN: &str = r"\.(py|rs|js|jsx|ts|tsx|go|rb|java|kt|swift)$";
+const FD_PROSE_FILE_PATTERN: &str =
+    r"^(README|Makefile|yarn\.lock|bun\.lock|bun\.lockb)$|\.(md|toml|json|ya?ml)$";
 static TOKEN_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[A-Za-z][A-Za-z0-9_]*").unwrap());
 static SYMBOL_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"\b(?:(?:pub|export|default|declare|async)\s+)*(fn|function|class|interface|struct|enum|trait|type|const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)").unwrap()
@@ -1093,15 +1117,26 @@ fn fd_positive_file_pattern(filters: &SearchFilters) -> Option<String> {
     if prefer_rg_files_for_positive_structural_scope(filters) {
         return None;
     }
-    let file = filters.file.as_deref()?.trim().replace('\\', "/");
-    if file.is_empty() || file.contains('/') || file.contains('*') || file.contains('?') {
-        return None;
+    if let Some(file) = filters.file.as_deref() {
+        let file = file.trim().replace('\\', "/");
+        if file.is_empty() || file.contains('/') || file.contains('*') || file.contains('?') {
+            return None;
+        }
+        return Some(regex::escape(&file));
     }
-    Some(regex::escape(&file))
+    code_fd_file_pattern(filters).map(ToString::to_string)
 }
 
 fn prefer_rg_files_for_positive_structural_scope(filters: &SearchFilters) -> bool {
     filters.test == Some(true) || filters.generated == Some(true)
+}
+
+fn code_fd_file_pattern(filters: &SearchFilters) -> Option<&'static str> {
+    match filters.code {
+        Some(true) => Some(FD_CODE_FILE_PATTERN),
+        Some(false) => Some(FD_PROSE_FILE_PATTERN),
+        None => None,
+    }
 }
 
 fn rg_positive_file_glob(filters: &SearchFilters) -> Option<String> {
@@ -1223,6 +1258,7 @@ fn add_scope_filter_ripgrep_globs(command: &mut Command, filters: &SearchFilters
     }
     add_test_filter_ripgrep_globs(command, filters.test);
     add_generated_filter_ripgrep_globs(command, filters);
+    add_code_filter_ripgrep_globs(command, filters);
 }
 
 fn add_generated_filter_fd_excludes(command: &mut Command, filters: &SearchFilters) {
@@ -1257,6 +1293,60 @@ fn generated_ripgrep_globs(filters: &SearchFilters) -> Vec<String> {
                 .map(|glob| format!("{prefix}**/{glob}")),
         )
         .collect()
+}
+
+fn add_code_filter_ripgrep_globs(command: &mut Command, filters: &SearchFilters) {
+    for glob in code_ripgrep_globs(filters) {
+        command.arg("--iglob").arg(glob);
+    }
+}
+
+fn code_ripgrep_globs(filters: &SearchFilters) -> Vec<String> {
+    let Some(code) = filters.code else {
+        return Vec::new();
+    };
+    let has_positive_scope = positive_ripgrep_scope_active(filters);
+    match (code, has_positive_scope) {
+        (true, false) => CODE_FILE_GLOBS
+            .iter()
+            .map(|glob| (*glob).to_string())
+            .collect(),
+        (true, true) => PROSE_FILE_GLOBS
+            .iter()
+            .chain(PROSE_FILE_NAME_GLOBS.iter())
+            .map(|glob| format!("!{glob}"))
+            .collect(),
+        (false, false) => PROSE_FILE_GLOBS
+            .iter()
+            .chain(PROSE_FILE_NAME_GLOBS.iter())
+            .map(|glob| (*glob).to_string())
+            .collect(),
+        (false, true) => CODE_FILE_GLOBS
+            .iter()
+            .map(|glob| format!("!{glob}"))
+            .collect(),
+    }
+}
+
+fn positive_ripgrep_scope_active(filters: &SearchFilters) -> bool {
+    filters
+        .file
+        .as_deref()
+        .is_some_and(|file| !file.trim().is_empty())
+        || filters
+            .path
+            .as_deref()
+            .is_some_and(|path| !path.trim().is_empty())
+        || filters
+            .extension
+            .as_deref()
+            .is_some_and(|extension| !extension.trim().is_empty())
+        || filters
+            .language
+            .as_deref()
+            .is_some_and(|language| !language.trim().is_empty())
+        || filters.test == Some(true)
+        || filters.generated == Some(true)
 }
 
 fn rg_negative_file_globs(filters: &SearchFilters) -> Vec<String> {
@@ -6057,6 +6147,44 @@ mod tests {
     }
 
     #[test]
+    fn code_filters_push_safe_ripgrep_globs() {
+        let code_only = code_ripgrep_globs(&SearchFilters {
+            code: Some(true),
+            ..SearchFilters::default()
+        });
+        assert!(code_only.contains(&"**/*.rs".to_string()));
+        assert!(code_only.contains(&"**/*.ts".to_string()));
+        assert!(code_only.iter().all(|glob| !glob.starts_with('!')));
+
+        let prose_only = code_ripgrep_globs(&SearchFilters {
+            code: Some(false),
+            ..SearchFilters::default()
+        });
+        assert!(prose_only.contains(&"**/*.md".to_string()));
+        assert!(prose_only.contains(&"**/README".to_string()));
+        assert!(prose_only.contains(&"**/bun.lockb".to_string()));
+        assert!(prose_only.iter().all(|glob| !glob.starts_with('!')));
+
+        let scoped_code = code_ripgrep_globs(&SearchFilters {
+            code: Some(true),
+            path: Some("src".to_string()),
+            ..SearchFilters::default()
+        });
+        assert!(scoped_code.contains(&"!**/*.md".to_string()));
+        assert!(scoped_code.contains(&"!**/README".to_string()));
+        assert!(scoped_code.iter().all(|glob| glob.starts_with('!')));
+
+        let scoped_prose = code_ripgrep_globs(&SearchFilters {
+            code: Some(false),
+            file: Some("auth".to_string()),
+            ..SearchFilters::default()
+        });
+        assert!(scoped_prose.contains(&"!**/*.rs".to_string()));
+        assert!(scoped_prose.contains(&"!**/*.tsx".to_string()));
+        assert!(scoped_prose.iter().all(|glob| glob.starts_with('!')));
+    }
+
+    #[test]
     fn generated_path_detection_covers_directory_and_suffix_patterns() {
         let generated_paths = [
             "src/generated/cache.rs",
@@ -6161,6 +6289,30 @@ mod tests {
         assert!(
             fd_positive_file_pattern(&SearchFilters {
                 file: Some("auth.rs".to_string()),
+                test: Some(true),
+                ..SearchFilters::default()
+            })
+            .is_none()
+        );
+        assert_eq!(
+            fd_positive_file_pattern(&SearchFilters {
+                code: Some(true),
+                ..SearchFilters::default()
+            })
+            .as_deref(),
+            Some(FD_CODE_FILE_PATTERN)
+        );
+        assert_eq!(
+            fd_positive_file_pattern(&SearchFilters {
+                code: Some(false),
+                ..SearchFilters::default()
+            })
+            .as_deref(),
+            Some(FD_PROSE_FILE_PATTERN)
+        );
+        assert!(
+            fd_positive_file_pattern(&SearchFilters {
+                code: Some(true),
                 test: Some(true),
                 ..SearchFilters::default()
             })
