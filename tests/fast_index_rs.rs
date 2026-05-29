@@ -1845,6 +1845,15 @@ fn filter_only_queries_discover_files_without_content_terms() {
         .search_filtered("-path:docs", 10, &SearchFilters::default())
         .unwrap();
     assert!(negative_only.is_empty());
+
+    let no_tests_repo = tempfile::tempdir().unwrap();
+    write(
+        &no_tests_repo.path().join("src/auth.rs"),
+        "pub fn issue_token() {}\n",
+    );
+    let no_tests_index = FastIndex::build(no_tests_repo.path()).unwrap();
+    assert!(!no_tests_index.query_may_match("file:*_test.rs", &SearchFilters::default()));
+    assert!(index.query_may_match("file:*_test.rs", &SearchFilters::default()));
 }
 
 #[test]
@@ -3545,6 +3554,7 @@ fn indexed_query_prefilter_skips_impossible_shards_without_false_negatives() {
         "kind:function issue token",
         "path:auth issue",
         "lang:rust issue",
+        "file:Cargo.toml",
         "essionman",
     ] {
         assert!(
@@ -3564,6 +3574,7 @@ fn indexed_query_prefilter_skips_impossible_shards_without_false_negatives() {
         "issue missing",
         "kind:enum issue token",
         "lang:typescript issue",
+        "file:*_test.rs",
         "definitely_absent_token",
     ] {
         assert!(

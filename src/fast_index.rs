@@ -1521,7 +1521,12 @@ impl FastIndex {
             return false;
         }
         if query_tokens.is_empty() && query_trigrams.is_empty() {
-            return filter_only_query(&filters);
+            return self.filter_only_query_may_match(
+                &filters,
+                &symbol_kind_postings,
+                &attribute_postings,
+                &path_filter_postings,
+            );
         }
         if query_tokens.len() > 1 && !filters.match_any {
             filters.require_all = true;
@@ -1650,6 +1655,32 @@ impl FastIndex {
             use_trigrams,
         );
         !indexed_filter_candidate_ids(&self.files, candidate_ids, &filters).is_empty()
+    }
+
+    fn filter_only_query_may_match(
+        &self,
+        filters: &SearchFilters,
+        symbol_kind_postings: &[(&String, &Vec<Posting>)],
+        attribute_postings: &AttributeFilterPostings<'_>,
+        path_filter_postings: &PathFilterTrigramPostings<'_>,
+    ) -> bool {
+        if !filter_only_query(filters) {
+            return false;
+        }
+        match filter_only_candidate_ids(
+            symbol_kind_postings,
+            attribute_postings,
+            path_filter_postings,
+            filters,
+        ) {
+            Some(candidate_ids) => {
+                !indexed_filter_candidate_ids(&self.files, candidate_ids, filters).is_empty()
+            }
+            None => self
+                .files
+                .iter()
+                .any(|file| indexed_file_matches_filters(file, filters)),
+        }
     }
 
     pub fn query_plan(&self, query: &str, filters: &SearchFilters) -> Result<QueryPlan> {
