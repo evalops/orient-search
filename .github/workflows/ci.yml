@@ -40,7 +40,7 @@ jobs:
         run: bazel build -c opt //:orient
 
       - name: Run Bazel-native tests
-        run: bazel test //...
+        run: bazel test --test_output=errors //...
 
       - name: Check formatting
         run: bazel run //:ci_fmt

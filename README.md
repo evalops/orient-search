@@ -92,4 +92,5 @@ More detail:
 - [Agent adoption](docs/agent-adoption.md)
 - [Agent protocol](docs/agent-protocol.md)
 - [Adoption eval](docs/adoption-eval.md)
+- [Deep improvement plan](docs/deep-improvement-plan.md)
 - [Fast search roadmap](docs/fast-search-roadmap.md)
