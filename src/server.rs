@@ -24,6 +24,7 @@ use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use anyhow::{Context, Result, anyhow};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
+use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
@@ -2792,8 +2793,8 @@ impl ToolRuntime {
             }
             "index_status" => {
                 let index_path = self.index_path_arg_or_single_cached(&request.arguments)?;
-                let index = self.cached_index(index_path)?;
-                Ok(serde_json::to_value(index.freshness()?)?)
+                let index = self.cached_index(index_path.clone())?;
+                Ok(serde_json::to_value(index.freshness_at(index_path)?)?)
             }
             "read_index_range" | "open_index_range" => {
                 let index_path = self.index_path_arg_or_single_cached(&request.arguments)?;
@@ -3888,11 +3889,13 @@ impl ToolRuntime {
                     .filter_map(|(path, entry)| {
                         entry.ready_index().map(|index| {
                             let stats = index.stats();
+                            let index_bytes = fs::metadata(path).map(|metadata| metadata.len()).ok();
                             json!({
                                 "index": path.to_string_lossy(),
                                 "root": stats.root.to_string_lossy(),
                                 "version": stats.version,
                                 "files": stats.files,
+                                "index_bytes": index_bytes,
                                 "source_bytes": stats.source_bytes,
                                 "terms": stats.terms,
                                 "path_terms": stats.path_terms,
@@ -4410,14 +4413,22 @@ impl ToolRuntime {
 }
 
 fn shard_manifest_detail(index_dir: &Path, manifest: &ShardManifest) -> Value {
+    let mut total_index_bytes = 0u64;
     let repos = manifest
         .shards
         .iter()
         .map(|shard| {
+            let index_bytes = fs::metadata(index_dir.join(&shard.index))
+                .map(|metadata| metadata.len())
+                .ok();
+            if let Some(index_bytes) = index_bytes {
+                total_index_bytes += index_bytes;
+            }
             json!({
                 "name": shard.name,
                 "root": shard.root,
                 "index": shard.index,
+                "index_bytes": index_bytes,
                 "aliases": shard
                     .aliases
                     .iter()
@@ -4430,6 +4441,7 @@ fn shard_manifest_detail(index_dir: &Path, manifest: &ShardManifest) -> Value {
     json!({
         "index_dir": index_dir.to_string_lossy().to_string(),
         "shards": manifest.shards.len(),
+        "index_bytes": total_index_bytes,
         "repos": repos
     })
 }

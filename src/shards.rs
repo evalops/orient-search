@@ -133,6 +133,7 @@ pub struct ShardFreshness {
     pub shard_count: usize,
     pub stale: bool,
     pub stale_shards: usize,
+    pub index_bytes: u64,
     pub source_bytes: u64,
     pub terms: usize,
     pub path_terms: usize,
@@ -341,6 +342,7 @@ pub fn shard_status(index_dir: impl AsRef<Path>) -> Result<ShardFreshness> {
     let mut changed_files = 0usize;
     let mut deleted_files = 0usize;
     let mut added_files = 0usize;
+    let mut index_bytes = 0u64;
     let mut source_bytes = 0u64;
     let mut terms = 0usize;
     let mut path_terms = 0usize;
@@ -357,6 +359,7 @@ pub fn shard_status(index_dir: impl AsRef<Path>) -> Result<ShardFreshness> {
         changed_files += status.changed_files;
         deleted_files += status.deleted_files;
         added_files += status.added_files;
+        index_bytes += status.index_bytes;
         source_bytes += status.source_bytes;
         terms += status.terms;
         path_terms += status.path_terms;
@@ -372,6 +375,7 @@ pub fn shard_status(index_dir: impl AsRef<Path>) -> Result<ShardFreshness> {
         shard_count: manifest.shards.len(),
         stale: stale_shards > 0,
         stale_shards,
+        index_bytes,
         source_bytes,
         terms,
         path_terms,
@@ -430,10 +434,11 @@ fn shard_status_job_batch(
 ) -> Result<Vec<(usize, ShardIndexFreshness)>> {
     let mut statuses = Vec::with_capacity(shards.len());
     for (index, shard) in shards.iter().enumerate() {
-        let loaded = FastIndex::load(index_dir.join(&shard.index))
-            .with_context(|| format!("load shard {}", shard.index))?;
+        let index_path = index_dir.join(&shard.index);
+        let loaded =
+            FastIndex::load(&index_path).with_context(|| format!("load shard {}", shard.index))?;
         let status = loaded
-            .freshness()
+            .freshness_at(&index_path)
             .with_context(|| format!("check shard freshness {}", shard.name))?;
         statuses.push((
             offset + index,

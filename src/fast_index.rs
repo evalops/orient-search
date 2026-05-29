@@ -170,6 +170,7 @@ pub struct IndexFreshness {
     pub root_exists: bool,
     pub stale: bool,
     pub indexed_files: usize,
+    pub index_bytes: u64,
     pub source_bytes: u64,
     pub terms: usize,
     pub path_terms: usize,
@@ -468,6 +469,17 @@ impl FastIndex {
     }
 
     pub fn freshness(&self) -> Result<IndexFreshness> {
+        self.freshness_with_index_bytes(0)
+    }
+
+    pub fn freshness_at(&self, index_path: impl AsRef<Path>) -> Result<IndexFreshness> {
+        let index_bytes = fs::metadata(index_path.as_ref())
+            .with_context(|| format!("stat index {}", index_path.as_ref().display()))?
+            .len();
+        self.freshness_with_index_bytes(index_bytes)
+    }
+
+    fn freshness_with_index_bytes(&self, index_bytes: u64) -> Result<IndexFreshness> {
         let stats = self.stats();
         if !self.root.exists() {
             let mut deleted_paths = self
@@ -482,6 +494,7 @@ impl FastIndex {
                 root_exists: false,
                 stale: !deleted_paths.is_empty(),
                 indexed_files: self.files.len(),
+                index_bytes,
                 source_bytes: stats.source_bytes,
                 terms: stats.terms,
                 path_terms: stats.path_terms,
@@ -557,6 +570,7 @@ impl FastIndex {
                 && deleted_paths.is_empty()
                 && added_paths.is_empty()),
             indexed_files: self.files.len(),
+            index_bytes,
             source_bytes: stats.source_bytes,
             terms: stats.terms,
             path_terms: stats.path_terms,

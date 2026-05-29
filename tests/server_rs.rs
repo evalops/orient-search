@@ -4015,6 +4015,7 @@ fn runtime_ensures_shards_builds_refreshes_and_warms() {
     assert_eq!(status["stale"], serde_json::json!(true));
     assert_eq!(status["shard_count"], serde_json::json!(2));
     assert_eq!(status["stale_shards"], serde_json::json!(1));
+    assert!(status["index_bytes"].as_u64().unwrap() > 0);
     assert!(status["source_bytes"].as_u64().unwrap() > 0);
     assert!(status["posting_entries"].as_u64().unwrap() > 0);
     assert!(status["compressed_posting_bytes"].as_u64().unwrap() > 0);
@@ -4399,6 +4400,7 @@ fn runtime_reports_index_status_for_cached_indexes() {
     assert!(clean.error.is_none(), "{:?}", clean.error);
     let clean_result = clean.result.as_ref().unwrap();
     assert_eq!(clean_result["stale"], serde_json::json!(false));
+    assert!(clean_result["index_bytes"].as_u64().unwrap() > 0);
     assert!(clean_result["source_bytes"].as_u64().unwrap() > 0);
     assert!(clean_result["posting_entries"].as_u64().unwrap() > 0);
     assert!(clean_result["compressed_posting_bytes"].as_u64().unwrap() > 0);
