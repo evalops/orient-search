@@ -3767,7 +3767,7 @@ impl ToolRuntime {
                 index.query_plan(query, &filters)?,
                 "search_code",
                 "repo",
-                &index.root,
+                &repo,
                 arguments,
             );
             (

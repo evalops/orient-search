@@ -442,6 +442,34 @@ fn cli_search_auto_selects_live_indexed_and_shard_surfaces() {
         .stdout(predicate::str::contains("\"tool\":\"search_query_plan\""))
         .stdout(predicate::str::contains("\"tool\":\"read_ranges\""));
 
+    let mut empty_live_default = Command::cargo_bin("orient").unwrap();
+    let empty_live_default = empty_live_default
+        .current_dir(repo.path())
+        .args([
+            "search-auto",
+            "--no-daemon",
+            "issue_token definitely_missing",
+        ])
+        .output()
+        .unwrap();
+    assert!(empty_live_default.status.success());
+    let value: serde_json::Value = serde_json::from_slice(&empty_live_default.stdout).unwrap();
+    assert_eq!(value["target"], serde_json::json!("."));
+    assert_eq!(
+        value["query_plan_result"]["retry_requests"][0]["arguments"]["repo"],
+        serde_json::json!(".")
+    );
+    assert_eq!(
+        value["primary_retry_request"]["arguments"]["repo"],
+        serde_json::json!(".")
+    );
+    assert!(
+        !value["query_plan_result"]["retry_requests"][0]["cli"]
+            .as_str()
+            .unwrap()
+            .contains(repo.path().to_str().unwrap())
+    );
+
     let mut indexed = Command::cargo_bin("orient").unwrap();
     indexed
         .args([

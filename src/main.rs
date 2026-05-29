@@ -3419,7 +3419,7 @@ fn run() -> Result<()> {
                         index.query_plan(&query, &filters)?,
                         "search_code",
                         "repo",
-                        &index.root,
+                        &repo,
                         &filters,
                     );
                     (
@@ -3694,7 +3694,7 @@ fn run() -> Result<()> {
                                 index.query_plan(&query, &filters)?,
                                 "search_code",
                                 "repo",
-                                &index.root,
+                                &repo,
                                 &filters,
                             );
                             (
