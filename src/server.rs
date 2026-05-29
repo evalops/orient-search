@@ -583,6 +583,7 @@ impl ToolRuntime {
         let cached_shard_manifest_details = self.cached_shard_manifest_details();
         let footprint =
             daemon_footprint_summary(&cached_index_details, &cached_shard_manifest_details);
+        let repair_requests = self.daemon_repair_requests();
         let default_requests = client_cwd.as_deref().map_or_else(
             || daemon_default_requests(&search_auto_default),
             daemon_default_cwd_requests,
@@ -599,6 +600,9 @@ impl ToolRuntime {
             "cached_shard_manifest_details": cached_shard_manifest_details,
             "footprint": footprint
         });
+        if !repair_requests.is_empty() {
+            status["repair_requests"] = Value::Array(repair_requests);
+        }
         if let Some(cwd) = client_cwd {
             status["client_scope"] = json!({
                 "cwd": cwd,
@@ -1105,7 +1109,7 @@ pub fn agent_guide(
         },
         "recommended_loop": [
             "Call tool_manifest or mcp_manifest once.",
-            "Call daemon_status when using a shared daemon; trust search_auto_default for no-target search_auto routing and default_requests for copyable first calls.",
+            "Call daemon_status when using a shared daemon; trust search_auto_default for no-target search_auto routing, run repair_requests when present, and use default_requests for copyable first calls.",
             "Use repo_map, indexed_repo_map, or shard_repo_map before editing unfamiliar code.",
             "Search first, then use read_request, related_request, or related_symbols_request from results.",
             "Call a query-plan tool when results are empty, noisy, or overly broad."
@@ -1263,7 +1267,7 @@ Keep cache paths local to the machine running the agents; do not copy private wo
 For many local repos, bootstrap it with `orient ensure-shards --discover-root /path/to/workspaces --output-dir {index_dir} --family-limit 2` and `orient serve-tcp --addr {addr} --index-dir {index_dir}`.\n\
 For one repo, bootstrap it with `orient ensure-index --repo {repo} --index {index}` and `orient serve-tcp --addr {addr} --index {index}`.\n\
 Start each session with `daemon_status` or `agent_guide`, then use `search_auto` for normal lookup and `search_auto_batch` for alternate query phrasings.\n\
-Trust `daemon_status.search_auto_default` to see whether no-target `search_auto` will use a registered shard directory, warmed index, or the daemon current directory; use `daemon_status.default_requests` for copyable first repo-map/search/query-plan calls.\n\
+Trust `daemon_status.search_auto_default` to see whether no-target `search_auto` will use a registered shard directory, warmed index, or the daemon current directory; run any `daemon_status.repair_requests`, then use `daemon_status.default_requests` for copyable first repo-map/search/query-plan calls.\n\
 When calling `search`, `search_batch`, `search_auto`, `search_auto_batch`, `repo_map`, `search_plan`, `find_symbol`, `read_range`, `read_ranges`, `related_files`, or `related_symbols` through JSON-lines/MCP without an explicit target, pass `cwd` so shared shard daemons scope results to the current git checkout.\n\
 Use query filters directly: `file:`, `path:`, `lang:`, `ext:`, `symbol:`, `type:`, `repo:`, `test:`, `generated:`, `code:`, `is:code`, `is:docs`, quoted literals, and negative filters like `-path:vendor` or `-is:generated`.\n\
 Generated paths, including hashed JavaScript bundles, are demoted by default; use `generated:true` or `is:generated` when intentionally inspecting generated output.\n\
@@ -4904,6 +4908,13 @@ impl ToolRuntime {
                 "target": index_dir.to_string_lossy()
             });
         }
+        if let Some(index_dir) = self.single_unregistered_warmed_shard_dir() {
+            return json!({
+                "surface": "shards",
+                "source": "single_warmed_shard_dir",
+                "target": index_dir.to_string_lossy()
+            });
+        }
         if let Ok(index) = self.single_cached_index_path() {
             return json!({
                 "surface": "indexed",
@@ -4924,6 +4935,67 @@ impl ToolRuntime {
                 "error": error.to_string()
             }),
         }
+    }
+
+    fn single_unregistered_warmed_shard_dir(&self) -> Option<PathBuf> {
+        let dirs = self.unregistered_warmed_shard_dirs();
+        match dirs.as_slice() {
+            [(index_dir, _)] => Some(index_dir.clone()),
+            _ => None,
+        }
+    }
+
+    fn unregistered_warmed_shard_dirs(&self) -> Vec<(PathBuf, PathBuf)> {
+        let registered_dirs = self
+            .shard_manifests
+            .lock()
+            .map(|manifests| manifests.keys().cloned().collect::<HashSet<_>>())
+            .unwrap_or_default();
+        let mut warmed_index_paths = self
+            .indexes
+            .lock()
+            .map(|indexes| {
+                indexes
+                    .iter()
+                    .filter_map(|(path, entry)| entry.is_ready().then(|| path.clone()))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        warmed_index_paths.sort();
+
+        let mut seen_dirs = HashSet::default();
+        let mut dirs = Vec::new();
+        for index_path in warmed_index_paths {
+            let Some(parent) = index_path.parent() else {
+                continue;
+            };
+            let index_dir = canonical_cache_key(parent);
+            if registered_dirs.contains(&index_dir) || !seen_dirs.insert(index_dir.clone()) {
+                continue;
+            }
+            if index_dir.join("manifest.json").is_file() {
+                dirs.push((index_dir, index_path));
+            }
+        }
+        dirs
+    }
+
+    fn daemon_repair_requests(&self) -> Vec<Value> {
+        let mut requests = Vec::new();
+        for (index_dir, index_path) in self.unregistered_warmed_shard_dirs() {
+            requests.push(json!({
+                "kind": "register_warmed_shard_dir",
+                "summary": "A warmed index belongs to a shard directory whose manifest is not registered; run this request so no-target search_auto uses shard routing instead of a single warmed index.",
+                "index_dir": index_dir.to_string_lossy(),
+                "warmed_index": index_path.to_string_lossy(),
+                "request": daemon_default_request(
+                    "register-shards",
+                    "register_shards",
+                    json!({ "index_dir": index_dir })
+                )
+            }));
+        }
+        requests
     }
 
     fn search_auto(
@@ -4973,6 +5045,25 @@ impl ToolRuntime {
         }
         let scoped_arguments = arguments_scoped_to_client_cwd_for_query(arguments, query)?;
         if let Ok(index_dir) = self.single_cached_shard_manifest_path() {
+            if self.search_auto_shards_match_client_scope(
+                &index_dir,
+                arguments,
+                &scoped_arguments,
+                query,
+            )? {
+                return self.search_auto_shards(
+                    index_dir,
+                    &scoped_arguments,
+                    query,
+                    limit,
+                    context_lines,
+                    refresh_if_stale,
+                    diagnose,
+                    retry_if_empty,
+                );
+            }
+        }
+        if let Some(index_dir) = self.single_unregistered_warmed_shard_dir() {
             if self.search_auto_shards_match_client_scope(
                 &index_dir,
                 arguments,
@@ -5053,8 +5144,14 @@ impl ToolRuntime {
         {
             return Ok(None);
         }
-        let Ok(index_dir) = self.single_cached_shard_manifest_path() else {
-            return Ok(None);
+        let index_dir = match self.single_cached_shard_manifest_path() {
+            Ok(index_dir) => index_dir,
+            Err(_) => {
+                let Some(index_dir) = self.single_unregistered_warmed_shard_dir() else {
+                    return Ok(None);
+                };
+                index_dir
+            }
         };
         let filters = search_filters(arguments, true)?;
         self.refresh_shards_for_query_batch_if_stale(&index_dir, arguments, &filters, queries)?;

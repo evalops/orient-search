@@ -5172,6 +5172,97 @@ fn runtime_warms_index_by_tool_request() {
 }
 
 #[test]
+fn daemon_status_suggests_registering_warmed_shard_indexes() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/auth.rs"),
+        "pub struct SessionManager;\npub fn issue_token() {}\n",
+    );
+    write(
+        &repo.path().join("Cargo.toml"),
+        "[package]\nname='auth'\nversion='0.1.0'\nedition='2024'\n",
+    );
+    let shard_dir = tempfile::tempdir().unwrap();
+    build_shards(&[repo.path().to_path_buf()], shard_dir.path()).unwrap();
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(shard_dir.path().join("manifest.json")).unwrap()).unwrap();
+    let shard_index = shard_dir
+        .path()
+        .join(manifest["shards"][0]["index"].as_str().unwrap());
+
+    let runtime = ToolRuntime::default();
+    let warm = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("warm"),
+        tool: "warm_index".to_string(),
+        arguments: serde_json::json!({
+            "index": shard_index
+        }),
+    });
+    assert!(warm.error.is_none(), "{:?}", warm.error);
+
+    let status = runtime.daemon_status();
+    assert_eq!(
+        status["search_auto_default"]["surface"],
+        serde_json::json!("shards")
+    );
+    assert_eq!(
+        status["search_auto_default"]["source"],
+        serde_json::json!("single_warmed_shard_dir")
+    );
+    assert_eq!(status["cached_shard_manifests"], serde_json::json!(0));
+    assert_eq!(
+        status["repair_requests"][0]["kind"],
+        serde_json::json!("register_warmed_shard_dir")
+    );
+    assert_eq!(
+        status["repair_requests"][0]["request"]["tool"],
+        serde_json::json!("register_shards")
+    );
+    assert_eq!(
+        status["repair_requests"][0]["request"]["arguments"]["index_dir"],
+        serde_json::json!(shard_dir.path().canonicalize().unwrap())
+    );
+    assert!(
+        status["repair_requests"][0]["request"]["client_cli"]
+            .as_str()
+            .unwrap()
+            .contains("orient client-jsonl")
+    );
+
+    let search = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("search"),
+        tool: "search_auto".to_string(),
+        arguments: serde_json::json!({
+            "query": "issue token",
+            "limit": 3,
+            "require_all": true
+        }),
+    });
+    assert!(search.error.is_none(), "{:?}", search.error);
+    let search_result = search.result.unwrap();
+    assert_eq!(search_result["surface"], serde_json::json!("shards"));
+    assert!(
+        serde_json::to_string(&search_result)
+            .unwrap()
+            .contains("src/auth.rs")
+    );
+
+    let request = &status["repair_requests"][0]["request"];
+    let repair = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("repair"),
+        tool: request["tool"].as_str().unwrap().to_string(),
+        arguments: request["arguments"].clone(),
+    });
+    assert!(repair.error.is_none(), "{:?}", repair.error);
+    let repaired_status = runtime.daemon_status();
+    assert_eq!(
+        repaired_status["search_auto_default"]["surface"],
+        serde_json::json!("shards")
+    );
+    assert!(repaired_status.get("repair_requests").is_none());
+}
+
+#[test]
 fn runtime_reuses_cached_index_after_initial_load() {
     let repo = tempfile::tempdir().unwrap();
     write(

@@ -66,6 +66,8 @@ for registered-target details, `search_auto_default`, and copyable
 When protocol clients pass `cwd` to `daemon_status`, those `default_requests`
 include the same `cwd` and use target-aware no-target tools so a shared daemon
 scopes map, search, batch, and query-plan requests to the active checkout.
+If `repair_requests` is present, run the provided request first; for example,
+it can register a shard manifest when only one shard index was warmed.
 
 When exactly one index is warmed or one shard directory is registered, indexed and shard tools
 marked with `daemon_default.source` may omit `index` or `index_dir`; otherwise
