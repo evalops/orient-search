@@ -4,6 +4,10 @@ Run one shared Orient daemon for the repos agents are actively editing. Local
 agents share repo maps, indexes, query plans, and bounded reads without each one
 rescanning the same files. The daemon stays local and does not collect telemetry.
 
+In this doc, "shared" means shared by local clients on the same machine. Orient
+does not store agent conversations, transcripts, task outcomes, or usage
+analytics.
+
 ## Start
 
 For several repos, build or refresh a shard directory and serve it locally:
@@ -103,6 +107,10 @@ Shard directories contain source snapshots and line tables so reads can be
 served without reopening every file. Treat them like local build artifacts:
 place them in a cache directory, do not commit them, and do not copy them to
 shared storage unless the indexed source is allowed there too.
+
+The daemon cache contains code-search artifacts only: opened index files,
+derived postings, repo metadata, and freshness state. It is not a memory layer
+for agent sessions.
 
 Public docs and examples should use placeholders such as `/path/to/repo` and
 `/path/to/workspaces`. Keep machine-specific paths, user names, and private

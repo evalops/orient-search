@@ -39,6 +39,10 @@ orient daemon-status --format json
 `daemon-status` reports registered shard directories and warmed indexes. Add
 `--format json` for copyable first requests and target details.
 
+The daemon shares local search state only: indexes, shard manifests, repo maps,
+and cached file metadata. It does not ingest agent transcripts, session logs, or
+interaction analytics.
+
 ## Search
 
 ```bash
@@ -104,7 +108,8 @@ definition instead of opening an exact line window.
 
 Orient stores source snapshots and line offsets in persisted indexes so bounded
 reads stay fast even when served by a shared daemon. Keep indexes in a local
-cache and out of source control. Orient does not collect telemetry.
+cache and out of source control. Orient does not collect telemetry or agent
+session data.
 
 Use:
 

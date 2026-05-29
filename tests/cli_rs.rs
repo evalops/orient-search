@@ -110,6 +110,17 @@ fn cli_outputs_tool_manifest() {
 }
 
 #[test]
+fn cli_help_stays_focused_on_local_code_search() {
+    let mut cmd = Command::cargo_bin("orient").unwrap();
+    cmd.arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("eval-adoption").not())
+        .stdout(predicate::str::contains("transcript").not())
+        .stdout(predicate::str::contains("analytics").not());
+}
+
+#[test]
 fn cli_search_line_filter_anchors_file_results() {
     let repo = sample_repo();
 
@@ -267,85 +278,6 @@ fn cli_doctor_strict_fails_on_unreadable_index() {
         .failure()
         .stdout(predicate::str::contains("\"ok\":false"))
         .stderr(predicate::str::contains("doctor found unhealthy checks"));
-}
-
-#[test]
-fn cli_scores_adoption_eval_transcripts() {
-    let temp = tempfile::tempdir().unwrap();
-    let tasks = temp.path().join("tasks.jsonl");
-    let baseline_dir = temp.path().join("baseline");
-    let orient_dir = temp.path().join("orient");
-    let baseline = baseline_dir.join("auth-token-refresh.jsonl");
-    let orient = orient_dir.join("auth-token-refresh.jsonl");
-    write(
-        &tasks,
-        r#"{"id":"auth-token-refresh","relevant_files":["src/auth/session.rs","tests/session_refresh.rs"]}
-"#,
-    );
-    write(
-        &baseline,
-        r#"{"ts":"2026-05-28T10:00:00Z","kind":"tool_call","tool":"shell","command":"rg \"token refresh\""}
-{"ts":"2026-05-28T10:00:01Z","kind":"file_open","path":"src/auth/cache.rs"}
-{"ts":"2026-05-28T10:00:02Z","kind":"tool_call","tool":"shell","command":"find . -name '*session*'"}
-{"ts":"2026-05-28T10:00:05Z","kind":"file_open","path":"src/auth/session.rs"}
-{"ts":"2026-05-28T10:00:10Z","kind":"edit","path":"src/auth/session.rs"}
-{"ts":"2026-05-28T10:01:00Z","kind":"success","passed":true}
-"#,
-    );
-    write(
-        &orient,
-        r#"{"task_id":"auth-token-refresh","ts":"2026-05-28T10:00:00Z","kind":"tool_call","tool":"orient","command":"orient search-auto \"token refresh\""}
-{"task_id":"auth-token-refresh","ts":"2026-05-28T10:00:01Z","kind":"file_open","path":"src/auth/session.rs"}
-{"task_id":"auth-token-refresh","ts":"2026-05-28T10:00:04Z","kind":"edit","path":"src/auth/session.rs"}
-{"task_id":"auth-token-refresh","ts":"2026-05-28T10:00:30Z","kind":"success","passed":true}
-"#,
-    );
-
-    let mut cmd = Command::cargo_bin("orient").unwrap();
-    cmd.args([
-        "eval-adoption",
-        "--tasks",
-        tasks.to_str().unwrap(),
-        "--baseline-transcript",
-        baseline_dir.to_str().unwrap(),
-        "--orient-transcript",
-        orient_dir.to_str().unwrap(),
-        "--format",
-        "json",
-    ])
-    .assert()
-    .success()
-    .stdout(predicate::str::contains("\"compared_tasks\":1"))
-    .stdout(predicate::str::contains(
-        "\"median_local_search_commands\":2.0",
-    ))
-    .stdout(predicate::str::contains("\"median_orient_requests\":1.0"))
-    .stdout(predicate::str::contains(
-        "\"local_search_commands_median_delta\":-2.0",
-    ))
-    .stdout(predicate::str::contains(
-        "\"time_to_first_relevant_file_median_delta_s\":-4.0",
-    ))
-    .stdout(predicate::str::contains(
-        "\"wrong_file_opens_before_relevant\":1",
-    ));
-
-    let mut text = Command::cargo_bin("orient").unwrap();
-    text.args([
-        "eval-adoption",
-        "--tasks",
-        tasks.to_str().unwrap(),
-        "--baseline-transcript",
-        baseline_dir.to_str().unwrap(),
-        "--orient-transcript",
-        orient_dir.to_str().unwrap(),
-    ])
-    .assert()
-    .success()
-    .stdout(predicate::str::contains(
-        "Adoption eval: 1 tasks, 1 compared",
-    ))
-    .stdout(predicate::str::contains("delta:"));
 }
 
 #[test]
