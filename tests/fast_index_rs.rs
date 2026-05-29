@@ -860,8 +860,11 @@ fn indexed_query_plan_reports_missing_terms_without_results() {
     let kind_typo_plan = index
         .query_plan("kind:functoin", &SearchFilters::default())
         .unwrap();
-    assert_eq!(kind_typo_plan.strategy, "filter_scan");
+    assert_eq!(kind_typo_plan.strategy, "symbol_kind_filter_postings");
     assert_eq!(kind_typo_plan.candidate_count, 0);
+    assert_eq!(kind_typo_plan.filtered_candidate_count, 0);
+    assert_eq!(kind_typo_plan.scored_candidate_count, 0);
+    assert_eq!(kind_typo_plan.final_match_count, 0);
     assert_eq!(
         kind_typo_plan.repair_hints[0].kind,
         "replace_symbol_kind_filter"
@@ -877,6 +880,18 @@ fn indexed_query_plan_reports_missing_terms_without_results() {
         "{:?}",
         kind_typo_plan.repair_hints
     );
+
+    let kind_typo_search = index
+        .search_filtered(
+            "kind:functoin",
+            10,
+            &SearchFilters {
+                explain: true,
+                ..SearchFilters::default()
+            },
+        )
+        .unwrap();
+    assert!(kind_typo_search.is_empty());
 
     let bad_file_plan = index
         .query_plan("file:not_real.rs lang:rust", &SearchFilters::default())

@@ -1420,7 +1420,7 @@ impl FastIndex {
             planned_symbol_query_name(&parsed.terms, &filters, parsed.explicit_content_terms);
         if query_tokens.is_empty() && query_trigrams.is_empty() {
             if filter_only_query(&filters) {
-                let candidate_ids = filter_only_candidate_ids(&symbol_kind_postings);
+                let candidate_ids = filter_only_candidate_ids(&symbol_kind_postings, &filters);
                 let final_match_count = match &candidate_ids {
                     Some(candidate_ids) => candidate_ids
                         .iter()
@@ -1438,11 +1438,7 @@ impl FastIndex {
                     .map(Vec::len)
                     .unwrap_or(final_match_count);
                 return Ok(QueryPlan {
-                    strategy: if symbol_kind_postings.is_empty() {
-                        "filter_scan".to_string()
-                    } else {
-                        "symbol_kind_filter_postings".to_string()
-                    },
+                    strategy: filter_only_strategy(&filters).to_string(),
                     require_all: filters.require_all,
                     query_tokens,
                     query_phrases,
@@ -1676,7 +1672,7 @@ impl FastIndex {
         filters: &SearchFilters,
         symbol_kind_postings: &[(&String, &Vec<Posting>)],
     ) -> Vec<SearchResult> {
-        let candidate_ids = filter_only_candidate_ids(symbol_kind_postings);
+        let candidate_ids = filter_only_candidate_ids(symbol_kind_postings, filters);
         let mut results = match &candidate_ids {
             Some(candidate_ids) => candidate_ids
                 .iter()
@@ -1696,11 +1692,7 @@ impl FastIndex {
                 .map(Vec::len)
                 .unwrap_or(final_match_count);
             let query_plan = QueryPlan {
-                strategy: if symbol_kind_postings.is_empty() {
-                    "filter_scan".to_string()
-                } else {
-                    "symbol_kind_filter_postings".to_string()
-                },
+                strategy: filter_only_strategy(filters).to_string(),
                 require_all: filters.require_all,
                 query_tokens: Vec::new(),
                 query_phrases: Vec::new(),
@@ -3262,7 +3254,11 @@ fn symbol_kind_postings_for_filters<'a>(
 
 fn filter_only_candidate_ids(
     symbol_kind_postings: &[(&String, &Vec<Posting>)],
+    filters: &SearchFilters,
 ) -> Option<Vec<u32>> {
+    if filters.symbol_kind.is_some() && symbol_kind_postings.is_empty() {
+        return Some(Vec::new());
+    }
     if symbol_kind_postings.is_empty() {
         return None;
     }
@@ -3273,6 +3269,14 @@ fn filter_only_candidate_ids(
             .collect::<Vec<_>>(),
         true,
     ))
+}
+
+fn filter_only_strategy(filters: &SearchFilters) -> &'static str {
+    if filters.symbol_kind.is_some() {
+        "symbol_kind_filter_postings"
+    } else {
+        "filter_scan"
+    }
 }
 
 fn has_unsatisfied_missing_terms(missing_terms: &[String], filters: &SearchFilters) -> bool {
