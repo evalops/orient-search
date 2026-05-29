@@ -3413,6 +3413,10 @@ fn runtime_batches_searches_and_query_plans_against_repo_index_and_shards() {
     let live_plan_result = live_plan.result.as_ref().unwrap();
     assert_eq!(live_plan_result["retry_requests"][0]["tool"], "search");
     assert_eq!(
+        live_plan_result["primary_retry_request"],
+        live_plan_result["retry_requests"][0]
+    );
+    assert_eq!(
         live_plan_result["retry_requests"][0]["arguments"]["query"],
         "session manager"
     );

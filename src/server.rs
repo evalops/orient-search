@@ -2238,6 +2238,7 @@ fn attach_retry_requests<T: Serialize>(
         target_value,
         source_arguments,
     );
+    plan.primary_retry_request = plan.retry_requests.first().cloned();
     plan
 }
 
@@ -2263,7 +2264,9 @@ fn attach_result_query_plan_retry_requests<T: Serialize>(
 }
 
 fn primary_retry_request_from_plan(plan: &QueryPlan) -> Option<ResultToolRequest> {
-    plan.retry_requests.first().cloned()
+    plan.primary_retry_request
+        .clone()
+        .or_else(|| plan.retry_requests.first().cloned())
 }
 
 fn primary_diagnosis_from_plan(plan: &QueryPlan) -> Option<Value> {

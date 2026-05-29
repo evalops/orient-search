@@ -1285,6 +1285,7 @@ pub(crate) fn shard_selection_miss_plan(
                 suggested_query: (!query.trim().is_empty()).then(|| query.to_string()),
             }],
             retry_requests: Vec::new(),
+            primary_retry_request: None,
         }
         .with_diagnosis(),
     }

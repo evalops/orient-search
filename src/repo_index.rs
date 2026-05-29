@@ -322,6 +322,8 @@ pub struct QueryPlan {
     pub repair_hints: Vec<QueryPlanRepairHint>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub retry_requests: Vec<ResultToolRequest>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub primary_retry_request: Option<ResultToolRequest>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

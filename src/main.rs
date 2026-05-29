@@ -1457,6 +1457,7 @@ fn attach_cli_retry_requests<T: Serialize>(
 ) -> QueryPlan {
     plan.retry_requests =
         cli_retry_requests(&plan, search_tool, target_name, target_value, filters);
+    plan.primary_retry_request = plan.retry_requests.first().cloned();
     plan
 }
 
@@ -1783,9 +1784,9 @@ fn attach_cli_shard_retry_requests_with_tool(
 }
 
 fn primary_cli_retry_request_from_plan(plan: &QueryPlan) -> Option<Value> {
-    plan.retry_requests
-        .first()
-        .cloned()
+    plan.primary_retry_request
+        .clone()
+        .or_else(|| plan.retry_requests.first().cloned())
         .and_then(|request| serde_json::to_value(request).ok())
 }
 
