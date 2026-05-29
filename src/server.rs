@@ -12,7 +12,8 @@ use crate::repo_index::{
     attach_result_related_symbol_requests, finalize_results_for_filters, normalize_language_filter,
     normalize_token, query_plan_filter_field_present, read_file_range, read_file_range_scoped,
     related_file_lookup_results, related_symbol_lookup_results, result_read_batch_request,
-    search_repo_fast_filtered, symbol_lookup_read_batch_request, symbol_lookup_results,
+    result_value_read_batch_request, search_repo_fast_filtered, symbol_lookup_read_batch_request,
+    symbol_lookup_results,
 };
 use crate::shards::{
     ShardEntry, ShardFreshness, ShardManifest, ShardQueryPlan, ShardRepoMap, ShardSearchScope,
@@ -2261,10 +2262,48 @@ fn primary_diagnosis_from_shard_plans(plans: &[ShardQueryPlan]) -> Option<Value>
 }
 
 fn primary_retry_result_value(request: &ResultToolRequest, result: Value) -> Result<Value> {
-    Ok(json!({
+    let read_batch_request = primary_retry_read_batch_request(request, &result);
+    let mut value = json!({
         "request": request,
         "results": result
-    }))
+    });
+    if let Some(read_batch_request) = read_batch_request {
+        value["read_batch_request"] = serde_json::to_value(read_batch_request)?;
+    }
+    Ok(value)
+}
+
+fn primary_retry_read_batch_request(
+    request: &ResultToolRequest,
+    result: &Value,
+) -> Option<ResultToolRequest> {
+    let base_arguments = retry_read_base_arguments(request)?;
+    result_value_read_batch_request(result, retry_read_tool(request), base_arguments)
+}
+
+fn retry_read_tool(request: &ResultToolRequest) -> &'static str {
+    let is_shard_search = request.tool == "search_shards"
+        || request
+            .arguments
+            .as_object()
+            .is_some_and(|arguments| arguments.contains_key("index_dir"));
+    if is_shard_search {
+        "read_shard_ranges"
+    } else {
+        "read_ranges"
+    }
+}
+
+fn retry_read_base_arguments(request: &ResultToolRequest) -> Option<Map<String, Value>> {
+    let source = request.arguments.as_object()?;
+    let mut arguments = Map::new();
+    for name in ["repo", "index", "index_dir"] {
+        if let Some(value) = source.get(name) {
+            arguments.insert(name.to_string(), value.clone());
+            return Some(arguments);
+        }
+    }
+    None
 }
 
 fn arguments_scoped_to_client_cwd(arguments: &Value) -> Result<Value> {

@@ -485,7 +485,7 @@ fn cli_search_auto_selects_live_indexed_and_shard_surfaces() {
         .stdout(predicate::str::contains("\"tool\":\"search_code\""));
 
     let mut auto_retry_live = Command::cargo_bin("orient").unwrap();
-    auto_retry_live
+    let auto_retry_live = auto_retry_live
         .args([
             "search-auto",
             "--repo",
@@ -493,11 +493,23 @@ fn cli_search_auto_selects_live_indexed_and_shard_surfaces() {
             "--retry-if-empty",
             "issue_token definitely_missing",
         ])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("\"primary_retry_result\""))
-        .stdout(predicate::str::contains("\"request\""))
-        .stdout(predicate::str::contains("src/auth.rs"));
+        .output()
+        .unwrap();
+    assert!(auto_retry_live.status.success());
+    let auto_retry_live: serde_json::Value =
+        serde_json::from_slice(&auto_retry_live.stdout).unwrap();
+    assert_eq!(
+        auto_retry_live["primary_retry_result"]["read_batch_request"]["tool"],
+        serde_json::json!("read_ranges")
+    );
+    assert_eq!(
+        auto_retry_live["primary_retry_result"]["read_batch_request"]["arguments"]["repo"],
+        serde_json::json!(repo.path())
+    );
+    assert_eq!(
+        auto_retry_live["primary_retry_result"]["read_batch_request"]["arguments"]["ranges"][0]["path"],
+        serde_json::json!("src/auth.rs")
+    );
 
     let mut diagnosed_live = Command::cargo_bin("orient").unwrap();
     diagnosed_live

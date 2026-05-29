@@ -1712,6 +1712,18 @@ fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
             .unwrap()
             .contains("src/auth.rs")
     );
+    assert_eq!(
+        auto_retry["primary_retry_result"]["read_batch_request"]["tool"],
+        serde_json::json!("read_ranges")
+    );
+    assert_eq!(
+        auto_retry["primary_retry_result"]["read_batch_request"]["arguments"]["repo"],
+        serde_json::json!(repo.path())
+    );
+    assert_eq!(
+        auto_retry["primary_retry_result"]["read_batch_request"]["arguments"]["ranges"][0]["path"],
+        serde_json::json!("src/auth.rs")
+    );
 
     let git_scope_miss = runtime.dispatch(ToolRequest {
         id: serde_json::json!("git-scope-miss"),
@@ -1857,6 +1869,19 @@ fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
         serde_json::to_string(&auto_retry_indexed["primary_retry_result"]["results"])
             .unwrap()
             .contains("src/auth.rs")
+    );
+    assert_eq!(
+        auto_retry_indexed["primary_retry_result"]["read_batch_request"]["tool"],
+        serde_json::json!("read_ranges")
+    );
+    assert_eq!(
+        auto_retry_indexed["primary_retry_result"]["read_batch_request"]["arguments"]["index"],
+        serde_json::json!(index_path.canonicalize().unwrap())
+    );
+    assert_eq!(
+        auto_retry_indexed["primary_retry_result"]["read_batch_request"]["arguments"]["ranges"][0]
+            ["path"],
+        serde_json::json!("src/auth.rs")
     );
 
     let kind_typo = runtime.dispatch(ToolRequest {

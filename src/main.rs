@@ -15,7 +15,8 @@ use orient::repo_index::{
     attach_result_related_symbol_requests, normalize_language_filter,
     query_plan_filter_field_present, read_file_range, read_file_range_scoped,
     related_file_lookup_results, related_symbol_lookup_results, result_read_batch_request,
-    search_repo_fast_filtered, symbol_lookup_read_batch_request, symbol_lookup_results,
+    result_value_read_batch_request, search_repo_fast_filtered, symbol_lookup_read_batch_request,
+    symbol_lookup_results,
 };
 use orient::server::{
     DEFAULT_MAX_CACHED_INDEXES, MAX_BATCH_QUERIES, MAX_BATCH_RANGES, ToolRequest, ToolRuntime,
@@ -1832,10 +1833,37 @@ fn primary_cli_retry_result(
     if let Some(error) = response.error {
         bail!("primary retry request failed: {error}");
     }
-    Ok(Some(serde_json::json!({
+    let result = response.result.unwrap_or(Value::Null);
+    let read_batch_request = primary_cli_retry_read_batch_request(request, tool, &result);
+    let mut value = serde_json::json!({
         "request": request,
-        "results": response.result.unwrap_or(Value::Null)
-    })))
+        "results": result
+    });
+    if let Some(read_batch_request) = read_batch_request {
+        value["read_batch_request"] = serde_json::to_value(read_batch_request)?;
+    }
+    Ok(Some(value))
+}
+
+fn primary_cli_retry_read_batch_request(
+    request: &Value,
+    search_tool: &str,
+    result: &Value,
+) -> Option<ResultToolRequest> {
+    let source = request.get("arguments")?.as_object()?;
+    let mut arguments = serde_json::Map::new();
+    for name in ["repo", "index", "index_dir"] {
+        if let Some(value) = source.get(name) {
+            arguments.insert(name.to_string(), value.clone());
+            let read_tool = if search_tool == "search_shards" || name == "index_dir" {
+                "read_shard_ranges"
+            } else {
+                "read_ranges"
+            };
+            return result_value_read_batch_request(result, read_tool, arguments);
+        }
+    }
+    None
 }
 
 fn insert_optional_json_field(object: &mut Value, name: &str, value: Option<Value>) {

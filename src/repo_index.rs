@@ -5617,6 +5617,20 @@ pub fn result_read_batch_request(
     read_batch_request_from_ranges(ranges, tool, base_arguments)
 }
 
+pub fn result_value_read_batch_request(
+    result: &serde_json::Value,
+    tool: &str,
+    base_arguments: serde_json::Map<String, serde_json::Value>,
+) -> Option<ResultToolRequest> {
+    let ranges = result
+        .as_array()?
+        .iter()
+        .filter_map(|item| item.get("read_range"))
+        .filter_map(|value| serde_json::from_value::<ResultReadRange>(value.clone()).ok())
+        .collect::<Vec<_>>();
+    read_batch_request_from_ranges(ranges, tool, base_arguments)
+}
+
 pub fn attach_result_related_requests(
     results: &mut [SearchResult],
     tool: &str,
