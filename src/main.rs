@@ -5798,6 +5798,20 @@ mod tests {
         assert_eq!(hash.start, 12);
         assert_eq!(hash.lines, 4);
 
+        let markdown =
+            CliRangeSpec::from_str("[src/auth.rs#L12-L15](src/auth.rs#L12-L15)").unwrap();
+        assert_eq!(markdown.path, "src/auth.rs");
+        assert_eq!(markdown.start, 12);
+        assert_eq!(markdown.lines, 4);
+
+        let hosted = CliRangeSpec::from_str(
+            "https://github.com/evalops/orient-search/blob/main/src/auth.rs#L12-L15",
+        )
+        .unwrap();
+        assert_eq!(hosted.path, "src/auth.rs");
+        assert_eq!(hosted.start, 12);
+        assert_eq!(hosted.lines, 4);
+
         let wrapped =
             CliRangeSpec::from_str("at Object.handle (src/auth.rs#L12-L15):symbol").unwrap();
         assert_eq!(wrapped.path, "src/auth.rs");

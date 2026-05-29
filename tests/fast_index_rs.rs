@@ -2300,6 +2300,27 @@ fn bare_path_like_queries_use_filter_only_fast_paths() {
         search_repo_fast_filtered(repo.path(), "src/lib.rs#L40-L45", 10, &filters).unwrap();
     assert_eq!(result_paths(&hash_location_fallback), vec!["src/lib.rs"]);
     assert_eq!(hash_location_fallback[0].match_lines, vec![40]);
+    let markdown_location_fallback = search_repo_fast_filtered(
+        repo.path(),
+        "[src/lib.rs#L40-L45](src/lib.rs#L40-L45)",
+        10,
+        &filters,
+    )
+    .unwrap();
+    assert_eq!(
+        result_paths(&markdown_location_fallback),
+        vec!["src/lib.rs"]
+    );
+    assert_eq!(markdown_location_fallback[0].match_lines, vec![40]);
+    let hosted_location_fallback = search_repo_fast_filtered(
+        repo.path(),
+        "https://github.com/evalops/orient-search/blob/main/src/lib.rs#L40",
+        10,
+        &filters,
+    )
+    .unwrap();
+    assert_eq!(result_paths(&hosted_location_fallback), vec!["src/lib.rs"]);
+    assert_eq!(hosted_location_fallback[0].match_lines, vec![40]);
     let copied_line_fallback = search_repo_fast_filtered(
         repo.path(),
         "src/lib.rs:40: pub fn target_entrypoint",
@@ -2444,6 +2465,20 @@ fn bare_path_like_queries_use_filter_only_fast_paths() {
         .unwrap();
     assert_eq!(result_paths(&hash_location_indexed), vec!["src/lib.rs"]);
     assert_eq!(hash_location_indexed[0].match_lines, vec![40]);
+    let markdown_location_indexed = index
+        .search_filtered("[src/lib.rs#L40-L45](src/lib.rs#L40-L45)", 10, &filters)
+        .unwrap();
+    assert_eq!(result_paths(&markdown_location_indexed), vec!["src/lib.rs"]);
+    assert_eq!(markdown_location_indexed[0].match_lines, vec![40]);
+    let hosted_location_indexed = index
+        .search_filtered(
+            "https://github.com/evalops/orient-search/blob/main/src/lib.rs#L40",
+            10,
+            &filters,
+        )
+        .unwrap();
+    assert_eq!(result_paths(&hosted_location_indexed), vec!["src/lib.rs"]);
+    assert_eq!(hosted_location_indexed[0].match_lines, vec![40]);
     let copied_line_indexed = index
         .search_filtered("src/lib.rs:40: pub fn target_entrypoint", 10, &filters)
         .unwrap();

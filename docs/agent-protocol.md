@@ -140,10 +140,10 @@ Query strings support filters such as `repo:service`, `branch:feature/auth`, `or
 Bare single-token filename and path-like queries such as `Cargo.toml`, `README.md`, or `src/lib.rs` are inferred as `file:` / `path:` filters so agents that type the file they want get the file, not references to its name. Use `content:Cargo.toml`, `text:README.md`, or `term:src/lib.rs` when the literal string is the target.
 Bare pasted locations such as `src/lib.rs:42`, `src/lib.rs:42:9`,
 `src/lib.rs#L42-L45`, copied lines such as `src/lib.rs:42: pub fn issue_token`,
-and stack-frame forms such as `at issueToken (src/lib.rs:42:9)` strip the
-line/column prefix for matching and anchor the returned snippet near the line.
-Absolute pasted paths are normalized when they are inside the selected repo or
-index root.
+Markdown-style file links, common hosted code links, and stack-frame forms such
+as `at issueToken (src/lib.rs:42:9)` strip the line/column prefix for matching
+and anchor the returned snippet near the line. Absolute pasted paths are
+normalized when they are inside the selected repo or index root.
 Use `content:` / `text:` / `term:` when an identifier-shaped string should stay a content lookup instead of narrowing indexed search through implicit symbol postings.
 Positive non-code language scopes such as `lang:md` keep identifier-shaped terms as content searches instead of requiring symbol postings, so docs/prose lookups stay consistent with live fallback search.
 The same applies when positive `file:`, `path:`, or `ext:` scopes clearly target non-code files, such as `path:docs/*.md SessionManager` or `ext:md agent_instructions`.
@@ -237,7 +237,7 @@ For most agents, the handoff is:
 
 Read-range tools accept `/` or `\` separators in repo-relative paths and reject parent-directory escapes after separator normalization. Shard range and related-context tools accept exact shard-prefixed paths from search hits, such as `service/src/auth.rs`, and also accept unqualified paths like `src/auth.rs` when they resolve to exactly one shard. Ambiguous unqualified paths fail with a prompt to use `<repo>/<path>`.
 
-`read_range` / `open_range` and `read_ranges` / `open_ranges` are target-aware convenience tools: pass `repo`, `index`, or `index_dir` to read from a live repository, persistent index, or shard directory with one adapter path. With no explicit target, protocol clients can pass `cwd` to resolve repository-relative paths inside the active checkout. The single-read `path` and batch `ranges` entries accept copied locations such as `path:line`, `path:line: copied text`, and `path#Lstart-Lend`; `read_ranges.ranges` can be one compact string, one `{path,start,lines}` object, or an array mixing both. The explicit `read_index_range` and `read_shard_range` families remain available for wrappers that want surface-specific tools.
+`read_range` / `open_range` and `read_ranges` / `open_ranges` are target-aware convenience tools: pass `repo`, `index`, or `index_dir` to read from a live repository, persistent index, or shard directory with one adapter path. With no explicit target, protocol clients can pass `cwd` to resolve repository-relative paths inside the active checkout. The single-read `path` and batch `ranges` entries accept copied locations such as `path:line`, `path:line: copied text`, `path#Lstart-Lend`, Markdown links, and common hosted code links; `read_ranges.ranges` can be one compact string, one `{path,start,lines}` object, or an array mixing both. The explicit `read_index_range` and `read_shard_range` families remain available for wrappers that want surface-specific tools.
 
 `related_files` and `related_symbols` are target-aware too: pass `repo`, `index`, or `index_dir` to get nearby files or definitions from the same target style as `search`, or pass `cwd` when using the shared daemon without an explicit target. The CLI mirrors this as `related --repo`, `related --index`, or `related --index-dir`, and likewise for `related-symbols`. Related-file and related-symbol tools accept the same structured scoping filters as search, with `path` reserved for the anchor file; use fields such as `test`, `generated`, `lang`, `file`, `exclude_path`, or `exclude_content` to control returned neighbors. For shard `related_symbols`, include the search-hit `path` so Orient can keep the lookup inside the right shard or alias scope. The explicit `related_index_*` and `related_shard_*` tools remain available.
 

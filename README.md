@@ -88,9 +88,10 @@ Bare filename and path-like queries such as `Cargo.toml` or `src/lib.rs` use the
 same fast path filters. Use `content:Cargo.toml` when you want references to the
 string instead of the file itself. Pasted locations such as `src/lib.rs:42`,
 `src/lib.rs:42:9`, `src/lib.rs#L42-L45`, copied `src/lib.rs:42: text` lines,
-and common stack-frame forms like `at fn (src/lib.rs:42:9)` resolve to the file
-and anchor snippets near that line. Absolute pasted paths are normalized when
-they are inside the selected repo or index root.
+Markdown-style file links, common hosted code links, and stack-frame forms like
+`at fn (src/lib.rs:42:9)` resolve to the file and anchor snippets near that
+line. Absolute pasted paths are normalized when they are inside the selected
+repo or index root.
 `symbol:` accepts exact names plus strong multi-token identifier fragments, so
 `symbol:retry_result` can match `search_auto_retry_result`; single generic tokens
 stay exact to avoid broad matches such as `symbol:path` hitting every
@@ -123,7 +124,8 @@ symbol` to anchor the returned window at the nearest function, class, or type
 definition instead of opening an exact line window.
 The `read_range` / `read_ranges` protocol tools and `read-range` /
 `read-ranges` CLIs accept the same copied file locations as search, including
-`src/lib.rs:42`, copied `src/lib.rs:42: text` lines, and `src/lib.rs#L42-L45`.
+`src/lib.rs:42`, copied `src/lib.rs:42: text` lines, `src/lib.rs#L42-L45`,
+Markdown links, and common hosted code links.
 
 ## Footprint
 

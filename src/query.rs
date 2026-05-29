@@ -426,8 +426,42 @@ fn strip_hash_line_range(value: &str) -> &str {
 }
 
 fn normalize_location_token(token: &str) -> Option<String> {
+    let token = markdown_link_target(token).unwrap_or(token);
     let normalized = trim_location_token_wrappers(token).replace('\\', "/");
+    let normalized = code_hosted_location_path(&normalized).unwrap_or(normalized);
     (!normalized.is_empty()).then_some(normalized)
+}
+
+fn markdown_link_target(token: &str) -> Option<&str> {
+    let token = token.trim();
+    let marker = token.rfind("](")?;
+    let after_marker = &token[marker + 2..];
+    let end = after_marker.find(')')?;
+    let target = after_marker[..end].trim();
+    (!target.is_empty()).then_some(target)
+}
+
+fn code_hosted_location_path(value: &str) -> Option<String> {
+    if !value.contains("://") {
+        return None;
+    }
+    let anchor_start = value.find('#').unwrap_or(value.len());
+    let (base, anchor) = value.split_at(anchor_start);
+    let lower_base = base.to_ascii_lowercase();
+    for marker in ["/-/blob/", "/blob/", "/-/tree/", "/tree/"] {
+        let Some(marker_start) = lower_base.find(marker) else {
+            continue;
+        };
+        let after_marker = &base[marker_start + marker.len()..];
+        let Some(path_start) = after_marker.find('/') else {
+            continue;
+        };
+        let path = &after_marker[path_start + 1..];
+        if looks_like_location_path(path) {
+            return Some(format!("{path}{anchor}"));
+        }
+    }
+    None
 }
 
 fn trim_location_token_wrappers(token: &str) -> &str {
@@ -442,7 +476,8 @@ fn term_eq_ignore_ascii_punctuation(term: &str, expected: &str) -> bool {
 }
 
 fn strip_location_suffix(value: &str) -> (String, Option<usize>) {
-    let normalized = value.trim().replace('\\', "/");
+    let normalized =
+        normalize_location_token(value).unwrap_or_else(|| value.trim().replace('\\', "/"));
     if let Some((path, line, _)) = split_hash_line_anchor(&normalized) {
         return (path, Some(line));
     }
@@ -981,6 +1016,25 @@ mod tests {
             Some("src/server.rs")
         );
         assert_eq!(hash_range_source_location.filters.target_line, Some(42));
+
+        let markdown_source_location =
+            parse_query("[src/server.rs#L42-L45](src/server.rs#L42-L45)");
+        assert!(markdown_source_location.terms.is_empty());
+        assert_eq!(
+            markdown_source_location.filters.path.as_deref(),
+            Some("src/server.rs")
+        );
+        assert_eq!(markdown_source_location.filters.target_line, Some(42));
+
+        let hosted_source_location = parse_query(
+            "[src/server.rs:42](https://github.com/evalops/orient-search/blob/main/src/server.rs#L42)",
+        );
+        assert!(hosted_source_location.terms.is_empty());
+        assert_eq!(
+            hosted_source_location.filters.path.as_deref(),
+            Some("src/server.rs")
+        );
+        assert_eq!(hosted_source_location.filters.target_line, Some(42));
 
         let copied_source_line = parse_query("src/server.rs:42: pub fn handle_request");
         assert_eq!(
