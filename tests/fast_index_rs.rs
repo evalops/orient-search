@@ -797,6 +797,10 @@ fn indexed_query_plan_reports_missing_terms_without_results() {
         &repo.path().join("tests/auth_test.rs"),
         "use sample::SessionManager;\n#[test]\nfn issue_token_round_trip() {}\n",
     );
+    write(
+        &repo.path().join("src/SessionManager.rs"),
+        "pub struct MixedCaseSessionManager;\n",
+    );
 
     let index = FastIndex::build(repo.path()).unwrap();
     let plan = index
@@ -946,6 +950,40 @@ fn indexed_query_plan_reports_missing_terms_without_results() {
         path_typo_plan.repair_hints[0].suggested_query.as_deref(),
         Some("path:src/auth.rs")
     );
+
+    let cased_file_typo_plan = index
+        .query_plan("file:SessionManger.rs", &SearchFilters::default())
+        .unwrap();
+    assert_eq!(
+        cased_file_typo_plan.repair_hints[0]
+            .suggested_query
+            .as_deref(),
+        Some("file:SessionManager.rs")
+    );
+
+    let accidental_path_in_file_plan = index
+        .query_plan("file:src/ath.rs", &SearchFilters::default())
+        .unwrap();
+    assert_eq!(
+        accidental_path_in_file_plan.repair_hints[0].kind,
+        "replace_file_filter"
+    );
+    assert_eq!(
+        accidental_path_in_file_plan.repair_hints[0]
+            .suggested_query
+            .as_deref(),
+        Some("path:src/auth.rs")
+    );
+
+    let wildcard_file_plan = index
+        .query_plan("file:*athu.rs", &SearchFilters::default())
+        .unwrap();
+    assert_eq!(wildcard_file_plan.repair_hints[0].kind, "relax_file_filter");
+
+    let wildcard_path_plan = index
+        .query_plan("path:src/*ath.rs", &SearchFilters::default())
+        .unwrap();
+    assert_eq!(wildcard_path_plan.repair_hints[0].kind, "relax_path_filter");
 
     let branch_mismatch = index
         .query_plan(

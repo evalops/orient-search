@@ -1634,6 +1634,50 @@ fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
             .contains("src/auth.rs")
     );
 
+    let file_path_typo = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("file-path-typo"),
+        tool: "search_auto".to_string(),
+        arguments: serde_json::json!({
+            "query": "file:src/ath.rs",
+            "limit": 5
+        }),
+    });
+    assert!(file_path_typo.error.is_none(), "{:?}", file_path_typo.error);
+    let file_path_typo = file_path_typo.result.unwrap();
+    assert_eq!(
+        file_path_typo["query_plan_result"]["repair_hints"][0]["kind"],
+        "replace_file_filter"
+    );
+    assert_eq!(
+        file_path_typo["query_plan_result"]["retry_requests"][0]["arguments"]["query"],
+        "path:src/auth.rs"
+    );
+    assert!(
+        file_path_typo["query_plan_result"]["retry_requests"][0]["arguments"]
+            .get("file")
+            .is_none(),
+        "{:?}",
+        file_path_typo["query_plan_result"]["retry_requests"][0]["arguments"]
+    );
+    let file_path_retry = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("file-path-typo-retry"),
+        tool: file_path_typo["query_plan_result"]["retry_requests"][0]["tool"]
+            .as_str()
+            .unwrap()
+            .to_string(),
+        arguments: file_path_typo["query_plan_result"]["retry_requests"][0]["arguments"].clone(),
+    });
+    assert!(
+        file_path_retry.error.is_none(),
+        "{:?}",
+        file_path_retry.error
+    );
+    assert!(
+        serde_json::to_string(&file_path_retry.result)
+            .unwrap()
+            .contains("src/auth.rs")
+    );
+
     let map_request = indexed["repo_map_request"].clone();
     let map = runtime.dispatch(ToolRequest {
         id: serde_json::json!("map"),

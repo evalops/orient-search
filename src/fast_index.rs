@@ -3097,7 +3097,16 @@ fn suggested_symbol_query(wanted: &str, files: &[IndexedPath]) -> Option<String>
 }
 
 fn suggested_file_filter_query(wanted: &str, files: &[IndexedPath]) -> Option<String> {
-    let wanted = wanted.trim().trim_start_matches('/').to_ascii_lowercase();
+    if filter_suggestion_is_glob(wanted) {
+        return None;
+    }
+    let wanted_path = normalize_filter_path_for_suggestion(wanted);
+    if wanted_path.contains('/') {
+        if let Some(query) = suggested_path_filter_query(wanted, files) {
+            return Some(query);
+        }
+    }
+    let wanted = wanted_path.rsplit('/').next().unwrap_or("").to_string();
     if wanted.is_empty() {
         return None;
     }
@@ -3105,24 +3114,30 @@ fn suggested_file_filter_query(wanted: &str, files: &[IndexedPath]) -> Option<St
         .iter()
         .map(|file| {
             (
+                indexed_file_name(&file.path),
                 file.file_name_lower.as_str(),
                 edit_distance_at_most(&wanted, &file.file_name_lower, 4),
             )
         })
-        .filter_map(|(file_name, distance)| distance.map(|distance| (file_name, distance)))
+        .filter_map(|(file_name, file_name_lower, distance)| {
+            distance.map(|distance| (file_name, file_name_lower, distance))
+        })
         .collect::<Vec<_>>();
     best.sort_by(|left, right| {
-        left.1
-            .cmp(&right.1)
-            .then_with(|| left.0.len().cmp(&right.0.len()))
-            .then_with(|| left.0.cmp(right.0))
+        left.2
+            .cmp(&right.2)
+            .then_with(|| left.1.len().cmp(&right.1.len()))
+            .then_with(|| left.1.cmp(right.1))
     });
     best.first()
-        .filter(|(_, distance)| *distance <= 3)
-        .map(|(file_name, _)| format!("file:{file_name}"))
+        .filter(|(_, _, distance)| *distance <= 3)
+        .map(|(file_name, _, _)| format!("file:{file_name}"))
 }
 
 fn suggested_path_filter_query(wanted: &str, files: &[IndexedPath]) -> Option<String> {
+    if filter_suggestion_is_glob(wanted) {
+        return None;
+    }
     let wanted = normalize_filter_path_for_suggestion(wanted);
     if wanted.is_empty() {
         return None;
@@ -3151,12 +3166,23 @@ fn suggested_path_filter_query(wanted: &str, files: &[IndexedPath]) -> Option<St
         .map(|(path, _, _)| format!("path:{path}"))
 }
 
+fn filter_suggestion_is_glob(value: &str) -> bool {
+    value.contains('*') || value.contains('?')
+}
+
 fn normalize_filter_path_for_suggestion(path: &str) -> String {
     path.trim()
         .trim_start_matches("./")
         .trim_start_matches('/')
         .replace('\\', "/")
         .to_ascii_lowercase()
+}
+
+fn indexed_file_name(path: &str) -> String {
+    Path::new(path)
+        .file_name()
+        .map(|value| value.to_string_lossy().into_owned())
+        .unwrap_or_default()
 }
 
 fn edit_distance_at_most(left: &str, right: &str, max_distance: usize) -> Option<usize> {
