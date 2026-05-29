@@ -43,6 +43,7 @@ use std::time::SystemTime;
 
 pub const MAX_BATCH_QUERIES: usize = 32;
 pub const MAX_BATCH_RANGES: usize = 64;
+pub const MAX_BATCH_READ_LINES: usize = 8_000;
 pub const DEFAULT_MAX_CACHED_INDEXES: usize = 64;
 const DEFAULT_DAEMON_ADDR: &str = "127.0.0.1:8796";
 
@@ -1254,6 +1255,7 @@ pub fn agent_guide(
             "max_results": MAX_SEARCH_RESULTS,
             "max_batch_queries": MAX_BATCH_QUERIES,
             "max_batch_ranges": MAX_BATCH_RANGES,
+            "max_batch_read_lines": MAX_BATCH_READ_LINES,
             "max_range_lines": MAX_READ_RANGE_LINES,
             "max_attached_context_lines": MAX_ATTACHED_CONTEXT_LINES
         }
@@ -8034,7 +8036,21 @@ fn range_args(arguments: &Value) -> Result<Vec<RangeArg>> {
     for value in values {
         ranges.push(range_arg(value, default_scope)?);
     }
+    validate_batch_read_line_budget(&ranges)?;
     Ok(ranges)
+}
+
+fn validate_batch_read_line_budget(ranges: &[RangeArg]) -> Result<()> {
+    let total = ranges
+        .iter()
+        .try_fold(0usize, |total, range| total.checked_add(range.lines))
+        .ok_or_else(|| anyhow!("batch read line count overflowed"))?;
+    if total > MAX_BATCH_READ_LINES {
+        return Err(anyhow!(
+            "argument ranges requests {total} total lines, max {MAX_BATCH_READ_LINES}"
+        ));
+    }
+    Ok(())
 }
 
 fn range_arg(value: &Value, default_scope: RangeScope) -> Result<RangeArg> {

@@ -15,9 +15,9 @@ use orient::repo_index::{
     MAX_RESULT_READ_BATCH_RANGES, MAX_SEARCH_RESULTS,
 };
 use orient::server::{
-    DEFAULT_MAX_CACHED_INDEXES, MAX_BATCH_QUERIES, MAX_BATCH_RANGES, ToolRequest, ToolRuntime,
-    agent_guide, agent_instructions, mcp_dispatch_value, mcp_tool_manifest, serve_mcp_with_runtime,
-    tool_manifest,
+    DEFAULT_MAX_CACHED_INDEXES, MAX_BATCH_QUERIES, MAX_BATCH_RANGES, MAX_BATCH_READ_LINES,
+    ToolRequest, ToolRuntime, agent_guide, agent_instructions, mcp_dispatch_value,
+    mcp_tool_manifest, serve_mcp_with_runtime, tool_manifest,
 };
 use orient::shards::{build_shards, refresh_shards, shard_status};
 
@@ -1177,6 +1177,10 @@ fn agent_guide_returns_local_agent_request_templates() {
             .unwrap()
             .iter()
             .any(|item| item.as_str().unwrap().contains("AGENTS.md"))
+    );
+    assert_eq!(
+        guide["hard_limits"]["max_batch_read_lines"],
+        serde_json::json!(MAX_BATCH_READ_LINES)
     );
 }
 
@@ -3375,6 +3379,30 @@ fn runtime_rejects_oversized_batches() {
     });
     let error = response.error.unwrap();
     assert!(error.contains("max 64"), "{error}");
+
+    let too_many_range_lines = (0..=(MAX_BATCH_READ_LINES / MAX_READ_RANGE_LINES))
+        .map(|_| {
+            serde_json::json!({
+                "path": "src/auth.rs",
+                "start": 1,
+                "lines": MAX_READ_RANGE_LINES
+            })
+        })
+        .collect::<Vec<_>>();
+    let response = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("too-many-range-lines"),
+        tool: "read_ranges".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "ranges": too_many_range_lines
+        }),
+    });
+    let error = response.error.unwrap();
+    assert!(error.contains("total lines"), "{error}");
+    assert!(
+        error.contains(&format!("max {MAX_BATCH_READ_LINES}")),
+        "{error}"
+    );
 
     let response = runtime.dispatch(ToolRequest {
         id: serde_json::json!("empty-ranges"),

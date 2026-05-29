@@ -132,7 +132,8 @@ The `read_range` / `read_ranges` protocol tools and `read-range` /
 `read-ranges` CLIs accept the same copied file locations as search, including
 `src/lib.rs:42`, copied `src/lib.rs:42: text` lines, `src/lib.rs#L42-L45`,
 Markdown links, and common hosted code links with fragment or query-string line
-anchors.
+anchors. Batch reads are capped by both range count and total requested lines,
+so large inspections should be split into smaller follow-up reads.
 
 ## Footprint
 

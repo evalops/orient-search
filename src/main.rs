@@ -19,10 +19,10 @@ use orient::repo_index::{
     symbol_lookup_results,
 };
 use orient::server::{
-    DEFAULT_MAX_CACHED_INDEXES, MAX_BATCH_QUERIES, MAX_BATCH_RANGES, ToolRequest, ToolRuntime,
-    agent_guide, agent_instructions, mcp_tool_manifest, retarget_client_cli_commands, serve_jsonl,
-    serve_jsonl_stream_with_client_command, serve_mcp, serve_tcp, tcp_client_command,
-    tool_manifest, unix_client_command,
+    DEFAULT_MAX_CACHED_INDEXES, MAX_BATCH_QUERIES, MAX_BATCH_RANGES, MAX_BATCH_READ_LINES,
+    ToolRequest, ToolRuntime, agent_guide, agent_instructions, mcp_tool_manifest,
+    retarget_client_cli_commands, serve_jsonl, serve_jsonl_stream_with_client_command, serve_mcp,
+    serve_tcp, tcp_client_command, tool_manifest, unix_client_command,
 };
 use orient::shards::{
     ShardFreshness, ShardQueryPlan, build_shards_with_force, ensure_shards, find_shard_symbol,
@@ -5330,7 +5330,19 @@ fn cli_ranges(
             MAX_BATCH_RANGES
         );
     }
+    validate_cli_batch_read_line_budget(&ranges)?;
     Ok(ranges)
+}
+
+fn validate_cli_batch_read_line_budget(ranges: &[CliRangeSpec]) -> Result<()> {
+    let total = ranges
+        .iter()
+        .try_fold(0usize, |total, range| total.checked_add(range.lines))
+        .ok_or_else(|| anyhow::anyhow!("batch read line count overflowed"))?;
+    if total > MAX_BATCH_READ_LINES {
+        bail!("ranges request {total} total lines, max {MAX_BATCH_READ_LINES}");
+    }
+    Ok(())
 }
 
 fn cli_single_range(

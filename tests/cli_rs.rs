@@ -4,7 +4,8 @@ use std::path::Path;
 use std::process::{Command as ProcessCommand, Stdio};
 
 use assert_cmd::Command;
-use orient::server::{MAX_BATCH_QUERIES, MAX_BATCH_RANGES};
+use orient::repo_index::MAX_READ_RANGE_LINES;
+use orient::server::{MAX_BATCH_QUERIES, MAX_BATCH_RANGES, MAX_BATCH_READ_LINES};
 use predicates::prelude::*;
 
 fn write(path: &Path, text: &str) {
@@ -909,6 +910,20 @@ fn cli_rejects_oversized_batches() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("max 64"));
+
+    let mut cmd = Command::cargo_bin("orient").unwrap();
+    let mut args = vec!["read-ranges", "--repo", repo.path().to_str().unwrap()];
+    let paths = (0..=(MAX_BATCH_READ_LINES / MAX_READ_RANGE_LINES))
+        .map(|_| format!("src/auth.rs:1:{MAX_READ_RANGE_LINES}"))
+        .collect::<Vec<_>>();
+    args.extend(paths.iter().map(String::as_str));
+    cmd.args(args)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("total lines"))
+        .stderr(predicate::str::contains(format!(
+            "max {MAX_BATCH_READ_LINES}"
+        )));
 }
 
 #[test]
