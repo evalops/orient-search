@@ -1678,6 +1678,7 @@ fn retry_search_requests<T: Serialize>(
             continue;
         }
         let mut arguments = Map::new();
+        let replace_symbol = hint.kind == "replace_symbol_filter";
         let replace_symbol_kind = hint.kind == "replace_symbol_kind_filter";
         let relaxed_field = retry_relaxed_filter_field(&hint.kind);
         if hint.kind == "relax_filters" {
@@ -1690,6 +1691,9 @@ fn retry_search_requests<T: Serialize>(
             }
         } else if let Some(source) = source_arguments.as_object() {
             for (name, value) in source {
+                if replace_symbol && matches!(name.as_str(), "symbol") {
+                    continue;
+                }
                 if replace_symbol_kind && matches!(name.as_str(), "symbol_kind" | "kind" | "type") {
                     continue;
                 }
@@ -1706,8 +1710,9 @@ fn retry_search_requests<T: Serialize>(
                 &mut arguments,
                 plan,
                 target_name,
-                replace_symbol_kind
-                    .then_some("symbol_kind")
+                replace_symbol
+                    .then_some("symbol")
+                    .or_else(|| replace_symbol_kind.then_some("symbol_kind"))
                     .or(relaxed_field),
             );
         }

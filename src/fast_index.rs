@@ -1340,6 +1340,9 @@ impl FastIndex {
                 &missing_trigrams,
                 use_trigrams,
                 active_filters,
+                &filters,
+                &self.files,
+                &self.symbol_postings,
                 filters.require_all,
                 candidate_count,
                 candidate_cap,
@@ -1656,6 +1659,9 @@ impl FastIndex {
             &missing_trigrams,
             use_trigrams,
             active_filters,
+            &filters,
+            &self.files,
+            &self.symbol_postings,
             filters.require_all,
             candidate_count,
             candidate_cap,
@@ -2621,6 +2627,9 @@ fn indexed_query_plan(
     missing_trigrams: &[String],
     use_trigrams: bool,
     active_filters: Vec<QueryPlanFilter>,
+    filters: &SearchFilters,
+    files: &[IndexedPath],
+    all_symbol_postings: &HashMap<String, Vec<Posting>>,
     require_all: bool,
     candidate_count: usize,
     candidate_cap: usize,
@@ -2667,6 +2676,9 @@ fn indexed_query_plan(
         query_phrases,
         missing_terms,
         missing_trigrams,
+        filters,
+        files,
+        all_symbol_postings,
         &active_filters,
         require_all,
         candidate_count,
@@ -2713,6 +2725,9 @@ fn query_plan_repair_hints(
     query_phrases: &[String],
     missing_terms: &[String],
     missing_trigrams: &[String],
+    filters: &SearchFilters,
+    files: &[IndexedPath],
+    all_symbol_postings: &HashMap<String, Vec<Posting>>,
     active_filters: &[QueryPlanFilter],
     require_all: bool,
     candidate_count: usize,
@@ -2734,6 +2749,26 @@ fn query_plan_repair_hints(
     }
     if final_match_count > 0 {
         return hints;
+    }
+
+    if let Some(symbol) = filters.symbol.as_ref() {
+        let normalized = normalize_token(symbol);
+        if !normalized.is_empty() && !all_symbol_postings.contains_key(&normalized) {
+            let suggested_query = suggested_symbol_query(symbol, files);
+            let message = match suggested_query.as_deref() {
+                Some(query) => format!(
+                    "No indexed symbol exactly matches `{symbol}`. Retry with `{query}` or relax the symbol filter."
+                ),
+                None => format!(
+                    "No indexed symbol exactly matches `{symbol}`. Relax symbol: or search for content terms instead."
+                ),
+            };
+            hints.push(repair_hint(
+                "replace_symbol_filter",
+                message,
+                suggested_query,
+            ));
+        }
     }
 
     if !missing_terms.is_empty() {
@@ -3006,6 +3041,38 @@ fn suggested_symbol_kind_query(
     best.first()
         .filter(|(_, distance)| *distance <= 2)
         .map(|(kind, _)| format!("kind:{kind}"))
+}
+
+fn suggested_symbol_query(wanted: &str, files: &[IndexedPath]) -> Option<String> {
+    let wanted = normalize_token(wanted);
+    if wanted.is_empty() {
+        return None;
+    }
+    let mut best = files
+        .iter()
+        .flat_map(|file| file.symbols.iter())
+        .filter(|symbol| !symbol.normalized.is_empty())
+        .map(|symbol| {
+            (
+                symbol.name.as_str(),
+                symbol.normalized.as_str(),
+                edit_distance_at_most(&wanted, &symbol.normalized, 4),
+            )
+        })
+        .filter_map(|(name, normalized, distance)| {
+            distance.map(|distance| (name, normalized, distance))
+        })
+        .collect::<Vec<_>>();
+    best.sort_by(|left, right| {
+        left.2
+            .cmp(&right.2)
+            .then_with(|| left.1.len().cmp(&right.1.len()))
+            .then_with(|| left.1.cmp(right.1))
+            .then_with(|| left.0.cmp(right.0))
+    });
+    best.first()
+        .filter(|(_, _, distance)| *distance <= 3)
+        .map(|(name, _, _)| format!("symbol:{name}"))
 }
 
 fn edit_distance_at_most(left: &str, right: &str, max_distance: usize) -> Option<usize> {

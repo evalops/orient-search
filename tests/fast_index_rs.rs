@@ -827,6 +827,16 @@ fn indexed_query_plan_reports_missing_terms_without_results() {
             .any(|posting| posting.kind == "content" && posting.value == "session")
     );
 
+    let symbol_typo_plan = index
+        .query_plan("symbol:SessionManger", &SearchFilters::default())
+        .unwrap();
+    assert_eq!(symbol_typo_plan.final_match_count, 0);
+    assert!(symbol_typo_plan.repair_hints.iter().any(|hint| {
+        hint.kind == "replace_symbol_filter"
+            && hint.suggested_query.as_deref() == Some("symbol:SessionManager")
+            && hint.message.contains("No indexed symbol exactly matches")
+    }));
+
     let filter_plan = index
         .query_plan(
             "lang:rust test:true",
