@@ -17,9 +17,9 @@ use crate::repo_index::{
     repo_map_seed_paths, repo_matches, result_matches_all_tokens, result_matches_symbol_filters,
     round4, score_filter_only_path_match, select_repo_brief_import_hints,
     select_repo_map_top_symbols, source_excluded_content_filters_match,
-    source_import_filters_match, symbol_exact_phrase_bonus, symbol_for_anchor,
-    symbol_matches_related_filters, symbol_query_match_score, symbol_scoped_window, token_counts,
-    tokenize, unique_query_tokens,
+    source_import_filters_match, symbol_exact_phrase_bonus, symbol_filter_matches_name,
+    symbol_for_anchor, symbol_matches_related_filters, symbol_query_match_score,
+    symbol_scoped_window, token_counts, tokenize, unique_query_tokens,
 };
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use anyhow::{Context, Result};
@@ -3107,12 +3107,9 @@ fn indexed_filter_only_snippet(
 }
 
 fn indexed_path_matches_symbol_filter(file: &IndexedPath, wanted: &str) -> bool {
-    let wanted = normalize_token(wanted);
-    !wanted.is_empty()
-        && file
-            .symbols
-            .iter()
-            .any(|symbol| symbol.normalized == wanted || normalize_token(&symbol.name) == wanted)
+    file.symbols
+        .iter()
+        .any(|symbol| symbol_filter_matches_name(&symbol.name, wanted))
 }
 
 fn indexed_path_matches_import_filter(file: &IndexedPath, wanted: &str) -> bool {
@@ -4940,13 +4937,9 @@ fn indexed_snippet(
 }
 
 fn indexed_symbol_filter_line(file: &IndexedPath, wanted: &str) -> Option<usize> {
-    let wanted = normalize_token(wanted);
-    if wanted.is_empty() {
-        return None;
-    }
     file.symbols
         .iter()
-        .find(|symbol| symbol.normalized == wanted)
+        .find(|symbol| symbol_filter_matches_name(&symbol.name, wanted))
         .map(|symbol| symbol.line)
 }
 

@@ -1407,6 +1407,55 @@ fn multi_token_identifier_fragments_boost_containing_symbols() {
 }
 
 #[test]
+fn symbol_filters_accept_multi_token_fragments_without_single_token_overreach() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/server.rs"),
+        "pub(crate) fn search_auto_primary_retry_result() {}\n",
+    );
+    write(&repo.path().join("src/lower.rs"), "fn lower_path() {}\n");
+    write(&repo.path().join("src/exact.rs"), "fn path() {}\n");
+
+    let fallback = search_repo_fast_filtered(
+        repo.path(),
+        "symbol:primary_retry_result",
+        10,
+        &Default::default(),
+    )
+    .unwrap();
+    assert_eq!(fallback.len(), 1);
+    assert_eq!(fallback[0].path, "src/server.rs");
+    assert!(
+        fallback[0]
+            .reason
+            .contains("symbol:search_auto_primary_retry_result"),
+        "{fallback:?}"
+    );
+
+    let fallback_single =
+        search_repo_fast_filtered(repo.path(), "symbol:path", 10, &Default::default()).unwrap();
+    assert_eq!(result_paths(&fallback_single), vec!["src/exact.rs"]);
+
+    let index = FastIndex::build(repo.path()).unwrap();
+    let indexed = index
+        .search_filtered("symbol:primary_retry_result", 10, &Default::default())
+        .unwrap();
+    assert_eq!(indexed.len(), 1);
+    assert_eq!(indexed[0].path, "src/server.rs");
+    assert!(
+        indexed[0]
+            .reason
+            .contains("symbol:search_auto_primary_retry_result"),
+        "{indexed:?}"
+    );
+
+    let indexed_single = index
+        .search_filtered("symbol:path", 10, &Default::default())
+        .unwrap();
+    assert_eq!(result_paths(&indexed_single), vec!["src/exact.rs"]);
+}
+
+#[test]
 fn fallback_refresh_scores_symbols_beyond_ripgrep_match_cap() {
     let repo = tempfile::tempdir().unwrap();
     let mut noisy = String::new();

@@ -2192,8 +2192,7 @@ fn result_matches_file_symbol_filters(
 }
 
 fn symbol_name_matches(symbol: &Symbol, wanted: &str) -> bool {
-    let wanted = normalize_token(wanted);
-    !wanted.is_empty() && normalize_token(&symbol.name) == wanted
+    symbol_filter_matches_name(&symbol.name, wanted)
 }
 
 fn append_symbol_reason(result: &mut SearchResult, symbol_name: &str) {
@@ -4556,6 +4555,34 @@ pub(crate) fn symbol_query_match_score(
     (overlap >= min_overlap).then_some(("symbol_overlap", 4.0 * overlap as f64))
 }
 
+pub(crate) fn symbol_filter_match_score(
+    symbol_name: &str,
+    wanted: &str,
+) -> Option<(&'static str, f64)> {
+    let wanted_name = normalize_token(wanted);
+    if wanted_name.is_empty() {
+        return None;
+    }
+    let wanted_tokens = unique_query_tokens(wanted);
+    let symbol_normalized = normalize_token(symbol_name);
+    let symbol_tokens = tokenize(symbol_name);
+    let (kind, amount) = symbol_query_match_score(
+        &symbol_normalized,
+        &symbol_tokens,
+        &wanted_tokens,
+        &wanted_name,
+    )?;
+    matches!(
+        kind,
+        "symbol_exact" | "symbol_boundary_contains" | "symbol_contains"
+    )
+    .then_some((kind, amount))
+}
+
+pub(crate) fn symbol_filter_matches_name(symbol_name: &str, wanted: &str) -> bool {
+    symbol_filter_match_score(symbol_name, wanted).is_some()
+}
+
 fn rank_signal(kind: &str, value: &str, score: f64) -> RankSignal {
     RankSignal {
         kind: kind.to_string(),
@@ -4605,17 +4632,15 @@ pub(crate) fn symbol_matches_related_filters(
     kind: &str,
     filters: &SearchFilters,
 ) -> bool {
-    let normalized_name = normalize_token(name);
     if let Some(wanted) = &filters.symbol {
-        let wanted = normalize_token(wanted);
-        if wanted.is_empty() || normalized_name != wanted {
+        if !symbol_filter_matches_name(name, wanted) {
             return false;
         }
     }
     if filters
         .exclude_symbol
         .iter()
-        .any(|excluded| normalize_token(excluded) == normalized_name)
+        .any(|excluded| symbol_filter_matches_name(name, excluded))
     {
         return false;
     }
@@ -6483,15 +6508,11 @@ pub(crate) fn result_matches_symbol_filters(
 }
 
 fn reason_contains_symbol(reason: &str, wanted: &str) -> bool {
-    let wanted = normalize_token(wanted);
-    if wanted.is_empty() {
-        return false;
-    }
     reason
         .trim_start_matches("matched ")
         .split(", ")
         .filter_map(|part| part.strip_prefix("symbol:"))
-        .any(|symbol| normalize_token(symbol) == wanted)
+        .any(|symbol| symbol_filter_matches_name(symbol, wanted))
 }
 
 fn format_numbered_lines(lines: &[&str], start: usize, end: usize) -> String {
