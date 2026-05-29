@@ -845,6 +845,17 @@ fn indexed_query_plan_reports_missing_terms_without_results() {
     assert_eq!(plan.filtered_candidate_count, 0);
     assert_eq!(plan.scored_candidate_count, 0);
     assert_eq!(plan.final_match_count, 0);
+    let diagnosis = plan.diagnosis.as_ref().unwrap();
+    assert_eq!(diagnosis.status, "missing_terms");
+    assert_eq!(
+        diagnosis.primary_hint_kind.as_deref(),
+        Some("drop_missing_terms")
+    );
+    assert_eq!(
+        diagnosis.suggested_query.as_deref(),
+        Some("session manager")
+    );
+    assert!(diagnosis.next_action.contains("retry"));
     assert!(plan.repair_hints.iter().any(|hint| {
         hint.kind == "drop_missing_terms"
             && hint.suggested_query.as_deref() == Some("session manager")
@@ -864,6 +875,16 @@ fn indexed_query_plan_reports_missing_terms_without_results() {
             && hint.suggested_query.as_deref() == Some("symbol:SessionManager")
             && hint.message.contains("No indexed symbol exactly matches")
     }));
+    let diagnosis = symbol_typo_plan.diagnosis.as_ref().unwrap();
+    assert_eq!(diagnosis.status, "filters_rejected");
+    assert_eq!(
+        diagnosis.primary_hint_kind.as_deref(),
+        Some("replace_symbol_filter")
+    );
+    assert_eq!(
+        diagnosis.suggested_query.as_deref(),
+        Some("symbol:SessionManager")
+    );
 
     let filter_plan = index
         .query_plan(
@@ -1052,6 +1073,16 @@ fn indexed_query_plan_suggests_any_terms_for_strict_and_misses() {
     assert_eq!(plan.missing_terms, Vec::<String>::new());
     assert_eq!(plan.candidate_count, 0);
     assert_eq!(plan.final_match_count, 0);
+    let diagnosis = plan.diagnosis.as_ref().unwrap();
+    assert_eq!(diagnosis.status, "no_candidates");
+    assert_eq!(
+        diagnosis.primary_hint_kind.as_deref(),
+        Some("try_any_terms")
+    );
+    assert_eq!(
+        diagnosis.suggested_query.as_deref(),
+        Some("mode:any alpha beta")
+    );
     assert!(plan.repair_hints.iter().any(|hint| {
         hint.kind == "try_any_terms"
             && hint.suggested_query.as_deref() == Some("mode:any alpha beta")
@@ -1089,6 +1120,16 @@ fn indexed_query_plan_suggests_facets_for_noisy_successful_queries() {
 
     assert!(plan.final_match_count > 0);
     assert!(!plan.candidate_cap_hit);
+    let diagnosis = plan.diagnosis.as_ref().unwrap();
+    assert_eq!(diagnosis.status, "matched");
+    assert!(
+        diagnosis
+            .primary_hint_kind
+            .as_deref()
+            .unwrap()
+            .starts_with("narrow_by")
+    );
+    assert!(diagnosis.suggested_query.as_deref().is_some());
     assert!(plan.repair_hints.iter().any(|hint| {
         hint.kind == "narrow_by_code"
             && hint.suggested_query.as_deref() == Some("code:true sharedneedle")

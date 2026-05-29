@@ -316,10 +316,150 @@ pub struct QueryPlan {
     pub scored_candidate_count: usize,
     #[serde(default)]
     pub final_match_count: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diagnosis: Option<QueryPlanDiagnosis>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub repair_hints: Vec<QueryPlanRepairHint>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub retry_requests: Vec<ResultToolRequest>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QueryPlanDiagnosis {
+    pub status: String,
+    pub summary: String,
+    pub next_action: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub primary_hint_kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suggested_query: Option<String>,
+}
+
+impl QueryPlan {
+    pub fn with_diagnosis(mut self) -> Self {
+        self.diagnosis = Some(QueryPlanDiagnosis::from_plan(&self));
+        self
+    }
+}
+
+impl QueryPlanDiagnosis {
+    fn from_plan(plan: &QueryPlan) -> Self {
+        let primary_hint = plan.repair_hints.first();
+        let suggested_query = plan
+            .repair_hints
+            .iter()
+            .find_map(|hint| hint.suggested_query.clone());
+        let primary_hint_kind = primary_hint.map(|hint| hint.kind.clone());
+        let next_action = if let Some(query) = suggested_query.as_ref() {
+            format!("Run the first retry request or retry with query `{query}`.")
+        } else if plan.final_match_count > 0 && plan.candidate_cap_hit {
+            "Narrow with a rarer term or a facet hint before trusting the top results.".to_string()
+        } else if plan.final_match_count > 0 {
+            "Use the top results and their read_request/read_batch_request for bounded context."
+                .to_string()
+        } else {
+            "Inspect repair_hints and planned_postings, then relax the narrowest missing term or filter."
+                .to_string()
+        };
+
+        let primary_hint_kind_ref = primary_hint.map(|hint| hint.kind.as_str());
+        let (status, summary) = if plan.final_match_count > 0 && plan.candidate_cap_hit {
+            (
+                "candidate_cap_hit",
+                format!(
+                    "Found {} final matches after scoring a capped candidate set of {} from {} candidates.",
+                    plan.final_match_count, plan.candidate_cap, plan.candidate_count
+                ),
+            )
+        } else if plan.final_match_count > 0 {
+            (
+                "matched",
+                format!(
+                    "Found {} final matches from {} candidates.",
+                    plan.final_match_count, plan.candidate_count
+                ),
+            )
+        } else if plan.strategy == "empty_query" {
+            (
+                "empty_query",
+                "No positive query term or searchable positive filter was provided.".to_string(),
+            )
+        } else if plan.strategy.ends_with("_mismatch") {
+            (
+                "scope_mismatch",
+                "The selected repo, shard, branch, origin, or dependency scope rejected the query."
+                    .to_string(),
+            )
+        } else if primary_hint_kind_ref.is_some_and(|kind| {
+            kind.starts_with("replace_")
+                || kind.starts_with("relax_")
+                || kind == "dependency_filter_mismatch"
+        }) {
+            (
+                "filters_rejected",
+                primary_hint
+                    .map(|hint| hint.message.clone())
+                    .unwrap_or_else(|| "Active filters rejected the query.".to_string()),
+            )
+        } else if !plan.missing_terms.is_empty() {
+            (
+                "missing_terms",
+                format!(
+                    "Required terms have no content or path postings: {}.",
+                    plan.missing_terms.join(", ")
+                ),
+            )
+        } else if !plan.missing_trigrams.is_empty() {
+            (
+                "missing_trigrams",
+                "The literal substring trigrams are absent from the index.".to_string(),
+            )
+        } else if plan.candidate_count == 0 {
+            (
+                "no_candidates",
+                "Each required posting/filter scope produced no shared candidate files."
+                    .to_string(),
+            )
+        } else if plan.filtered_candidate_count == 0 {
+            (
+                "filters_rejected",
+                format!(
+                    "Postings found {} candidates, but active filters rejected all of them.",
+                    plan.candidate_count
+                ),
+            )
+        } else if plan.scored_candidate_count == 0 && !plan.query_phrases.is_empty() {
+            (
+                "phrase_rejected",
+                format!(
+                    "{} filtered candidates survived, but quoted phrase verification rejected them.",
+                    plan.filtered_candidate_count
+                ),
+            )
+        } else if plan.scored_candidate_count > 0 && plan.require_all {
+            (
+                "and_rejected",
+                format!(
+                    "{} candidates scored, but final AND or symbol checks rejected them.",
+                    plan.scored_candidate_count
+                ),
+            )
+        } else {
+            (
+                "no_final_matches",
+                "The plan produced no final matches after candidate selection and scoring."
+                    .to_string(),
+            )
+        };
+
+        Self {
+            status: status.to_string(),
+            summary,
+            next_action,
+            primary_hint_kind,
+            suggested_query,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

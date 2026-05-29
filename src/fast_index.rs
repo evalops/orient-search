@@ -1705,9 +1705,11 @@ impl FastIndex {
                 filtered_candidate_count: 0,
                 scored_candidate_count: 0,
                 final_match_count: 0,
+                diagnosis: None,
                 repair_hints: repo_scope_mismatch_repair_hints(&filters, &retry_query),
                 retry_requests: Vec::new(),
-            });
+            }
+            .with_diagnosis());
         }
         if !self.matches_dependency_filters(&filters) {
             return Ok(QueryPlan {
@@ -1726,13 +1728,15 @@ impl FastIndex {
                 filtered_candidate_count: 0,
                 scored_candidate_count: 0,
                 final_match_count: 0,
+                diagnosis: None,
                 repair_hints: vec![repair_hint(
                     "dependency_filter_mismatch",
                     "The dependency filter does not match this index. Relax dep: or choose a matching shard/index.",
                     None,
                 )],
                 retry_requests: Vec::new(),
-            });
+            }
+            .with_diagnosis());
         }
         let query = query_text(&parsed.terms, &filters);
         let query_tokens = unique_query_tokens(&query);
@@ -1799,6 +1803,7 @@ impl FastIndex {
                     filtered_candidate_count: final_match_count,
                     scored_candidate_count: final_match_count,
                     final_match_count,
+                    diagnosis: None,
                     repair_hints: filter_scan_repair_hints(
                         &filters,
                         &self.symbol_kind_postings,
@@ -1806,7 +1811,8 @@ impl FastIndex {
                         final_match_count,
                     ),
                     retry_requests: Vec::new(),
-                });
+                }
+                .with_diagnosis());
             }
             return Ok(QueryPlan {
                 strategy: "empty_query".to_string(),
@@ -1824,13 +1830,15 @@ impl FastIndex {
                 filtered_candidate_count: 0,
                 scored_candidate_count: 0,
                 final_match_count: 0,
+                diagnosis: None,
                 repair_hints: vec![repair_hint(
                     "empty_query",
                     "Add a content term, quoted literal, symbol:, or positive file/path/lang/ext/test filter.",
                     None,
                 )],
                 retry_requests: Vec::new(),
-            });
+            }
+            .with_diagnosis());
         }
 
         let mut token_postings = query_tokens
@@ -2090,6 +2098,7 @@ impl FastIndex {
                 filtered_candidate_count: final_match_count,
                 scored_candidate_count: final_match_count,
                 final_match_count,
+                diagnosis: None,
                 repair_hints: filter_scan_repair_hints(
                     filters,
                     &self.symbol_kind_postings,
@@ -2097,7 +2106,8 @@ impl FastIndex {
                     final_match_count,
                 ),
                 retry_requests: Vec::new(),
-            };
+            }
+            .with_diagnosis();
             for result in &mut results {
                 result.query_plan = Some(query_plan.clone());
             }
@@ -3304,9 +3314,11 @@ fn indexed_query_plan(
         filtered_candidate_count,
         scored_candidate_count,
         final_match_count,
+        diagnosis: None,
         repair_hints,
         retry_requests: Vec::new(),
     }
+    .with_diagnosis()
 }
 
 fn query_plan_repair_hints(

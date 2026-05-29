@@ -1263,13 +1263,15 @@ pub(crate) fn shard_selection_miss_plan(
             filtered_candidate_count: 0,
             scored_candidate_count: 0,
             final_match_count: 0,
+            diagnosis: None,
             repair_hints: vec![QueryPlanRepairHint {
                 kind: "relax_filters".to_string(),
                 message: message.to_string(),
                 suggested_query: (!query.trim().is_empty()).then(|| query.to_string()),
             }],
             retry_requests: Vec::new(),
-        },
+        }
+        .with_diagnosis(),
     }
 }
 
