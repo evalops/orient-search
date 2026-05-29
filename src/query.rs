@@ -279,7 +279,7 @@ fn infer_leading_location_term(
         return;
     }
 
-    let Some((path, target_line, trailing_term)) = split_leading_location_token(&terms[0]) else {
+    let Some((index, path, target_line, trailing_term)) = leading_location_term(terms) else {
         return;
     };
     let path = strip_leading_current_dir_segments(path);
@@ -295,16 +295,65 @@ fn infer_leading_location_term(
         return;
     }
     filters.target_line = Some(target_line);
+    terms.drain(0..=index);
     if let Some(trailing_term) = trailing_term {
-        terms[0] = trailing_term;
-    } else {
-        terms.remove(0);
+        terms.insert(0, trailing_term);
     }
     filters.require_all = false;
 }
 
+fn leading_location_term(terms: &[String]) -> Option<(usize, String, usize, Option<String>)> {
+    if let Some(location) = python_file_location_terms(terms) {
+        return Some(location);
+    }
+    for (index, term) in terms.iter().take(4).enumerate() {
+        if index > 0 && !stack_location_prefix(&terms[..index]) {
+            return None;
+        }
+        let Some((path, line, trailing)) = split_leading_location_token(term) else {
+            continue;
+        };
+        return Some((index, path, line, trailing));
+    }
+    None
+}
+
+fn python_file_location_terms(terms: &[String]) -> Option<(usize, String, usize, Option<String>)> {
+    if terms.len() < 4 || !term_eq_ignore_ascii_punctuation(&terms[0], "file") {
+        return None;
+    }
+    let path = normalize_location_token(&terms[1])?;
+    if !looks_like_location_path(&path) || !term_eq_ignore_ascii_punctuation(&terms[2], "line") {
+        return None;
+    }
+    let (line, _) = split_leading_positive_number(trim_location_token_wrappers(&terms[3]))?;
+    let (consume_index, trailing) =
+        match terms.get(4).map(|term| trim_location_token_wrappers(term)) {
+            Some(value) if value.eq_ignore_ascii_case("in") => {
+                let trailing = terms.get(5).cloned();
+                (trailing.as_ref().map(|_| 5).unwrap_or(4), trailing)
+            }
+            Some(value) if !value.is_empty() => (4, Some(value.to_string())),
+            _ => (3, None),
+        };
+    Some((consume_index, path, line, trailing))
+}
+
+fn stack_location_prefix(terms: &[String]) -> bool {
+    let Some(first) = terms.first() else {
+        return true;
+    };
+    let first = trim_location_token_wrappers(first).to_ascii_lowercase();
+    matches!(first.as_str(), "at" | "from" | "file" | "-->")
+        && terms.len() <= 3
+        && terms[1..].iter().all(|term| {
+            let term = trim_location_token_wrappers(term);
+            !term.is_empty() && !term.contains(':') && !looks_like_location_path(term)
+        })
+}
+
 fn split_leading_location_token(token: &str) -> Option<(String, usize, Option<String>)> {
-    let normalized = token.trim().replace('\\', "/");
+    let normalized = normalize_location_token(token)?;
     if normalized.is_empty() || normalized.contains("://") {
         return None;
     }
@@ -342,6 +391,22 @@ fn split_leading_location_token(token: &str) -> Option<(String, usize, Option<St
         ));
     }
     None
+}
+
+fn normalize_location_token(token: &str) -> Option<String> {
+    let normalized = trim_location_token_wrappers(token).replace('\\', "/");
+    (!normalized.is_empty()).then_some(normalized)
+}
+
+fn trim_location_token_wrappers(token: &str) -> &str {
+    token
+        .trim()
+        .trim_start_matches(|ch| matches!(ch, '(' | '[' | '{' | '<' | '"' | '\''))
+        .trim_end_matches(|ch| matches!(ch, ')' | ']' | '}' | '>' | '"' | '\'' | ',' | ';'))
+}
+
+fn term_eq_ignore_ascii_punctuation(term: &str, expected: &str) -> bool {
+    trim_location_token_wrappers(term).eq_ignore_ascii_case(expected)
 }
 
 fn strip_location_suffix(value: &str) -> (String, Option<usize>) {
@@ -882,6 +947,31 @@ mod tests {
             Some("src/server.rs")
         );
         assert_eq!(copied_source_column_line.filters.target_line, Some(42));
+
+        let wrapped_source_location = parse_query("(src/server.rs:42:9)");
+        assert!(wrapped_source_location.terms.is_empty());
+        assert_eq!(
+            wrapped_source_location.filters.path.as_deref(),
+            Some("src/server.rs")
+        );
+        assert_eq!(wrapped_source_location.filters.target_line, Some(42));
+
+        let stack_source_location = parse_query("at Object.handle (src/server.rs:42:9)");
+        assert!(stack_source_location.terms.is_empty());
+        assert_eq!(
+            stack_source_location.filters.path.as_deref(),
+            Some("src/server.rs")
+        );
+        assert_eq!(stack_source_location.filters.target_line, Some(42));
+
+        let python_source_location =
+            parse_query(r#"File "src/server.rs", line 42, in handle_request"#);
+        assert_eq!(python_source_location.terms, vec!["handle_request"]);
+        assert_eq!(
+            python_source_location.filters.path.as_deref(),
+            Some("src/server.rs")
+        );
+        assert_eq!(python_source_location.filters.target_line, Some(42));
 
         let copied_manifest_line = parse_query("Cargo.toml:12:name");
         assert_eq!(copied_manifest_line.terms, vec!["name"]);

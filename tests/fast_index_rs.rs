@@ -2049,6 +2049,28 @@ fn bare_path_like_queries_use_filter_only_fast_paths() {
         vec!["src/lib.rs"]
     );
     assert_eq!(absolute_copied_line_fallback[0].match_lines, vec![40]);
+    let wrapped_location_fallback =
+        search_repo_fast_filtered(repo.path(), "(src/lib.rs:40:9)", 10, &filters).unwrap();
+    assert_eq!(result_paths(&wrapped_location_fallback), vec!["src/lib.rs"]);
+    assert_eq!(wrapped_location_fallback[0].match_lines, vec![40]);
+    let stack_location_fallback = search_repo_fast_filtered(
+        repo.path(),
+        &format!("at Object.target ({absolute_source_path}:40:9)"),
+        10,
+        &filters,
+    )
+    .unwrap();
+    assert_eq!(result_paths(&stack_location_fallback), vec!["src/lib.rs"]);
+    assert_eq!(stack_location_fallback[0].match_lines, vec![40]);
+    let python_location_fallback = search_repo_fast_filtered(
+        repo.path(),
+        r#"File "src/lib.rs", line 40, in target_entrypoint"#,
+        10,
+        &filters,
+    )
+    .unwrap();
+    assert_eq!(result_paths(&python_location_fallback), vec!["src/lib.rs"]);
+    assert_eq!(python_location_fallback[0].match_lines, vec![40]);
     assert!(
         search_repo_fast_filtered(repo.path(), "missing/src/lib.rs:40:9", 10, &filters)
             .unwrap()
@@ -2146,6 +2168,29 @@ fn bare_path_like_queries_use_filter_only_fast_paths() {
         vec!["src/lib.rs"]
     );
     assert_eq!(absolute_copied_line_indexed[0].match_lines, vec![40]);
+    let wrapped_location_indexed = index
+        .search_filtered("(src/lib.rs:40:9)", 10, &filters)
+        .unwrap();
+    assert_eq!(result_paths(&wrapped_location_indexed), vec!["src/lib.rs"]);
+    assert_eq!(wrapped_location_indexed[0].match_lines, vec![40]);
+    let stack_location_indexed = index
+        .search_filtered(
+            &format!("at Object.target ({absolute_source_path}:40:9)"),
+            10,
+            &filters,
+        )
+        .unwrap();
+    assert_eq!(result_paths(&stack_location_indexed), vec!["src/lib.rs"]);
+    assert_eq!(stack_location_indexed[0].match_lines, vec![40]);
+    let python_location_indexed = index
+        .search_filtered(
+            r#"File "src/lib.rs", line 40, in target_entrypoint"#,
+            10,
+            &filters,
+        )
+        .unwrap();
+    assert_eq!(result_paths(&python_location_indexed), vec!["src/lib.rs"]);
+    assert_eq!(python_location_indexed[0].match_lines, vec![40]);
 
     let go_mod_indexed = index.search_filtered("go.mod", 10, &filters).unwrap();
     assert_eq!(go_mod_indexed[0].path, "go.mod");
