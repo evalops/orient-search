@@ -1730,6 +1730,7 @@ fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
         live["summary"]["top_paths"],
         serde_json::json!(["src/auth.rs"])
     );
+    assert_eq!(live["summary"]["top_dirs"], serde_json::json!(["src"]));
     assert!(
         live["summary"]["max_score"].as_f64().unwrap()
             >= live["summary"]["min_score"].as_f64().unwrap()
@@ -2016,6 +2017,10 @@ fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
     assert_eq!(
         auto_retry["primary_retry_result"]["summary"]["top_paths"],
         serde_json::json!(["src/auth.rs"])
+    );
+    assert_eq!(
+        auto_retry["primary_retry_result"]["summary"]["top_dirs"],
+        serde_json::json!(["src"])
     );
     assert_eq!(
         auto_retry["primary_retry_result"]["read_batch_request"]["tool"],

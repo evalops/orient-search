@@ -567,6 +567,7 @@ fn cli_search_auto_selects_live_indexed_and_shard_surfaces() {
     .success()
     .stdout(predicate::str::contains("\"surface\":\"fallback\""))
     .stdout(predicate::str::contains("\"top_paths\":[\"src/auth.rs\"]"))
+    .stdout(predicate::str::contains("\"top_dirs\":[\"src\"]"))
     .stdout(predicate::str::contains("\"max_score\""))
     .stdout(predicate::str::contains(
         "\"summary\":\"Read 1 bounded range",
@@ -767,6 +768,10 @@ fn cli_search_auto_selects_live_indexed_and_shard_surfaces() {
     assert_eq!(
         auto_retry_live["primary_retry_result"]["summary"]["top_paths"],
         serde_json::json!(["src/auth.rs"])
+    );
+    assert_eq!(
+        auto_retry_live["primary_retry_result"]["summary"]["top_dirs"],
+        serde_json::json!(["src"])
     );
     assert_eq!(
         auto_retry_live["primary_retry_result"]["read_batch_request"]["tool"],

@@ -88,6 +88,8 @@ struct SearchResultSummary {
     grouped_duplicate_count: usize,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     top_paths: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    top_dirs: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     max_score: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -115,6 +117,7 @@ fn search_result_summary(results: &[SearchResult]) -> SearchResultSummary {
         result_count,
         grouped_duplicate_count: grouped_duplicate_count_from_results(results),
         top_paths: search_summary_top_paths(results),
+        top_dirs: search_summary_top_dirs(results),
         max_score: results.first().map(|result| result.score),
         min_score: results.last().map(|result| result.score),
     }
@@ -131,6 +134,32 @@ fn search_summary_top_paths(results: &[SearchResult]) -> Vec<String> {
         }
     }
     paths
+}
+
+fn search_summary_top_dirs(results: &[SearchResult]) -> Vec<String> {
+    let mut dirs = Vec::new();
+    for result in results {
+        let dir = search_summary_dir(&result.path);
+        if !dirs.iter().any(|existing| existing == &dir) {
+            dirs.push(dir);
+            if dirs.len() == 5 {
+                break;
+            }
+        }
+    }
+    dirs
+}
+
+fn search_summary_dir(path: &str) -> String {
+    path.rsplit_once('/')
+        .map(|(dir, _)| {
+            if dir.is_empty() {
+                ".".to_string()
+            } else {
+                dir.to_string()
+            }
+        })
+        .unwrap_or_else(|| ".".to_string())
 }
 
 fn search_batch_result(
@@ -2895,6 +2924,10 @@ fn primary_retry_result_summary(result: &Value) -> Value {
     if !top_paths.is_empty() {
         summary["top_paths"] = json!(top_paths);
     }
+    let top_dirs = value_summary_top_dirs(results);
+    if !top_dirs.is_empty() {
+        summary["top_dirs"] = json!(top_dirs);
+    }
     if let Some(score) = results
         .first()
         .and_then(|item| item.get("score"))
@@ -2910,6 +2943,23 @@ fn primary_retry_result_summary(result: &Value) -> Value {
         summary["min_score"] = json!(score);
     }
     summary
+}
+
+fn value_summary_top_dirs(results: &[Value]) -> Vec<String> {
+    let mut dirs = Vec::new();
+    for item in results {
+        let Some(path) = item.get("path").and_then(Value::as_str) else {
+            continue;
+        };
+        let dir = search_summary_dir(path);
+        if !dirs.iter().any(|existing| existing == &dir) {
+            dirs.push(dir);
+            if dirs.len() == 5 {
+                break;
+            }
+        }
+    }
+    dirs
 }
 
 fn primary_retry_read_batch_request(
