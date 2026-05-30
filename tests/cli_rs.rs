@@ -303,7 +303,8 @@ fn cli_outputs_agent_guide() {
     .success()
     .stdout(predicate::str::contains("\"purpose\""))
     .stdout(predicate::str::contains("\"profile\":\"codex\""))
-    .stdout(predicate::str::contains("AGENTS.md"))
+    .stdout(predicate::str::contains("selected coding agent"))
+    .stdout(predicate::str::contains("AGENTS.md").not())
     .stdout(predicate::str::contains("no telemetry"))
     .stdout(predicate::str::contains("\"tool\":\"search_shards\""))
     .stdout(predicate::str::contains("\"tool\":\"search_auto\""))
@@ -345,7 +346,7 @@ fn cli_outputs_agent_instructions() {
     .stdout(predicate::str::contains(
         "orient client-jsonl --addr 127.0.0.1:9999",
     ))
-    .stdout(predicate::str::contains("local Amp project rules surface"))
+    .stdout(predicate::str::contains("selected coding agent"))
     .stdout(predicate::str::contains(
         "orient ensure-index --repo /work/repo --index /tmp/repo.index",
     ))
@@ -4015,6 +4016,14 @@ fn cli_filters_shard_search_by_nested_repo_alias() {
         "[package]\nname='billing'\nversion='0.1.0'\nedition='2024'\n",
     );
     write(
+        &billing_repo.join("package.json"),
+        r#"{"scripts":{"test":"vitest run","lint":"eslint .","typecheck":"tsc --noEmit"}}"#,
+    );
+    write(
+        &billing_repo.join("pnpm-lock.yaml"),
+        "lockfileVersion: '9.0'\n",
+    );
+    write(
         &auth_repo.join("src/auth.rs"),
         "pub fn issue_token() -> String { \"token\".to_string() }\n",
     );
@@ -4154,7 +4163,11 @@ fn cli_filters_shard_search_by_nested_repo_alias() {
         .stdout(predicate::str::contains("\"aliases\""))
         .stdout(predicate::str::contains("billing"))
         .stdout(predicate::str::contains("cargo test"))
+        .stdout(predicate::str::contains("pnpm test"))
+        .stdout(predicate::str::contains("pnpm run lint"))
+        .stdout(predicate::str::contains("pnpm run typecheck"))
         .stdout(predicate::str::contains("billing/Cargo.toml"))
+        .stdout(predicate::str::contains("billing/package.json"))
         .stdout(predicate::str::contains("auth/src/auth.rs").not());
 
     let mut generic_shard_map = Command::cargo_bin("orient").unwrap();
@@ -4171,7 +4184,11 @@ fn cli_filters_shard_search_by_nested_repo_alias() {
         .stdout(predicate::str::contains("\"aliases\""))
         .stdout(predicate::str::contains("billing"))
         .stdout(predicate::str::contains("cargo test"))
+        .stdout(predicate::str::contains("pnpm test"))
+        .stdout(predicate::str::contains("pnpm run lint"))
+        .stdout(predicate::str::contains("pnpm run typecheck"))
         .stdout(predicate::str::contains("billing/Cargo.toml"))
+        .stdout(predicate::str::contains("billing/package.json"))
         .stdout(predicate::str::contains("\"tool\":\"read_ranges\""))
         .stdout(predicate::str::contains("auth/src/auth.rs").not());
 

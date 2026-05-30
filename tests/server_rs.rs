@@ -1055,7 +1055,7 @@ fn agent_guide_returns_local_agent_request_templates() {
     assert_eq!(guide["profile"], "codex");
     assert_eq!(
         guide["rule_target"],
-        "the repo-local AGENTS.md file or equivalent Codex rule surface"
+        "the local instruction file read by the selected coding agent"
     );
     assert_eq!(
         guide["preferred_surfaces"]["many_local_repos"],
@@ -1192,7 +1192,7 @@ fn agent_guide_returns_local_agent_request_templates() {
             .as_array()
             .unwrap()
             .iter()
-            .any(|item| item.as_str().unwrap().contains("AGENTS.md"))
+            .any(|item| item.as_str().unwrap().contains("Selected profile: codex"))
     );
     assert_eq!(
         guide["hard_limits"]["max_batch_read_lines"],
@@ -1213,7 +1213,7 @@ fn agent_instructions_returns_copyable_local_agent_rules() {
         "## Orient Search",
         "Use Orient as the first local code-discovery step",
         "orient client-jsonl --addr 127.0.0.1:9999",
-        "CLAUDE.md",
+        "selected coding agent",
         "Keep cache paths local",
         "orient ensure-shards --discover-root /path/to/workspaces --output-dir /tmp/orient-shards --family-limit 2",
         "orient ensure-index --repo /work/repo --index /tmp/repo.index",
@@ -1263,24 +1263,32 @@ fn agent_guidance_defaults_use_neutral_cache_placeholders() {
 }
 
 #[test]
-fn agent_guidance_profiles_target_specific_rule_surfaces() {
+fn agent_guidance_profiles_keep_rule_surfaces_neutral() {
     let codex = agent_instructions(None, None, None, None, Some("codex"));
-    assert!(codex.contains("AGENTS.md"));
+    assert!(codex.contains("selected coding agent"));
+    assert!(!codex.contains("Selected profile"));
+    assert!(!codex.contains("AGENTS.md"));
     assert!(!codex.contains("CLAUDE.md"));
 
     let claude = agent_instructions(None, None, None, None, Some("claude-code"));
-    assert!(claude.contains("CLAUDE.md"));
+    assert!(claude.contains("selected coding agent"));
+    assert!(!claude.contains("CLAUDE.md"));
     assert!(!claude.contains("AGENTS.md"));
 
     let amp = agent_guide(None, None, None, None, Some("amp"));
     assert_eq!(amp["profile"], "amp");
-    assert!(amp["rule_target"].as_str().unwrap().contains("Amp"));
+    assert!(
+        amp["rule_target"]
+            .as_str()
+            .unwrap()
+            .contains("selected coding agent")
+    );
     assert!(
         amp["adapter_notes"]
             .as_array()
             .unwrap()
             .iter()
-            .any(|item| item.as_str().unwrap().contains("Selected profile: Amp"))
+            .any(|item| item.as_str().unwrap().contains("Selected profile: amp"))
     );
 }
 
@@ -1349,7 +1357,9 @@ fn runtime_serves_agent_instructions_for_local_rule_files() {
     assert!(instructions.contains("search_auto_default"));
     assert!(instructions.contains("next_action"));
     assert!(instructions.contains("read_batch_request"));
-    assert!(instructions.contains("local Amp project rules surface"));
+    assert!(instructions.contains("selected coding agent"));
+    assert!(!instructions.contains("AGENTS.md"));
+    assert!(!instructions.contains("CLAUDE.md"));
     assert!(instructions.contains("does not collect telemetry"));
 }
 

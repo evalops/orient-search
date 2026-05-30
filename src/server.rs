@@ -1444,18 +1444,18 @@ fn agent_profile(profile: Option<&str>) -> AgentProfile {
     {
         "codex" => AgentProfile {
             name: "codex",
-            rule_target: "the repo-local AGENTS.md file or equivalent Codex rule surface",
-            adapter_note: "Selected profile: Codex; place the snippet in AGENTS.md for the repo.",
+            rule_target: "the local instruction file read by the selected coding agent",
+            adapter_note: "Selected profile: codex; place the snippet in that agent's local instruction file for this repo.",
         },
         "claude" | "claudecode" => AgentProfile {
             name: "claude",
-            rule_target: "the project CLAUDE.md file or equivalent Claude Code rule file",
-            adapter_note: "Selected profile: Claude Code; place the snippet in CLAUDE.md for the project.",
+            rule_target: "the local instruction file read by the selected coding agent",
+            adapter_note: "Selected profile: claude; place the snippet in that agent's local instruction file for this repo.",
         },
         "amp" => AgentProfile {
             name: "amp",
-            rule_target: "the local Amp project rules surface",
-            adapter_note: "Selected profile: Amp; place the snippet in the local project rules surface.",
+            rule_target: "the local instruction file read by the selected coding agent",
+            adapter_note: "Selected profile: amp; place the snippet in that agent's local instruction file for this repo.",
         },
         _ => AgentProfile {
             name: "generic",
