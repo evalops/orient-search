@@ -1664,9 +1664,16 @@ fn argument_schema(tool_name: &str, name: &str) -> Value {
                     "path": {"type": "string", "description": path_description},
                     "start": {"type": "integer", "minimum": 1, "default": 1},
                     "start_line": {"type": "integer", "minimum": 1, "description": "Alias for start."},
+                    "start-line": {"type": "integer", "minimum": 1, "description": "Alias for start."},
+                    "line": {"type": "integer", "minimum": 1, "description": "Alias for start."},
+                    "target_line": {"type": "integer", "minimum": 1, "description": "Alias for start."},
+                    "target-line": {"type": "integer", "minimum": 1, "description": "Alias for start."},
                     "lines": {"type": "integer", "minimum": 1, "maximum": MAX_READ_RANGE_LINES, "default": 80},
                     "line_count": {"type": "integer", "minimum": 1, "maximum": MAX_READ_RANGE_LINES, "description": "Alias for lines."},
+                    "line-count": {"type": "integer", "minimum": 1, "maximum": MAX_READ_RANGE_LINES, "description": "Alias for lines."},
                     "end_line": {"type": "integer", "minimum": 1, "description": "Inclusive end line; use instead of lines or line_count."},
+                    "end-line": {"type": "integer", "minimum": 1, "description": "Alias for end_line."},
+                    "end": {"type": "integer", "minimum": 1, "description": "Alias for end_line."},
                     "scope": {
                         "type": "string",
                         "enum": ["exact", "symbol"],
@@ -1723,8 +1730,8 @@ fn argument_schema(tool_name: &str, name: &str) -> Value {
             schema.insert("type".to_string(), json!("boolean"));
         }
         "limit" | "max_depth" | "discover_limit" | "family_limit" | "symbols" | "start"
-        | "start_line" | "end_line" | "lines" | "line_count" | "tests" | "context_lines"
-        | "read_limit" | "line" | "target_line" => {
+        | "start_line" | "end_line" | "end" | "lines" | "line_count" | "tests"
+        | "context_lines" | "read_limit" | "line" | "target_line" => {
             schema.insert("type".to_string(), json!("integer"));
             schema.insert(
                 "minimum".to_string(),
@@ -1793,6 +1800,7 @@ fn argument_schema_aliases<'a>(name: &'a str) -> Vec<(String, &'a str)> {
         "origin" => &["remote", "remote_origin", "remote-origin"],
         "repo_filter" => &["repo-filter"],
         "target_line" => &["target-line"],
+        "end_line" => &["end"],
         "exclude_file" => &["exclude-filename", "exclude_file_name", "exclude-file-name"],
         "exclude_path" => &[
             "exclude_dir",
@@ -1899,8 +1907,8 @@ fn daemon_default_kind(tool_name: &str) -> Option<DaemonDefaultKind> {
 fn argument_type(name: &str) -> &'static str {
     match name {
         "limit" | "max_depth" | "discover_limit" | "family_limit" | "symbols" | "start"
-        | "start_line" | "end_line" | "lines" | "line_count" | "tests" | "context_lines"
-        | "read_limit" | "line" | "target_line" => "integer",
+        | "start_line" | "end_line" | "end" | "lines" | "line_count" | "tests"
+        | "context_lines" | "read_limit" | "line" | "target_line" => "integer",
         "test" | "generated" | "code" | "explain" | "require_all" | "any_terms" | "details"
         | "refresh_if_stale" | "include_read_batch" | "git_metadata" | "tracked_files"
         | "nested_manifests" => "boolean",
@@ -2193,6 +2201,7 @@ fn argument_description(tool_name: &str, name: &str) -> &'static str {
         "start" => "One-based start line for range reads.",
         "start_line" => "Alias for start when passing line_range-shaped data.",
         "end_line" => "Inclusive end line for range reads; use instead of lines or line_count.",
+        "end" => "Alias for end_line.",
         "lines" => "Number of lines to read, capped to the maximum bounded range size.",
         "line_count" => "Alias for lines when passing line_range-shaped data.",
         "scope" => {
@@ -7402,9 +7411,12 @@ const READ_TARGET_OPTIONAL_ARGS: &[&str] = &[
     "range",
     "start",
     "start_line",
+    "line",
+    "target_line",
     "lines",
     "line_count",
     "end_line",
+    "end",
     "scope",
 ];
 
@@ -7414,9 +7426,12 @@ const READ_WINDOW_OPTIONAL_ARGS: &[&str] = &[
     "range",
     "start",
     "start_line",
+    "line",
+    "target_line",
     "lines",
     "line_count",
     "end_line",
+    "end",
     "scope",
 ];
 
@@ -8337,7 +8352,7 @@ fn string_array_arg(arguments: &Value, name: &str) -> Result<Vec<String>> {
 }
 
 fn optional_path_array_arg(arguments: &Value, name: &str) -> Result<Vec<PathBuf>> {
-    let Some(value) = arguments.get(name) else {
+    let Some(value) = argument_value(arguments, name) else {
         return Ok(Vec::new());
     };
     let values = value
@@ -8362,9 +8377,8 @@ struct RangeArg {
 }
 
 fn range_args(arguments: &Value, tool_name: &str) -> Result<Vec<RangeArg>> {
-    let value = arguments
-        .get("ranges")
-        .ok_or_else(|| anyhow!("missing ranges argument"))?;
+    let value =
+        argument_value(arguments, "ranges").ok_or_else(|| anyhow!("missing ranges argument"))?;
     let owned_single;
     let values = if let Some(values) = value.as_array() {
         values
@@ -8397,19 +8411,19 @@ fn range_args(arguments: &Value, tool_name: &str) -> Result<Vec<RangeArg>> {
 }
 
 fn single_range_arg(arguments: &Value, tool_name: &str) -> Result<RangeArg> {
-    let has_path = arguments.get("path").is_some();
-    let has_range = arguments.get("range").is_some();
-    let has_ranges = arguments.get("ranges").is_some();
+    let has_path = argument_value(arguments, "path").is_some();
+    let has_range = argument_value(arguments, "range").is_some();
+    let has_ranges = argument_value(arguments, "ranges").is_some();
     if (has_path && (has_range || has_ranges)) || (has_range && has_ranges) {
         return Err(anyhow!(
             "{tool_name} accepts one of path/start/lines, range, or ranges"
         ));
     }
     let default_scope = read_scope_arg(arguments)?;
-    if let Some(value) = arguments.get("range") {
+    if let Some(value) = argument_value(arguments, "range") {
         return range_arg(value, default_scope);
     }
-    if let Some(value) = arguments.get("ranges") {
+    if let Some(value) = argument_value(arguments, "ranges") {
         let value = if let Some(values) = value.as_array() {
             if values.len() != 1 {
                 return Err(anyhow!(
@@ -8667,10 +8681,7 @@ fn shard_repos_from_arguments(arguments: &Value) -> Result<ShardRepoSelection> {
             .or(optional_positive_usize_arg(arguments, "limit")?)
             .unwrap_or(500);
         let family_limit = optional_family_limit_arg(arguments)?;
-        let nested_manifests = arguments
-            .get("nested_manifests")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
+        let nested_manifests = bool_arg(arguments, "nested_manifests");
         let mut discovery = Vec::new();
         for root in discover_roots {
             let discovered = discover_repos(

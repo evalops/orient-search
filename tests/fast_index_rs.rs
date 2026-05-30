@@ -1813,6 +1813,18 @@ fn query_language_filters_fallback_and_indexed_search() {
     assert_eq!(indexed_results.len(), 1);
     assert_eq!(indexed_results[0].path, "src/auth.rs");
 
+    let cli_style_query = r#"file-name:auth.rs target-line:1 require-all:true exclude-dir:docs exclude-symbol-kind:class "issue token""#;
+    let cli_style_filters = SearchFilters::default();
+    let fallback_cli_style =
+        search_repo_fast_filtered(repo.path(), cli_style_query, 10, &cli_style_filters).unwrap();
+    assert_eq!(result_paths(&fallback_cli_style), vec!["src/auth.rs"]);
+    assert_eq!(fallback_cli_style[0].match_lines[0], 1);
+    let indexed_cli_style = indexed
+        .search_filtered(cli_style_query, 10, &cli_style_filters)
+        .unwrap();
+    assert_eq!(result_paths(&indexed_cli_style), vec!["src/auth.rs"]);
+    assert_eq!(indexed_cli_style[0].match_lines[0], 1);
+
     let fallback_class_shorthand = search_repo_fast_filtered(
         repo.path(),
         "class:SessionManager",

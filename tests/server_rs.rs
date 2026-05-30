@@ -323,6 +323,27 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         read_shard_range["input_schema"]["properties"]["index-dir"]["type"],
         "string"
     );
+    assert_eq!(
+        read_shard_range["input_schema"]["properties"]["line"]["type"],
+        "integer"
+    );
+    assert_eq!(
+        read_shard_range["input_schema"]["properties"]["target-line"]["description"],
+        "Alias for target_line."
+    );
+    assert_eq!(
+        read_shard_range["input_schema"]["properties"]["end"]["description"],
+        "Alias for end_line."
+    );
+    assert_eq!(
+        read_index_range["input_schema"]["properties"]["range"]["oneOf"][0]["properties"]["line-count"]
+            ["maximum"],
+        serde_json::json!(MAX_READ_RANGE_LINES)
+    );
+    assert_eq!(
+        read_index_range["input_schema"]["properties"]["range"]["oneOf"][0]["properties"]["end"]["description"],
+        "Alias for end_line."
+    );
     assert!(
         search["input_schema"]["properties"]["line"]["description"]
             .as_str()
@@ -2707,6 +2728,25 @@ fn runtime_read_alias_accepts_live_index_and_shard_targets() {
     assert_eq!(live_line_range["start_line"], serde_json::json!(1));
     assert_eq!(live_line_range["end_line"], serde_json::json!(2));
 
+    let live_line_alias_range = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("live-line-alias-range-read"),
+        tool: "open_range".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "path": "src/auth.rs",
+            "line": 1,
+            "end": 2
+        }),
+    });
+    assert!(
+        live_line_alias_range.error.is_none(),
+        "{:?}",
+        live_line_alias_range.error
+    );
+    let live_line_alias_range = live_line_alias_range.result.unwrap();
+    assert_eq!(live_line_alias_range["start_line"], serde_json::json!(1));
+    assert_eq!(live_line_alias_range["end_line"], serde_json::json!(2));
+
     let live_range_object = runtime.dispatch(ToolRequest {
         id: serde_json::json!("live-single-range-object"),
         tool: "open_range".to_string(),
@@ -2736,8 +2776,8 @@ fn runtime_read_alias_accepts_live_index_and_shard_targets() {
             "repo": repo.path(),
             "range": {
                 "path": "src/auth.rs",
-                "start-line": 1,
-                "line-count": 2
+                "target-line": 1,
+                "end": 2
             }
         }),
     });
@@ -5204,9 +5244,10 @@ fn runtime_indexes_shards_from_discovered_root() {
         id: serde_json::json!("index"),
         tool: "index_shards".to_string(),
         arguments: serde_json::json!({
-            "discover_root": root.path(),
-            "max_depth": 2,
-            "output_dir": shard_dir.path()
+            "discover-roots": [root.path()],
+            "max-depth": 2,
+            "nested-manifests": true,
+            "output-dir": shard_dir.path()
         }),
     });
     assert!(build.error.is_none(), "{:?}", build.error);

@@ -81,12 +81,16 @@ fn apply_match_mode(filters: &mut SearchFilters, token: &str, negated: bool) -> 
     let key = key.to_ascii_lowercase();
     let value = value.trim().to_ascii_lowercase();
     match (key.as_str(), value.as_str()) {
-        ("mode" | "match" | "terms", "any" | "or" | "some") | ("all", "false" | "0" | "no") => {
+        ("mode" | "match" | "terms", "any" | "or" | "some")
+        | ("all" | "require_all" | "require-all", "false" | "0" | "no")
+        | ("any_terms" | "any-terms", "true" | "1" | "yes") => {
             filters.match_any = true;
             filters.require_all = false;
             true
         }
-        ("mode" | "match" | "terms", "all" | "and") | ("all", "true" | "1" | "yes") => {
+        ("mode" | "match" | "terms", "all" | "and")
+        | ("all" | "require_all" | "require-all", "true" | "1" | "yes")
+        | ("any_terms" | "any-terms", "false" | "0" | "no") => {
             filters.match_any = false;
             filters.require_all = true;
             true
@@ -116,7 +120,7 @@ fn apply_filter(filters: &mut SearchFilters, token: &str, negated: bool) -> bool
     }
 
     match (negated, key.as_str()) {
-        (false, "file" | "filename" | "file_name" | "basename") => {
+        (false, "file" | "filename" | "file_name" | "file-name" | "basename") => {
             let (value, target_line) = strip_location_suffix(&value);
             let value = strip_leading_current_dir_segments(value);
             if target_line.is_some() && value.contains('/') {
@@ -146,7 +150,7 @@ fn apply_filter(filters: &mut SearchFilters, token: &str, negated: bool) -> bool
                 None => return false,
             }
         }
-        (false, "repo") => filters.repo = Some(value),
+        (false, "repo" | "repo_filter" | "repo-filter") => filters.repo = Some(value),
         (false, "branch" | "git_branch" | "git-branch") => filters.branch = Some(value),
         (false, "origin" | "remote" | "remote_origin" | "remote-origin") => {
             filters.origin = Some(value)
@@ -176,7 +180,63 @@ fn apply_filter(filters: &mut SearchFilters, token: &str, negated: bool) -> bool
             };
             filters.target_line = Some(line);
         }
-        (true, "file" | "filename" | "file_name" | "basename") => filters.exclude_file.push(value),
+        (
+            false,
+            "exclude_file" | "exclude_filename" | "exclude_file_name" | "exclude-file-name",
+        ) => filters.exclude_file.push(value),
+        (
+            false,
+            "exclude_path" | "exclude_dir" | "exclude_directory" | "exclude_folder" | "exclude-dir"
+            | "exclude-directory" | "exclude-folder",
+        ) => filters.exclude_path.push(value),
+        (false, "exclude_language" | "exclude_lang" | "exclude-lang") => filters
+            .exclude_language
+            .push(normalize_language_filter(&value)),
+        (false, "exclude_extension" | "exclude_ext" | "exclude-ext") => filters
+            .exclude_extension
+            .push(value.trim_start_matches('.').to_ascii_lowercase()),
+        (false, "exclude_symbol") => filters.exclude_symbol.push(value),
+        (
+            false,
+            "exclude_symbol_kind"
+            | "exclude_kind"
+            | "exclude_type"
+            | "exclude-symbol-kind"
+            | "exclude-kind"
+            | "exclude-type",
+        ) => filters
+            .exclude_symbol_kind
+            .push(normalize_symbol_kind(&value)),
+        (false, "exclude_repo") => filters.exclude_repo.push(value),
+        (false, "exclude_branch" | "exclude_git_branch" | "exclude-git-branch") => {
+            filters.exclude_branch.push(value)
+        }
+        (
+            false,
+            "exclude_origin"
+            | "exclude_remote"
+            | "exclude_remote_origin"
+            | "exclude-remote"
+            | "exclude-remote-origin",
+        ) => filters.exclude_origin.push(value),
+        (
+            false,
+            "exclude_dependency" | "exclude_dep" | "exclude_deps" | "exclude-dep" | "exclude-deps",
+        ) => filters.exclude_dependency.push(value.to_ascii_lowercase()),
+        (
+            false,
+            "exclude_import" | "exclude_imports" | "exclude_module" | "exclude_modules"
+            | "exclude_use" | "exclude_uses" | "exclude-imports" | "exclude-module"
+            | "exclude-modules" | "exclude-use" | "exclude-uses",
+        ) => filters.exclude_import.push(value.to_ascii_lowercase()),
+        (
+            false,
+            "exclude_content" | "exclude_text" | "exclude_term" | "exclude-content"
+            | "exclude-text" | "exclude-term",
+        ) => filters.exclude_content.push(value),
+        (true, "file" | "filename" | "file_name" | "file-name" | "basename") => {
+            filters.exclude_file.push(value)
+        }
         (true, "path" | "dir" | "directory" | "folder") => filters.exclude_path.push(value),
         (true, "lang" | "language") => filters
             .exclude_language
@@ -193,7 +253,7 @@ fn apply_filter(filters: &mut SearchFilters, token: &str, negated: bool) -> bool
             Some(kind) => filters.exclude_symbol_kind.push(kind),
             None => return false,
         },
-        (true, "repo") => filters.exclude_repo.push(value),
+        (true, "repo" | "repo_filter" | "repo-filter") => filters.exclude_repo.push(value),
         (true, "branch" | "git_branch" | "git-branch") => filters.exclude_branch.push(value),
         (true, "origin" | "remote" | "remote_origin" | "remote-origin") => {
             filters.exclude_origin.push(value)
@@ -1040,6 +1100,22 @@ mod tests {
         assert_eq!(parsed.filters.exclude_language, vec!["markdown"]);
         assert_eq!(parsed.filters.exclude_file, vec!["generated.rs"]);
         assert_eq!(parsed.filters.exclude_path, vec!["vendor"]);
+
+        let cli_style = parse_query(
+            "file-name:auth.rs repo-filter:service target-line:12 require-all:true exclude-dir:vendor exclude-symbol-kind:class exclude-content:deprecated token auth",
+        );
+        assert_eq!(cli_style.terms, vec!["token", "auth"]);
+        assert_eq!(cli_style.filters.file.as_deref(), Some("auth.rs"));
+        assert_eq!(cli_style.filters.repo.as_deref(), Some("service"));
+        assert_eq!(cli_style.filters.target_line, Some(12));
+        assert!(cli_style.filters.require_all);
+        assert_eq!(cli_style.filters.exclude_path, vec!["vendor"]);
+        assert_eq!(cli_style.filters.exclude_symbol_kind, vec!["class"]);
+        assert_eq!(cli_style.filters.exclude_content, vec!["deprecated"]);
+
+        let broad = parse_query("any-terms:true session token");
+        assert!(broad.filters.match_any);
+        assert!(!broad.filters.require_all);
     }
 
     #[test]
