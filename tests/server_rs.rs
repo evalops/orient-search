@@ -3459,6 +3459,14 @@ fn runtime_find_symbol_alias_accepts_live_index_and_shard_targets() {
         indexed_wrapped.error
     );
     let indexed_wrapped = indexed_wrapped.result.unwrap();
+    assert_eq!(
+        indexed_wrapped["summary"]["status"],
+        serde_json::json!("matched")
+    );
+    assert_eq!(
+        indexed_wrapped["summary"]["symbol_count"],
+        serde_json::json!(indexed_wrapped["results"].as_array().unwrap().len())
+    );
     assert_eq!(indexed_wrapped["results"][0]["path"], "src/auth.rs");
     assert_eq!(
         indexed_wrapped["read_batch_request"]["tool"],
@@ -3472,6 +3480,34 @@ fn runtime_find_symbol_alias_accepts_live_index_and_shard_targets() {
         indexed_wrapped["next_action"]["request"],
         indexed_wrapped["read_batch_request"]
     );
+
+    let missing_wrapped = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("missing-symbol-wrapped"),
+        tool: "find_symbol".to_string(),
+        arguments: serde_json::json!({
+            "index": repo.path().join(".orient/index"),
+            "name": "MissingSymbol",
+            "limit": 5,
+            "include_read_batch": true
+        }),
+    });
+    assert!(
+        missing_wrapped.error.is_none(),
+        "{:?}",
+        missing_wrapped.error
+    );
+    let missing_wrapped = missing_wrapped.result.unwrap();
+    assert_eq!(
+        missing_wrapped["summary"]["status"],
+        serde_json::json!("not_found")
+    );
+    assert_eq!(
+        missing_wrapped["summary"]["symbol_count"],
+        serde_json::json!(0)
+    );
+    assert_eq!(missing_wrapped["results"], serde_json::json!([]));
+    assert!(missing_wrapped["read_batch_request"].is_null());
+    assert!(missing_wrapped["next_action"].is_null());
 
     let explicit_indexed_wrapped = runtime.dispatch(ToolRequest {
         id: serde_json::json!("explicit-indexed-symbol-wrapped"),
@@ -3489,6 +3525,10 @@ fn runtime_find_symbol_alias_accepts_live_index_and_shard_targets() {
         explicit_indexed_wrapped.error
     );
     let explicit_indexed_wrapped = explicit_indexed_wrapped.result.unwrap();
+    assert_eq!(
+        explicit_indexed_wrapped["summary"]["status"],
+        serde_json::json!("matched")
+    );
     assert_eq!(
         explicit_indexed_wrapped["read_batch_request"]["tool"],
         serde_json::json!("read_index_ranges")
@@ -3533,6 +3573,10 @@ fn runtime_find_symbol_alias_accepts_live_index_and_shard_targets() {
         explicit_sharded_wrapped.error
     );
     let explicit_sharded_wrapped = explicit_sharded_wrapped.result.unwrap();
+    assert_eq!(
+        explicit_sharded_wrapped["summary"]["status"],
+        serde_json::json!("matched")
+    );
     assert_eq!(
         explicit_sharded_wrapped["read_batch_request"]["tool"],
         serde_json::json!("read_shard_ranges")

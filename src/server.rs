@@ -299,6 +299,7 @@ struct SymbolBatchResult {
 
 #[derive(Debug, Serialize)]
 struct SymbolLookupResponse {
+    summary: SymbolBatchSummary,
     results: Vec<SymbolLookupResult>,
     #[serde(skip_serializing_if = "Option::is_none")]
     read_batch_request: Option<ResultToolRequest>,
@@ -312,6 +313,17 @@ struct SymbolBatchSummary {
     symbol_count: usize,
 }
 
+fn symbol_batch_summary(symbol_count: usize) -> SymbolBatchSummary {
+    SymbolBatchSummary {
+        status: if symbol_count == 0 {
+            "not_found".to_string()
+        } else {
+            "matched".to_string()
+        },
+        symbol_count,
+    }
+}
+
 fn symbol_lookup_response(
     symbols: Vec<SymbolLookupResult>,
     include_read_batch: bool,
@@ -323,7 +335,9 @@ fn symbol_lookup_response(
     }
     let read_batch_request = symbol_lookup_read_batch_request(&symbols, batch_tool, base_arguments);
     let next_action = read_batch_next_action(&read_batch_request);
+    let summary = symbol_batch_summary(symbols.len());
     Ok(serde_json::to_value(SymbolLookupResponse {
+        summary,
         results: symbols,
         read_batch_request,
         next_action,
@@ -335,14 +349,7 @@ fn symbol_batch_result(
     read_batch_request: Option<ResultToolRequest>,
     symbols: Vec<SymbolLookupResult>,
 ) -> SymbolBatchResult {
-    let summary = SymbolBatchSummary {
-        status: if symbols.is_empty() {
-            "not_found".to_string()
-        } else {
-            "matched".to_string()
-        },
-        symbol_count: symbols.len(),
-    };
+    let summary = symbol_batch_summary(symbols.len());
     let next_action = read_batch_next_action(&read_batch_request);
     SymbolBatchResult {
         name,
