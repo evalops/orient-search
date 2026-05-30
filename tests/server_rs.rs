@@ -532,6 +532,10 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         false
     );
     assert_eq!(
+        search_plan_alias["input_schema"]["properties"]["summary"]["type"],
+        "boolean"
+    );
+    assert_eq!(
         search_plan_batch["required"],
         serde_json::json!(["repo", "queries"])
     );
@@ -548,6 +552,10 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         "string"
     );
     assert_eq!(
+        search_plan_batch_alias["input_schema"]["properties"]["summary"]["description"],
+        "When true for query-plan tools, return only compact summaries, retry requests, and next_action instead of full nested plan payloads."
+    );
+    assert_eq!(
         search_plan_batch["input_schema"]["properties"]["queries"]["maxItems"],
         serde_json::json!(MAX_BATCH_QUERIES)
     );
@@ -558,6 +566,10 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
     assert_eq!(
         indexed_plan_batch["input_schema"]["properties"]["refresh_if_stale"]["default"],
         false
+    );
+    assert_eq!(
+        indexed_plan_batch["input_schema"]["properties"]["summary"]["type"],
+        "boolean"
     );
     assert_eq!(
         shard_plan_batch["required"],
@@ -4077,6 +4089,25 @@ fn runtime_search_plan_alias_accepts_live_index_and_shard_targets() {
         serde_json::json!(repo.path().canonicalize().unwrap())
     );
 
+    let live_summary = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("live-plan-summary"),
+        tool: "search_plan".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "query": "issue definitely_missing",
+            "summary": true
+        }),
+    });
+    assert!(live_summary.error.is_none(), "{:?}", live_summary.error);
+    let live_summary = live_summary.result.unwrap();
+    assert_eq!(
+        live_summary["primary_retry_request"]["tool"],
+        serde_json::json!("search")
+    );
+    assert!(live_summary.get("retry_requests").is_none());
+    assert!(live_summary.get("planned_postings").is_none());
+    assert!(live_summary.get("query_tokens").is_none());
+
     let indexed = runtime.dispatch(ToolRequest {
         id: serde_json::json!("indexed-plan"),
         tool: "search_plan".to_string(),
@@ -4093,6 +4124,28 @@ fn runtime_search_plan_alias_accepts_live_index_and_shard_targets() {
         serde_json::json!(index_path)
     );
 
+    let direct_index_summary = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("direct-index-plan-summary"),
+        tool: "indexed_query_plan".to_string(),
+        arguments: serde_json::json!({
+            "index": repo.path().join(".orient/index"),
+            "query": "issue definitely_missing",
+            "summary": true
+        }),
+    });
+    assert!(
+        direct_index_summary.error.is_none(),
+        "{:?}",
+        direct_index_summary.error
+    );
+    let direct_index_summary = direct_index_summary.result.unwrap();
+    assert_eq!(
+        direct_index_summary["primary_retry_request"]["tool"],
+        serde_json::json!("indexed_search_code")
+    );
+    assert!(direct_index_summary.get("retry_requests").is_none());
+    assert!(direct_index_summary.get("planned_postings").is_none());
+
     let sharded = runtime.dispatch(ToolRequest {
         id: serde_json::json!("shard-plan"),
         tool: "search_plan".to_string(),
@@ -4107,6 +4160,27 @@ fn runtime_search_plan_alias_accepts_live_index_and_shard_targets() {
     assert_eq!(
         sharded[0]["plan"]["retry_requests"][0]["arguments"]["index_dir"],
         serde_json::json!(shard_dir)
+    );
+
+    let sharded_summary = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("shard-plan-summary"),
+        tool: "shard_query_plan".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": repo.path().join(".orient-shards"),
+            "query": "issue definitely_missing",
+            "summary": true
+        }),
+    });
+    assert!(
+        sharded_summary.error.is_none(),
+        "{:?}",
+        sharded_summary.error
+    );
+    let sharded_summary = sharded_summary.result.unwrap();
+    assert!(sharded_summary.as_array().unwrap()[0].get("plan").is_none());
+    assert_eq!(
+        sharded_summary[0]["summary"]["primary_retry_request"]["tool"],
+        serde_json::json!("search_shards")
     );
 
     let indexed_batch = runtime.dispatch(ToolRequest {
@@ -4132,6 +4206,28 @@ fn runtime_search_plan_alias_accepts_live_index_and_shard_targets() {
         serde_json::json!(index_path)
     );
 
+    let indexed_batch_summary = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("indexed-plan-batch-summary"),
+        tool: "search_plan_batch".to_string(),
+        arguments: serde_json::json!({
+            "index": repo.path().join(".orient/index"),
+            "queries": ["issue definitely_missing", "SessionManager definitely_missing"],
+            "summary": true
+        }),
+    });
+    assert!(
+        indexed_batch_summary.error.is_none(),
+        "{:?}",
+        indexed_batch_summary.error
+    );
+    let indexed_batch_summary = indexed_batch_summary.result.unwrap();
+    assert_eq!(
+        indexed_batch_summary[0]["summary"]["primary_retry_request"]["tool"],
+        serde_json::json!("search")
+    );
+    assert!(indexed_batch_summary[0].get("plan").is_none());
+    assert!(indexed_batch_summary[0].get("plans").is_none());
+
     let shard_batch = runtime.dispatch(ToolRequest {
         id: serde_json::json!("shard-plan-batch"),
         tool: "search_plan_batch".to_string(),
@@ -4154,6 +4250,28 @@ fn runtime_search_plan_alias_accepts_live_index_and_shard_targets() {
         shard_batch[0]["plans"][0]["plan"]["retry_requests"][0]["arguments"]["index_dir"],
         serde_json::json!(shard_dir)
     );
+
+    let shard_batch_summary = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("shard-plan-batch-summary"),
+        tool: "search_plan_batch".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": repo.path().join(".orient-shards"),
+            "queries": ["issue definitely_missing"],
+            "summary": true
+        }),
+    });
+    assert!(
+        shard_batch_summary.error.is_none(),
+        "{:?}",
+        shard_batch_summary.error
+    );
+    let shard_batch_summary = shard_batch_summary.result.unwrap();
+    assert_eq!(
+        shard_batch_summary[0]["summary"]["primary_retry_request"]["tool"],
+        serde_json::json!("search")
+    );
+    assert!(shard_batch_summary[0].get("plans").is_none());
+    assert!(shard_batch_summary[0]["shards"].is_array());
 
     let conflicted = runtime.dispatch(ToolRequest {
         id: serde_json::json!("conflicted-plan"),

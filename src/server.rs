@@ -437,6 +437,96 @@ fn shard_query_plan_summary_value(plans: &[ShardQueryPlan]) -> Value {
     )
 }
 
+fn query_plan_response_value(plan: QueryPlan, summary_only: bool) -> Result<Value> {
+    if summary_only {
+        Ok(serde_json::to_value(plan.compact_summary())?)
+    } else {
+        Ok(serde_json::to_value(plan)?)
+    }
+}
+
+fn query_plan_batch_response_value(
+    query: String,
+    plan: QueryPlan,
+    summary_only: bool,
+) -> Result<Value> {
+    if summary_only {
+        let next_action = plan.next_action.clone();
+        let mut item = Map::new();
+        item.insert("query".to_string(), Value::String(query));
+        item.insert(
+            "summary".to_string(),
+            serde_json::to_value(plan.compact_summary())?,
+        );
+        if let Some(next_action) = next_action {
+            item.insert(
+                "next_action".to_string(),
+                serde_json::to_value(next_action)?,
+            );
+        }
+        Ok(Value::Object(item))
+    } else {
+        Ok(serde_json::to_value(query_plan_batch_result(query, plan))?)
+    }
+}
+
+fn indexed_query_plan_batch_response_value(
+    query: String,
+    plan: QueryPlan,
+    summary_only: bool,
+) -> Result<Value> {
+    if summary_only {
+        query_plan_batch_response_value(query, plan, true)
+    } else {
+        Ok(serde_json::to_value(indexed_query_plan_batch_result(
+            query, plan,
+        ))?)
+    }
+}
+
+fn shard_query_plan_response_value(plans: &[ShardQueryPlan], summary_only: bool) -> Result<Value> {
+    if summary_only {
+        Ok(shard_query_plan_summary_value(plans))
+    } else {
+        Ok(serde_json::to_value(plans)?)
+    }
+}
+
+fn shard_query_plan_batch_response_value(
+    query: String,
+    plans: Vec<ShardQueryPlan>,
+    summary_only: bool,
+) -> Result<Value> {
+    if summary_only {
+        let next_action = plans
+            .iter()
+            .find_map(|shard_plan| shard_plan.plan.next_action.clone());
+        let summary = plans
+            .iter()
+            .find(|shard_plan| {
+                shard_plan.plan.final_match_count > 0 || shard_plan.plan.next_action.is_some()
+            })
+            .or_else(|| plans.first())
+            .map(|shard_plan| shard_plan.plan.compact_summary())
+            .unwrap_or_else(|| QueryPlan::empty("no_shards", true).compact_summary());
+        let mut item = Map::new();
+        item.insert("query".to_string(), Value::String(query));
+        item.insert("summary".to_string(), serde_json::to_value(summary)?);
+        if let Some(next_action) = next_action {
+            item.insert(
+                "next_action".to_string(),
+                serde_json::to_value(next_action)?,
+            );
+        }
+        item.insert("shards".to_string(), shard_query_plan_summary_value(&plans));
+        Ok(Value::Object(item))
+    } else {
+        Ok(serde_json::to_value(shard_query_plan_batch_result(
+            query, plans,
+        ))?)
+    }
+}
+
 #[derive(Debug, Serialize)]
 struct SymbolBatchResult {
     name: String,
@@ -2078,7 +2168,8 @@ fn argument_schema(tool_name: &str, name: &str) -> Value {
         }
         "test" | "generated" | "code" | "explain" | "require_all" | "any_terms" | "details"
         | "refresh_if_stale" | "diagnose" | "retry_if_empty" | "include_read_batch"
-        | "include_summary" | "git_metadata" | "tracked_files" | "nested_manifests" | "force" => {
+        | "include_summary" | "summary" | "git_metadata" | "tracked_files" | "nested_manifests"
+        | "force" => {
             schema.insert("type".to_string(), json!("boolean"));
         }
         "limit" | "max_depth" | "discover_limit" | "family_limit" | "symbols" | "start"
@@ -2501,6 +2592,9 @@ fn argument_description(tool_name: &str, name: &str) -> &'static str {
         }
         "include_summary" => {
             "When true, batch read tools return {summary, ranges} instead of a bare range array."
+        }
+        "summary" => {
+            "When true for query-plan tools, return only compact summaries, retry requests, and next_action instead of full nested plan payloads."
         }
         "force" => {
             "When true for index_shards, replace an existing shard directory even if the rebuild would remove existing shards."
@@ -4645,18 +4739,23 @@ impl ToolRuntime {
             "search_query_plan" => {
                 let repo = path_arg(&request.arguments, "repo")?;
                 let query = string_arg(&request.arguments, "query")?;
+                let summary_only = bool_arg(&request.arguments, "summary");
                 let index = FastIndex::build(repo)?;
                 let plan = index.query_plan(&query, &search_filters(&request.arguments, false)?)?;
-                Ok(serde_json::to_value(attach_retry_requests(
-                    plan,
-                    "search_code",
-                    "repo",
-                    &index.root,
-                    &request.arguments,
-                ))?)
+                query_plan_response_value(
+                    attach_retry_requests(
+                        plan,
+                        "search_code",
+                        "repo",
+                        &index.root,
+                        &request.arguments,
+                    ),
+                    summary_only,
+                )
             }
             "search_plan" => {
                 let query = string_arg(&request.arguments, "query")?;
+                let summary_only = bool_arg(&request.arguments, "summary");
                 if argument_value(&request.arguments, "index").is_some()
                     && argument_value(&request.arguments, "index_dir").is_some()
                 {
@@ -4684,7 +4783,7 @@ impl ToolRuntime {
                         &index_dir,
                         &request.arguments,
                     );
-                    return Ok(serde_json::to_value(plans)?);
+                    return shard_query_plan_response_value(&plans, summary_only);
                 }
                 if let Some(index_path) =
                     optional_string_arg(&request.arguments, "index").map(PathBuf::from)
@@ -4694,13 +4793,16 @@ impl ToolRuntime {
                         self.cached_index_maybe_refresh(index_path.clone(), refresh_if_stale)?;
                     let plan =
                         index.query_plan(&query, &search_filters(&request.arguments, true)?)?;
-                    return Ok(serde_json::to_value(attach_retry_requests(
-                        plan,
-                        "search",
-                        "index",
-                        index_path,
-                        &request.arguments,
-                    ))?);
+                    return query_plan_response_value(
+                        attach_retry_requests(
+                            plan,
+                            "search",
+                            "index",
+                            index_path,
+                            &request.arguments,
+                        ),
+                        summary_only,
+                    );
                 }
                 if optional_string_arg(&request.arguments, "cwd").is_some() {
                     let scoped_arguments =
@@ -4724,7 +4826,7 @@ impl ToolRuntime {
                             &index_dir,
                             &scoped_arguments,
                         );
-                        return Ok(serde_json::to_value(plans)?);
+                        return shard_query_plan_response_value(&plans, summary_only);
                     }
                     if let Ok(index_path) = self.single_cached_index_path() {
                         let refresh_if_stale = bool_arg(&request.arguments, "refresh_if_stale");
@@ -4733,13 +4835,16 @@ impl ToolRuntime {
                         if index_matches_client_cwd(&index, &request.arguments)? {
                             let plan = index
                                 .query_plan(&query, &search_filters(&scoped_arguments, true)?)?;
-                            return Ok(serde_json::to_value(attach_retry_requests(
-                                plan,
-                                "search",
-                                "index",
-                                index_path,
-                                &scoped_arguments,
-                            ))?);
+                            return query_plan_response_value(
+                                attach_retry_requests(
+                                    plan,
+                                    "search",
+                                    "index",
+                                    index_path,
+                                    &scoped_arguments,
+                                ),
+                                summary_only,
+                            );
                         }
                     }
                 }
@@ -4751,17 +4856,15 @@ impl ToolRuntime {
                     })?;
                 let index = FastIndex::build(repo)?;
                 let plan = index.query_plan(&query, &search_filters(&request.arguments, false)?)?;
-                Ok(serde_json::to_value(attach_retry_requests(
-                    plan,
-                    "search",
-                    "repo",
-                    &index.root,
-                    &request.arguments,
-                ))?)
+                query_plan_response_value(
+                    attach_retry_requests(plan, "search", "repo", &index.root, &request.arguments),
+                    summary_only,
+                )
             }
             "search_query_plan_batch" => {
                 let repo = path_arg(&request.arguments, "repo")?;
                 let queries = string_array_arg(&request.arguments, "queries")?;
+                let summary_only = bool_arg(&request.arguments, "summary");
                 let index = FastIndex::build(repo)?;
                 let filters = search_filters(&request.arguments, false)?;
                 let mut batch = Vec::new();
@@ -4773,12 +4876,13 @@ impl ToolRuntime {
                         &index.root,
                         &request.arguments,
                     );
-                    batch.push(query_plan_batch_result(query, plan));
+                    batch.push(query_plan_batch_response_value(query, plan, summary_only)?);
                 }
                 Ok(serde_json::to_value(batch)?)
             }
             "search_plan_batch" => {
                 let queries = string_array_arg(&request.arguments, "queries")?;
+                let summary_only = bool_arg(&request.arguments, "summary");
                 if argument_value(&request.arguments, "index").is_some()
                     && argument_value(&request.arguments, "index_dir").is_some()
                 {
@@ -4808,7 +4912,11 @@ impl ToolRuntime {
                             &index_dir,
                             &request.arguments,
                         );
-                        batch.push(shard_query_plan_batch_result(query, plans));
+                        batch.push(shard_query_plan_batch_response_value(
+                            query,
+                            plans,
+                            summary_only,
+                        )?);
                     }
                     return Ok(serde_json::to_value(batch)?);
                 }
@@ -4828,7 +4936,7 @@ impl ToolRuntime {
                             &index_path,
                             &request.arguments,
                         );
-                        batch.push(query_plan_batch_result(query, plan));
+                        batch.push(query_plan_batch_response_value(query, plan, summary_only)?);
                     }
                     return Ok(serde_json::to_value(batch)?);
                 }
@@ -4858,7 +4966,11 @@ impl ToolRuntime {
                                 &index_dir,
                                 &scoped_arguments,
                             );
-                            batch.push(shard_query_plan_batch_result(query, plans));
+                            batch.push(shard_query_plan_batch_response_value(
+                                query,
+                                plans,
+                                summary_only,
+                            )?);
                         }
                         return Ok(serde_json::to_value(batch)?);
                     }
@@ -4881,7 +4993,11 @@ impl ToolRuntime {
                                     &index_path,
                                     &scoped_arguments,
                                 );
-                                batch.push(query_plan_batch_result(query, plan));
+                                batch.push(query_plan_batch_response_value(
+                                    query,
+                                    plan,
+                                    summary_only,
+                                )?);
                             }
                             return Ok(serde_json::to_value(batch)?);
                         }
@@ -4904,7 +5020,7 @@ impl ToolRuntime {
                         &index.root,
                         &request.arguments,
                     );
-                    batch.push(query_plan_batch_result(query, plan));
+                    batch.push(query_plan_batch_response_value(query, plan, summary_only)?);
                 }
                 Ok(serde_json::to_value(batch)?)
             }
@@ -5013,21 +5129,26 @@ impl ToolRuntime {
             "indexed_query_plan" | "index_plan" => {
                 let index_path = self.index_path_arg_or_single_cached(&request.arguments)?;
                 let query = string_arg(&request.arguments, "query")?;
+                let summary_only = bool_arg(&request.arguments, "summary");
                 let refresh_if_stale = bool_arg(&request.arguments, "refresh_if_stale");
                 let index =
                     self.cached_index_maybe_refresh(index_path.clone(), refresh_if_stale)?;
                 let plan = index.query_plan(&query, &search_filters(&request.arguments, true)?)?;
-                Ok(serde_json::to_value(attach_retry_requests(
-                    plan,
-                    "indexed_search_code",
-                    "index",
-                    index_path,
-                    &request.arguments,
-                ))?)
+                query_plan_response_value(
+                    attach_retry_requests(
+                        plan,
+                        "indexed_search_code",
+                        "index",
+                        index_path,
+                        &request.arguments,
+                    ),
+                    summary_only,
+                )
             }
             "indexed_query_plan_batch" => {
                 let index_path = self.index_path_arg_or_single_cached(&request.arguments)?;
                 let queries = string_array_arg(&request.arguments, "queries")?;
+                let summary_only = bool_arg(&request.arguments, "summary");
                 let refresh_if_stale = bool_arg(&request.arguments, "refresh_if_stale");
                 let index =
                     self.cached_index_maybe_refresh(index_path.clone(), refresh_if_stale)?;
@@ -5041,7 +5162,11 @@ impl ToolRuntime {
                         &index_path,
                         &request.arguments,
                     );
-                    batch.push(indexed_query_plan_batch_result(query, plan));
+                    batch.push(indexed_query_plan_batch_response_value(
+                        query,
+                        plan,
+                        summary_only,
+                    )?);
                 }
                 Ok(serde_json::to_value(batch)?)
             }
@@ -5200,6 +5325,7 @@ impl ToolRuntime {
             "shard_query_plan" | "shard_plan" => {
                 let index_dir = self.shard_dir_arg_or_single_cached(&request.arguments)?;
                 let query = string_arg(&request.arguments, "query")?;
+                let summary_only = bool_arg(&request.arguments, "summary");
                 let scoped_arguments =
                     arguments_scoped_to_client_cwd_for_query(&request.arguments, &query)?;
                 let filters = search_filters(&scoped_arguments, true)?;
@@ -5214,11 +5340,12 @@ impl ToolRuntime {
                 }
                 let mut plans = self.shard_query_plans_cached(&index_dir, &query, &filters)?;
                 attach_shard_retry_requests(&mut plans, &index_dir, &scoped_arguments);
-                Ok(serde_json::to_value(plans)?)
+                shard_query_plan_response_value(&plans, summary_only)
             }
             "shard_query_plan_batch" => {
                 let index_dir = self.shard_dir_arg_or_single_cached(&request.arguments)?;
                 let queries = string_array_arg(&request.arguments, "queries")?;
+                let summary_only = bool_arg(&request.arguments, "summary");
                 let mut batch = Vec::new();
                 for query in queries {
                     let scoped_arguments =
@@ -5235,7 +5362,11 @@ impl ToolRuntime {
                     }
                     let mut plans = self.shard_query_plans_cached(&index_dir, &query, &filters)?;
                     attach_shard_retry_requests(&mut plans, &index_dir, &scoped_arguments);
-                    batch.push(shard_query_plan_batch_result(query, plans));
+                    batch.push(shard_query_plan_batch_response_value(
+                        query,
+                        plans,
+                        summary_only,
+                    )?);
                 }
                 Ok(serde_json::to_value(batch)?)
             }
@@ -8692,6 +8823,7 @@ const PLAN_OPTIONAL_ARGS: &[&str] = &[
     "code",
     "require_all",
     "any_terms",
+    "summary",
     "exclude_file",
     "exclude_path",
     "exclude_language",
@@ -8753,6 +8885,7 @@ const PLAN_TARGET_OPTIONAL_ARGS: &[&str] = &[
     "require_all",
     "any_terms",
     "refresh_if_stale",
+    "summary",
     "exclude_file",
     "exclude_path",
     "exclude_language",
@@ -8811,6 +8944,7 @@ const PLAN_INDEX_OPTIONAL_ARGS: &[&str] = &[
     "require_all",
     "any_terms",
     "refresh_if_stale",
+    "summary",
     "exclude_file",
     "exclude_path",
     "exclude_language",
@@ -9695,6 +9829,7 @@ fn daemon_default_cwd_requests(cwd: &str) -> Value {
                 "cwd": cwd,
                 "query": "symbol:SessionManager missingterm",
                 "require_all": true,
+                "summary": true,
                 "refresh_if_stale": true
             }),
         ),
@@ -9737,6 +9872,7 @@ fn daemon_default_query_plan_request(search_auto_default: &Value, target: Option
         json!("symbol:SessionManager missingterm"),
     );
     arguments.insert("require_all".to_string(), json!(true));
+    arguments.insert("summary".to_string(), json!(true));
     let tool = match (
         search_auto_default.get("surface").and_then(Value::as_str),
         target,
