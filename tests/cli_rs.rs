@@ -886,6 +886,11 @@ fn cli_search_auto_diagnose_prefers_retry_next_action_for_noisy_hits() {
     assert!(output.status.success());
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert!(!value["results"].as_array().unwrap().is_empty());
+    assert_eq!(value["summary"]["status"], serde_json::json!("matched"));
+    assert_eq!(
+        value["summary"]["result_count"],
+        serde_json::json!(value["results"].as_array().unwrap().len())
+    );
     assert!(!value["read_batch_request"].is_null());
     assert_eq!(
         value["next_action"]["source"],
@@ -1083,6 +1088,14 @@ fn cli_search_auto_batch_returns_query_surfaces() {
     assert_eq!(
         auto_retry_batch[0]["next_action"]["request"],
         auto_retry_batch[0]["next_read_batch_request"]
+    );
+    assert_eq!(
+        auto_retry_batch[0]["summary"]["status"],
+        serde_json::json!("not_found")
+    );
+    assert_eq!(
+        auto_retry_batch[0]["summary"]["result_count"],
+        serde_json::json!(0)
     );
 
     let mut diagnosed_batch = Command::cargo_bin("orient").unwrap();

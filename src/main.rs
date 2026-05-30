@@ -3416,6 +3416,7 @@ fn run() -> Result<()> {
                 );
                 let mut output = serde_json::json!({
                     "query": query,
+                    "summary": search_result_summary(results.len()),
                     "surface": "shards",
                     "target": index_dir,
                     "query_plan_request": {
@@ -3514,6 +3515,7 @@ fn run() -> Result<()> {
                 );
                 let mut output = serde_json::json!({
                     "query": query,
+                    "summary": search_result_summary(results.len()),
                     "surface": "indexed",
                     "target": index_path,
                     "query_plan_request": {
@@ -3609,6 +3611,7 @@ fn run() -> Result<()> {
                 );
                 let mut output = serde_json::json!({
                     "query": query,
+                    "summary": search_result_summary(results.len()),
                     "surface": "fallback",
                     "target": repo,
                     "query_plan_request": {
@@ -3742,6 +3745,7 @@ fn run() -> Result<()> {
                     );
                     let mut item = serde_json::json!({
                         "query": query,
+                        "summary": search_result_summary(results.len()),
                         "surface": "shards",
                         "target": index_dir,
                         "query_plan_request": {
@@ -3843,6 +3847,7 @@ fn run() -> Result<()> {
                     );
                     let mut item = serde_json::json!({
                         "query": query,
+                        "summary": search_result_summary(results.len()),
                         "surface": "indexed",
                         "target": index_path,
                         "query_plan_request": {
@@ -3941,6 +3946,7 @@ fn run() -> Result<()> {
                     );
                     let mut item = serde_json::json!({
                         "query": query,
+                        "summary": search_result_summary(results.len()),
                         "surface": "fallback",
                         "target": repo,
                         "query_plan_request": {

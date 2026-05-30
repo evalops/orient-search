@@ -1699,6 +1699,8 @@ fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
     assert!(live.error.is_none(), "{:?}", live.error);
     let live = live.result.unwrap();
     assert_eq!(live["surface"], "fallback");
+    assert_eq!(live["summary"]["status"], serde_json::json!("matched"));
+    assert_eq!(live["summary"]["result_count"], serde_json::json!(1));
     assert_eq!(live["query_plan_request"]["tool"], "search_query_plan");
     assert_eq!(live["repo_map_request"]["tool"], "repo_map");
     assert_eq!(
@@ -1875,6 +1877,11 @@ fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
     let empty_live = empty_live.result.unwrap();
     assert!(empty_live["results"].as_array().unwrap().is_empty());
     assert_eq!(
+        empty_live["summary"]["status"],
+        serde_json::json!("not_found")
+    );
+    assert_eq!(empty_live["summary"]["result_count"], serde_json::json!(0));
+    assert_eq!(
         empty_live["query_plan_result"]["repair_hints"][0]["kind"],
         "drop_missing_terms"
     );
@@ -2041,6 +2048,8 @@ fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
     assert!(indexed.error.is_none(), "{:?}", indexed.error);
     let indexed = indexed.result.unwrap();
     assert_eq!(indexed["surface"], "indexed");
+    assert_eq!(indexed["summary"]["status"], serde_json::json!("matched"));
+    assert_eq!(indexed["summary"]["result_count"], serde_json::json!(1));
     assert_eq!(indexed["query_plan_request"]["tool"], "indexed_query_plan");
     assert_eq!(indexed["repo_map_request"]["tool"], "repo_map");
     assert_eq!(
@@ -2074,6 +2083,14 @@ fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
     let empty_indexed = empty_indexed.result.unwrap();
     assert_eq!(empty_indexed["surface"], "indexed");
     assert!(empty_indexed["results"].as_array().unwrap().is_empty());
+    assert_eq!(
+        empty_indexed["summary"]["status"],
+        serde_json::json!("not_found")
+    );
+    assert_eq!(
+        empty_indexed["summary"]["result_count"],
+        serde_json::json!(0)
+    );
     assert_eq!(
         empty_indexed["query_plan_result"]["retry_requests"][0]["tool"],
         "indexed_search_code"

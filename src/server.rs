@@ -172,6 +172,7 @@ fn read_batch_next_action(read_batch_request: &Option<ResultToolRequest>) -> Opt
 #[derive(Debug, Serialize)]
 struct SearchAutoResult {
     query: String,
+    summary: SearchResultSummary,
     surface: String,
     target: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -5877,6 +5878,7 @@ impl ToolRuntime {
         );
         Ok(SearchAutoResult {
             query: query.to_string(),
+            summary: search_result_summary(results.len()),
             surface: "fallback".to_string(),
             target: repo.to_string_lossy().to_string(),
             freshness: None,
@@ -5998,6 +6000,7 @@ impl ToolRuntime {
         );
         Ok(SearchAutoResult {
             query: query.to_string(),
+            summary: search_result_summary(results.len()),
             surface: "shards".to_string(),
             target: index_dir.to_string_lossy().to_string(),
             refresh_request,
@@ -6116,6 +6119,7 @@ impl ToolRuntime {
         );
         Ok(SearchAutoResult {
             query: query.to_string(),
+            summary: search_result_summary(results.len()),
             surface: "indexed".to_string(),
             target: index_path.to_string_lossy().to_string(),
             refresh_request,
