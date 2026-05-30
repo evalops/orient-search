@@ -2533,6 +2533,8 @@ fn cli_replaced_filter_field(kind: &str) -> Option<&'static str> {
         "replace_path_filter" => Some("path"),
         "replace_symbol_filter" => Some("symbol"),
         "replace_symbol_kind_filter" => Some("symbol_kind"),
+        "replace_language_filter" => Some("language"),
+        "replace_extension_filter" => Some("extension"),
         _ => None,
     }
 }

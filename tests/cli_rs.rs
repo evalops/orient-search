@@ -3016,6 +3016,10 @@ fn cli_search_surfaces_accept_structured_filters() {
         "use sample::SessionManager;\n#[test]\nfn issue_token_test() {}\n",
     );
     write(&repo.path().join("docs/auth.md"), "issue token docs\n");
+    write(
+        &repo.path().join("ui/App.tsx"),
+        "export function AppShell() { return null; }\n",
+    );
 
     let mut fallback = Command::cargo_bin("orient").unwrap();
     fallback
@@ -3289,6 +3293,61 @@ fn cli_search_surfaces_accept_structured_filters() {
     assert!(plan_text.contains("definitely"));
     assert!(plan_text.contains("missing"));
     assert!(plan_text.contains("drop_missing_terms"));
+
+    let mut language_typo_plan = Command::cargo_bin("orient").unwrap();
+    let language_output = language_typo_plan
+        .args([
+            "search-plan",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "lang:rustt issue_token",
+        ])
+        .output()
+        .unwrap();
+    assert!(language_output.status.success());
+    let language_plan: serde_json::Value = serde_json::from_slice(&language_output.stdout).unwrap();
+    assert_eq!(
+        language_plan["repair_hints"][0]["kind"],
+        serde_json::json!("replace_language_filter")
+    );
+    assert_eq!(
+        language_plan["retry_requests"][0]["arguments"]["query"],
+        serde_json::json!("issue token lang:rust")
+    );
+    assert!(
+        language_plan["retry_requests"][0]["arguments"]
+            .get("language")
+            .is_none(),
+        "{language_plan:?}"
+    );
+
+    let mut extension_typo_plan = Command::cargo_bin("orient").unwrap();
+    let extension_output = extension_typo_plan
+        .args([
+            "search-plan",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "ext:tsxz",
+        ])
+        .output()
+        .unwrap();
+    assert!(extension_output.status.success());
+    let extension_plan: serde_json::Value =
+        serde_json::from_slice(&extension_output.stdout).unwrap();
+    assert_eq!(
+        extension_plan["repair_hints"][0]["kind"],
+        serde_json::json!("replace_extension_filter")
+    );
+    assert_eq!(
+        extension_plan["retry_requests"][0]["arguments"]["query"],
+        serde_json::json!("ext:tsx")
+    );
+    assert!(
+        extension_plan["retry_requests"][0]["arguments"]
+            .get("extension")
+            .is_none(),
+        "{extension_plan:?}"
+    );
 
     let mut search_plan_summary = Command::cargo_bin("orient").unwrap();
     let summary_output = search_plan_summary

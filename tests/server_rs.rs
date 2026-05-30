@@ -1797,6 +1797,10 @@ fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
         &repo.path().join("src/auth.rs"),
         "pub struct SessionManager;\npub fn issue_token() {}\n",
     );
+    write(
+        &repo.path().join("ui/App.tsx"),
+        "export function AppShell() { return null; }\n",
+    );
     let runtime = ToolRuntime::default();
 
     let live = runtime.dispatch(ToolRequest {
@@ -2486,6 +2490,90 @@ fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
         serde_json::to_string(&symbol_drop_terms_retry_result.result)
             .unwrap()
             .contains("issue_token")
+    );
+
+    let language_typo = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("language-typo"),
+        tool: "search_auto".to_string(),
+        arguments: serde_json::json!({
+            "query": "lang:rustt issue_token",
+            "limit": 5
+        }),
+    });
+    assert!(language_typo.error.is_none(), "{:?}", language_typo.error);
+    let language_typo = language_typo.result.unwrap();
+    assert_eq!(
+        language_typo["query_plan_result"]["repair_hints"][0]["kind"],
+        "replace_language_filter"
+    );
+    assert_eq!(
+        language_typo["query_plan_result"]["retry_requests"][0]["arguments"]["query"],
+        "issue token lang:rust"
+    );
+    assert!(
+        language_typo["query_plan_result"]["retry_requests"][0]["arguments"]
+            .get("language")
+            .is_none(),
+        "{:?}",
+        language_typo["query_plan_result"]["retry_requests"][0]["arguments"]
+    );
+    let language_retry = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("language-typo-retry"),
+        tool: language_typo["query_plan_result"]["retry_requests"][0]["tool"]
+            .as_str()
+            .unwrap()
+            .to_string(),
+        arguments: language_typo["query_plan_result"]["retry_requests"][0]["arguments"].clone(),
+    });
+    assert!(language_retry.error.is_none(), "{:?}", language_retry.error);
+    assert!(
+        serde_json::to_string(&language_retry.result)
+            .unwrap()
+            .contains("issue_token")
+    );
+
+    let extension_typo = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("extension-typo"),
+        tool: "search_auto".to_string(),
+        arguments: serde_json::json!({
+            "query": "ext:tsxz",
+            "limit": 5
+        }),
+    });
+    assert!(extension_typo.error.is_none(), "{:?}", extension_typo.error);
+    let extension_typo = extension_typo.result.unwrap();
+    assert_eq!(
+        extension_typo["query_plan_result"]["repair_hints"][0]["kind"],
+        "replace_extension_filter"
+    );
+    assert_eq!(
+        extension_typo["query_plan_result"]["retry_requests"][0]["arguments"]["query"],
+        "ext:tsx"
+    );
+    assert!(
+        extension_typo["query_plan_result"]["retry_requests"][0]["arguments"]
+            .get("extension")
+            .is_none(),
+        "{:?}",
+        extension_typo["query_plan_result"]["retry_requests"][0]["arguments"]
+    );
+    let extension_retry = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("extension-typo-retry"),
+        tool: extension_typo["query_plan_result"]["retry_requests"][0]["tool"]
+            .as_str()
+            .unwrap()
+            .to_string(),
+        arguments: extension_typo["query_plan_result"]["retry_requests"][0]["arguments"].clone(),
+    });
+    assert!(
+        extension_retry.error.is_none(),
+        "{:?}",
+        extension_retry.error
+    );
+    assert!(
+        serde_json::to_string(&extension_retry.result)
+            .unwrap()
+            .contains("ui/App.tsx")
     );
 
     let path_typo = runtime.dispatch(ToolRequest {

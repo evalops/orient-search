@@ -938,6 +938,10 @@ fn indexed_query_plan_reports_missing_terms_without_results() {
         &repo.path().join("src/SessionManager.rs"),
         "pub struct MixedCaseSessionManager;\n",
     );
+    write(
+        &repo.path().join("ui/App.tsx"),
+        "export function AppShell() { return null; }\n",
+    );
 
     let index = FastIndex::build(repo.path()).unwrap();
     let plan = index
@@ -1083,6 +1087,38 @@ fn indexed_query_plan_reports_missing_terms_without_results() {
         )
         .unwrap();
     assert!(kind_typo_search.is_empty());
+
+    let language_typo_plan = index
+        .query_plan("lang:rustt issue_token", &SearchFilters::default())
+        .unwrap();
+    assert_eq!(
+        language_typo_plan.repair_hints[0].kind,
+        "replace_language_filter"
+    );
+    assert_eq!(
+        language_typo_plan.repair_hints[0]
+            .suggested_query
+            .as_deref(),
+        Some("issue token lang:rust")
+    );
+    assert_eq!(
+        language_typo_plan.diagnosis.as_ref().unwrap().status,
+        "filters_rejected"
+    );
+
+    let extension_typo_plan = index
+        .query_plan("ext:tsxz", &SearchFilters::default())
+        .unwrap();
+    assert_eq!(
+        extension_typo_plan.repair_hints[0].kind,
+        "replace_extension_filter"
+    );
+    assert_eq!(
+        extension_typo_plan.repair_hints[0]
+            .suggested_query
+            .as_deref(),
+        Some("ext:tsx")
+    );
 
     let bad_file_plan = index
         .query_plan("file:not_real.rs lang:rust", &SearchFilters::default())

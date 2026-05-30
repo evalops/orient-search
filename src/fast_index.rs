@@ -3721,6 +3721,27 @@ fn query_plan_repair_hints(
             ));
         }
     }
+    if let Some(language) = filters.language.as_ref() {
+        if let Some(query) = suggested_language_filter_query(language, files, query_tokens, filters)
+        {
+            hints.push(repair_hint(
+                "replace_language_filter",
+                format!("No indexed files use language `lang:{language}`. Retry with `{query}`."),
+                Some(query),
+            ));
+        }
+    }
+    if let Some(extension) = filters.extension.as_ref() {
+        if let Some(query) =
+            suggested_extension_filter_query(extension, files, query_tokens, filters)
+        {
+            hints.push(repair_hint(
+                "replace_extension_filter",
+                format!("No indexed files use extension `ext:{extension}`. Retry with `{query}`."),
+                Some(query),
+            ));
+        }
+    }
 
     if !missing_terms.is_empty() {
         hints.push(repair_hint(
@@ -4151,6 +4172,24 @@ fn filter_scan_repair_hints(
             )];
         }
     }
+    if let Some(language) = filters.language.as_ref() {
+        if let Some(query) = suggested_language_filter_query(language, files, &[], filters) {
+            return vec![repair_hint(
+                "replace_language_filter",
+                format!("No indexed files use language `lang:{language}`. Retry with `{query}`."),
+                Some(query),
+            )];
+        }
+    }
+    if let Some(extension) = filters.extension.as_ref() {
+        if let Some(query) = suggested_extension_filter_query(extension, files, &[], filters) {
+            return vec![repair_hint(
+                "replace_extension_filter",
+                format!("No indexed files use extension `ext:{extension}`. Retry with `{query}`."),
+                Some(query),
+            )];
+        }
+    }
     if let Some(file) = filters.file.as_ref() {
         if let Some(query) = suggested_file_filter_query(file, files) {
             return vec![repair_hint(
@@ -4290,6 +4329,105 @@ fn suggested_symbol_kind_replacement_query(
         Some(query) => format!("{replacement} {query}"),
         None => replacement,
     })
+}
+
+fn suggested_language_filter_query(
+    wanted: &str,
+    files: &[IndexedPath],
+    query_tokens: &[String],
+    filters: &SearchFilters,
+) -> Option<String> {
+    let wanted = normalize_language_filter(wanted);
+    if wanted.len() < 2 {
+        return None;
+    }
+    let candidates = indexed_language_values(files);
+    if candidates.iter().any(|value| value == &wanted) {
+        return None;
+    }
+    let replacement = suggested_filter_value(&wanted, candidates, 3, 2)?;
+    let mut repaired = filters.clone();
+    repaired.language = Some(replacement.clone());
+    suggested_query_from_filters(query_tokens, &repaired)
+        .or_else(|| Some(format!("lang:{replacement}")))
+}
+
+fn suggested_extension_filter_query(
+    wanted: &str,
+    files: &[IndexedPath],
+    query_tokens: &[String],
+    filters: &SearchFilters,
+) -> Option<String> {
+    let wanted = wanted.trim().trim_start_matches('.').to_ascii_lowercase();
+    if wanted.len() < 2 {
+        return None;
+    }
+    let candidates = indexed_extension_values(files);
+    if candidates.iter().any(|value| value == &wanted) {
+        return None;
+    }
+    let replacement = suggested_filter_value(&wanted, candidates, 3, 2)?;
+    let mut repaired = filters.clone();
+    repaired.extension = Some(replacement.clone());
+    suggested_query_from_filters(query_tokens, &repaired)
+        .or_else(|| Some(format!("ext:{replacement}")))
+}
+
+fn indexed_language_values(files: &[IndexedPath]) -> Vec<String> {
+    let mut values = files
+        .iter()
+        .map(|file| normalize_language_filter(&file.language))
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>();
+    values.sort();
+    values.dedup();
+    values
+}
+
+fn indexed_extension_values(files: &[IndexedPath]) -> Vec<String> {
+    let mut values = files
+        .iter()
+        .filter_map(|file| file.extension_lower.clone())
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>();
+    values.sort();
+    values.dedup();
+    values
+}
+
+fn suggested_filter_value(
+    wanted: &str,
+    candidates: Vec<String>,
+    max_distance: usize,
+    threshold: usize,
+) -> Option<String> {
+    let mut best = candidates
+        .iter()
+        .map(|candidate| {
+            (
+                candidate.as_str(),
+                edit_distance_at_most(wanted, candidate, max_distance),
+            )
+        })
+        .filter_map(|(candidate, distance)| distance.map(|distance| (candidate, distance)))
+        .collect::<Vec<_>>();
+    best.sort_by(|left, right| {
+        left.1
+            .cmp(&right.1)
+            .then_with(|| left.0.len().cmp(&right.0.len()))
+            .then_with(|| left.0.cmp(right.0))
+    });
+    best.first()
+        .filter(|(_, distance)| *distance <= threshold)
+        .map(|(candidate, _)| (*candidate).to_string())
+}
+
+fn suggested_query_from_filters(
+    query_tokens: &[String],
+    filters: &SearchFilters,
+) -> Option<String> {
+    let query = query_with_filters_text(query_tokens, filters);
+    (!query.trim().is_empty()).then_some(query)
 }
 
 fn suggested_symbol_query(wanted: &str, files: &[IndexedPath]) -> Option<String> {
