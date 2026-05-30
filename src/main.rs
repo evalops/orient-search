@@ -6529,7 +6529,7 @@ fn copied_hash_anchor_lines(value: &str) -> Option<usize> {
     let marker = lower.find("#l")?;
     let after_marker = &value[marker + 2..];
     let (start, after_start) = split_leading_digits(after_marker)?;
-    let after_start = after_start.trim_start();
+    let after_start = strip_hash_anchor_column(after_start.trim_start()).trim_start();
     let after_dash = after_start.strip_prefix('-')?.trim_start();
     let after_optional_l = after_dash
         .strip_prefix('L')
@@ -6537,6 +6537,15 @@ fn copied_hash_anchor_lines(value: &str) -> Option<usize> {
         .unwrap_or(after_dash);
     let (end, _) = split_leading_digits(after_optional_l)?;
     (end >= start).then_some(end - start + 1)
+}
+
+fn strip_hash_anchor_column(value: &str) -> &str {
+    let Some(rest) = value.strip_prefix('C').or_else(|| value.strip_prefix('c')) else {
+        return value;
+    };
+    split_leading_digits(rest)
+        .map(|(_, after_column)| after_column)
+        .unwrap_or(value)
 }
 
 fn split_leading_digits(value: &str) -> Option<(usize, &str)> {
@@ -7226,6 +7235,11 @@ mod tests {
         assert_eq!(hash.start, 12);
         assert_eq!(hash.lines, 4);
 
+        let hash_columns = CliRangeSpec::from_str("src/auth.rs#L12C5-L15C2").unwrap();
+        assert_eq!(hash_columns.path, "src/auth.rs");
+        assert_eq!(hash_columns.start, 12);
+        assert_eq!(hash_columns.lines, 4);
+
         let markdown =
             CliRangeSpec::from_str("[src/auth.rs#L12-L15](src/auth.rs#L12-L15)").unwrap();
         assert_eq!(markdown.path, "src/auth.rs");
@@ -7239,6 +7253,14 @@ mod tests {
         assert_eq!(hosted.path, "src/auth.rs");
         assert_eq!(hosted.start, 12);
         assert_eq!(hosted.lines, 4);
+
+        let hosted_columns = CliRangeSpec::from_str(
+            "https://github.com/evalops/orient-search/blob/main/src/auth.rs#L12C5-L15C2",
+        )
+        .unwrap();
+        assert_eq!(hosted_columns.path, "src/auth.rs");
+        assert_eq!(hosted_columns.start, 12);
+        assert_eq!(hosted_columns.lines, 4);
 
         let hosted_query = CliRangeSpec::from_str(
             "https://github.com/evalops/orient-search/blob/main/src/auth.rs?plain=1#L12-L15",

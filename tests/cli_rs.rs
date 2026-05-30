@@ -1936,6 +1936,20 @@ fn cli_outputs_repo_map_and_reads_ranges() {
         .stdout(predicate::str::contains("\"end_line\":6"))
         .stdout(predicate::str::contains("issue_token"));
 
+    let mut hosted_column_link_read_range = Command::cargo_bin("orient").unwrap();
+    hosted_column_link_read_range
+        .args([
+            "read-range",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "https://github.com/evalops/orient-search/blob/main/src/auth.rs#L5C9-L6C1",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"start_line\":5"))
+        .stdout(predicate::str::contains("\"end_line\":6"))
+        .stdout(predicate::str::contains("issue_token"));
+
     let mut hosted_query_read_range = Command::cargo_bin("orient").unwrap();
     hosted_query_read_range
         .args([

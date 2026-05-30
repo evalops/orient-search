@@ -9314,7 +9314,7 @@ fn copied_hash_anchor_lines(value: &str) -> Option<usize> {
     let marker = lower.find("#l")?;
     let after_marker = &value[marker + 2..];
     let (start, after_start) = split_leading_digits(after_marker)?;
-    let after_start = after_start.trim_start();
+    let after_start = strip_hash_anchor_column(after_start.trim_start()).trim_start();
     let after_dash = after_start.strip_prefix('-')?.trim_start();
     let after_optional_l = after_dash
         .strip_prefix('L')
@@ -9322,6 +9322,15 @@ fn copied_hash_anchor_lines(value: &str) -> Option<usize> {
         .unwrap_or(after_dash);
     let (end, _) = split_leading_digits(after_optional_l)?;
     (end >= start).then_some(end - start + 1)
+}
+
+fn strip_hash_anchor_column(value: &str) -> &str {
+    let Some(rest) = value.strip_prefix('C').or_else(|| value.strip_prefix('c')) else {
+        return value;
+    };
+    split_leading_digits(rest)
+        .map(|(_, after_column)| after_column)
+        .unwrap_or(value)
 }
 
 fn copied_colon_range_lines(value: &str) -> Option<usize> {

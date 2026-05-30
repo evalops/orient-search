@@ -62,7 +62,7 @@ orient search --repo . "issue token"
 orient search --index "$ORIENT_INDEX" "issue token"
 orient search --index-dir "$ORIENT_SHARDS" "repo:service issue token"
 orient read-range --index "$ORIENT_INDEX" src/lib.rs:40:80
-orient read-range --repo . src/lib.rs#L40-L45
+orient read-range --repo . src/lib.rs#L40C9-L45C1
 ```
 
 With no explicit `--repo`, `--index`, or `--index-dir`, `search-auto` first
