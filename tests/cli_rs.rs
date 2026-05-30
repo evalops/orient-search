@@ -711,6 +711,14 @@ fn cli_search_auto_selects_live_indexed_and_shard_surfaces() {
         shard_retry["next_action"]["request"],
         shard_retry["next_read_batch_request"]
     );
+    assert_eq!(
+        shard_retry["query_plan_summary"][0]["next_action"],
+        shard_retry["query_plan_result"][0]["next_action"]
+    );
+    assert_eq!(
+        shard_retry["query_plan_summary"][0]["next_action"]["request"],
+        shard_retry["primary_retry_request"]
+    );
 
     let mut empty_live = Command::cargo_bin("orient").unwrap();
     empty_live

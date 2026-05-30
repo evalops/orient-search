@@ -7676,6 +7676,14 @@ fn runtime_search_auto_scopes_warmed_shards_to_client_cwd() {
         retry["primary_retry_request"]
     );
     assert_eq!(
+        retry["query_plan_summary"][0]["next_action"],
+        retry["query_plan_result"][0]["next_action"]
+    );
+    assert_eq!(
+        retry["query_plan_summary"][0]["next_action"]["request"],
+        retry["primary_retry_request"]
+    );
+    assert_eq!(
         retry["next_read_batch_request"],
         retry["primary_retry_result"]["read_batch_request"]
     );

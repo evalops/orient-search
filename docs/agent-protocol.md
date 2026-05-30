@@ -108,7 +108,7 @@ Use `ensure_shards` for shard directories shared by several local agents. The lo
 
 Use the fastest surface that matches your setup:
 
-- `search_auto` when a daemon has exactly one registered shard directory or warmed index, when the request supplies `index_dir`, `index`, or a live `repo`, or when the daemon was started from the desired repo directory. It returns `{query,summary,surface,target,query_plan_request,query_plan_summary,repo_map_request,read_batch_request,next_read_batch_request,next_action,results}` and keeps result follow-up requests aligned with the chosen surface. `summary` carries `status` and `result_count`; `query_plan_summary` is present when automatic diagnosis or retry planning ran, so wrappers can inspect status and retry intent without parsing the full plan.
+- `search_auto` when a daemon has exactly one registered shard directory or warmed index, when the request supplies `index_dir`, `index`, or a live `repo`, or when the daemon was started from the desired repo directory. It returns `{query,summary,surface,target,query_plan_request,query_plan_summary,repo_map_request,read_batch_request,next_read_batch_request,next_action,results}` and keeps result follow-up requests aligned with the chosen surface. `summary` carries `status` and `result_count`; `query_plan_summary` is present when automatic diagnosis or retry planning ran, so wrappers can inspect status and retry intent without parsing the full plan. Shard `query_plan_summary` entries include each shard item's compact `summary` and promoted `next_action` when a retry is available.
 - `search_code` for a live repo without a prebuilt index.
 - `indexed_search_code` for one persistent repo index.
 - `search_shards` for a multi-repo shard directory.

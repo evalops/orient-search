@@ -2235,12 +2235,21 @@ fn cli_query_plan_summary_from_shard_plans(plans: &[ShardQueryPlan]) -> Value {
         plans
             .iter()
             .map(|shard_plan| {
-                serde_json::json!({
+                let mut item = serde_json::json!({
                     "name": shard_plan.name,
                     "root": shard_plan.root,
                     "aliases": shard_plan.aliases,
-                    "summary": shard_plan.plan.compact_summary()
-                })
+                    "summary": shard_plan
+                        .summary
+                        .clone()
+                        .unwrap_or_else(|| shard_plan.plan.compact_summary())
+                });
+                if let Some(next_action) = &shard_plan.next_action {
+                    if let Some(object) = item.as_object_mut() {
+                        object.insert("next_action".to_string(), serde_json::json!(next_action));
+                    }
+                }
+                item
             })
             .collect(),
     )
