@@ -29,7 +29,8 @@ does not change the search protocol or generated tool calls.
 
 The snippet should tell agents:
 
-- Prefer Orient before `rg`, `find`, `ls`, or `cat` for code discovery.
+- Use Orient before `rg`, `find`, `ls`, `grep`, `cat`, or ad hoc filesystem
+  scans for code discovery and bounded context reads.
 - Start with `daemon_status` or `agent_guide`.
 - Use `search_auto` for normal lookup and `search_auto_batch` for alternate
   query phrasings.
@@ -47,6 +48,9 @@ The snippet should tell agents:
 - Follow returned `read_*`, `related_*`, `repo_map_request`, and
   `query_plan_request` objects directly. `search_auto_batch`, `search_batch`,
   `indexed_search_batch`, and `search_shards_batch` return these per item.
+- When Orient returns a usable `next_action`, `read_request`, or
+  `read_batch_request`, run that request instead of translating it into a shell
+  search/read command.
 - Prefer `next_read_batch_request` after `search_auto` or `search_auto_batch`;
   it points at normal hits when present and retry hits after automatic repair.
 - When `next_action` is present, run `next_action.request` first; it chooses
@@ -59,8 +63,8 @@ The snippet should tell agents:
 - Treat generated hits as searchable but lower-priority by default; use
   `generated:true` / `is:generated` only when intentionally inspecting
   generated output.
-- Fall back to shell search only when the daemon is unavailable or the plan is
-  not useful.
+- Fall back to shell search only when Orient is unavailable or its query plan is
+  not useful for the task.
 
 ## Copyable Requests
 

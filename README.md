@@ -121,6 +121,8 @@ JSON-lines requests look like this:
 
 Every search result includes ready-to-send read, related-file, related-symbol,
 and query-plan follow-ups with `jsonl`, `client_cli`, and compact CLI hints.
+Agents should run those returned requests directly instead of translating them
+back into shell search/read commands.
 Exact-content duplicate hits from repeated worktrees or copied files are
 collapsed into one canonical result with `duplicate_group`; generated batch
 read follow-ups include `read_budget.grouped_duplicate_count` when duplicates

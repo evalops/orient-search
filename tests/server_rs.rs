@@ -1291,7 +1291,7 @@ fn agent_guide_returns_local_agent_request_templates() {
         guide["instruction_snippet"]
             .as_str()
             .unwrap()
-            .contains("Use Orient as the first local code-discovery step")
+            .contains("Use Orient for local code discovery and bounded file reads")
     );
     assert!(
         guide["recommended_loop"]
@@ -1331,7 +1331,7 @@ fn agent_instructions_returns_copyable_local_agent_snippet() {
     );
     for expected in [
         "## Orient Search",
-        "Use Orient as the first local code-discovery step",
+        "Use Orient for local code discovery and bounded file reads",
         "orient client-jsonl --addr 127.0.0.1:9999",
         "selected coding agent",
         "Keep cache paths local",
@@ -1341,6 +1341,8 @@ fn agent_instructions_returns_copyable_local_agent_snippet() {
         "daemon_status.search_auto_default",
         "`file:`, `path:`, `lang:`, `ext:`, `symbol:`, `type:`, `repo:`, `test:`",
         "Generated paths, including hashed JavaScript bundles, are demoted by default",
+        "run that request instead of translating it into a shell search/read command",
+        "Fall back to shell search only when Orient is unavailable",
         "does not collect telemetry",
     ] {
         assert!(

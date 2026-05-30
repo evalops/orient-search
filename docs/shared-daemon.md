@@ -89,7 +89,10 @@ The generated snippet should keep agents on this loop. See
   freshness matters.
 - Treat generated bundle output as searchable but lower-priority by default;
   use `generated:true` only when intentionally inspecting generated files.
-- Fall back to shell search only when Orient is unavailable or unhelpful.
+- When Orient returns a usable follow-up request, run that request directly
+  instead of translating it into shell search/read commands.
+- Fall back to shell search only when Orient is unavailable or its query plan is
+  not useful for the task.
 
 ## Check And Refresh
 

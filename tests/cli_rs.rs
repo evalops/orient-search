@@ -466,7 +466,7 @@ fn cli_outputs_agent_guide() {
     .stdout(predicate::str::contains("\"tool\":\"search_code\""))
     .stdout(predicate::str::contains("instruction_snippet"))
     .stdout(predicate::str::contains(
-        "Use Orient as the first local code-discovery step",
+        "Use Orient for local code discovery and bounded file reads",
     ))
     .stdout(predicate::str::contains("read_request"))
     .stdout(predicate::str::contains("127.0.0.1:9999"))
@@ -494,7 +494,7 @@ fn cli_outputs_agent_instructions() {
     .success()
     .stdout(predicate::str::contains("## Orient Search"))
     .stdout(predicate::str::contains(
-        "Use Orient as the first local code-discovery step",
+        "Use Orient for local code discovery and bounded file reads",
     ))
     .stdout(predicate::str::contains(
         "orient client-jsonl --addr 127.0.0.1:9999",

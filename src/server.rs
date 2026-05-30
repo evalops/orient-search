@@ -1408,7 +1408,7 @@ pub fn agent_instructions(
     let client_command = tcp_client_command(addr);
     format!(
         "## Orient Search\n\
-Use Orient as the first local code-discovery step before repeated `rg`, `find`, `ls`, or `cat`.\n\
+Use Orient for local code discovery and bounded file reads before `rg`, `find`, `ls`, `grep`, `cat`, or ad hoc filesystem scans.\n\
 Prefer the shared daemon when it is running: `{client_command}`.\n\
 Copy this snippet into {instruction_target}.\n\
 Keep cache paths local to the machine running the agents; do not copy private workspace layouts into shared docs or reusable instructions.\n\
@@ -1421,10 +1421,12 @@ Use query filters directly: `file:`, `path:`, `lang:`, `ext:`, `symbol:`, `type:
 Use `line:42` or `target_line:42` with `file:` or `path:` when the agent knows the relevant line and wants anchored snippets/read ranges.\n\
 Generated paths, including hashed JavaScript bundles, are demoted by default; use `generated:true` or `is:generated` when intentionally inspecting generated output.\n\
 After search, follow returned `next_action`, `next_read_batch_request`, `read_batch_request`, `read_request`, `related_request`, and `related_symbols_request`; each includes `jsonl` and `client_cli` for direct replay through `orient client-jsonl` when it wraps a tool request.\n\
+If Orient returns a usable request, run that request instead of translating it into a shell search/read command.\n\
 Use `read_batch_request.read_budget` to keep batch reads under the advertised hard limits; split large inspections into smaller calls instead of widening one huge request.\n\
 For manual context reads from a line inside a definition, pass `scope:\"symbol\"` so `read_range` or `read_ranges` anchors at the nearest function, class, or type definition.\n\
 Manual `read_range` and `read_ranges` calls accept pasted locations like `src/lib.rs:40-45` or `src/lib.rs#L40-L45`; use returned read requests when available.\n\
 When results are empty, noisy, or suspicious, use the returned `query_plan_request` or inline `query_plan_result` before broadening the search; pass `retry_if_empty:true` when you want Orient to execute the promoted retry once and return `primary_retry_result` immediately.\n\
+Fall back to shell search only when Orient is unavailable or its query plan is not useful for the task.\n\
 Orient is local code search only and does not collect telemetry.",
         instruction_target = profile.instruction_target
     )
