@@ -186,6 +186,8 @@ pub struct ResultToolRequest {
     pub tool: String,
     pub arguments: serde_json::Value,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub read_budget: Option<ReadBatchBudget>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cli: Option<String>,
@@ -234,6 +236,7 @@ impl ResultToolRequest {
             id,
             tool,
             arguments,
+            summary: None,
             read_budget: None,
             cli,
             jsonl,
@@ -242,6 +245,7 @@ impl ResultToolRequest {
     }
 
     fn with_read_budget(mut self, read_budget: ReadBatchBudget) -> Self {
+        self.summary = Some(read_batch_budget_summary(&read_budget));
         self.read_budget = Some(read_budget);
         self
     }
@@ -251,6 +255,7 @@ impl ResultToolRequest {
             && let Some(read_budget) = &mut self.read_budget
         {
             read_budget.grouped_duplicate_count = grouped_duplicate_count;
+            self.summary = Some(read_batch_budget_summary(read_budget));
         }
         self
     }
@@ -265,9 +270,16 @@ fn is_false(value: &bool) -> bool {
 }
 
 pub fn read_batch_action_summary(request: &ResultToolRequest, fallback: &str) -> String {
+    if let Some(summary) = &request.summary {
+        return summary.clone();
+    }
     let Some(budget) = &request.read_budget else {
         return fallback.to_string();
     };
+    read_batch_budget_summary(budget)
+}
+
+fn read_batch_budget_summary(budget: &ReadBatchBudget) -> String {
     let range_word = pluralize(budget.range_count, "range", "ranges");
     let line_word = pluralize(budget.total_lines, "line", "lines");
     let mut summary = format!(
@@ -7921,6 +7933,12 @@ mod tests {
             read_batch_action_summary(&request, "read"),
             "Read 2 bounded ranges (220 total lines). 2 grouped duplicate paths are represented by the canonical results."
         );
+        assert_eq!(
+            request.summary.as_deref(),
+            Some(
+                "Read 2 bounded ranges (220 total lines). 2 grouped duplicate paths are represented by the canonical results."
+            )
+        );
         assert_eq!(ranges[0]["path"], serde_json::json!("src/auth.rs"));
         assert_eq!(ranges[0]["start"], serde_json::json!(10));
         assert_eq!(ranges[0]["lines"], serde_json::json!(140));
@@ -7961,6 +7979,10 @@ mod tests {
                 max_lines_per_range: MAX_READ_RANGE_LINES,
                 grouped_duplicate_count: 0,
             })
+        );
+        assert_eq!(
+            request.summary.as_deref(),
+            Some("Read 8 bounded ranges (8000 total lines).")
         );
     }
 

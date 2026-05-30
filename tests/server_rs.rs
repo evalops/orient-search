@@ -1779,6 +1779,10 @@ fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
             .contains("src/auth.rs:")
     );
     assert_eq!(live["read_batch_request"]["tool"], "read_ranges");
+    assert_eq!(
+        live["read_batch_request"]["summary"],
+        serde_json::json!("Read 1 bounded range (80 total lines).")
+    );
     assert!(
         live["read_batch_request"]["cli"]
             .as_str()
@@ -3936,6 +3940,10 @@ fn runtime_search_auto_batch_uses_single_warmed_index() {
     );
     assert_eq!(batch[0]["results"][0]["read_request"]["tool"], "read_range");
     assert_eq!(batch[0]["read_batch_request"]["tool"], "read_ranges");
+    assert_eq!(
+        batch[0]["read_batch_request"]["summary"],
+        serde_json::json!("Read 1 bounded range (80 total lines).")
+    );
     assert!(batch[0]["read_batch_request"]["arguments"]["ranges"].is_array());
     assert_eq!(batch[1]["query"], "SessionManager");
     assert_eq!(batch[1]["surface"], "indexed");
