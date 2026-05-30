@@ -150,6 +150,14 @@ fn cli_help_stays_focused_on_local_code_search() {
         .stdout(predicate::str::contains("open-range"))
         .stdout(predicate::str::contains("read-ranges"))
         .stdout(predicate::str::contains("open-ranges"))
+        .stdout(predicate::str::contains("read-index-range"))
+        .stdout(predicate::str::contains("open-index-range"))
+        .stdout(predicate::str::contains("read-index-ranges"))
+        .stdout(predicate::str::contains("open-index-ranges"))
+        .stdout(predicate::str::contains("read-shard-range"))
+        .stdout(predicate::str::contains("open-shard-range"))
+        .stdout(predicate::str::contains("read-shard-ranges"))
+        .stdout(predicate::str::contains("open-shard-ranges"))
         .stdout(predicate::str::contains("eval-adoption").not())
         .stdout(predicate::str::contains("transcript").not())
         .stdout(predicate::str::contains("analytics").not());
@@ -1113,6 +1121,33 @@ fn cli_search_accepts_index_and_shard_targets() {
         .stdout(predicate::str::contains("\"tool\":\"read_index_range\""))
         .stdout(predicate::str::contains("\"tool\":\"related_index_files\""));
 
+    let mut open_index = Command::cargo_bin("orient").unwrap();
+    open_index
+        .args([
+            "open-index-range",
+            "--index",
+            index_path.to_str().unwrap(),
+            "src/auth.rs:5:1",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("src/auth.rs"))
+        .stdout(predicate::str::contains("issue_token"));
+
+    let mut open_index_batch = Command::cargo_bin("orient").unwrap();
+    open_index_batch
+        .args([
+            "open-index-ranges",
+            "--index",
+            index_path.to_str().unwrap(),
+            "--summary",
+            "src/auth.rs:5:1",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"range_count\":1"))
+        .stdout(predicate::str::contains("\"path\":\"src/auth.rs\""));
+
     let mut shard = Command::cargo_bin("orient").unwrap();
     shard
         .args([
@@ -1126,6 +1161,37 @@ fn cli_search_accepts_index_and_shard_targets() {
         .stdout(predicate::str::contains("src/auth.rs"))
         .stdout(predicate::str::contains("\"tool\":\"read_shard_range\""))
         .stdout(predicate::str::contains("\"tool\":\"related_shard_files\""));
+
+    let mut open_shard = Command::cargo_bin("orient").unwrap();
+    open_shard
+        .args([
+            "open-shard-range",
+            "--index-dir",
+            shard_dir.to_str().unwrap(),
+            "src/auth.rs",
+            "--start",
+            "5",
+            "--lines",
+            "1",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("src/auth.rs"))
+        .stdout(predicate::str::contains("issue_token"));
+
+    let mut open_shard_batch = Command::cargo_bin("orient").unwrap();
+    open_shard_batch
+        .args([
+            "open-shard-ranges",
+            "--index-dir",
+            shard_dir.to_str().unwrap(),
+            "--summary",
+            "src/auth.rs:5:1",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"range_count\":1"))
+        .stdout(predicate::str::contains("src/auth.rs"));
 }
 
 #[test]

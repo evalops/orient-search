@@ -246,7 +246,7 @@ enum Commands {
         #[arg(long)]
         refresh_if_stale: bool,
     },
-    #[command(alias = "open-shard-range")]
+    #[command(visible_alias = "open-shard-range")]
     ReadShardRange {
         #[arg(long)]
         index_dir: PathBuf,
@@ -263,7 +263,7 @@ enum Commands {
         #[arg(long = "format", default_value = "json", value_parser = ["json"])]
         format: String,
     },
-    #[command(alias = "open-shard-ranges")]
+    #[command(visible_alias = "open-shard-ranges")]
     ReadShardRanges {
         #[arg(long)]
         index_dir: PathBuf,
@@ -645,7 +645,7 @@ enum Commands {
         #[arg(long)]
         refresh_if_stale: bool,
     },
-    #[command(alias = "open-index-range")]
+    #[command(visible_alias = "open-index-range")]
     ReadIndexRange {
         #[arg(long)]
         index: PathBuf,
@@ -669,7 +669,7 @@ enum Commands {
         #[arg(long = "format", default_value = "json", value_parser = ["json"])]
         format: String,
     },
-    #[command(alias = "open-index-ranges")]
+    #[command(visible_alias = "open-index-ranges")]
     ReadIndexRanges {
         #[arg(long)]
         index: PathBuf,
