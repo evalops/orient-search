@@ -3755,6 +3755,14 @@ fn runtime_find_symbol_alias_accepts_live_index_and_shard_targets() {
         serde_json::json!(["src/auth.rs"])
     );
     assert_eq!(
+        indexed_wrapped["summary"]["top_dirs"],
+        serde_json::json!(["src"])
+    );
+    assert_eq!(
+        indexed_wrapped["summary"]["top_exts"],
+        serde_json::json!(["rs"])
+    );
+    assert_eq!(
         indexed_wrapped["summary"]["kinds"],
         serde_json::json!(["struct"])
     );
@@ -3899,6 +3907,14 @@ fn runtime_find_symbol_alias_accepts_live_index_and_shard_targets() {
     assert_eq!(
         indexed_batch[0]["summary"]["top_paths"],
         serde_json::json!(["src/auth.rs"])
+    );
+    assert_eq!(
+        indexed_batch[0]["summary"]["top_dirs"],
+        serde_json::json!(["src"])
+    );
+    assert_eq!(
+        indexed_batch[0]["summary"]["top_exts"],
+        serde_json::json!(["rs"])
     );
     assert_eq!(
         indexed_batch[0]["summary"]["kinds"],

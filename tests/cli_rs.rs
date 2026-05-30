@@ -3840,6 +3840,8 @@ fn cli_builds_and_searches_persistent_index() {
         .stdout(predicate::str::contains("\"status\":\"matched\""))
         .stdout(predicate::str::contains("\"symbol_count\""))
         .stdout(predicate::str::contains("\"top_paths\":[\"src/auth.rs\"]"))
+        .stdout(predicate::str::contains("\"top_dirs\":[\"src\"]"))
+        .stdout(predicate::str::contains("\"top_exts\":[\"rs\"]"))
         .stdout(predicate::str::contains("\"kinds\":[\"struct\"]"))
         .stdout(predicate::str::contains("\"results\""))
         .stdout(predicate::str::contains("\"read_batch_request\""))
@@ -3919,6 +3921,17 @@ fn cli_builds_and_searches_persistent_index() {
             .unwrap()
             .contains(&serde_json::json!("src/auth.rs")),
         "{index_symbol_batch:?}"
+    );
+    assert!(
+        index_symbol_batch[1]["summary"]["top_dirs"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("src")),
+        "{index_symbol_batch:?}"
+    );
+    assert_eq!(
+        index_symbol_batch[1]["summary"]["top_exts"],
+        serde_json::json!(["rs"])
     );
     assert_eq!(
         index_symbol_batch[1]["summary"]["kinds"],

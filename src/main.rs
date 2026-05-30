@@ -1851,6 +1851,10 @@ struct SymbolBatchSummary {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     top_paths: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
+    top_dirs: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    top_exts: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     kinds: Vec<String>,
 }
 
@@ -1864,6 +1868,8 @@ fn symbol_batch_summary(symbols: &[SymbolLookupResult]) -> SymbolBatchSummary {
         },
         symbol_count,
         top_paths: symbol_summary_top_paths(symbols),
+        top_dirs: symbol_summary_top_dirs(symbols),
+        top_exts: symbol_summary_top_exts(symbols),
         kinds: symbol_summary_kinds(symbols),
     }
 }
@@ -1879,6 +1885,36 @@ fn symbol_summary_top_paths(symbols: &[SymbolLookupResult]) -> Vec<String> {
         }
     }
     paths
+}
+
+fn symbol_summary_top_dirs(symbols: &[SymbolLookupResult]) -> Vec<String> {
+    let mut dirs = Vec::new();
+    for symbol in symbols {
+        let dir = search_summary_dir(&symbol.symbol.path);
+        if !dirs.iter().any(|existing| existing == &dir) {
+            dirs.push(dir);
+            if dirs.len() == 5 {
+                break;
+            }
+        }
+    }
+    dirs
+}
+
+fn symbol_summary_top_exts(symbols: &[SymbolLookupResult]) -> Vec<String> {
+    let mut exts = Vec::new();
+    for symbol in symbols {
+        let Some(ext) = search_summary_ext(&symbol.symbol.path) else {
+            continue;
+        };
+        if !exts.iter().any(|existing| existing == &ext) {
+            exts.push(ext);
+            if exts.len() == 5 {
+                break;
+            }
+        }
+    }
+    exts
 }
 
 fn symbol_summary_kinds(symbols: &[SymbolLookupResult]) -> Vec<String> {
