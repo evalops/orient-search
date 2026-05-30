@@ -109,6 +109,12 @@ fn apply_filter(filters: &mut SearchFilters, token: &str, negated: bool) -> bool
         return false;
     }
 
+    if !negated && let Some(kind) = symbol_kind_from_shorthand_key(&key) {
+        filters.symbol_kind = Some(kind);
+        filters.symbol = Some(value);
+        return true;
+    }
+
     match (negated, key.as_str()) {
         (false, "file" | "filename" | "file_name" | "basename") => {
             let (value, target_line) = strip_location_suffix(&value);
@@ -643,7 +649,9 @@ fn agent_path_query_extension(extension: &str) -> bool {
 
 pub fn normalize_symbol_kind(value: &str) -> String {
     match value.trim().to_ascii_lowercase().as_str() {
-        "func" | "function" | "functions" | "method" | "methods" => "function".to_string(),
+        "fn" | "func" | "function" | "functions" | "method" | "methods" | "def" => {
+            "function".to_string()
+        }
         "consts" | "constant" | "constants" => "const".to_string(),
         "vars" | "variable" | "variables" => "var".to_string(),
         "classes" => "class".to_string(),
@@ -654,6 +662,15 @@ pub fn normalize_symbol_kind(value: &str) -> String {
         "types" => "type".to_string(),
         other => other.to_string(),
     }
+}
+
+fn symbol_kind_from_shorthand_key(key: &str) -> Option<String> {
+    let kind = normalize_symbol_kind(key);
+    matches!(
+        kind.as_str(),
+        "function" | "class" | "interface" | "struct" | "enum" | "trait" | "const" | "var"
+    )
+    .then_some(kind)
 }
 
 fn symbol_kind_from_type_value(value: &str) -> Option<String> {
@@ -1267,6 +1284,22 @@ mod tests {
 
         let alias = parse_query("symbol_type:struct SessionManager");
         assert_eq!(alias.filters.symbol_kind.as_deref(), Some("struct"));
+
+        let shorthand = parse_query("fn:issue_token");
+        assert!(shorthand.terms.is_empty());
+        assert_eq!(shorthand.filters.symbol.as_deref(), Some("issue_token"));
+        assert_eq!(shorthand.filters.symbol_kind.as_deref(), Some("function"));
+
+        let class_shorthand = parse_query("class:SessionManager auth");
+        assert_eq!(class_shorthand.terms, vec!["auth"]);
+        assert_eq!(
+            class_shorthand.filters.symbol.as_deref(),
+            Some("SessionManager")
+        );
+        assert_eq!(
+            class_shorthand.filters.symbol_kind.as_deref(),
+            Some("class")
+        );
 
         let excluded = parse_query("-symbol-type:interfaces gateway");
         assert_eq!(excluded.filters.exclude_symbol_kind, vec!["interface"]);

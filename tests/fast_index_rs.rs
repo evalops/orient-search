@@ -1768,6 +1768,10 @@ fn query_language_filters_fallback_and_indexed_search() {
         "export function SessionManager() { return 'doc-ish' }\n",
     );
     write(
+        &repo.path().join("src/session.py"),
+        "class SessionManager:\n    pass\n",
+    );
+    write(
         &repo.path().join("tests/auth_test.rs"),
         "pub fn issue_token_test() {}\n",
     );
@@ -1808,6 +1812,25 @@ fn query_language_filters_fallback_and_indexed_search() {
         .unwrap();
     assert_eq!(indexed_results.len(), 1);
     assert_eq!(indexed_results[0].path, "src/auth.rs");
+
+    let fallback_class_shorthand = search_repo_fast_filtered(
+        repo.path(),
+        "class:SessionManager",
+        10,
+        &SearchFilters::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        result_paths(&fallback_class_shorthand),
+        vec!["src/session.py"]
+    );
+    let indexed_class_shorthand = indexed
+        .search_filtered("class:SessionManager", 10, &SearchFilters::default())
+        .unwrap();
+    assert_eq!(
+        result_paths(&indexed_class_shorthand),
+        vec!["src/session.py"]
+    );
 
     let negative_term_query = "content:SessionManager -deprecated";
     let fallback_negative_term = search_repo_fast_filtered(
