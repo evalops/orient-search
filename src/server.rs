@@ -8540,6 +8540,14 @@ fn context_lines_arg(arguments: &Value) -> Result<usize> {
     )
 }
 
+fn snippet_mode_arg(arguments: &Value) -> Result<SnippetMode> {
+    let Some(value) = optional_string_arg(arguments, "snippet") else {
+        return Ok(SnippetMode::default());
+    };
+    SnippetMode::parse(&value)
+        .ok_or_else(|| anyhow!("snippet must be one of: short, medium, block, symbol"))
+}
+
 fn is_zero(value: &usize) -> bool {
     *value == 0
 }
@@ -8919,10 +8927,7 @@ fn search_filters(arguments: &Value, allow_repo_alias: bool) -> Result<SearchFil
         generated: arguments.get("generated").and_then(Value::as_bool),
         code: arguments.get("code").and_then(Value::as_bool),
         target_line: optional_positive_usize_arg_any(arguments, &["line", "target_line"])?,
-        snippet: optional_string_arg(arguments, "snippet")
-            .as_deref()
-            .and_then(SnippetMode::parse)
-            .unwrap_or_default(),
+        snippet: snippet_mode_arg(arguments)?,
         explain: arguments
             .get("explain")
             .and_then(Value::as_bool)

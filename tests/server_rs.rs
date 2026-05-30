@@ -3703,6 +3703,21 @@ fn runtime_rejects_oversized_batches() {
     );
 
     let response = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("invalid-snippet"),
+        tool: "search_code".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "query": "SessionManager",
+            "snippet": "wide"
+        }),
+    });
+    let error = response.error.unwrap();
+    assert!(
+        error.contains("snippet must be one of: short, medium, block, symbol"),
+        "{error}"
+    );
+
+    let response = runtime.dispatch(ToolRequest {
         id: serde_json::json!("too-many-lines"),
         tool: "open_range".to_string(),
         arguments: serde_json::json!({
