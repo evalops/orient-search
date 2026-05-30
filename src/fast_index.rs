@@ -37,7 +37,8 @@ use std::path::{Component, Path, PathBuf};
 use std::process;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const INDEX_VERSION: u32 = 13;
+pub const INDEX_FORMAT_VERSION: u32 = 13;
+const INDEX_VERSION: u32 = INDEX_FORMAT_VERSION;
 const PREVIOUS_DISK_INDEX_VERSION: u32 = 12;
 const OLDER_DISK_INDEX_VERSION: u32 = 11;
 const OLDEST_DISK_INDEX_VERSION: u32 = 10;

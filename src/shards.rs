@@ -20,7 +20,8 @@ use std::process;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-const SHARD_MANIFEST_VERSION: u32 = 1;
+pub const SHARD_MANIFEST_FORMAT_VERSION: u32 = 1;
+const SHARD_MANIFEST_VERSION: u32 = SHARD_MANIFEST_FORMAT_VERSION;
 const SHARD_MANIFEST_SIDECAR_VERSION: u32 = 2;
 const SHARD_MANIFEST_PREFILTER_VERSION: u32 = 1;
 const SHARD_MANIFEST_ROUTE_VERSION: u32 = 7;

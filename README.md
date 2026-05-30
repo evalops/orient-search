@@ -10,6 +10,7 @@ Run one shared daemon for the repos local agents are likely to touch:
 
 ```bash
 cargo install --git https://github.com/evalops/orient-search
+orient --version
 
 export ORIENT_WORKSPACES=/path/to/workspaces
 export ORIENT_SHARDS=/path/to/local/cache/orient-shards

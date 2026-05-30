@@ -58,6 +58,34 @@ fn cli_outputs_repo_brief_as_json() {
 }
 
 #[test]
+fn cli_reports_version_for_install_sanity_checks() {
+    let mut flag = Command::cargo_bin("orient").unwrap();
+    flag.arg("--version")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(env!("CARGO_PKG_VERSION")));
+
+    let mut text = Command::cargo_bin("orient").unwrap();
+    text.args(["version"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("orient "))
+        .stdout(predicate::str::contains(env!("CARGO_PKG_VERSION")));
+
+    let mut json = Command::cargo_bin("orient").unwrap();
+    let output = json.args(["version", "--format", "json"]).output().unwrap();
+    assert!(output.status.success());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["binary"], serde_json::json!("orient"));
+    assert_eq!(
+        value["version"],
+        serde_json::json!(env!("CARGO_PKG_VERSION"))
+    );
+    assert!(value["index_format_version"].as_u64().unwrap() >= 1);
+    assert!(value["shard_manifest_format_version"].as_u64().unwrap() >= 1);
+}
+
+#[test]
 fn cli_outputs_tool_manifest() {
     let mut cmd = Command::cargo_bin("orient").unwrap();
     cmd.arg("tool-manifest")
@@ -1799,6 +1827,25 @@ fn cli_outputs_repo_map_and_reads_ranges() {
         .stdout(predicate::str::contains("\"end_line\":5"))
         .stdout(predicate::str::contains("issue_token"));
 
+    let mut line_alias_read = Command::cargo_bin("orient").unwrap();
+    line_alias_read
+        .args([
+            "read-range",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--path",
+            "src/auth.rs",
+            "--line",
+            "5",
+            "--end",
+            "6",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"start_line\":5"))
+        .stdout(predicate::str::contains("\"end_line\":6"))
+        .stdout(predicate::str::contains("issue_token"));
+
     let mut symbol_read_range = Command::cargo_bin("orient").unwrap();
     symbol_read_range
         .args([
@@ -3338,6 +3385,26 @@ fn cli_builds_and_searches_persistent_index() {
         .stdout(predicate::str::contains("\"path\":\"src/auth.rs\""))
         .stdout(predicate::str::contains("issue_token"));
 
+    let mut index_line_alias_read = Command::cargo_bin("orient").unwrap();
+    index_line_alias_read
+        .args([
+            "read-index-range",
+            "--index",
+            index_path.to_str().unwrap(),
+            "--path",
+            "./src/auth.rs",
+            "--line",
+            "5",
+            "--end",
+            "6",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"path\":\"src/auth.rs\""))
+        .stdout(predicate::str::contains("\"start_line\":5"))
+        .stdout(predicate::str::contains("\"end_line\":6"))
+        .stdout(predicate::str::contains("issue_token"));
+
     let mut read_index_ranges = Command::cargo_bin("orient").unwrap();
     read_index_ranges
         .args([
@@ -3391,6 +3458,25 @@ fn cli_builds_and_searches_persistent_index() {
         .stdout(predicate::str::contains("issue_token"))
         .stdout(predicate::str::contains("\"path\":\"tests/auth_test.rs\""))
         .stdout(predicate::str::contains("issue_token_round_trip"));
+
+    let mut index_line_alias_ranges = Command::cargo_bin("orient").unwrap();
+    index_line_alias_ranges
+        .args([
+            "open-index-ranges",
+            "--index",
+            index_path.to_str().unwrap(),
+            "./src/auth.rs",
+            "tests/auth_test.rs",
+            "--line",
+            "1",
+            "--line-count",
+            "2",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"path\":\"src/auth.rs\""))
+        .stdout(predicate::str::contains("\"end_line\":2"))
+        .stdout(predicate::str::contains("\"path\":\"tests/auth_test.rs\""));
 
     let mut index_symbol = Command::cargo_bin("orient").unwrap();
     index_symbol

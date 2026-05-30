@@ -4,7 +4,7 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use orient::discover::{
     DiscoverOptions, DiscoverySelectionSummary, discover_repos, discovery_selection_summary,
 };
-use orient::fast_index::{FastIndex, RefreshStats};
+use orient::fast_index::{FastIndex, INDEX_FORMAT_VERSION, RefreshStats};
 use orient::query::{merge_filters, normalize_symbol_kind, parse_query};
 use orient::repo_index::{
     DEFAULT_REPO_MAP_READ_BATCH_RANGES, MAX_READ_RANGE_LINES, MAX_RESULT_READ_BATCH_RANGES,
@@ -25,10 +25,10 @@ use orient::server::{
     serve_tcp, tcp_client_command, tool_manifest, unix_client_command,
 };
 use orient::shards::{
-    ShardFreshness, ShardQueryPlan, build_shards_with_force, ensure_shards, find_shard_symbol,
-    read_shard_range, read_shard_range_scoped, refresh_shards, related_shard_files_filtered,
-    related_shard_symbols_filtered, search_shards, shard_query_plans, shard_repo_maps,
-    shard_status,
+    SHARD_MANIFEST_FORMAT_VERSION, ShardFreshness, ShardQueryPlan, build_shards_with_force,
+    ensure_shards, find_shard_symbol, read_shard_range, read_shard_range_scoped, refresh_shards,
+    related_shard_files_filtered, related_shard_symbols_filtered, search_shards, shard_query_plans,
+    shard_repo_maps, shard_status,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -51,6 +51,7 @@ const DEFAULT_CLI_READ_RANGE_LINES: usize = 80;
 
 #[derive(Debug, Parser)]
 #[command(name = "orient")]
+#[command(version)]
 #[command(about = "Fast local code search for coding agents")]
 struct Cli {
     #[arg(long, global = true, hide = true)]
@@ -61,6 +62,10 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Commands {
+    Version {
+        #[arg(long, default_value = "text", value_parser = ["text", "json"])]
+        format: String,
+    },
     DiscoverRepos {
         #[arg(long, default_value = ".")]
         root: PathBuf,
@@ -401,7 +406,7 @@ enum Commands {
         path: Option<String>,
         #[arg(long = "path", value_name = "PATH", conflicts_with = "path")]
         path_arg: Option<String>,
-        #[arg(long, alias = "start-line", alias = "start_line")]
+        #[arg(long, alias = "line", alias = "start-line", alias = "start_line")]
         start: Option<usize>,
         #[arg(
             long,
@@ -426,7 +431,7 @@ enum Commands {
         #[arg(long = "range", value_name = "PATH:START:LINES[:SCOPE]")]
         ranges: Vec<CliRangeSpec>,
         paths: Vec<String>,
-        #[arg(long, alias = "start-line", alias = "start_line")]
+        #[arg(long, alias = "line", alias = "start-line", alias = "start_line")]
         start: Option<usize>,
         #[arg(
             long,
@@ -582,10 +587,17 @@ enum Commands {
         path: Option<String>,
         #[arg(long = "path", value_name = "PATH", conflicts_with = "path")]
         path_arg: Option<String>,
-        #[arg(long, default_value_t = 1)]
-        start: usize,
-        #[arg(long, default_value_t = 80)]
-        lines: usize,
+        #[arg(long, alias = "line", alias = "start-line", alias = "start_line")]
+        start: Option<usize>,
+        #[arg(
+            long,
+            alias = "line-count",
+            alias = "line_count",
+            conflicts_with = "end_line"
+        )]
+        lines: Option<usize>,
+        #[arg(long = "end-line", alias = "end_line", alias = "end")]
+        end_line: Option<usize>,
         #[arg(long, value_enum, default_value_t = ReadScopeArg::Exact)]
         scope: ReadScopeArg,
     },
@@ -596,10 +608,17 @@ enum Commands {
         #[arg(long = "range", value_name = "PATH:START:LINES[:SCOPE]")]
         ranges: Vec<CliRangeSpec>,
         paths: Vec<String>,
-        #[arg(long, default_value_t = 1)]
-        start: usize,
-        #[arg(long, default_value_t = 80)]
-        lines: usize,
+        #[arg(long, alias = "line", alias = "start-line", alias = "start_line")]
+        start: Option<usize>,
+        #[arg(
+            long,
+            alias = "line-count",
+            alias = "line_count",
+            conflicts_with = "end_line"
+        )]
+        lines: Option<usize>,
+        #[arg(long = "end-line", alias = "end_line", alias = "end")]
+        end_line: Option<usize>,
         #[arg(long, value_enum, default_value_t = ReadScopeArg::Exact)]
         scope: ReadScopeArg,
     },
@@ -2353,9 +2372,42 @@ fn snippet_mode_name(mode: SnippetMode) -> &'static str {
     }
 }
 
+#[derive(Debug, Serialize)]
+struct VersionReport {
+    package: &'static str,
+    binary: &'static str,
+    version: &'static str,
+    description: &'static str,
+    index_format_version: u32,
+    shard_manifest_format_version: u32,
+}
+
+fn version_report() -> VersionReport {
+    VersionReport {
+        package: env!("CARGO_PKG_NAME"),
+        binary: "orient",
+        version: env!("CARGO_PKG_VERSION"),
+        description: env!("CARGO_PKG_DESCRIPTION"),
+        index_format_version: INDEX_FORMAT_VERSION,
+        shard_manifest_format_version: SHARD_MANIFEST_FORMAT_VERSION,
+    }
+}
+
+fn print_version_report(format: &str) -> Result<()> {
+    let report = version_report();
+    match format {
+        "json" => println!("{}", serde_json::to_string(&report)?),
+        _ => println!("{} {}", report.binary, report.version),
+    }
+    Ok(())
+}
+
 fn run() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
+        Commands::Version { format } => {
+            print_version_report(&format)?;
+        }
         Commands::DiscoverRepos {
             root,
             max_depth,
@@ -4028,9 +4080,11 @@ fn run() -> Result<()> {
             path_arg,
             start,
             lines,
+            end_line,
             scope,
         } => {
-            let range = cli_single_range(path, path_arg, start, lines)?;
+            let window = cli_read_window(start, lines, end_line)?;
+            let range = cli_single_range(path, path_arg, window.start, window.lines)?;
             let index = FastIndex::load(index)?;
             println!(
                 "{}",
@@ -4048,12 +4102,14 @@ fn run() -> Result<()> {
             paths,
             start,
             lines,
+            end_line,
             scope,
         } => {
             let index = FastIndex::load(index)?;
             let mut results = Vec::new();
             let scope = RangeScope::from(scope);
-            for range in cli_ranges(paths, ranges, start, lines, scope)? {
+            let window = cli_read_window(start, lines, end_line)?;
+            for range in cli_ranges(paths, ranges, window.start, window.lines, scope)? {
                 results.push(index.read_range_scoped(
                     &range.path,
                     range.start,
