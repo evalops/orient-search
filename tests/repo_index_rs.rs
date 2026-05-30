@@ -558,6 +558,97 @@ public class Gateway {
 }
 
 #[test]
+fn c_family_symbols_work_across_live_and_persistent_indexes() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("engine.cpp"),
+        r#"
+class SearchEngine {};
+
+int score_candidate(int value) {
+    return value;
+}
+
+void SearchEngine::refresh_index() {}
+"#,
+    );
+    write(
+        &repo.path().join("include/query.h"),
+        r#"
+struct QueryPlan {
+    int candidate_count;
+};
+"#,
+    );
+    write(
+        &repo.path().join("SearchController.cs"),
+        r#"
+public interface ISearchClient {}
+
+public class SearchController {
+    public SearchResult ExecuteSearch(QueryPlan plan) {
+        return default;
+    }
+}
+"#,
+    );
+
+    let live = RepoIndexer::new(repo.path()).build().unwrap();
+    assert_symbol(
+        &live.find_symbol("SearchEngine", 10)[0],
+        "engine.cpp",
+        "class",
+    );
+    assert_symbol(
+        &live.find_symbol("score_candidate", 10)[0],
+        "engine.cpp",
+        "function",
+    );
+    assert_symbol(
+        &live.find_symbol("refresh_index", 10)[0],
+        "engine.cpp",
+        "function",
+    );
+    assert_symbol(
+        &live.find_symbol("QueryPlan", 10)[0],
+        "include/query.h",
+        "struct",
+    );
+    assert_symbol(
+        &live.find_symbol("ISearchClient", 10)[0],
+        "SearchController.cs",
+        "interface",
+    );
+    assert_symbol(
+        &live.find_symbol("ExecuteSearch", 10)[0],
+        "SearchController.cs",
+        "function",
+    );
+
+    let fallback = search_repo_fast_filtered(
+        repo.path(),
+        "lang:cpp symbol:score_candidate",
+        5,
+        &Default::default(),
+    )
+    .unwrap();
+    assert_eq!(fallback[0].path, "engine.cpp");
+    assert!(fallback[0].reason.contains("symbol:score_candidate"));
+
+    let indexed = FastIndex::build(repo.path()).unwrap();
+    assert_symbol(
+        &indexed.find_symbol("ExecuteSearch", 10)[0],
+        "SearchController.cs",
+        "function",
+    );
+    let indexed_results = indexed
+        .search_filtered("lang:csharp symbol:ISearchClient", 5, &Default::default())
+        .unwrap();
+    assert_eq!(indexed_results[0].path, "SearchController.cs");
+    assert!(indexed_results[0].reason.contains("symbol:ISearchClient"));
+}
+
+#[test]
 fn generic_extractor_indexes_traits_types_and_exported_symbols() {
     let repo = tempfile::tempdir().unwrap();
     write(

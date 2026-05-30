@@ -80,6 +80,15 @@ const GENERATED_FILE_GLOBS: &[&str] = &[
 ];
 const GENERATED_BUNDLE_DIR_SEGMENTS: &[&str] = &["assets", "static"];
 const CODE_FILE_GLOBS: &[&str] = &[
+    "**/*.c",
+    "**/*.h",
+    "**/*.cc",
+    "**/*.cpp",
+    "**/*.cxx",
+    "**/*.hh",
+    "**/*.hpp",
+    "**/*.hxx",
+    "**/*.cs",
     "**/*.py",
     "**/*.rs",
     "**/*.js",
@@ -100,7 +109,8 @@ const PROSE_FILE_NAME_GLOBS: &[&str] = &[
     "**/bun.lock",
     "**/bun.lockb",
 ];
-const FD_CODE_FILE_PATTERN: &str = r"\.(py|rs|js|jsx|ts|tsx|go|rb|java|kt|swift)$";
+const FD_CODE_FILE_PATTERN: &str =
+    r"\.(c|h|cc|cpp|cxx|hh|hpp|hxx|cs|py|rs|js|jsx|ts|tsx|go|rb|java|kt|swift)$";
 const FD_PROSE_FILE_PATTERN: &str =
     r"^(README|Makefile|yarn\.lock|bun\.lock|bun\.lockb)$|\.(md|toml|json|ya?ml)$";
 static TOKEN_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[A-Za-z][A-Za-z0-9_]*").unwrap());
@@ -132,6 +142,18 @@ static SWIFT_TYPE_SYMBOL_RE: LazyLock<Regex> = LazyLock::new(|| {
 });
 static JAVA_METHOD_SYMBOL_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^\s*(?:public|private|protected|static|final|abstract|synchronized|native|default|\s)+[A-Za-z_][A-Za-z0-9_<>\[\], ?]*\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(").unwrap()
+});
+static C_FAMILY_TYPE_SYMBOL_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^\s*(?:template\s*<[^>]+>\s*)?(class|struct|enum)\s+(?:class\s+|struct\s+)?([A-Za-z_][A-Za-z0-9_]*)").unwrap()
+});
+static C_FAMILY_FUNCTION_SYMBOL_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^\s*(?:(?:inline|static|constexpr|virtual|extern|friend|explicit)\s+)*(?:[A-Za-z_][A-Za-z0-9_:<>,*&\s~]*\s+)?(?:[A-Za-z_][A-Za-z0-9_]*::)*([A-Za-z_~][A-Za-z0-9_]*)\s*\([^;{}]*\)\s*(?:const\s*)?(?:noexcept\s*)?(?:->\s*[^{]+)?\{?").unwrap()
+});
+static CSHARP_TYPE_SYMBOL_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^\s*(?:(?:public|private|protected|internal|static|sealed|abstract|partial|readonly|unsafe|new)\s+)*(class|interface|struct|enum|record)\s+([A-Za-z_][A-Za-z0-9_]*)").unwrap()
+});
+static CSHARP_METHOD_SYMBOL_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^\s*(?:(?:public|private|protected|internal|static|virtual|override|async|sealed|abstract|extern|unsafe|new|partial)\s+)+[A-Za-z_][A-Za-z0-9_<>,?\[\]. ]*\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(").unwrap()
 });
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -4585,6 +4607,9 @@ pub fn language_for(path: &Path) -> Option<String> {
     }
     let ext = path.extension()?.to_string_lossy().to_lowercase();
     let language = match ext.as_str() {
+        "c" | "h" => "c",
+        "cc" | "cpp" | "cxx" | "hh" | "hpp" | "hxx" => "cpp",
+        "cs" => "csharp",
         "py" => "python",
         "rs" => "rust",
         "js" | "jsx" => "javascript",
@@ -4630,6 +4655,9 @@ pub(crate) fn is_source_code_language(language: &str) -> bool {
     matches!(
         normalize_language_filter(language).as_str(),
         "python"
+            | "c"
+            | "cpp"
+            | "csharp"
             | "rust"
             | "javascript"
             | "typescript"
@@ -4643,6 +4671,9 @@ pub(crate) fn is_source_code_language(language: &str) -> bool {
 
 pub fn normalize_language_filter(value: &str) -> String {
     match value.trim().to_ascii_lowercase().as_str() {
+        "c" | "h" => "c".to_string(),
+        "cc" | "cpp" | "c++" | "cxx" | "hh" | "hpp" | "hxx" => "cpp".to_string(),
+        "cs" | "csharp" | "c#" => "csharp".to_string(),
         "py" | "python" => "python".to_string(),
         "rs" | "rust" => "rust".to_string(),
         "js" | "jsx" | "javascript" => "javascript".to_string(),
@@ -4680,6 +4711,12 @@ pub(crate) fn extract_symbols(path: &str, text: &str, language: &str) -> Vec<Sym
     }
     if language == "java" {
         return extract_java_symbols(path, text);
+    }
+    if language == "c" || language == "cpp" {
+        return extract_c_family_symbols(path, text);
+    }
+    if language == "csharp" {
+        return extract_csharp_symbols(path, text);
     }
     if !language_supports_generic_symbols(language) {
         return Vec::new();
@@ -4836,6 +4873,94 @@ fn extract_java_symbols(path: &str, text: &str) -> Vec<Symbol> {
                 continue;
             };
             if !matches!(name, "if" | "for" | "while" | "switch" | "catch") {
+                symbols.push(Symbol {
+                    name: name.to_string(),
+                    kind: "function".to_string(),
+                    path: path.to_string(),
+                    line: index + 1,
+                });
+            }
+        }
+    }
+    symbols
+}
+
+fn extract_c_family_symbols(path: &str, text: &str) -> Vec<Symbol> {
+    let mut symbols = Vec::new();
+    for (index, line) in text.lines().enumerate() {
+        if let Some(capture) = C_FAMILY_TYPE_SYMBOL_RE.captures(line) {
+            symbols.push(Symbol {
+                name: capture
+                    .get(2)
+                    .map(|value| value.as_str())
+                    .unwrap_or_default()
+                    .to_string(),
+                kind: capture
+                    .get(1)
+                    .map(|value| value.as_str())
+                    .unwrap_or("class")
+                    .to_string(),
+                path: path.to_string(),
+                line: index + 1,
+            });
+            continue;
+        }
+        let Some(capture) = C_FAMILY_FUNCTION_SYMBOL_RE.captures(line) else {
+            continue;
+        };
+        let Some(name) = capture.get(1).map(|value| value.as_str()) else {
+            continue;
+        };
+        if !c_family_function_name_allowed(name) {
+            continue;
+        }
+        symbols.push(Symbol {
+            name: name.trim_start_matches('~').to_string(),
+            kind: "function".to_string(),
+            path: path.to_string(),
+            line: index + 1,
+        });
+    }
+    symbols
+}
+
+fn c_family_function_name_allowed(name: &str) -> bool {
+    !matches!(
+        name.trim_start_matches('~'),
+        "if" | "for" | "while" | "switch" | "catch" | "return" | "sizeof"
+    )
+}
+
+fn extract_csharp_symbols(path: &str, text: &str) -> Vec<Symbol> {
+    let mut symbols = Vec::new();
+    for (index, line) in text.lines().enumerate() {
+        if let Some(capture) = CSHARP_TYPE_SYMBOL_RE.captures(line) {
+            let raw_kind = capture
+                .get(1)
+                .map(|value| value.as_str())
+                .unwrap_or("class");
+            symbols.push(Symbol {
+                name: capture
+                    .get(2)
+                    .map(|value| value.as_str())
+                    .unwrap_or_default()
+                    .to_string(),
+                kind: if raw_kind == "record" {
+                    "class"
+                } else {
+                    raw_kind
+                }
+                .to_string(),
+                path: path.to_string(),
+                line: index + 1,
+            });
+            continue;
+        }
+        if let Some(capture) = CSHARP_METHOD_SYMBOL_RE.captures(line) {
+            let Some(name) = capture.get(1).map(|value| value.as_str()) else {
+                continue;
+            };
+            if !matches!(name, "if" | "for" | "while" | "switch" | "catch" | "using") {
                 symbols.push(Symbol {
                     name: name.to_string(),
                     kind: "function".to_string(),
