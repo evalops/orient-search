@@ -2306,8 +2306,10 @@ fn primary_cli_retry_result(
     }
     let result = response.result.unwrap_or(Value::Null);
     let read_batch_request = primary_cli_retry_read_batch_request(request, &result);
+    let summary = primary_cli_retry_result_summary(&result);
     let mut value = serde_json::json!({
         "request": request,
+        "summary": summary,
         "results": result
     });
     if let Some(read_batch_request) = read_batch_request {
@@ -2329,6 +2331,44 @@ fn primary_cli_retry_read_batch_request(
         }
     }
     None
+}
+
+fn primary_cli_retry_result_summary(result: &Value) -> Value {
+    let results = result.as_array().map(Vec::as_slice).unwrap_or(&[]);
+    let mut summary = serde_json::json!({
+        "status": if results.is_empty() { "not_found" } else { "matched" },
+        "result_count": results.len()
+    });
+    let mut top_paths = Vec::new();
+    for item in results {
+        let Some(path) = item.get("path").and_then(Value::as_str) else {
+            continue;
+        };
+        if !top_paths.iter().any(|existing| existing == path) {
+            top_paths.push(path.to_string());
+            if top_paths.len() == 5 {
+                break;
+            }
+        }
+    }
+    if !top_paths.is_empty() {
+        summary["top_paths"] = serde_json::json!(top_paths);
+    }
+    if let Some(score) = results
+        .first()
+        .and_then(|item| item.get("score"))
+        .and_then(Value::as_f64)
+    {
+        summary["max_score"] = serde_json::json!(score);
+    }
+    if let Some(score) = results
+        .last()
+        .and_then(|item| item.get("score"))
+        .and_then(Value::as_f64)
+    {
+        summary["min_score"] = serde_json::json!(score);
+    }
+    summary
 }
 
 fn insert_optional_json_field(object: &mut Value, name: &str, value: Option<Value>) {

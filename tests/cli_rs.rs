@@ -753,6 +753,18 @@ fn cli_search_auto_selects_live_indexed_and_shard_surfaces() {
     let auto_retry_live: serde_json::Value =
         serde_json::from_slice(&auto_retry_live.stdout).unwrap();
     assert_eq!(
+        auto_retry_live["primary_retry_result"]["summary"]["status"],
+        serde_json::json!("matched")
+    );
+    assert_eq!(
+        auto_retry_live["primary_retry_result"]["summary"]["result_count"],
+        serde_json::json!(1)
+    );
+    assert_eq!(
+        auto_retry_live["primary_retry_result"]["summary"]["top_paths"],
+        serde_json::json!(["src/auth.rs"])
+    );
+    assert_eq!(
         auto_retry_live["primary_retry_result"]["read_batch_request"]["tool"],
         serde_json::json!("read_ranges")
     );

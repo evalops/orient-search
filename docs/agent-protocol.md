@@ -237,8 +237,9 @@ Generated follow-ups include `jsonl`, `client_cli`, and compact CLI hints.
 Batch read follow-ups include `read_budget.grouped_duplicate_count` when the
 returned canonical result ranges represent additional duplicate paths.
 Set `retry_if_empty:true` or pass `--retry-if-empty` to run the promoted retry
-once and receive `primary_retry_result`; if that retry returns hits, Orient also
-returns a target-aware read batch request for those hits. Set `diagnose:true`
+once and receive `primary_retry_result`; it includes compact `summary` fields
+with retry hit count, top paths, and score bounds. If that retry returns hits,
+Orient also returns a target-aware read batch request for those hits. Set `diagnose:true`
 when results are noisy or suspicious to include inline diagnostics even when the
 search already returned hits. Batch search items from `search_batch`,
 `indexed_search_batch`, and `search_shards_batch` include the same plan/map

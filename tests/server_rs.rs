@@ -1961,6 +1961,18 @@ fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
             .contains("src/auth.rs")
     );
     assert_eq!(
+        auto_retry["primary_retry_result"]["summary"]["status"],
+        serde_json::json!("matched")
+    );
+    assert_eq!(
+        auto_retry["primary_retry_result"]["summary"]["result_count"],
+        serde_json::json!(1)
+    );
+    assert_eq!(
+        auto_retry["primary_retry_result"]["summary"]["top_paths"],
+        serde_json::json!(["src/auth.rs"])
+    );
+    assert_eq!(
         auto_retry["primary_retry_result"]["read_batch_request"]["tool"],
         serde_json::json!("read_ranges")
     );

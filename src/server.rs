@@ -2804,14 +2804,54 @@ fn primary_diagnosis_from_shard_plans(
 
 fn primary_retry_result_value(request: &ResultToolRequest, result: Value) -> Result<Value> {
     let read_batch_request = primary_retry_read_batch_request(request, &result);
+    let summary = primary_retry_result_summary(&result);
     let mut value = json!({
         "request": request,
+        "summary": summary,
         "results": result
     });
     if let Some(read_batch_request) = read_batch_request {
         value["read_batch_request"] = serde_json::to_value(read_batch_request)?;
     }
     Ok(value)
+}
+
+fn primary_retry_result_summary(result: &Value) -> Value {
+    let results = result.as_array().map(Vec::as_slice).unwrap_or(&[]);
+    let mut summary = json!({
+        "status": if results.is_empty() { "not_found" } else { "matched" },
+        "result_count": results.len()
+    });
+    let mut top_paths = Vec::new();
+    for item in results {
+        let Some(path) = item.get("path").and_then(Value::as_str) else {
+            continue;
+        };
+        if !top_paths.iter().any(|existing| existing == path) {
+            top_paths.push(path.to_string());
+            if top_paths.len() == 5 {
+                break;
+            }
+        }
+    }
+    if !top_paths.is_empty() {
+        summary["top_paths"] = json!(top_paths);
+    }
+    if let Some(score) = results
+        .first()
+        .and_then(|item| item.get("score"))
+        .and_then(Value::as_f64)
+    {
+        summary["max_score"] = json!(score);
+    }
+    if let Some(score) = results
+        .last()
+        .and_then(|item| item.get("score"))
+        .and_then(Value::as_f64)
+    {
+        summary["min_score"] = json!(score);
+    }
+    summary
 }
 
 fn primary_retry_read_batch_request(
