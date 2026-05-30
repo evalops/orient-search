@@ -6318,6 +6318,13 @@ mod tests {
         assert_eq!(wrapped.start, 12);
         assert_eq!(wrapped.lines, 4);
         assert_eq!(wrapped.scope, Some(RangeScope::Symbol));
+
+        let wrapped_colon_range =
+            CliRangeSpec::from_str("at Object.handle (src/auth.rs:12-15):symbol").unwrap();
+        assert_eq!(wrapped_colon_range.path, "src/auth.rs");
+        assert_eq!(wrapped_colon_range.start, 12);
+        assert_eq!(wrapped_colon_range.lines, 4);
+        assert_eq!(wrapped_colon_range.scope, Some(RangeScope::Symbol));
     }
 
     #[test]
