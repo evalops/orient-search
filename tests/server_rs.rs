@@ -8762,6 +8762,14 @@ fn runtime_filters_shard_search_by_nested_repo_alias() {
         "[package]\nname='billing'\nversion='0.1.0'\nedition='2024'\n",
     );
     write(
+        &billing_repo.join("package.json"),
+        r#"{"scripts":{"test":"vitest run","lint":"eslint .","typecheck":"tsc --noEmit"}}"#,
+    );
+    write(
+        &billing_repo.join("pnpm-lock.yaml"),
+        "lockfileVersion: '9.0'\n",
+    );
+    write(
         &auth_repo.join("src/auth.rs"),
         "pub fn issue_token() -> String { \"token\".to_string() }\n",
     );
@@ -8877,9 +8885,16 @@ fn runtime_filters_shard_search_by_nested_repo_alias() {
     let result = serde_json::to_string(&map.result).unwrap();
     assert!(result.contains("billing/Cargo.toml"), "{result}");
     assert!(result.contains("cargo test"), "{result}");
+    assert!(result.contains("pnpm test"), "{result}");
+    assert!(result.contains("pnpm run lint"), "{result}");
+    assert!(result.contains("pnpm run typecheck"), "{result}");
     assert!(result.contains("\"command_hints\""), "{result}");
     assert!(
         result.contains("\"source\":\"billing/Cargo.toml\""),
+        "{result}"
+    );
+    assert!(
+        result.contains("\"source\":\"billing/package.json\""),
         "{result}"
     );
     assert!(!result.contains("auth/src/auth.rs"), "{result}");

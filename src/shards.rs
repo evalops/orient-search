@@ -6,8 +6,8 @@ use crate::query::{merge_filters, parse_query, query_text, query_with_filters_te
 use crate::repo_index::{
     CommandHint, FileRange, QueryPlan, QueryPlanFilter, QueryPlanRepairHint, RangeScope,
     RelatedFile, RelatedSymbol, RepoMap, RepoMapDetail, SearchFilters, SearchResult, Symbol,
-    finalize_results_for_filters, is_manifest_file, language_for, normalize_token,
-    query_plan_repair_action, unique_query_tokens,
+    finalize_results_for_filters, is_manifest_file, known_commands_from_hints, language_for,
+    normalize_token, query_plan_repair_action, unique_query_tokens,
 };
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use anyhow::{Context, Result};
@@ -2012,6 +2012,13 @@ pub(crate) fn filter_repo_map_by_prefix(map: &mut RepoMap, path_prefix: &str) {
     let prefix = path_prefix.trim_end_matches('/');
     let matches_prefix = |path: &str| path == prefix || path.starts_with(&format!("{prefix}/"));
 
+    let mut command_hints = map
+        .brief
+        .command_hints
+        .iter()
+        .filter(|hint| matches_prefix(&hint.source))
+        .cloned()
+        .collect::<Vec<_>>();
     map.brief.manifest_files.retain(|path| matches_prefix(path));
     map.brief
         .important_files
@@ -2066,8 +2073,10 @@ pub(crate) fn filter_repo_map_by_prefix(map: &mut RepoMap, path_prefix: &str) {
         .chain(map.brief.important_files.iter())
         .cloned()
         .collect::<Vec<_>>();
-    map.brief.known_commands = known_commands_for_manifest_paths(&command_hint_paths);
-    map.brief.command_hints = command_hints_for_manifest_paths(&command_hint_paths);
+    command_hints.extend(command_hints_for_manifest_paths(&command_hint_paths));
+    sort_dedup_command_hints(&mut command_hints);
+    map.brief.known_commands = known_commands_from_hints(&command_hints);
+    map.brief.command_hints = command_hints;
 }
 
 fn language_counts_for_paths(paths: &[String]) -> HashMap<String, usize> {
@@ -2078,16 +2087,6 @@ fn language_counts_for_paths(paths: &[String]) -> HashMap<String, usize> {
         }
     }
     counts
-}
-
-fn known_commands_for_manifest_paths(paths: &[String]) -> Vec<String> {
-    let mut commands = command_hints_for_manifest_paths(paths)
-        .into_iter()
-        .map(|hint| hint.command)
-        .collect::<Vec<_>>();
-    commands.sort();
-    commands.dedup();
-    commands
 }
 
 fn command_hints_for_manifest_paths(paths: &[String]) -> Vec<CommandHint> {
@@ -2141,13 +2140,18 @@ fn command_hints_for_manifest_paths(paths: &[String]) -> Vec<CommandHint> {
     if let Some(source) = manifest_path("Makefile") {
         hints.push(command_hint("make test", "test", source));
     }
+    sort_dedup_command_hints(&mut hints);
+    hints
+}
+
+fn sort_dedup_command_hints(hints: &mut Vec<CommandHint>) {
     hints.sort_by(|left, right| {
         left.command
             .cmp(&right.command)
             .then_with(|| left.source.cmp(&right.source))
+            .then_with(|| left.kind.cmp(&right.kind))
     });
     hints.dedup_by(|left, right| left.command == right.command && left.source == right.source);
-    hints
 }
 
 fn bazel_manifest_source(manifest_path: &impl Fn(&str) -> Option<String>) -> Option<String> {

@@ -3889,24 +3889,20 @@ fn suggested_faceted_query(
 }
 
 fn path_prefix_facet(path: &str) -> Option<String> {
-    let mut parts = path.split('/').filter(|part| !part.is_empty());
-    let first = parts.next()?;
+    let parts = path
+        .split('/')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
+    let first = parts.first()?;
     if ["src", "tests", "test", "docs", "examples", "benches"].contains(&first) {
-        return match parts.next() {
-            Some(second) if !path_segment_looks_like_file(second) => {
-                Some(format!("{first}/{second}"))
-            }
-            _ => Some(first.to_string()),
+        return if parts.len() >= 3 {
+            Some(format!("{first}/{}", parts[1]))
+        } else {
+            Some((*first).to_string())
         };
     }
-    let second = parts.next()?;
+    let second = parts.get(1)?;
     Some(format!("{first}/{second}"))
-}
-
-fn path_segment_looks_like_file(segment: &str) -> bool {
-    segment
-        .rsplit_once('.')
-        .is_some_and(|(_, extension)| !extension.is_empty())
 }
 
 fn repo_scope_mismatch_repair_hints(

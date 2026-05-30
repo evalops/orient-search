@@ -1271,6 +1271,34 @@ fn indexed_query_plan_prefers_nested_path_facets_for_common_roots() {
 }
 
 #[test]
+fn indexed_query_plan_keeps_dotted_nested_path_facets() {
+    let repo = tempfile::tempdir().unwrap();
+    for index in 0..11 {
+        write(
+            &repo.path().join(format!("src/api.v2/handler_{index}.rs")),
+            &format!("pub fn versionedneedle_api_{index}() {{}}\n"),
+        );
+    }
+    for index in 0..7 {
+        write(
+            &repo.path().join(format!("src/ui/view_{index}.rs")),
+            &format!("pub fn versionedneedle_ui_{index}() {{}}\n"),
+        );
+    }
+
+    let index = FastIndex::build(repo.path()).unwrap();
+    let plan = index
+        .query_plan("versionedneedle", &SearchFilters::default())
+        .unwrap();
+
+    assert!(plan.repair_hints.iter().any(|hint| {
+        hint.kind == "narrow_by_path"
+            && hint.suggested_query.as_deref() == Some("versionedneedle path:src/api.v2")
+            && hint.message.contains("from 18 files to 11")
+    }));
+}
+
+#[test]
 fn indexed_query_plan_facet_retries_preserve_existing_scope() {
     let repo = tempfile::tempdir().unwrap();
     for index in 0..12 {
