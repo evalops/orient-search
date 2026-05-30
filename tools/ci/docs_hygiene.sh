@@ -2,6 +2,10 @@
 set -euo pipefail
 
 docs=(README.md docs)
+markdown_files=(README.md)
+while IFS= read -r file; do
+  markdown_files+=("$file")
+done < <(find docs -type f -name '*.md' | sort)
 
 fixed_patterns=(
   'analytics'
@@ -39,23 +43,31 @@ regex_patterns=(
 )
 
 for pattern in "${fixed_patterns[@]}"; do
-  if rg -n --fixed-strings --ignore-case --glob '*.md' "$pattern" "${docs[@]}"; then
+  if grep -n -F -i "$pattern" "${markdown_files[@]}"; then
     echo "public docs contain private or out-of-scope wording: $pattern" >&2
     exit 1
   fi
 done
 
 for pattern in "${regex_patterns[@]}"; do
-  if rg -n --ignore-case --glob '*.md' "$pattern" "${docs[@]}"; then
+  if grep -n -E -i "$pattern" "${markdown_files[@]}"; then
     echo "public docs contain private or machine-specific paths: $pattern" >&2
     exit 1
   fi
 done
 
-markdown_files=(README.md)
-while IFS= read -r file; do
-  markdown_files+=("$file")
-done < <(find docs -type f -name '*.md' | sort)
+require_doc_string() {
+  local file="$1"
+  local needle="$2"
+  if ! grep -q -F "$needle" "$file"; then
+    echo "$file should document: $needle" >&2
+    exit 1
+  fi
+}
+
+require_doc_string docs/agent-protocol.md 'query_plan_summary'
+require_doc_string docs/agent-protocol.md 'next_read_batch_request'
+require_doc_string docs/agent-protocol.md 'plan batch items include top-level `summary`'
 
 while IFS=: read -r file line target; do
   target="${target%% \"*}"
