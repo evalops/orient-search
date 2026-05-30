@@ -317,7 +317,7 @@ fn apply_negative_alias(filters: &mut SearchFilters, value: &str) -> bool {
 fn apply_bare_filter(filters: &mut SearchFilters, token: &str, negated: bool) -> bool {
     let token = token.to_ascii_lowercase();
     match (negated, token.as_str()) {
-        (_, "test" | "tests") => filters.test = Some(!negated),
+        (true, "test" | "tests") => filters.test = Some(false),
         (true, "generated" | "gen" | "codegen" | "autogen") => filters.generated = Some(false),
         (true, "docs" | "documentation" | "prose" | "config" | "configuration") => {
             filters.code = Some(true)
@@ -1135,7 +1135,7 @@ mod tests {
     #[test]
     fn parses_aliases_booleans_escapes_and_negatives() {
         let parsed = parse_query(
-            r#"file:'auth service.rs' language:Rust extension:.RS repo:orient branch:main origin:example tests !ext:md !repo:old -branch:wip -origin:legacy "quoted \"token\"""#,
+            r#"file:'auth service.rs' language:Rust extension:.RS repo:orient branch:main origin:example test:true !ext:md !repo:old -branch:wip -origin:legacy "quoted \"token\"""#,
         );
 
         assert_eq!(parsed.terms, vec![r#"quoted "token""#]);
@@ -1157,6 +1157,10 @@ mod tests {
         assert_eq!(bang.filters.generated, Some(false));
         assert_eq!(bang.filters.exclude_content, vec!["deprecated"]);
         assert_eq!(bang.filters.exclude_path, vec!["vendor"]);
+
+        let positive_test = parse_query("test parser support");
+        assert_eq!(positive_test.terms, vec!["test", "parser", "support"]);
+        assert_eq!(positive_test.filters.test, None);
 
         let path_negated = parse_query("!path:vendor SessionManager");
         assert_eq!(path_negated.terms, vec!["SessionManager"]);

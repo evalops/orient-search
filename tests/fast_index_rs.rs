@@ -1816,6 +1816,10 @@ fn query_language_filters_fallback_and_indexed_search() {
         "pub fn issue_token_test() {}\n",
     );
     write(
+        &repo.path().join("src/parser_support.rs"),
+        "pub fn parser_support() { /* test helper */ }\n",
+    );
+    write(
         &repo.path().join("docs/auth.md"),
         "SessionManager issue token docs.\n",
     );
@@ -1886,6 +1890,21 @@ fn query_language_filters_fallback_and_indexed_search() {
     assert_eq!(
         result_paths(&indexed_class_shorthand),
         vec!["src/session.py"]
+    );
+
+    let fallback_positive_test_term =
+        search_repo_fast_filtered(repo.path(), "test helper", 10, &SearchFilters::default())
+            .unwrap();
+    assert_eq!(
+        result_paths(&fallback_positive_test_term),
+        vec!["src/parser_support.rs"]
+    );
+    let indexed_positive_test_term = indexed
+        .search_filtered("test helper", 10, &SearchFilters::default())
+        .unwrap();
+    assert_eq!(
+        result_paths(&indexed_positive_test_term),
+        vec!["src/parser_support.rs"]
     );
 
     let negative_term_query = "content:SessionManager -deprecated";
