@@ -145,6 +145,8 @@ pub struct SearchResult {
     pub score: f64,
     pub reason: String,
     pub snippet: String,
+    #[serde(skip)]
+    pub(crate) duplicate_key: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub line_range: Option<ResultLineRange>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -2154,6 +2156,7 @@ fn refresh_result_snippets_from_files(
         if text.contains('\0') {
             continue;
         }
+        result.duplicate_key = content_duplicate_key(&result.path, &text);
         refresh_result_symbol_scores_from_text(result, &text, query_tokens, explain);
         let snippet = best_snippet_for_path_with_phrases(
             &result.path,
@@ -2536,6 +2539,7 @@ fn merge_match_result(
             score: round4(score),
             reason: format!("matched {}", reasons.join(", ")),
             snippet,
+            duplicate_key: None,
             line_range: None,
             match_lines,
             explanation: explain.then_some(signals),
@@ -2705,6 +2709,7 @@ impl RepoIndex {
                     score: round4(score),
                     reason: format!("matched {}", reasons.join(", ")),
                     snippet: best_snippet(&file.text, &query_tokens),
+                    duplicate_key: content_duplicate_key(&file.path, &file.text),
                     line_range: None,
                     match_lines: match_lines_from_text(&file.text, &query_tokens, &[], 16),
                     explanation: None,
@@ -4660,6 +4665,7 @@ fn score_text_file(
             query_phrases,
             snippet_mode,
         ),
+        duplicate_key: content_duplicate_key(path, text),
         line_range: None,
         match_lines: ranked_match_lines_from_text(path, text, query_tokens, query_phrases, 16),
         explanation: explain.then_some(signals),
@@ -6966,6 +6972,7 @@ pub(crate) fn filter_only_search_result(
         score: matched.score,
         reason,
         snippet,
+        duplicate_key: content_duplicate_key(path, text),
         line_range: None,
         match_lines,
         explanation: filters.explain.then_some(matched.signals),
@@ -7111,9 +7118,45 @@ fn format_numbered_lines(lines: &[&str], start: usize, end: usize) -> String {
 }
 
 fn result_signature(result: &SearchResult) -> String {
+    if let Some(key) = &result.duplicate_key {
+        return key.clone();
+    }
     let comparable_path = normalized_result_path(&result.path);
     let snippet = normalized_snippet_signature(&result.snippet);
     format!("{comparable_path}\n{snippet}")
+}
+
+pub(crate) fn content_duplicate_key(path: &str, text: &str) -> Option<String> {
+    worktree_like_duplicate_path(path).then(|| {
+        format!(
+            "content:{}:{:016x}",
+            text.len(),
+            content_hash(text.as_bytes())
+        )
+    })
+}
+
+fn worktree_like_duplicate_path(path: &str) -> bool {
+    let mut saw_leading_scope = false;
+    for segment in path.split('/').filter(|segment| !segment.is_empty()) {
+        if matches!(
+            segment,
+            "src" | "tests" | "test" | "pkg" | "cmd" | "internal"
+        ) {
+            return saw_leading_scope;
+        }
+        saw_leading_scope = true;
+    }
+    false
+}
+
+fn content_hash(bytes: &[u8]) -> u64 {
+    let mut hash = 0xcbf29ce484222325u64;
+    for byte in bytes {
+        hash ^= *byte as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash
 }
 
 fn normalized_result_path(path: &str) -> String {
@@ -7168,6 +7211,7 @@ mod tests {
             score,
             reason: "test".to_string(),
             snippet: snippet.to_string(),
+            duplicate_key: None,
             line_range: None,
             match_lines: vec![2, 2, 1],
             explanation: Some(vec![
@@ -7407,6 +7451,7 @@ mod tests {
                 score: 10.0,
                 reason: "test".to_string(),
                 snippet: "10: first".to_string(),
+                duplicate_key: None,
                 line_range: None,
                 match_lines: Vec::new(),
                 explanation: None,
@@ -7428,6 +7473,7 @@ mod tests {
                 score: 9.0,
                 reason: "test".to_string(),
                 snippet: "70: second".to_string(),
+                duplicate_key: None,
                 line_range: None,
                 match_lines: Vec::new(),
                 explanation: None,
@@ -7449,6 +7495,7 @@ mod tests {
                 score: 8.0,
                 reason: "test".to_string(),
                 snippet: "220: third".to_string(),
+                duplicate_key: None,
                 line_range: None,
                 match_lines: Vec::new(),
                 explanation: None,
@@ -7699,6 +7746,7 @@ mod tests {
             score: 10.0,
             reason: "matched symbol:issue_token".to_string(),
             snippet: "26: pub fn issue_token() {\n27:     let token = 42;\n28: }".to_string(),
+            duplicate_key: None,
             line_range: None,
             match_lines: vec![26],
             explanation: None,
@@ -7780,6 +7828,7 @@ mod tests {
             score: 10.0,
             reason: "test".to_string(),
             snippet: "10: first".to_string(),
+            duplicate_key: None,
             line_range: None,
             match_lines: Vec::new(),
             explanation: None,

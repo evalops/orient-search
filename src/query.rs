@@ -182,52 +182,60 @@ fn apply_filter(filters: &mut SearchFilters, token: &str, negated: bool) -> bool
         }
         (
             false,
-            "exclude_file" | "exclude_filename" | "exclude_file_name" | "exclude-file-name",
+            "exclude_file" | "exclude-file" | "exclude_filename" | "exclude-filename"
+            | "exclude_file_name" | "exclude-file-name",
         ) => filters.exclude_file.push(value),
         (
             false,
-            "exclude_path" | "exclude_dir" | "exclude_directory" | "exclude_folder" | "exclude-dir"
-            | "exclude-directory" | "exclude-folder",
+            "exclude_path" | "exclude-path" | "exclude_dir" | "exclude-dir" | "exclude_directory"
+            | "exclude-directory" | "exclude_folder" | "exclude-folder",
         ) => filters.exclude_path.push(value),
-        (false, "exclude_language" | "exclude_lang" | "exclude-lang") => filters
-            .exclude_language
-            .push(normalize_language_filter(&value)),
-        (false, "exclude_extension" | "exclude_ext" | "exclude-ext") => filters
-            .exclude_extension
-            .push(value.trim_start_matches('.').to_ascii_lowercase()),
-        (false, "exclude_symbol") => filters.exclude_symbol.push(value),
+        (false, "exclude_language" | "exclude-language" | "exclude_lang" | "exclude-lang") => {
+            filters
+                .exclude_language
+                .push(normalize_language_filter(&value))
+        }
+        (false, "exclude_extension" | "exclude-extension" | "exclude_ext" | "exclude-ext") => {
+            filters
+                .exclude_extension
+                .push(value.trim_start_matches('.').to_ascii_lowercase())
+        }
+        (false, "exclude_symbol" | "exclude-symbol") => filters.exclude_symbol.push(value),
         (
             false,
             "exclude_symbol_kind"
-            | "exclude_kind"
-            | "exclude_type"
             | "exclude-symbol-kind"
+            | "exclude_kind"
             | "exclude-kind"
+            | "exclude_type"
             | "exclude-type",
         ) => filters
             .exclude_symbol_kind
             .push(normalize_symbol_kind(&value)),
-        (false, "exclude_repo") => filters.exclude_repo.push(value),
-        (false, "exclude_branch" | "exclude_git_branch" | "exclude-git-branch") => {
-            filters.exclude_branch.push(value)
-        }
+        (false, "exclude_repo" | "exclude-repo") => filters.exclude_repo.push(value),
+        (
+            false,
+            "exclude_branch" | "exclude-branch" | "exclude_git_branch" | "exclude-git-branch",
+        ) => filters.exclude_branch.push(value),
         (
             false,
             "exclude_origin"
+            | "exclude-origin"
             | "exclude_remote"
-            | "exclude_remote_origin"
             | "exclude-remote"
+            | "exclude_remote_origin"
             | "exclude-remote-origin",
         ) => filters.exclude_origin.push(value),
         (
             false,
-            "exclude_dependency" | "exclude_dep" | "exclude_deps" | "exclude-dep" | "exclude-deps",
+            "exclude_dependency" | "exclude-dependency" | "exclude_dep" | "exclude-dep"
+            | "exclude_deps" | "exclude-deps",
         ) => filters.exclude_dependency.push(value.to_ascii_lowercase()),
         (
             false,
-            "exclude_import" | "exclude_imports" | "exclude_module" | "exclude_modules"
-            | "exclude_use" | "exclude_uses" | "exclude-imports" | "exclude-module"
-            | "exclude-modules" | "exclude-use" | "exclude-uses",
+            "exclude_import" | "exclude-import" | "exclude_imports" | "exclude-imports"
+            | "exclude_module" | "exclude-module" | "exclude_modules" | "exclude-modules"
+            | "exclude_use" | "exclude-use" | "exclude_uses" | "exclude-uses",
         ) => filters.exclude_import.push(value.to_ascii_lowercase()),
         (
             false,
@@ -1102,7 +1110,7 @@ mod tests {
         assert_eq!(parsed.filters.exclude_path, vec!["vendor"]);
 
         let cli_style = parse_query(
-            "file-name:auth.rs repo-filter:service target-line:12 require-all:true exclude-dir:vendor exclude-symbol-kind:class exclude-content:deprecated token auth",
+            "file-name:auth.rs repo-filter:service target-line:12 require-all:true exclude-path:vendor exclude-file:generated.rs exclude-language:md exclude-extension:txt exclude-symbol:LegacyToken exclude-symbol-kind:class exclude-repo:old exclude-branch:wip exclude-origin:legacy exclude-dependency:serde exclude-import:legacy exclude-content:deprecated token auth",
         );
         assert_eq!(cli_style.terms, vec!["token", "auth"]);
         assert_eq!(cli_style.filters.file.as_deref(), Some("auth.rs"));
@@ -1110,7 +1118,16 @@ mod tests {
         assert_eq!(cli_style.filters.target_line, Some(12));
         assert!(cli_style.filters.require_all);
         assert_eq!(cli_style.filters.exclude_path, vec!["vendor"]);
+        assert_eq!(cli_style.filters.exclude_file, vec!["generated.rs"]);
+        assert_eq!(cli_style.filters.exclude_language, vec!["markdown"]);
+        assert_eq!(cli_style.filters.exclude_extension, vec!["txt"]);
+        assert_eq!(cli_style.filters.exclude_symbol, vec!["LegacyToken"]);
         assert_eq!(cli_style.filters.exclude_symbol_kind, vec!["class"]);
+        assert_eq!(cli_style.filters.exclude_repo, vec!["old"]);
+        assert_eq!(cli_style.filters.exclude_branch, vec!["wip"]);
+        assert_eq!(cli_style.filters.exclude_origin, vec!["legacy"]);
+        assert_eq!(cli_style.filters.exclude_dependency, vec!["serde"]);
+        assert_eq!(cli_style.filters.exclude_import, vec!["legacy"]);
         assert_eq!(cli_style.filters.exclude_content, vec!["deprecated"]);
 
         let broad = parse_query("any-terms:true session token");

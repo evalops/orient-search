@@ -283,7 +283,7 @@ fn saved_indexes_compress_large_posting_lists_on_disk() {
     for index in 0..160 {
         write(
             &repo.path().join(format!("src/file_{index:03}.rs")),
-            "pub fn repeated_symbol() { let common_token = true; }\n",
+            &format!("pub fn repeated_symbol_{index:03}() {{ let common_token = {index}; }}\n"),
         );
     }
     let index = FastIndex::build(repo.path()).unwrap();
@@ -315,7 +315,7 @@ fn legacy_raw_indexes_normalize_posting_order_on_load() {
     );
     write(
         &repo.path().join("src/b.rs"),
-        "pub fn shared_token() { let shared = true; }\n",
+        "pub fn shared_token_b() { let shared = false; }\n",
     );
     let mut index = FastIndex::build(repo.path()).unwrap();
     index.version = 9;
@@ -448,7 +448,7 @@ fn search_result_limits_are_capped() {
     for index in 0..MAX_SEARCH_RESULTS + 25 {
         write(
             &repo.path().join(format!("src/file_{index:03}.rs")),
-            "pub fn sharedcaptoken() {}\n",
+            &format!("pub fn sharedcaptoken_{index:03}() {{}}\n"),
         );
     }
 
@@ -1813,7 +1813,7 @@ fn query_language_filters_fallback_and_indexed_search() {
     assert_eq!(indexed_results.len(), 1);
     assert_eq!(indexed_results[0].path, "src/auth.rs");
 
-    let cli_style_query = r#"file-name:auth.rs target-line:1 require-all:true exclude-dir:docs exclude-symbol-kind:class "issue token""#;
+    let cli_style_query = r#"file-name:auth.rs target-line:1 require-all:true exclude-path:docs exclude-symbol-kind:class "issue token""#;
     let cli_style_filters = SearchFilters::default();
     let fallback_cli_style =
         search_repo_fast_filtered(repo.path(), cli_style_query, 10, &cli_style_filters).unwrap();
@@ -4100,6 +4100,53 @@ fn fast_search_deduplicates_repeated_worktree_hits() {
 }
 
 #[test]
+fn fast_search_deduplicates_exact_content_clones_with_different_names() {
+    let repo = tempfile::tempdir().unwrap();
+    let source = "pub fn issue_token() { let token = \"session\"; }\n";
+    write(&repo.path().join("packages/a/src/auth.rs"), source);
+    write(&repo.path().join("packages/b/src/session.rs"), source);
+
+    let fallback = search_repo_fast_filtered(
+        repo.path(),
+        "issue token",
+        10,
+        &SearchFilters {
+            require_all: true,
+            ..SearchFilters::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(fallback.len(), 1);
+    assert_eq!(fallback[0].path, "packages/a/src/auth.rs");
+    let fallback_group = fallback[0].duplicate_group.as_ref().unwrap();
+    assert_eq!(fallback_group.duplicate_count, 1);
+    assert_eq!(
+        fallback_group.duplicate_paths,
+        vec!["packages/b/src/session.rs"]
+    );
+
+    let index = FastIndex::build(repo.path()).unwrap();
+    let indexed = index
+        .search_filtered(
+            "issue token",
+            10,
+            &SearchFilters {
+                require_all: true,
+                ..SearchFilters::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(indexed.len(), 1);
+    assert_eq!(indexed[0].path, "packages/a/src/auth.rs");
+    let indexed_group = indexed[0].duplicate_group.as_ref().unwrap();
+    assert_eq!(indexed_group.duplicate_count, 1);
+    assert_eq!(
+        indexed_group.duplicate_paths,
+        vec!["packages/b/src/session.rs"]
+    );
+}
+
+#[test]
 fn fast_search_deduplicates_repeated_manifest_hits_by_snippet() {
     let repo = tempfile::tempdir().unwrap();
     let manifest = "[package]\nname = \"sample\"\nversion = \"0.1.0\"\n";
@@ -4445,16 +4492,21 @@ fn test_filter_recognizes_common_multilanguage_test_paths() {
         "spec/models/user_spec.rb",
         "src/test/java/AuthFlow.java",
     ];
-    for path in test_paths {
+    for (index, path) in test_paths.iter().enumerate() {
         write(
             &repo.path().join(path),
-            "// agent common token\npub fn agent_common_token() {}\n",
+            &format!("// agent common token {index}\npub fn agent_common_token_{index}() {{}}\n"),
         );
     }
-    for path in ["src/lib.rs", "src/testament.rs", "src/contest.ts"] {
+    for (index, path) in ["src/lib.rs", "src/testament.rs", "src/contest.ts"]
+        .iter()
+        .enumerate()
+    {
         write(
             &repo.path().join(path),
-            "// agent common token\npub fn agent_common_token() {}\n",
+            &format!(
+                "// agent common token control {index}\npub fn agent_common_token_control_{index}() {{}}\n"
+            ),
         );
     }
 
