@@ -17,16 +17,16 @@ Each index contains:
 - line-offset and token-to-line tables
 
 That tradeoff is intentional: agents can inspect search hits quickly while a
-shared daemon amortizes load cost across local clients.
+shared daemon amortizes index-load cost across local clients.
 
 Indexes contain source text. Treat them like local build artifacts for the
 repositories they represent: keep them in local cache storage, out of source
 control, and away from shared locations unless the underlying source is allowed
 there too.
 
-Daemon memory is just a hot cache for those code-search artifacts: loaded
-indexes, shard route data, repo metadata, and freshness checks. It is not a
-general agent state store.
+Daemon RAM is just a hot cache for code-search artifacts: loaded indexes, shard
+route data, repo metadata, and freshness checks. It is not a general-purpose
+state store.
 
 ## Inspect It
 

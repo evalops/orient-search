@@ -97,7 +97,7 @@ freshness for one checkout. Status outputs include footprint counters such as
 `index_bytes`, `source_bytes`, `content_snapshot_bytes`, `line_offset_bytes`,
 `posting_entries`, and `compressed_posting_bytes`; shard status also reports
 route-sidecar counters. Use `shard_status --summary` for large shared shard
-sets. See [Memory and footprint](memory-footprint.md) for the disk/memory
+sets. See [Storage and footprint](storage-footprint.md) for the resource
 tradeoffs behind those counters.
 
 Use `ensure_shards` for shard directories shared by several local agents. The lower-level `index_shards` rebuild path refuses to overwrite an existing shard directory when the requested repo set would remove existing shards; pass `force:true` or `orient index-shards --force` only when intentionally replacing that directory.

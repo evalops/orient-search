@@ -1240,6 +1240,37 @@ fn indexed_query_plan_suggests_facets_for_noisy_successful_queries() {
 }
 
 #[test]
+fn indexed_query_plan_prefers_nested_path_facets_for_common_roots() {
+    let repo = tempfile::tempdir().unwrap();
+    for index in 0..12 {
+        write(
+            &repo.path().join(format!("src/auth/session_{index}.rs")),
+            &format!("pub fn sharedneedle_auth_{index}() {{}}\n"),
+        );
+    }
+    for index in 0..8 {
+        write(
+            &repo.path().join(format!("src/billing/invoice_{index}.rs")),
+            &format!("pub fn sharedneedle_billing_{index}() {{}}\n"),
+        );
+    }
+
+    let index = FastIndex::build(repo.path()).unwrap();
+    let plan = index
+        .query_plan("sharedneedle", &SearchFilters::default())
+        .unwrap();
+
+    assert_eq!(plan.candidate_count, 20);
+    assert!(plan.final_match_count > 0);
+    assert!(plan.repair_hints.iter().any(|hint| {
+        hint.kind == "narrow_by_path"
+            && hint.action == "narrow"
+            && hint.suggested_query.as_deref() == Some("path:src/auth sharedneedle")
+            && hint.message.contains("from 20 files to 12")
+    }));
+}
+
+#[test]
 fn indexed_query_plan_suggests_symbol_kind_facet_for_noisy_definition_searches() {
     let repo = tempfile::tempdir().unwrap();
     for index in 0..5 {

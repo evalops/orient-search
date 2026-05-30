@@ -22,6 +22,7 @@ fixed_patterns=(
   'analytics'
   'session analytics'
   'session data'
+  'session-data'
   'session logs'
   'transcript analytics'
   'agent transcripts'
@@ -29,6 +30,7 @@ fixed_patterns=(
   'task outcomes'
   'tool-call histories'
   'memory/rules surface'
+  'agent memory'
 )
 
 regex_patterns=(

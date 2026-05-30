@@ -29,8 +29,8 @@ structured enough that agents stop spending turns on repeated `rg`, `find`,
   workflows need short, copyable commands and structured follow-up requests.
 
 Orient should borrow the durable search-engine ideas, but keep the product
-local-agent-first: no hosted indexing requirement, no session-data collection,
-bounded JSON-lines/MCP-style calls, and repo-relative examples in public docs.
+local-agent-first: no hosted indexing requirement, no telemetry, bounded
+JSON-lines/MCP-style calls, and repo-relative examples in public docs.
 
 ## Already In Place
 
@@ -44,8 +44,8 @@ bounded JSON-lines/MCP-style calls, and repo-relative examples in public docs.
   shard indexes, and serve many local agents.
 - Repo maps, related-file lookup, related-symbol lookup, and bounded range
   reads from live repos, indexes, and shard directories.
-- Query plans with missing-term diagnostics, filter rejection counts, and safe
-  retry requests.
+- Query plans with missing-term diagnostics, filter rejection counts, candidate
+  facet narrowing, and safe retry requests.
 - Footprint counters for index size, represented source bytes, snapshots, line
   offsets, postings, and largest shards.
 - Bazel-backed CI for build, tests, smoke checks, and performance gates.

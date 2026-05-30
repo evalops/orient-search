@@ -3866,10 +3866,21 @@ fn path_prefix_facet(path: &str) -> Option<String> {
     let mut parts = path.split('/').filter(|part| !part.is_empty());
     let first = parts.next()?;
     if ["src", "tests", "test", "docs", "examples", "benches"].contains(&first) {
-        return Some(first.to_string());
+        return match parts.next() {
+            Some(second) if !path_segment_looks_like_file(second) => {
+                Some(format!("{first}/{second}"))
+            }
+            _ => Some(first.to_string()),
+        };
     }
     let second = parts.next()?;
     Some(format!("{first}/{second}"))
+}
+
+fn path_segment_looks_like_file(segment: &str) -> bool {
+    segment
+        .rsplit_once('.')
+        .is_some_and(|(_, extension)| !extension.is_empty())
 }
 
 fn repo_scope_mismatch_repair_hints(
