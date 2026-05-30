@@ -2685,9 +2685,11 @@ fn shard_route_candidate_ids(
         }
     }
     if !requirements.substring_grams.is_empty() {
-        let ids = candidate_ids
-            .take()
-            .unwrap_or_else(|| (0..route.shards.len()).map(|id| id as u16).collect());
+        let ids = candidate_ids.take().unwrap_or_else(|| {
+            (0..route.shards.len())
+                .filter_map(|id| u16::try_from(id).ok())
+                .collect()
+        });
         candidate_ids = Some(
             ids.into_iter()
                 .filter(|id| {
@@ -2915,6 +2917,9 @@ fn load_manifest_route(index_dir: &Path) -> Result<Option<ShardManifestRoute>> {
         Err(_) => return Ok(None),
     };
     if route.version != SHARD_MANIFEST_ROUTE_VERSION || route.json_fingerprint != json_fingerprint {
+        return Ok(None);
+    }
+    if route.shards.len() > u16::MAX as usize {
         return Ok(None);
     }
     Ok(Some(route))
