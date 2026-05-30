@@ -2564,6 +2564,10 @@ fn bare_path_like_queries_use_filter_only_fast_paths() {
         &repo.path().join("tests/mentions.rs"),
         "const MANIFEST: &str = \"Cargo.toml\";\nconst SOURCE: &str = \"src/lib.rs\";\nconst GO_MOD: &str = \"go.mod\";\nconst DOCKERFILE: &str = \"Dockerfile\";\n",
     );
+    write(
+        &repo.path().join("tests/test_auth.py"),
+        "def test_login():\n    assert True\n",
+    );
 
     let filters = SearchFilters {
         explain: true,
@@ -2600,6 +2604,24 @@ fn bare_path_like_queries_use_filter_only_fast_paths() {
     let dot_path_fallback =
         search_repo_fast_filtered(repo.path(), "./src/lib.rs", 10, &filters).unwrap();
     assert_eq!(result_paths(&dot_path_fallback), vec!["src/lib.rs"]);
+    let pytest_node_id_fallback =
+        search_repo_fast_filtered(repo.path(), "tests/test_auth.py::test_login", 10, &filters)
+            .unwrap();
+    assert_eq!(
+        result_paths(&pytest_node_id_fallback),
+        vec!["tests/test_auth.py"]
+    );
+    let pytest_failure_fallback = search_repo_fast_filtered(
+        repo.path(),
+        "FAILED tests/test_auth.py::test_login - failed",
+        10,
+        &filters,
+    )
+    .unwrap();
+    assert_eq!(
+        result_paths(&pytest_failure_fallback),
+        vec!["tests/test_auth.py"]
+    );
     let explicit_dot_path_fallback =
         search_repo_fast_filtered(repo.path(), "path:./src/lib.rs", 10, &filters).unwrap();
     assert_eq!(
@@ -2966,6 +2988,24 @@ fn bare_path_like_queries_use_filter_only_fast_paths() {
     );
     let dot_path_indexed = index.search_filtered("./src/lib.rs", 10, &filters).unwrap();
     assert_eq!(result_paths(&dot_path_indexed), vec!["src/lib.rs"]);
+    let pytest_node_id_indexed = index
+        .search_filtered("tests/test_auth.py::test_login", 10, &filters)
+        .unwrap();
+    assert_eq!(
+        result_paths(&pytest_node_id_indexed),
+        vec!["tests/test_auth.py"]
+    );
+    let pytest_failure_indexed = index
+        .search_filtered(
+            "FAILED tests/test_auth.py::test_login - failed",
+            10,
+            &filters,
+        )
+        .unwrap();
+    assert_eq!(
+        result_paths(&pytest_failure_indexed),
+        vec!["tests/test_auth.py"]
+    );
     let explicit_dot_path_indexed = index
         .search_filtered("path:./src/lib.rs", 10, &filters)
         .unwrap();

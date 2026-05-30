@@ -41,6 +41,7 @@ pub fn parse_query(input: &str) -> ParsedQuery {
     }
 
     infer_leading_location_term(&mut terms, &mut filters, explicit_content_terms);
+    infer_leading_pytest_node_id_term(&mut terms, &mut filters, explicit_content_terms);
     if terms.len() > 1 && !filters.match_any {
         filters.require_all = true;
     }
@@ -411,6 +412,52 @@ fn infer_path_like_single_term(
     }
 }
 
+fn infer_leading_pytest_node_id_term(
+    terms: &mut Vec<String>,
+    filters: &mut SearchFilters,
+    explicit_content_terms: bool,
+) {
+    if explicit_content_terms
+        || terms.is_empty()
+        || filters.file.is_some()
+        || filters.path.is_some()
+        || filters.symbol.is_some()
+    {
+        return;
+    }
+
+    for index in 0..terms.len().min(4) {
+        let Some(path) = pytest_node_id_path(&terms[index]) else {
+            continue;
+        };
+        let path = strip_leading_current_dir_segments(path);
+        let applied = if path.contains('/') {
+            filters.path = Some(path);
+            true
+        } else if looks_like_file_name_query(&path) {
+            filters.file = Some(path);
+            true
+        } else {
+            false
+        };
+        if !applied {
+            return;
+        }
+        filters.require_all = false;
+        let status_prefixed =
+            index > 0 && terms[..index].iter().all(|term| test_status_prefix(term));
+        if index == 0 || status_prefixed {
+            terms.drain(0..=index);
+            if status_prefixed || diagnostic_message_prefix_terms(terms) {
+                terms.clear();
+            }
+        } else {
+            terms.remove(index);
+        }
+        return;
+    }
+}
+
 fn infer_leading_location_term(
     terms: &mut Vec<String>,
     filters: &mut SearchFilters,
@@ -674,6 +721,16 @@ fn diagnostic_message_prefix_term(term: &str) -> bool {
     matches!(
         term.as_str(),
         "error" | "warning" | "warn" | "notice" | "note" | "info" | "fatal"
+    )
+}
+
+fn test_status_prefix(term: &str) -> bool {
+    let term = trim_location_token_wrappers(term)
+        .trim_end_matches(':')
+        .to_ascii_lowercase();
+    matches!(
+        term.as_str(),
+        "failed" | "failure" | "fail" | "error" | "errors" | "passed" | "pass" | "skipped"
     )
 }
 
@@ -1148,6 +1205,9 @@ fn term_eq_ignore_ascii_punctuation(term: &str, expected: &str) -> bool {
 }
 
 fn strip_location_suffix(value: &str) -> (String, Option<usize>) {
+    if let Some(path) = pytest_node_id_path(value) {
+        return (path, None);
+    }
     if let Some((path, line, _)) = normalize_parenthesized_location_token(value).and_then(|value| {
         (!value.contains("://"))
             .then(|| split_parenthesized_line_location(&value))
@@ -1175,6 +1235,19 @@ fn strip_location_suffix(value: &str) -> (String, Option<usize>) {
     } else {
         (normalized, None)
     }
+}
+
+fn pytest_node_id_path(value: &str) -> Option<String> {
+    let token = trim_outer_location_wrappers(value).replace('\\', "/");
+    let (path, node) = token.split_once("::")?;
+    if node.is_empty() || node.starts_with(':') {
+        return None;
+    }
+    let path = path.trim();
+    if !looks_like_location_path(path) {
+        return None;
+    }
+    Some(path.to_string())
 }
 
 fn strip_leading_current_dir_segments(mut value: String) -> String {
@@ -1943,6 +2016,22 @@ mod tests {
         assert!(source_path.terms.is_empty());
         assert_eq!(source_path.filters.path.as_deref(), Some("src/server.rs"));
         assert_eq!(source_path.filters.target_line, None);
+
+        let pytest_node_id = parse_query("tests/test_auth.py::test_login");
+        assert!(pytest_node_id.terms.is_empty());
+        assert_eq!(
+            pytest_node_id.filters.path.as_deref(),
+            Some("tests/test_auth.py")
+        );
+        assert_eq!(pytest_node_id.filters.target_line, None);
+
+        let pytest_failure_line = parse_query("FAILED tests/test_auth.py::test_login - failed");
+        assert!(pytest_failure_line.terms.is_empty());
+        assert_eq!(
+            pytest_failure_line.filters.path.as_deref(),
+            Some("tests/test_auth.py")
+        );
+        assert_eq!(pytest_failure_line.filters.target_line, None);
 
         let dot_source_path = parse_query("./src/server.rs");
         assert!(dot_source_path.terms.is_empty());
