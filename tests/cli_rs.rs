@@ -234,6 +234,41 @@ fn cli_search_accepts_visible_common_aliases() {
 }
 
 #[test]
+fn cli_search_can_return_diagnostic_followups_when_requested() {
+    let repo = sample_repo();
+
+    let output = Command::cargo_bin("orient")
+        .unwrap()
+        .args([
+            "search",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--diagnose",
+            "SessionManager definitely_missing",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+
+    assert_eq!(value["surface"], serde_json::json!("fallback"));
+    assert_eq!(value["summary"]["status"], serde_json::json!("not_found"));
+    assert!(value["results"].as_array().unwrap().is_empty());
+    assert_eq!(
+        value["query_plan_request"]["tool"],
+        serde_json::json!("search_query_plan")
+    );
+    assert_eq!(
+        value["primary_retry_request"]["tool"],
+        serde_json::json!("search_code")
+    );
+    assert_eq!(
+        value["next_action"]["source"],
+        serde_json::json!("primary_retry_request")
+    );
+}
+
+#[test]
 fn cli_rejects_invalid_snippet_mode_before_searching() {
     let repo = sample_repo();
 

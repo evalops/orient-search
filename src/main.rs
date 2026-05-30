@@ -524,6 +524,10 @@ enum Commands {
         context_lines: usize,
         #[arg(long)]
         refresh_if_stale: bool,
+        #[arg(long)]
+        diagnose: bool,
+        #[arg(long)]
+        retry_if_empty: bool,
     },
     SearchAuto {
         #[arg(allow_hyphen_values = true, required_unless_present = "query_arg")]
@@ -3958,9 +3962,49 @@ fn run() -> Result<()> {
             filters,
             context_lines,
             refresh_if_stale,
+            diagnose,
+            retry_if_empty,
         } => {
             let filters = search_filters_from_args(&filters, repo_filter)?;
             let query = cli_single_query_for_filters(query, query_arg, &filters)?;
+            if diagnose || retry_if_empty {
+                let mut arguments = search_filter_arguments(&filters);
+                arguments.insert("query".to_string(), Value::String(query));
+                arguments.insert("limit".to_string(), serde_json::json!(limit));
+                arguments.insert(
+                    "context_lines".to_string(),
+                    serde_json::json!(context_lines),
+                );
+                arguments.insert(
+                    "refresh_if_stale".to_string(),
+                    serde_json::json!(refresh_if_stale),
+                );
+                arguments.insert("diagnose".to_string(), serde_json::json!(diagnose));
+                arguments.insert(
+                    "retry_if_empty".to_string(),
+                    serde_json::json!(retry_if_empty),
+                );
+                if let Some(index_dir) = index_dir {
+                    arguments.insert("index_dir".to_string(), serde_json::json!(index_dir));
+                } else if let Some(index) = index {
+                    arguments.insert("index".to_string(), serde_json::json!(index));
+                } else {
+                    arguments.insert("repo".to_string(), serde_json::json!(repo));
+                }
+                let response = ToolRuntime::default().dispatch(ToolRequest {
+                    id: serde_json::json!("search"),
+                    tool: "search_auto".to_string(),
+                    arguments: Value::Object(arguments),
+                });
+                if let Some(error) = response.error {
+                    bail!("search diagnosis failed: {error}");
+                }
+                println!(
+                    "{}",
+                    serde_json::to_string(&response.result.unwrap_or(Value::Null))?
+                );
+                return Ok(());
+            }
             let results = if let Some(index_dir) = index_dir {
                 if refresh_if_stale && shard_status(&index_dir)?.stale {
                     refresh_shards(&index_dir)?;
