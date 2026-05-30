@@ -256,6 +256,18 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         "Alias for language."
     );
     assert_eq!(
+        search["input_schema"]["properties"]["file-name"]["description"],
+        "Alias for file."
+    );
+    assert_eq!(
+        search["input_schema"]["properties"]["exclude-dir"]["oneOf"][1]["items"]["type"],
+        "string"
+    );
+    assert_eq!(
+        search["input_schema"]["properties"]["exclude-symbol-kind"]["oneOf"][1]["items"]["type"],
+        "string"
+    );
+    assert_eq!(
         search["input_schema"]["properties"]["ext"]["description"],
         "Alias for extension."
     );
@@ -282,6 +294,34 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
     assert_eq!(
         search["input_schema"]["properties"]["line"]["type"],
         "integer"
+    );
+    assert_eq!(
+        search["input_schema"]["properties"]["target-line"]["type"],
+        "integer"
+    );
+    assert_eq!(
+        search["input_schema"]["properties"]["target-line"]["description"],
+        "Alias for target_line."
+    );
+    assert_eq!(
+        search["input_schema"]["properties"]["context-lines"]["maximum"],
+        serde_json::json!(MAX_ATTACHED_CONTEXT_LINES)
+    );
+    assert_eq!(
+        search["input_schema"]["properties"]["require-all"]["type"],
+        "boolean"
+    );
+    assert_eq!(
+        repo_map["input_schema"]["properties"]["read-limit"]["maximum"],
+        serde_json::json!(MAX_RESULT_READ_BATCH_RANGES)
+    );
+    assert_eq!(
+        related_files["input_schema"]["properties"]["include-read-batch"]["type"],
+        "boolean"
+    );
+    assert_eq!(
+        read_shard_range["input_schema"]["properties"]["index-dir"]["type"],
+        "string"
     );
     assert!(
         search["input_schema"]["properties"]["line"]["description"]
@@ -2689,6 +2729,27 @@ fn runtime_read_alias_accepts_live_index_and_shard_targets() {
         serde_json::json!(2)
     );
 
+    let live_kebab_range_object = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("live-kebab-range-object"),
+        tool: "open_range".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "range": {
+                "path": "src/auth.rs",
+                "start-line": 1,
+                "line-count": 2
+            }
+        }),
+    });
+    assert!(
+        live_kebab_range_object.error.is_none(),
+        "{:?}",
+        live_kebab_range_object.error
+    );
+    let live_kebab_range_object = live_kebab_range_object.result.unwrap();
+    assert_eq!(live_kebab_range_object["start_line"], serde_json::json!(1));
+    assert_eq!(live_kebab_range_object["end_line"], serde_json::json!(2));
+
     let indexed = runtime.dispatch(ToolRequest {
         id: serde_json::json!("indexed-read"),
         tool: "read_range".to_string(),
@@ -2795,6 +2856,24 @@ fn runtime_read_alias_accepts_live_index_and_shard_targets() {
             .as_str()
             .unwrap()
             .contains("issue_token")
+    );
+
+    let sharded_kebab = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("shard-kebab-read"),
+        tool: "read_range".to_string(),
+        arguments: serde_json::json!({
+            "index-dir": repo.path().join(".orient-shards"),
+            "path": "src/auth.rs",
+            "start-line": 1,
+            "line-count": 1
+        }),
+    });
+    assert!(sharded_kebab.error.is_none(), "{:?}", sharded_kebab.error);
+    assert!(
+        sharded_kebab.result.as_ref().unwrap()["text"]
+            .as_str()
+            .unwrap()
+            .contains("SessionManager")
     );
 
     let indexed_batch = runtime.dispatch(ToolRequest {
@@ -4662,6 +4741,33 @@ fn runtime_accepts_structured_negative_search_filters() {
     assert!(result.contains("src/view.ts"), "{result}");
     assert!(!result.contains("src/view_class.ts"), "{result}");
     assert!(!result.contains("src/auth.rs"), "{result}");
+
+    let dashed_alias_filters = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("dashed-alias-filters"),
+        tool: "search".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "query": "React",
+            "limit": 10,
+            "folder": "src",
+            "file-name": "view.ts",
+            "lang": "ts",
+            "ext": "ts",
+            "symbol-kind": "function",
+            "require-all": true,
+            "exclude-dir": ["generated"],
+            "exclude-symbol-kind": "class"
+        }),
+    });
+    assert!(
+        dashed_alias_filters.error.is_none(),
+        "{:?}",
+        dashed_alias_filters.error
+    );
+    let result = serde_json::to_string(&dashed_alias_filters.result).unwrap();
+    assert!(result.contains("src/view.ts"), "{result}");
+    assert!(!result.contains("src/view_class.ts"), "{result}");
+    assert!(!result.contains("generated/auth.rs"), "{result}");
 
     let indexed = runtime.dispatch(ToolRequest {
         id: serde_json::json!("indexed"),

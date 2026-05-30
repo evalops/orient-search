@@ -1629,6 +1629,11 @@ fn input_schema(tool_name: &str, required: &[&str], optional: &[&str]) -> Value 
     let mut properties = Map::new();
     for name in required.iter().chain(optional.iter()) {
         properties.insert((*name).to_string(), argument_schema(tool_name, name));
+        for (alias, canonical) in argument_schema_aliases(name) {
+            properties
+                .entry(alias.clone())
+                .or_insert_with(|| argument_alias_schema(tool_name, &alias, canonical));
+        }
     }
     json!({
         "type": "object",
@@ -1751,6 +1756,79 @@ fn argument_schema(tool_name: &str, name: &str) -> Value {
         schema.insert("x-daemon-default".to_string(), default);
     }
     Value::Object(schema)
+}
+
+fn argument_alias_schema(tool_name: &str, alias: &str, canonical: &str) -> Value {
+    let mut schema = match argument_schema(tool_name, canonical) {
+        Value::Object(schema) => schema,
+        _ => Map::new(),
+    };
+    schema.insert(
+        "description".to_string(),
+        json!(format!("Alias for {canonical}.")),
+    );
+    if let Some(default) = argument_default(tool_name, alias) {
+        schema.insert("default".to_string(), default);
+    }
+    if let Some(values) = argument_enum(alias) {
+        schema.insert("enum".to_string(), json!(values));
+    }
+    Value::Object(schema)
+}
+
+fn argument_schema_aliases<'a>(name: &'a str) -> Vec<(String, &'a str)> {
+    let mut aliases = Vec::new();
+    if let Some(alias) = kebab_case_alias(name) {
+        aliases.push((alias, name));
+    }
+    let extra: &[&str] = match name {
+        "path" => &["dir", "directory", "folder"],
+        "language" => &["lang"],
+        "extension" => &["ext"],
+        "file" => &["filename", "file-name", "file_name"],
+        "symbol_kind" => &["kind", "type", "symbol-kind", "symbol_type", "symbol-type"],
+        "dependency" => &["dep", "deps"],
+        "import" => &["imports", "module", "modules", "use", "uses"],
+        "branch" => &["git_branch", "git-branch"],
+        "origin" => &["remote", "remote_origin", "remote-origin"],
+        "repo_filter" => &["repo-filter"],
+        "target_line" => &["target-line"],
+        "exclude_file" => &["exclude-filename", "exclude_file_name", "exclude-file-name"],
+        "exclude_path" => &[
+            "exclude_dir",
+            "exclude-dir",
+            "exclude_directory",
+            "exclude-directory",
+            "exclude_folder",
+            "exclude-folder",
+        ],
+        "exclude_language" => &["exclude-lang"],
+        "exclude_extension" => &["exclude-ext"],
+        "exclude_symbol_kind" => &["exclude-kind", "exclude-type", "exclude-symbol-kind"],
+        "exclude_origin" => &[
+            "exclude_remote",
+            "exclude-remote",
+            "exclude_remote_origin",
+            "exclude-remote-origin",
+        ],
+        "exclude_dependency" => &["exclude-dep", "exclude-deps"],
+        "exclude_import" => &[
+            "exclude-imports",
+            "exclude-module",
+            "exclude_modules",
+            "exclude-modules",
+            "exclude-use",
+            "exclude_uses",
+            "exclude-uses",
+        ],
+        _ => &[],
+    };
+    aliases.extend(extra.iter().map(|alias| ((*alias).to_string(), name)));
+    aliases
+}
+
+fn kebab_case_alias(name: &str) -> Option<String> {
+    name.contains('_').then(|| name.replace('_', "-"))
 }
 
 fn tool_daemon_default(tool_name: &str) -> Option<Value> {
@@ -3034,21 +3112,9 @@ impl ToolRuntime {
                 let max_depth = positive_usize_arg(&request.arguments, "max_depth", 4)?;
                 let limit = positive_usize_arg(&request.arguments, "limit", 500)?;
                 let family_limit = optional_family_limit_arg(&request.arguments)?;
-                let git_metadata = request
-                    .arguments
-                    .get("git_metadata")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false);
-                let tracked_files = request
-                    .arguments
-                    .get("tracked_files")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false);
-                let nested_manifests = request
-                    .arguments
-                    .get("nested_manifests")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false);
+                let git_metadata = bool_arg(&request.arguments, "git_metadata");
+                let tracked_files = bool_arg(&request.arguments, "tracked_files");
+                let nested_manifests = bool_arg(&request.arguments, "nested_manifests");
                 Ok(serde_json::to_value(discover_repos(
                     root,
                     &DiscoverOptions {
@@ -3072,8 +3138,8 @@ impl ToolRuntime {
                 let test_limit = positive_usize_arg(&request.arguments, "tests", 50)?;
                 let detail = repo_map_detail_arg(&request.arguments)?;
                 let read_limit = repo_map_read_limit_arg(&request.arguments)?;
-                if request.arguments.get("index").is_some()
-                    && request.arguments.get("index_dir").is_some()
+                if argument_value(&request.arguments, "index").is_some()
+                    && argument_value(&request.arguments, "index_dir").is_some()
                 {
                     return Err(anyhow!("repo_map accepts only one of index or index_dir"));
                 }
@@ -3184,8 +3250,8 @@ impl ToolRuntime {
             "read_range" | "open_range" => {
                 let tool_name = request.tool.as_str();
                 let range = single_range_arg(&request.arguments, tool_name)?;
-                if request.arguments.get("index").is_some()
-                    && request.arguments.get("index_dir").is_some()
+                if argument_value(&request.arguments, "index").is_some()
+                    && argument_value(&request.arguments, "index_dir").is_some()
                 {
                     return Err(anyhow!(
                         "{tool_name} accepts only one of index or index_dir"
@@ -3254,8 +3320,8 @@ impl ToolRuntime {
             "read_ranges" | "open_ranges" => {
                 let tool_name = request.tool.as_str();
                 let ranges = range_args(&request.arguments, tool_name)?;
-                if request.arguments.get("index").is_some()
-                    && request.arguments.get("index_dir").is_some()
+                if argument_value(&request.arguments, "index").is_some()
+                    && argument_value(&request.arguments, "index_dir").is_some()
                 {
                     return Err(anyhow!(
                         "{tool_name} accepts only one of index or index_dir"
@@ -3380,8 +3446,8 @@ impl ToolRuntime {
                 let query = string_arg(&request.arguments, "query")?;
                 let limit = search_limit_arg(&request.arguments)?;
                 let context_lines = context_lines_arg(&request.arguments)?;
-                if request.arguments.get("index").is_some()
-                    && request.arguments.get("index_dir").is_some()
+                if argument_value(&request.arguments, "index").is_some()
+                    && argument_value(&request.arguments, "index_dir").is_some()
                 {
                     return Err(anyhow!("search accepts only one of index or index_dir"));
                 }
@@ -3605,7 +3671,9 @@ impl ToolRuntime {
                 let mut batch = Vec::new();
                 if let Some(index_dir) = refreshed_shard_dir {
                     for query in queries {
-                        let scoped_arguments = if request.arguments.get("index_dir").is_some() {
+                        let scoped_arguments = if argument_value(&request.arguments, "index_dir")
+                            .is_some()
+                        {
                             request.arguments.clone()
                         } else {
                             arguments_scoped_to_client_cwd_for_query(&request.arguments, &query)?
@@ -3640,8 +3708,8 @@ impl ToolRuntime {
                 let queries = string_array_arg(&request.arguments, "queries")?;
                 let limit = search_limit_arg(&request.arguments)?;
                 let context_lines = context_lines_arg(&request.arguments)?;
-                if request.arguments.get("index").is_some()
-                    && request.arguments.get("index_dir").is_some()
+                if argument_value(&request.arguments, "index").is_some()
+                    && argument_value(&request.arguments, "index_dir").is_some()
                 {
                     return Err(anyhow!(
                         "search_batch accepts only one of index or index_dir"
@@ -3961,8 +4029,8 @@ impl ToolRuntime {
             }
             "search_plan" => {
                 let query = string_arg(&request.arguments, "query")?;
-                if request.arguments.get("index").is_some()
-                    && request.arguments.get("index_dir").is_some()
+                if argument_value(&request.arguments, "index").is_some()
+                    && argument_value(&request.arguments, "index_dir").is_some()
                 {
                     return Err(anyhow!(
                         "search_plan accepts only one of index or index_dir"
@@ -4083,8 +4151,8 @@ impl ToolRuntime {
             }
             "search_plan_batch" => {
                 let queries = string_array_arg(&request.arguments, "queries")?;
-                if request.arguments.get("index").is_some()
-                    && request.arguments.get("index_dir").is_some()
+                if argument_value(&request.arguments, "index").is_some()
+                    && argument_value(&request.arguments, "index_dir").is_some()
                 {
                     return Err(anyhow!(
                         "search_plan_batch accepts only one of index or index_dir"
@@ -4636,8 +4704,8 @@ impl ToolRuntime {
             "find_symbol" => {
                 let name = string_arg(&request.arguments, "name")?;
                 let limit = positive_usize_arg(&request.arguments, "limit", 10)?;
-                if request.arguments.get("index").is_some()
-                    && request.arguments.get("index_dir").is_some()
+                if argument_value(&request.arguments, "index").is_some()
+                    && argument_value(&request.arguments, "index_dir").is_some()
                 {
                     return Err(anyhow!(
                         "find_symbol accepts only one of index or index_dir"
@@ -4716,8 +4784,8 @@ impl ToolRuntime {
             "find_symbol_batch" => {
                 let names = string_array_arg(&request.arguments, "names")?;
                 let limit = positive_usize_arg(&request.arguments, "limit", 10)?;
-                if request.arguments.get("index").is_some()
-                    && request.arguments.get("index_dir").is_some()
+                if argument_value(&request.arguments, "index").is_some()
+                    && argument_value(&request.arguments, "index_dir").is_some()
                 {
                     return Err(anyhow!(
                         "find_symbol_batch accepts only one of index or index_dir"
@@ -4881,8 +4949,8 @@ impl ToolRuntime {
                 let path = string_arg(&request.arguments, "path")?;
                 let limit = positive_usize_arg(&request.arguments, "limit", 10)?;
                 let include_read_batch = bool_arg(&request.arguments, "include_read_batch");
-                if request.arguments.get("index").is_some()
-                    && request.arguments.get("index_dir").is_some()
+                if argument_value(&request.arguments, "index").is_some()
+                    && argument_value(&request.arguments, "index_dir").is_some()
                 {
                     return Err(anyhow!(
                         "related_files accepts only one of index or index_dir"
@@ -5035,8 +5103,8 @@ impl ToolRuntime {
                 let query = optional_string_arg(&request.arguments, "query");
                 let limit = positive_usize_arg(&request.arguments, "limit", 10)?;
                 let include_read_batch = bool_arg(&request.arguments, "include_read_batch");
-                if request.arguments.get("index").is_some()
-                    && request.arguments.get("index_dir").is_some()
+                if argument_value(&request.arguments, "index").is_some()
+                    && argument_value(&request.arguments, "index_dir").is_some()
                 {
                     return Err(anyhow!(
                         "related_symbols accepts only one of index or index_dir"
@@ -8117,8 +8185,7 @@ const INDEX_SHARD_BUILD_OPTIONAL_ARGS: &[&str] = &[
 ];
 
 fn string_arg(arguments: &Value, name: &str) -> Result<String> {
-    arguments
-        .get(name)
+    argument_value(arguments, name)
         .and_then(Value::as_str)
         .map(String::from)
         .ok_or_else(|| anyhow!("missing string argument: {name}"))
@@ -8137,15 +8204,13 @@ fn join_paths_for_error(paths: &[PathBuf]) -> String {
 }
 
 fn bool_arg(arguments: &Value, name: &str) -> bool {
-    arguments
-        .get(name)
+    argument_value(arguments, name)
         .and_then(Value::as_bool)
         .unwrap_or(false)
 }
 
 fn repo_map_detail_arg(arguments: &Value) -> Result<RepoMapDetail> {
-    match arguments
-        .get("detail")
+    match argument_value(arguments, "detail")
         .and_then(Value::as_str)
         .unwrap_or("compact")
     {
@@ -8217,7 +8282,7 @@ fn read_scope_arg(arguments: &Value) -> Result<RangeScope> {
 }
 
 fn optional_read_scope_arg(value: &Value, name: &str) -> Result<Option<RangeScope>> {
-    let Some(scope) = value.get(name) else {
+    let Some(scope) = argument_value(value, name) else {
         return Ok(None);
     };
     let Some(scope) = scope.as_str() else {
@@ -8244,7 +8309,7 @@ fn validate_read_window(start: usize, lines: usize) -> Result<()> {
 }
 
 fn string_array_arg(arguments: &Value, name: &str) -> Result<Vec<String>> {
-    let Some(value) = arguments.get(name) else {
+    let Some(value) = argument_value(arguments, name) else {
         return Err(anyhow!("missing string array argument: {name}"));
     };
     let values = value
@@ -8722,7 +8787,7 @@ fn optional_bounded_usize_arg(
     maximum: Option<usize>,
 ) -> Result<Option<usize>> {
     bounded_usize_value(
-        arguments.get(name),
+        argument_value(arguments, name),
         &format!("argument {name}"),
         minimum,
         maximum,
@@ -8738,7 +8803,7 @@ fn optional_bounded_usize_field_any(
 ) -> Result<Option<usize>> {
     for name in names {
         if let Some(value) = bounded_usize_value(
-            object.get(name),
+            argument_value(object, name),
             &format!("{label} {name}"),
             minimum,
             maximum,
@@ -8750,7 +8815,9 @@ fn optional_bounded_usize_field_any(
 }
 
 fn has_any_field(value: &Value, names: &[&str]) -> bool {
-    names.iter().any(|name| value.get(name).is_some())
+    names
+        .iter()
+        .any(|name| argument_value(value, name).is_some())
 }
 
 fn bounded_usize_value(
@@ -8781,10 +8848,15 @@ fn bounded_usize_value(
 }
 
 fn optional_string_arg(arguments: &Value, name: &str) -> Option<String> {
-    arguments
-        .get(name)
+    argument_value(arguments, name)
         .and_then(Value::as_str)
         .map(String::from)
+}
+
+fn argument_value<'a>(arguments: &'a Value, name: &str) -> Option<&'a Value> {
+    arguments
+        .get(name)
+        .or_else(|| kebab_case_alias(name).and_then(|alias| arguments.get(alias)))
 }
 
 fn daemon_footprint_summary(index_details: &[Value], shard_manifest_details: &[Value]) -> Value {
@@ -8989,7 +9061,7 @@ fn optional_positive_usize_arg_any(arguments: &Value, names: &[&str]) -> Result<
 }
 
 fn optional_string_list_arg(arguments: &Value, name: &str) -> Result<Vec<String>> {
-    let Some(value) = arguments.get(name) else {
+    let Some(value) = argument_value(arguments, name) else {
         return Ok(Vec::new());
     };
     if let Some(value) = value.as_str() {
