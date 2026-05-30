@@ -222,6 +222,8 @@ enum Commands {
         lines: usize,
         #[arg(long, value_enum, default_value_t = ReadScopeArg::Exact)]
         scope: ReadScopeArg,
+        #[arg(long = "format", default_value = "json", value_parser = ["json"])]
+        format: String,
     },
     #[command(alias = "open-shard-ranges")]
     ReadShardRanges {
@@ -236,6 +238,8 @@ enum Commands {
         lines: usize,
         #[arg(long, value_enum, default_value_t = ReadScopeArg::Exact)]
         scope: ReadScopeArg,
+        #[arg(long = "format", default_value = "json", value_parser = ["json"])]
+        format: String,
     },
     ShardSymbol {
         #[arg(long)]
@@ -419,6 +423,8 @@ enum Commands {
         end_line: Option<usize>,
         #[arg(long, value_enum, default_value_t = ReadScopeArg::Exact)]
         scope: ReadScopeArg,
+        #[arg(long = "format", default_value = "json", value_parser = ["json"])]
+        format: String,
     },
     #[command(alias = "open-ranges")]
     ReadRanges {
@@ -444,6 +450,8 @@ enum Commands {
         end_line: Option<usize>,
         #[arg(long, value_enum, default_value_t = ReadScopeArg::Exact)]
         scope: ReadScopeArg,
+        #[arg(long = "format", default_value = "json", value_parser = ["json"])]
+        format: String,
     },
     Search {
         #[arg(long, default_value = ".")]
@@ -600,6 +608,8 @@ enum Commands {
         end_line: Option<usize>,
         #[arg(long, value_enum, default_value_t = ReadScopeArg::Exact)]
         scope: ReadScopeArg,
+        #[arg(long = "format", default_value = "json", value_parser = ["json"])]
+        format: String,
     },
     #[command(alias = "open-index-ranges")]
     ReadIndexRanges {
@@ -621,6 +631,8 @@ enum Commands {
         end_line: Option<usize>,
         #[arg(long, value_enum, default_value_t = ReadScopeArg::Exact)]
         scope: ReadScopeArg,
+        #[arg(long = "format", default_value = "json", value_parser = ["json"])]
+        format: String,
     },
     Symbol {
         #[arg(long, default_value = ".")]
@@ -2738,6 +2750,7 @@ fn run() -> Result<()> {
             start,
             lines,
             scope,
+            format: _format,
         } => {
             let range = cli_single_range(path, path_arg, start, lines)?;
             println!(
@@ -2758,6 +2771,7 @@ fn run() -> Result<()> {
             start,
             lines,
             scope,
+            format: _format,
         } => {
             let mut results = Vec::new();
             let scope = RangeScope::from(scope);
@@ -3090,6 +3104,7 @@ fn run() -> Result<()> {
             lines,
             end_line,
             scope,
+            format: _format,
         } => {
             let window = cli_read_window(start, lines, end_line)?;
             let range_spec = cli_single_range(path, path_arg, window.start, window.lines)?;
@@ -3131,6 +3146,7 @@ fn run() -> Result<()> {
             lines,
             end_line,
             scope,
+            format: _format,
         } => {
             let mut results = Vec::new();
             let scope = RangeScope::from(scope);
@@ -4203,6 +4219,7 @@ fn run() -> Result<()> {
             lines,
             end_line,
             scope,
+            format: _format,
         } => {
             let window = cli_read_window(start, lines, end_line)?;
             let range = cli_single_range(path, path_arg, window.start, window.lines)?;
@@ -4225,6 +4242,7 @@ fn run() -> Result<()> {
             lines,
             end_line,
             scope,
+            format: _format,
         } => {
             let index = FastIndex::load(index)?;
             let mut results = Vec::new();
