@@ -31,6 +31,12 @@ fixed_patterns=(
   'tool-call histories'
   'memory/rules surface'
   'agent memory'
+  'agent rule'
+  'agent-rule'
+  'local rule'
+  'reusable rules'
+  'rule_target'
+  'agent_rules'
 )
 
 regex_patterns=(

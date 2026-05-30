@@ -1,15 +1,15 @@
 # Agent Adoption
 
 Orient adoption should be boring: start one shared daemon, give each local
-agent a small rule, and let returned follow-up requests drive search, reads,
-and query-plan recovery.
+agent a small instruction snippet, and let returned follow-up requests drive
+search, reads, and query-plan recovery.
 
 For setup and shared-runtime operations, use [Shared Daemon](shared-daemon.md).
 For transport details and tool schemas, use [Agent Protocol](agent-protocol.md).
 
-## Minimal Agent Rule
+## Minimal Instructions
 
-Generate the live rule with:
+Generate the live snippet with:
 
 ```bash
 export ORIENT_SHARDS=/path/to/local/cache/orient-shards
@@ -18,7 +18,7 @@ orient agent-instructions --profile generic --index-dir "$ORIENT_SHARDS"
 ```
 
 Keep that cache path local to the machine running the agents; the generated
-rule should not contain private workspace layouts.
+snippet should not contain private workspace layouts.
 
 Place the generated snippet in the local instruction file read by the coding
 agent. The snippet is intentionally tool-agnostic: it tells the agent to use
@@ -27,7 +27,7 @@ scans. Use `--profile generic` for neutral output, or an explicit adapter
 profile when you want a placement hint for that agent. The selected profile
 does not change the search protocol or generated tool calls.
 
-The rule should tell agents:
+The snippet should tell agents:
 
 - Prefer Orient before `rg`, `find`, `ls`, or `cat` for code discovery.
 - Start with `daemon_status` or `agent_guide`.

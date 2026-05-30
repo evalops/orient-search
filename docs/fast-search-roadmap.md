@@ -24,9 +24,8 @@ structured enough that agents stop spending turns on repeated `rg`, `find`,
   [code-search capabilities](https://sourcegraph.com/docs/code-search/features)
   point to the product surface agents need too: precise query filters,
   freshness, symbol lookup, file/path scoping, and shareable line ranges.
-- Agent tools such as [Amp](https://ampcode.com/manual) make the adapter
-  requirement clear: guidance files, MCP/local tools, subagents, and terminal
-  workflows need short, copyable commands and structured follow-up requests.
+- Agent adapters need short, copyable commands, local tool manifests, and
+  structured follow-up requests instead of prose-only guidance.
 
 Orient should borrow the durable search-engine ideas, but keep the product
 local-agent-first: no hosted indexing requirement, no telemetry, bounded

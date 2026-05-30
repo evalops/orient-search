@@ -1054,7 +1054,7 @@ fn agent_guide_returns_local_agent_request_templates() {
     );
     assert_eq!(guide["profile"], "codex");
     assert_eq!(
-        guide["rule_target"],
+        guide["instruction_target"],
         "the local instruction file read by the selected coding agent"
     );
     assert_eq!(
@@ -1099,7 +1099,7 @@ fn agent_guide_returns_local_agent_request_templates() {
             ))
     );
     assert_eq!(
-        guide["quickstart"]["agent_rules"],
+        guide["quickstart"]["agent_instructions"],
         "orient agent-instructions --profile codex --index-dir /tmp/orient-shards"
     );
     assert!(
@@ -1201,7 +1201,7 @@ fn agent_guide_returns_local_agent_request_templates() {
 }
 
 #[test]
-fn agent_instructions_returns_copyable_local_agent_rules() {
+fn agent_instructions_returns_copyable_local_agent_snippet() {
     let instructions = agent_instructions(
         Some("/work/repo"),
         Some("/tmp/repo.index"),
@@ -1263,7 +1263,7 @@ fn agent_guidance_defaults_use_neutral_cache_placeholders() {
 }
 
 #[test]
-fn agent_guidance_profiles_keep_rule_surfaces_neutral() {
+fn agent_guidance_profiles_keep_instruction_surfaces_neutral() {
     let codex = agent_instructions(None, None, None, None, Some("codex"));
     assert!(codex.contains("selected coding agent"));
     assert!(!codex.contains("Selected profile"));
@@ -1278,7 +1278,7 @@ fn agent_guidance_profiles_keep_rule_surfaces_neutral() {
     let amp = agent_guide(None, None, None, None, Some("amp"));
     assert_eq!(amp["profile"], "amp");
     assert!(
-        amp["rule_target"]
+        amp["instruction_target"]
             .as_str()
             .unwrap()
             .contains("selected coding agent")
@@ -1336,7 +1336,7 @@ fn runtime_serves_agent_guide_for_json_lines_wrappers() {
 }
 
 #[test]
-fn runtime_serves_agent_instructions_for_local_rule_files() {
+fn runtime_serves_agent_instructions_for_local_instruction_files() {
     let runtime = ToolRuntime::default();
     let response = runtime.dispatch(ToolRequest {
         id: serde_json::json!("instructions"),

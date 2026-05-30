@@ -31,7 +31,7 @@ indexes on first use. The daemon keeps at most 64 ready indexes by default; use
 `--warm-index-dir "$ORIENT_SHARDS"` only when you intentionally want to load
 shard indexes at startup.
 
-Then verify the daemon and generate the short agent rule:
+Then verify the daemon and generate the short instruction snippet:
 
 ```bash
 orient doctor --index-dir "$ORIENT_SHARDS"

@@ -1234,7 +1234,7 @@ pub fn agent_guide(
         "name": "Orient Search",
         "purpose": "Fast local code search for coding agents; no telemetry.",
         "profile": profile.name,
-        "rule_target": profile.rule_target,
+        "instruction_target": profile.instruction_target,
         "instruction_snippet": agent_instructions(Some(repo), Some(index), Some(index_dir), Some(addr), Some(profile.name)),
         "quickstart": {
             "install": "cargo install --git https://github.com/evalops/orient-search",
@@ -1249,7 +1249,7 @@ pub fn agent_guide(
             "client": client_command,
             "status": status_command,
             "one_shot_search": "orient search-auto \"symbol:SessionManager token\"",
-            "agent_rules": format!("orient agent-instructions --profile {} --index-dir {index_dir}", profile.name),
+            "agent_instructions": format!("orient agent-instructions --profile {} --index-dir {index_dir}", profile.name),
             "followup_request_hints": "Generated follow-up requests include jsonl, client_cli, and compact cli hints where available."
         },
         "recommended_loop": [
@@ -1261,7 +1261,7 @@ pub fn agent_guide(
         ],
         "adapter_notes": [
             profile.adapter_note,
-            "Keep cache paths local to the machine running the agents; do not copy private workspace layouts into shared docs or reusable rules.",
+            "Keep cache paths local to the machine running the agents; do not copy private workspace layouts into shared docs or reusable instructions.",
             "Prefer JSON-lines/MCP tool calls and returned follow-up requests over repeated shell scans."
         ],
         "preferred_surfaces": {
@@ -1408,8 +1408,8 @@ pub fn agent_instructions(
         "## Orient Search\n\
 Use Orient as the first local code-discovery step before repeated `rg`, `find`, `ls`, or `cat`.\n\
 Prefer the shared daemon when it is running: `{client_command}`.\n\
-Copy this snippet into {rule_target}.\n\
-Keep cache paths local to the machine running the agents; do not copy private workspace layouts into shared docs or reusable rules.\n\
+Copy this snippet into {instruction_target}.\n\
+Keep cache paths local to the machine running the agents; do not copy private workspace layouts into shared docs or reusable instructions.\n\
 For many local repos, bootstrap it with `orient ensure-shards --discover-root /path/to/workspaces --output-dir {index_dir} --family-limit 2` and `orient serve-tcp --addr {addr} --index-dir {index_dir}`.\n\
 For one repo, bootstrap it with `orient ensure-index --repo {repo} --index {index}` and `orient serve-tcp --addr {addr} --index {index}`.\n\
 At the start of a task, call `daemon_status` or `agent_guide`, then use `search_auto` for normal lookup and `search_auto_batch` for alternate query phrasings.\n\
@@ -1423,14 +1423,14 @@ Use `read_batch_request.read_budget` to keep batch reads under the advertised ha
 For manual context reads from a line inside a definition, pass `scope:\"symbol\"` so `read_range` or `read_ranges` anchors at the nearest function, class, or type definition.\n\
 When results are empty, noisy, or suspicious, use the returned `query_plan_request` or inline `query_plan_result` before broadening the search; pass `retry_if_empty:true` when you want Orient to execute the promoted retry once and return `primary_retry_result` immediately.\n\
 Orient is local code search only and does not collect telemetry.",
-        rule_target = profile.rule_target
+        instruction_target = profile.instruction_target
     )
 }
 
 #[derive(Debug, Clone, Copy)]
 struct AgentProfile {
     name: &'static str,
-    rule_target: &'static str,
+    instruction_target: &'static str,
     adapter_note: &'static str,
 }
 
@@ -1444,22 +1444,22 @@ fn agent_profile(profile: Option<&str>) -> AgentProfile {
     {
         "codex" => AgentProfile {
             name: "codex",
-            rule_target: "the local instruction file read by the selected coding agent",
+            instruction_target: "the local instruction file read by the selected coding agent",
             adapter_note: "Selected profile: codex; place the snippet in that agent's local instruction file for this repo.",
         },
         "claude" | "claudecode" => AgentProfile {
             name: "claude",
-            rule_target: "the local instruction file read by the selected coding agent",
+            instruction_target: "the local instruction file read by the selected coding agent",
             adapter_note: "Selected profile: claude; place the snippet in that agent's local instruction file for this repo.",
         },
         "amp" => AgentProfile {
             name: "amp",
-            rule_target: "the local instruction file read by the selected coding agent",
+            instruction_target: "the local instruction file read by the selected coding agent",
             adapter_note: "Selected profile: amp; place the snippet in that agent's local instruction file for this repo.",
         },
         _ => AgentProfile {
             name: "generic",
-            rule_target: "the local agent instruction file for this repo",
+            instruction_target: "the local agent instruction file for this repo",
             adapter_note: "Selected profile: generic; place the snippet in the local instruction file your coding agent reads.",
         },
     }
@@ -1959,9 +1959,7 @@ fn argument_description(tool_name: &str, name: &str) -> &'static str {
             "Path to a local multi-repo shard directory. Daemon tools may omit this when exactly one shard directory is registered."
         }
         "addr" => "Local TCP daemon address for generated setup and client commands.",
-        "profile" => {
-            "Agent-rule target profile for generated guidance: generic, codex, claude, or amp."
-        }
+        "profile" => "Instruction profile for generated guidance: generic, codex, claude, or amp.",
         "output_dir" => "Directory where shard indexes and manifest.json should be written.",
         "query" => "Agent query string with filters, quoted phrases, and normal search terms.",
         "queries" => "Agent query strings to run as one batch against the same search target.",
