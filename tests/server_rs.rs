@@ -2029,6 +2029,10 @@ fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
         serde_json::json!(["rs"])
     );
     assert_eq!(
+        auto_retry["primary_retry_result"]["summary"]["top_langs"],
+        serde_json::json!(["rust"])
+    );
+    assert_eq!(
         auto_retry["primary_retry_result"]["read_batch_request"]["tool"],
         serde_json::json!("read_ranges")
     );
@@ -3300,6 +3304,10 @@ fn runtime_related_alias_accepts_live_index_and_shard_targets() {
         serde_json::json!(["tests"])
     );
     assert_eq!(live_batch["summary"]["top_exts"], serde_json::json!(["rs"]));
+    assert_eq!(
+        live_batch["summary"]["top_langs"],
+        serde_json::json!(["rust"])
+    );
     assert!(live_batch["summary"]["max_score"].is_number());
     assert!(live_batch["summary"]["min_score"].is_number());
     assert!(
@@ -3431,6 +3439,13 @@ fn runtime_related_alias_accepts_live_index_and_shard_targets() {
             .as_array()
             .unwrap()
             .contains(&serde_json::json!("rs")),
+        "{indexed_symbol_batch:?}"
+    );
+    assert!(
+        indexed_symbol_batch["summary"]["top_langs"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("rust")),
         "{indexed_symbol_batch:?}"
     );
     assert!(
@@ -3764,6 +3779,10 @@ fn runtime_find_symbol_alias_accepts_live_index_and_shard_targets() {
         serde_json::json!(["rs"])
     );
     assert_eq!(
+        indexed_wrapped["summary"]["top_langs"],
+        serde_json::json!(["rust"])
+    );
+    assert_eq!(
         indexed_wrapped["summary"]["kinds"],
         serde_json::json!(["struct"])
     );
@@ -3916,6 +3935,10 @@ fn runtime_find_symbol_alias_accepts_live_index_and_shard_targets() {
     assert_eq!(
         indexed_batch[0]["summary"]["top_exts"],
         serde_json::json!(["rs"])
+    );
+    assert_eq!(
+        indexed_batch[0]["summary"]["top_langs"],
+        serde_json::json!(["rust"])
     );
     assert_eq!(
         indexed_batch[0]["summary"]["kinds"],

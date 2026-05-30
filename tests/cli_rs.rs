@@ -780,6 +780,10 @@ fn cli_search_auto_selects_live_indexed_and_shard_surfaces() {
         serde_json::json!(["rs"])
     );
     assert_eq!(
+        auto_retry_live["primary_retry_result"]["summary"]["top_langs"],
+        serde_json::json!(["rust"])
+    );
+    assert_eq!(
         auto_retry_live["primary_retry_result"]["read_batch_request"]["tool"],
         serde_json::json!("read_ranges")
     );
@@ -1278,6 +1282,10 @@ fn cli_read_ranges_can_return_compact_summary() {
     assert_eq!(
         summarized["summary"]["top_exts"],
         serde_json::json!(["rs", "toml"])
+    );
+    assert_eq!(
+        summarized["summary"]["top_langs"],
+        serde_json::json!(["rust", "toml"])
     );
     assert_eq!(summarized["ranges"].as_array().unwrap().len(), 2);
 }
@@ -2420,6 +2428,7 @@ fn cli_searches_symbols_and_related_files() {
     assert_eq!(related["summary"]["status"], serde_json::json!("matched"));
     assert_eq!(related["summary"]["top_dirs"], serde_json::json!(["tests"]));
     assert_eq!(related["summary"]["top_exts"], serde_json::json!(["rs"]));
+    assert_eq!(related["summary"]["top_langs"], serde_json::json!(["rust"]));
 
     let related_symbols = Command::cargo_bin("orient")
         .unwrap()
@@ -2462,6 +2471,10 @@ fn cli_searches_symbols_and_related_files() {
     assert_eq!(
         related_symbols["summary"]["top_exts"],
         serde_json::json!(["rs"])
+    );
+    assert_eq!(
+        related_symbols["summary"]["top_langs"],
+        serde_json::json!(["rust"])
     );
     assert!(
         related_symbols["summary"]["top_symbols"]
@@ -3843,6 +3856,7 @@ fn cli_builds_and_searches_persistent_index() {
         .stdout(predicate::str::contains("\"top_paths\":[\"src/auth.rs\"]"))
         .stdout(predicate::str::contains("\"top_dirs\":[\"src\"]"))
         .stdout(predicate::str::contains("\"top_exts\":[\"rs\"]"))
+        .stdout(predicate::str::contains("\"top_langs\":[\"rust\"]"))
         .stdout(predicate::str::contains("\"kinds\":[\"struct\"]"))
         .stdout(predicate::str::contains("\"results\""))
         .stdout(predicate::str::contains("\"read_batch_request\""))
@@ -3933,6 +3947,10 @@ fn cli_builds_and_searches_persistent_index() {
     assert_eq!(
         index_symbol_batch[1]["summary"]["top_exts"],
         serde_json::json!(["rs"])
+    );
+    assert_eq!(
+        index_symbol_batch[1]["summary"]["top_langs"],
+        serde_json::json!(["rust"])
     );
     assert_eq!(
         index_symbol_batch[1]["summary"]["kinds"],

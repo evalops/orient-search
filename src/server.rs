@@ -112,6 +112,8 @@ struct ReadRangesResponseSummary {
     top_dirs: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     top_exts: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    top_langs: Vec<String>,
 }
 
 fn search_result_summary(results: &[SearchResult]) -> SearchResultSummary {
@@ -467,6 +469,8 @@ struct SymbolBatchSummary {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     top_exts: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
+    top_langs: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     kinds: Vec<String>,
 }
 
@@ -482,6 +486,7 @@ fn symbol_batch_summary(symbols: &[SymbolLookupResult]) -> SymbolBatchSummary {
         top_paths: symbol_summary_top_paths(symbols),
         top_dirs: symbol_summary_top_dirs(symbols),
         top_exts: symbol_summary_top_exts(symbols),
+        top_langs: symbol_summary_top_langs(symbols),
         kinds: symbol_summary_kinds(symbols),
     }
 }
@@ -527,6 +532,22 @@ fn symbol_summary_top_exts(symbols: &[SymbolLookupResult]) -> Vec<String> {
         }
     }
     exts
+}
+
+fn symbol_summary_top_langs(symbols: &[SymbolLookupResult]) -> Vec<String> {
+    let mut langs = Vec::new();
+    for symbol in symbols {
+        let Some(language) = language_for(Path::new(&symbol.symbol.path)) else {
+            continue;
+        };
+        if !langs.iter().any(|existing| existing == &language) {
+            langs.push(language);
+            if langs.len() == 5 {
+                break;
+            }
+        }
+    }
+    langs
 }
 
 fn symbol_summary_kinds(symbols: &[SymbolLookupResult]) -> Vec<String> {
@@ -3020,6 +3041,10 @@ fn primary_retry_result_summary(result: &Value) -> Value {
     if !top_exts.is_empty() {
         summary["top_exts"] = json!(top_exts);
     }
+    let top_langs = value_summary_top_langs(results);
+    if !top_langs.is_empty() {
+        summary["top_langs"] = json!(top_langs);
+    }
     if let Some(score) = results
         .first()
         .and_then(|item| item.get("score"))
@@ -3073,6 +3098,25 @@ fn value_summary_top_exts(results: &[Value]) -> Vec<String> {
     exts
 }
 
+fn value_summary_top_langs(results: &[Value]) -> Vec<String> {
+    let mut langs = Vec::new();
+    for item in results {
+        let Some(path) = item.get("path").and_then(Value::as_str) else {
+            continue;
+        };
+        let Some(language) = language_for(Path::new(path)) else {
+            continue;
+        };
+        if !langs.iter().any(|existing| existing == &language) {
+            langs.push(language);
+            if langs.len() == 5 {
+                break;
+            }
+        }
+    }
+    langs
+}
+
 fn primary_retry_read_batch_request(
     request: &ResultToolRequest,
     result: &Value,
@@ -3086,6 +3130,7 @@ fn read_ranges_response_summary(ranges: &[FileRange]) -> ReadRangesResponseSumma
     let mut paths = Vec::new();
     let mut top_dirs = Vec::new();
     let mut top_exts = Vec::new();
+    let mut top_langs = Vec::new();
     let mut total_lines = 0;
 
     for range in ranges {
@@ -3100,6 +3145,12 @@ fn read_ranges_response_summary(ranges: &[FileRange]) -> ReadRangesResponseSumma
         {
             top_exts.push(ext);
         }
+        if let Some(language) = language_for(Path::new(&range.path))
+            && top_langs.len() < 5
+            && !top_langs.iter().any(|existing| existing == &language)
+        {
+            top_langs.push(language);
+        }
         if seen_paths.insert(range.path.clone()) && paths.len() < 5 {
             paths.push(range.path.clone());
         }
@@ -3113,6 +3164,7 @@ fn read_ranges_response_summary(ranges: &[FileRange]) -> ReadRangesResponseSumma
         paths,
         top_dirs,
         top_exts,
+        top_langs,
     }
 }
 
@@ -3165,6 +3217,7 @@ fn related_lookup_summary(results: &Value) -> Value {
     let mut top_paths = Vec::new();
     let mut top_dirs = Vec::new();
     let mut top_exts = Vec::new();
+    let mut top_langs = Vec::new();
     let mut top_symbols = Vec::new();
     let mut symbol_kinds = Vec::new();
     for item in results {
@@ -3185,6 +3238,12 @@ fn related_lookup_summary(results: &Value) -> Value {
                 && !top_exts.iter().any(|existing| existing == &ext)
             {
                 top_exts.push(ext);
+            }
+            if let Some(language) = language_for(Path::new(path))
+                && top_langs.len() < 5
+                && !top_langs.iter().any(|existing| existing == &language)
+            {
+                top_langs.push(language);
             }
         }
         if let Some(symbol) = item.get("symbol") {
@@ -3210,6 +3269,9 @@ fn related_lookup_summary(results: &Value) -> Value {
     }
     if !top_exts.is_empty() {
         summary["top_exts"] = json!(top_exts);
+    }
+    if !top_langs.is_empty() {
+        summary["top_langs"] = json!(top_langs);
     }
     if !top_symbols.is_empty() {
         summary["top_symbols"] = json!(top_symbols);
