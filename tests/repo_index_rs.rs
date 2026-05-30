@@ -890,6 +890,51 @@ exports_files(["README.md"])
 }
 
 #[test]
+fn bazel_labels_search_build_targets_by_package_and_symbol() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("BUILD.bazel"),
+        r#"
+rust_library(
+    name = "root_lib",
+    srcs = ["src/lib.rs"],
+)
+"#,
+    );
+    write(
+        &repo.path().join("tools/search/BUILD.bazel"),
+        r#"
+rust_binary(
+    name = "orient_cli",
+    srcs = ["main.rs"],
+)
+"#,
+    );
+
+    let package_label = search_repo_fast_filtered(
+        repo.path(),
+        "//tools/search:orient_cli",
+        5,
+        &Default::default(),
+    )
+    .unwrap();
+    assert_eq!(package_label[0].path, "tools/search/BUILD.bazel");
+    assert!(package_label[0].reason.contains("symbol:orient_cli"));
+
+    let relative_label =
+        search_repo_fast_filtered(repo.path(), ":root_lib", 5, &Default::default()).unwrap();
+    assert_eq!(relative_label[0].path, "BUILD.bazel");
+    assert!(relative_label[0].reason.contains("symbol:root_lib"));
+
+    let indexed = FastIndex::build(repo.path()).unwrap();
+    let indexed_results = indexed
+        .search_filtered("//tools/search:orient_cli", 5, &Default::default())
+        .unwrap();
+    assert_eq!(indexed_results[0].path, "tools/search/BUILD.bazel");
+    assert!(indexed_results[0].reason.contains("symbol:orient_cli"));
+}
+
+#[test]
 fn docker_compose_services_work_as_symbols_across_live_and_persistent_indexes() {
     let repo = tempfile::tempdir().unwrap();
     write(

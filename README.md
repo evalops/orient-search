@@ -104,9 +104,10 @@ code links resolve to anchored file searches. Go panic stack locations are
 accepted too. Language filters include common shorthands such as `lang:rs`,
 `lang:ts`, `lang:cpp`, `lang:csharp`, `lang:shell`, `lang:makefile`, and
 `lang:justfile`. `kind:target` and `recipe:name` can jump to Makefile targets,
-Justfile targets, GitHub Actions jobs, and Bazel BUILD rule names; `kind:script`
-and `script:name` can jump to package.json and pyproject scripts;
-`package:name` can jump to
+Justfile targets, GitHub Actions jobs, and Bazel BUILD rule names. Pasted Bazel
+labels like `//tools/search:orient_cli` and `:agent_smoke_test` infer target
+symbol searches too. `kind:script` and `script:name` can jump to package.json
+and pyproject scripts; `package:name` can jump to
 package.json packages, Cargo packages, pyproject packages, Go module paths,
 Maven coordinates, and Gradle project names; `bin:name`, `example:name`, and
 `bench:name` can jump to Cargo manifest entries; `service:name` can jump to

@@ -45,6 +45,7 @@ pub fn parse_query(input: &str) -> ParsedQuery {
     if terms.len() > 1 && !filters.match_any {
         filters.require_all = true;
     }
+    infer_bazel_label_single_term(&mut terms, &mut filters, explicit_content_terms);
     infer_path_like_single_term(&mut terms, &mut filters, explicit_content_terms);
 
     ParsedQuery {
@@ -410,6 +411,64 @@ fn infer_path_like_single_term(
         terms.clear();
         filters.require_all = false;
     }
+}
+
+fn infer_bazel_label_single_term(
+    terms: &mut Vec<String>,
+    filters: &mut SearchFilters,
+    explicit_content_terms: bool,
+) {
+    if explicit_content_terms
+        || terms.len() != 1
+        || filters.file.is_some()
+        || filters.path.is_some()
+        || filters.symbol.is_some()
+    {
+        return;
+    }
+
+    let Some((package, target)) = bazel_label_parts(&terms[0]) else {
+        return;
+    };
+    if let Some(package) = package {
+        filters.path = Some(package);
+    }
+    filters.symbol = Some(target);
+    filters.symbol_kind = Some("target".to_string());
+    terms.clear();
+    filters.require_all = false;
+}
+
+fn bazel_label_parts(value: &str) -> Option<(Option<String>, String)> {
+    let value = trim_location_token_wrappers(value);
+    if value.chars().any(char::is_whitespace) {
+        return None;
+    }
+
+    let (package, target) = if let Some(target) = value.strip_prefix(':') {
+        (None, target)
+    } else if let Some(rest) = value.strip_prefix("//") {
+        let (package, target) = rest.split_once(':')?;
+        let package = package.trim_matches('/');
+        let package = (!package.is_empty()).then(|| package.to_string());
+        (package, target)
+    } else {
+        return None;
+    };
+
+    let target = target.trim();
+    if !is_bazel_label_target(target) {
+        return None;
+    }
+    Some((package, target.to_string()))
+}
+
+fn is_bazel_label_target(value: &str) -> bool {
+    !value.is_empty()
+        && !value.contains('/')
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.'))
 }
 
 fn infer_leading_pytest_node_id_term(
@@ -2051,6 +2110,32 @@ mod tests {
             Some("src/server.rs")
         );
         assert_eq!(source_location.filters.target_line, Some(42));
+
+        let bazel_package_label = parse_query("//tools/search:orient_cli");
+        assert!(bazel_package_label.terms.is_empty());
+        assert_eq!(
+            bazel_package_label.filters.path.as_deref(),
+            Some("tools/search")
+        );
+        assert_eq!(
+            bazel_package_label.filters.symbol.as_deref(),
+            Some("orient_cli")
+        );
+        assert_eq!(
+            bazel_package_label.filters.symbol_kind.as_deref(),
+            Some("target")
+        );
+
+        let bazel_relative_label = parse_query(":agent_smoke_test");
+        assert!(bazel_relative_label.terms.is_empty());
+        assert_eq!(
+            bazel_relative_label.filters.symbol.as_deref(),
+            Some("agent_smoke_test")
+        );
+        assert_eq!(
+            bazel_relative_label.filters.symbol_kind.as_deref(),
+            Some("target")
+        );
 
         let rust_diagnostic_location = parse_query("--> src/server.rs:42:9: borrowed value");
         assert_eq!(rust_diagnostic_location.terms, Vec::<String>::new());
