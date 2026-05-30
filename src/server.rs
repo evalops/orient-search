@@ -1708,15 +1708,18 @@ fn jsonl_client_cli(jsonl: &str, client_command: &str) -> String {
 
 pub fn tcp_client_command(addr: &str) -> String {
     if addr == DEFAULT_DAEMON_ADDR {
-        "orient client-jsonl".to_string()
+        "orient client-jsonl --require-version".to_string()
     } else {
-        format!("orient client-jsonl --addr {}", shell_quote(addr))
+        format!(
+            "orient client-jsonl --require-version --addr {}",
+            shell_quote(addr)
+        )
     }
 }
 
 pub fn unix_client_command(socket: &Path) -> String {
     format!(
-        "orient client-jsonl --socket {}",
+        "orient client-jsonl --require-version --socket {}",
         shell_quote(&socket.to_string_lossy())
     )
 }

@@ -77,7 +77,7 @@ The snippet should tell agents:
 printf '%s\n' \
   '{"id":"guide","tool":"agent_guide","arguments":{}}' \
   '{"id":"status","tool":"daemon_status","arguments":{"cwd":"/path/to/current/repo"}}' \
-  | orient client-jsonl
+  | orient client-jsonl --require-version
 ```
 
 Pass `details:true` to `daemon_status` only when an adapter needs cached paths
@@ -86,13 +86,13 @@ or per-target runtime details.
 ```bash
 printf '%s\n' \
   '{"id":"search","tool":"search_auto","arguments":{"query":"repo:service branch:main symbol:SessionManager token","limit":10,"explain":true,"refresh_if_stale":true,"retry_if_empty":true}}' \
-  | orient client-jsonl
+  | orient client-jsonl --require-version
 ```
 
 ```bash
 printf '%s\n' \
   '{"id":"searches","tool":"search_auto_batch","arguments":{"queries":["repo:service symbol:SessionManager token","origin:example/service path:auth token","repo:service mode:any SessionManager token"],"limit":10,"explain":true,"refresh_if_stale":true,"retry_if_empty":true}}' \
-  | orient client-jsonl
+  | orient client-jsonl --require-version
 ```
 
 On a registered shard daemon, `search_auto_batch` resolves all query scopes and

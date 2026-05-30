@@ -992,6 +992,8 @@ enum Commands {
         socket: Option<PathBuf>,
         #[arg(long, default_value = DEFAULT_DAEMON_ADDR)]
         addr: Option<String>,
+        #[arg(long)]
+        require_version: bool,
     },
 }
 
@@ -5231,11 +5233,18 @@ fn run() -> Result<()> {
             io::stdout().flush()?;
             serve_unix(listener, socket, runtime)?;
         }
-        Commands::ClientJsonl { socket, addr } => {
+        Commands::ClientJsonl {
+            socket,
+            addr,
+            require_version,
+        } => {
             if let Some(socket) = socket {
-                client_jsonl_unix(&socket)?;
+                client_jsonl_unix(&socket, require_version)?;
             } else {
-                client_jsonl_tcp(addr.as_deref().unwrap_or(DEFAULT_DAEMON_ADDR))?;
+                client_jsonl_tcp(
+                    addr.as_deref().unwrap_or(DEFAULT_DAEMON_ADDR),
+                    require_version,
+                )?;
             }
         }
     }
@@ -5284,13 +5293,13 @@ fn bootstrap_runtime(
     Ok((runtime, ensured_shards))
 }
 
-fn client_jsonl_tcp(addr: &str) -> Result<()> {
-    client_jsonl_stream(TcpStream::connect(addr)?)
+fn client_jsonl_tcp(addr: &str, require_version: bool) -> Result<()> {
+    client_jsonl_stream(TcpStream::connect(addr)?, require_version)
 }
 
 #[cfg(unix)]
-fn client_jsonl_unix(socket: &Path) -> Result<()> {
-    client_jsonl_stream(UnixStream::connect(socket)?)
+fn client_jsonl_unix(socket: &Path, require_version: bool) -> Result<()> {
+    client_jsonl_stream(UnixStream::connect(socket)?, require_version)
 }
 
 fn daemon_status_tcp(addr: &str) -> Result<Value> {
@@ -5861,13 +5870,20 @@ fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 
-fn client_jsonl_stream(stream: impl Read + Write) -> Result<()> {
+fn client_jsonl_stream(stream: impl Read + Write, require_version: bool) -> Result<()> {
     let cwd = env::current_dir().ok();
-    client_jsonl_stream_with_cwd(stream, cwd.as_deref())
+    client_jsonl_stream_with_cwd(stream, cwd.as_deref(), require_version)
 }
 
-fn client_jsonl_stream_with_cwd(stream: impl Read + Write, cwd: Option<&Path>) -> Result<()> {
+fn client_jsonl_stream_with_cwd(
+    stream: impl Read + Write,
+    cwd: Option<&Path>,
+    require_version: bool,
+) -> Result<()> {
     let mut reader = BufReader::new(stream);
+    if require_version {
+        require_matching_daemon_version(&mut reader)?;
+    }
     let stdin = io::stdin();
     let mut stdout = io::stdout();
     let mut response = String::new();
@@ -5889,6 +5905,45 @@ fn client_jsonl_stream_with_cwd(stream: impl Read + Write, cwd: Option<&Path>) -
         stdout.flush()?;
     }
 
+    Ok(())
+}
+
+fn require_matching_daemon_version(stream: &mut BufReader<impl Read + Write>) -> Result<()> {
+    let client_version = env!("CARGO_PKG_VERSION");
+    let request = serde_json::json!({
+        "id": "client-version-check",
+        "tool": "daemon_status",
+        "arguments": {}
+    });
+    writeln!(stream.get_mut(), "{request}")?;
+    stream.get_mut().flush()?;
+
+    let mut response = String::new();
+    stream.read_line(&mut response)?;
+    if response.is_empty() {
+        bail!("daemon closed connection before version check completed");
+    }
+    let response: Value = serde_json::from_str(&response)?;
+    if let Some(error) = response.get("error").and_then(Value::as_str) {
+        bail!("daemon version check failed: {error}");
+    }
+    let result = response
+        .get("result")
+        .ok_or_else(|| anyhow::anyhow!("daemon version check response did not include result"))?;
+    let daemon_version = result
+        .get("daemon_version")
+        .and_then(Value::as_str)
+        .filter(|version| !version.trim().is_empty())
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "daemon did not report daemon_version; restart or update the shared orient daemon"
+            )
+        })?;
+    if daemon_version != client_version {
+        bail!(
+            "daemon version {daemon_version} differs from client {client_version}; restart the shared orient daemon"
+        );
+    }
     Ok(())
 }
 
@@ -7002,6 +7057,74 @@ mod tests {
         assert_eq!(check.status, DoctorCheckStatus::Warn);
         assert!(check.message.contains("did not report daemon_version"));
         assert!(recommendation.unwrap().contains("older daemons"));
+    }
+
+    struct VersionCheckStream {
+        read: std::io::Cursor<Vec<u8>>,
+        written: Vec<u8>,
+    }
+
+    impl VersionCheckStream {
+        fn new(response: Value) -> Self {
+            Self {
+                read: std::io::Cursor::new(format!("{response}\n").into_bytes()),
+                written: Vec::new(),
+            }
+        }
+    }
+
+    impl Read for VersionCheckStream {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            self.read.read(buf)
+        }
+    }
+
+    impl Write for VersionCheckStream {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.written.extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn client_jsonl_version_guard_accepts_matching_daemon() {
+        let response = serde_json::json!({
+            "id": "client-version-check",
+            "result": {"daemon_version": env!("CARGO_PKG_VERSION")}
+        });
+        let mut stream = BufReader::new(VersionCheckStream::new(response));
+
+        require_matching_daemon_version(&mut stream).unwrap();
+
+        let written = String::from_utf8(stream.get_ref().written.clone()).unwrap();
+        assert!(written.contains("\"tool\":\"daemon_status\""), "{written}");
+    }
+
+    #[test]
+    fn client_jsonl_version_guard_rejects_missing_or_stale_daemon_version() {
+        let missing = serde_json::json!({
+            "id": "client-version-check",
+            "result": {"cached_indexes": 0}
+        });
+        let mut stream = BufReader::new(VersionCheckStream::new(missing));
+        let error = require_matching_daemon_version(&mut stream)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("did not report daemon_version"), "{error}");
+
+        let stale = serde_json::json!({
+            "id": "client-version-check",
+            "result": {"daemon_version": "0.0.0-stale"}
+        });
+        let mut stream = BufReader::new(VersionCheckStream::new(stale));
+        let error = require_matching_daemon_version(&mut stream)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("differs from client"), "{error}");
     }
 
     #[test]

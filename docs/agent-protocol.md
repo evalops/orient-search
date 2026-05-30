@@ -19,11 +19,11 @@ orient serve-tcp --addr 127.0.0.1:8796 --index-dir "$ORIENT_SHARDS"
 orient serve-tcp --addr 127.0.0.1:8796 --ensure-shards-dir "$ORIENT_SHARDS" --repo "$ORIENT_REPO_A" --repo "$ORIENT_REPO_B"
 orient daemon-status
 orient daemon-status --format json
-orient client-jsonl
+orient client-jsonl --require-version
 orient serve-unix --socket "$ORIENT_SOCKET" --index-dir "$ORIENT_SHARDS"
 orient daemon-status --socket "$ORIENT_SOCKET"
 orient daemon-status --socket "$ORIENT_SOCKET" --format json
-orient client-jsonl --socket "$ORIENT_SOCKET"
+orient client-jsonl --require-version --socket "$ORIENT_SOCKET"
 ```
 
 Each request is one JSON object per line:
@@ -81,7 +81,7 @@ pass the target explicitly. `search_auto` and `search_auto_batch` use an
 explicit `index_dir`, `index`, or `repo` first, then one registered shard directory or warmed index,
 then live fallback search from the daemon runtime.
 
-Generated follow-up objects such as `read_request`, `read_batch_request`, `related_request`, `related_symbols_request`, `repo_map_request`, `query_plan_request`, and query-plan `retry_requests` are complete tool requests. They include an `id`, `tool`, `arguments`, raw `jsonl`, a shell-native `client_cli` pipe for `orient client-jsonl`, and, when there is a compact human CLI equivalent, a `cli` hint. Generated batch read requests set `include_summary:true` and also include `summary` and `read_budget` with `range_count`, `total_lines`, `max_ranges`, `max_total_lines`, and `max_lines_per_range`, so adapters can inspect, split, or widen reads intentionally.
+Generated follow-up objects such as `read_request`, `read_batch_request`, `related_request`, `related_symbols_request`, `repo_map_request`, `query_plan_request`, and query-plan `retry_requests` are complete tool requests. They include an `id`, `tool`, `arguments`, raw `jsonl`, a shell-native `client_cli` pipe for `orient client-jsonl --require-version`, and, when there is a compact human CLI equivalent, a `cli` hint. Generated batch read requests set `include_summary:true` and also include `summary` and `read_budget` with `range_count`, `total_lines`, `max_ranges`, `max_total_lines`, and `max_lines_per_range`, so adapters can inspect, split, or widen reads intentionally.
 
 Use `index_status` or `shard_status` when live files may have changed since
 indexing. They report added, changed, deleted files, and shard git metadata

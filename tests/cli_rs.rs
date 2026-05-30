@@ -364,7 +364,8 @@ fn cli_help_shows_default_daemon_addr_for_agent_clients() {
         .args(["client-jsonl", "--help"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("[default: 127.0.0.1:8796]"));
+        .stdout(predicate::str::contains("[default: 127.0.0.1:8796]"))
+        .stdout(predicate::str::contains("--require-version"));
 
     let mut status = Command::cargo_bin("orient").unwrap();
     status
@@ -514,7 +515,7 @@ fn cli_outputs_agent_instructions() {
         "Use Orient for local code discovery and bounded file reads",
     ))
     .stdout(predicate::str::contains(
-        "orient client-jsonl --addr 127.0.0.1:9999",
+        "orient client-jsonl --require-version --addr 127.0.0.1:9999",
     ))
     .stdout(predicate::str::contains("selected coding agent"))
     .stdout(predicate::str::contains(

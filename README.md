@@ -73,14 +73,16 @@ focused on the agent's current task and only load matching shard indexes. Use
 `--daemon-addr` for another TCP daemon or `--no-daemon` to force local fallback.
 
 `orient client-jsonl` adds the shell's current working directory to no-target
-search, map, plan, symbol, read, and related-file calls. Other protocol clients
-can pass `cwd` explicitly. The daemon uses that checkout as the default scope,
-which keeps shared multi-repo daemons focused on the current task. With the same
-scope, `refresh_if_stale:true` refreshes only that repo's shard. Empty or
-diagnostic `search_auto` responses include a compact `freshness` object when
-the scoped index is stale, plus a top-level ready-to-run `refresh_request` that
-refreshes and repeats the search. Shard freshness includes branch/origin
-metadata drift, so switching branches without touching files is still detected.
+search, map, plan, symbol, read, and related-file calls. Generated client
+commands pass `--require-version` so stale shared daemons fail loudly instead of
+serving an older protocol shape. Other protocol clients can pass `cwd`
+explicitly. The daemon uses that checkout as the default scope, which keeps
+shared multi-repo daemons focused on the current task. With the same scope,
+`refresh_if_stale:true` refreshes only that repo's shard. Empty or diagnostic
+`search_auto` responses include a compact `freshness` object when the scoped
+index is stale, plus a top-level ready-to-run `refresh_request` that refreshes
+and repeats the search. Shard freshness includes branch/origin metadata drift,
+so switching branches without touching files is still detected.
 When a JSON-lines or MCP client calls `daemon_status` with `cwd`, the returned
 `default_requests` also include that `cwd`, so copyable first map, search,
 batch, and query-plan calls stay scoped to the active checkout. Those scoped

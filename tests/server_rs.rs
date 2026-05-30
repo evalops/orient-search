@@ -1227,7 +1227,7 @@ fn agent_guide_returns_local_agent_request_templates() {
     );
     assert_eq!(
         guide["quickstart"]["client"],
-        "orient client-jsonl --addr 127.0.0.1:9999"
+        "orient client-jsonl --require-version --addr 127.0.0.1:9999"
     );
     assert_eq!(
         guide["quickstart"]["status"],
@@ -1368,7 +1368,7 @@ fn agent_instructions_returns_copyable_local_agent_snippet() {
     for expected in [
         "## Orient Search",
         "Use Orient for local code discovery and bounded file reads",
-        "orient client-jsonl --addr 127.0.0.1:9999",
+        "orient client-jsonl --require-version --addr 127.0.0.1:9999",
         "selected coding agent",
         "Keep cache paths local",
         "Orient shares code-search artifacts only",
@@ -1515,7 +1515,7 @@ fn runtime_serves_agent_instructions_for_local_instruction_files() {
     assert!(response.error.is_none(), "{:?}", response.error);
     let result = response.result.unwrap();
     let instructions = result["instructions"].as_str().unwrap();
-    assert!(instructions.contains("orient client-jsonl --addr 127.0.0.1:9999"));
+    assert!(instructions.contains("orient client-jsonl --require-version --addr 127.0.0.1:9999"));
     assert!(instructions.contains("search_auto"));
     assert!(instructions.contains("search_auto_default"));
     assert!(instructions.contains("next_action"));
@@ -10385,7 +10385,9 @@ fn tcp_daemon_serves_json_lines_requests() {
         startup_json["daemon_status"]["default_requests"]["search"]["client_cli"]
             .as_str()
             .unwrap()
-            .contains(&format!("orient client-jsonl --addr {addr}")),
+            .contains(&format!(
+                "orient client-jsonl --require-version --addr {addr}"
+            )),
         "{startup_json}"
     );
 
@@ -10423,7 +10425,9 @@ fn tcp_daemon_serves_json_lines_requests() {
         search_response["result"]["read_batch_request"]["client_cli"]
             .as_str()
             .unwrap()
-            .contains(&format!("| orient client-jsonl --addr {addr}")),
+            .contains(&format!(
+                "| orient client-jsonl --require-version --addr {addr}"
+            )),
         "{search_response}"
     );
 }
@@ -10542,7 +10546,9 @@ fn tcp_daemon_status_cli_reports_runtime_cache() {
         status["default_requests"]["search"]["client_cli"]
             .as_str()
             .unwrap()
-            .contains(&format!("| orient client-jsonl --addr {addr}"))
+            .contains(&format!(
+                "| orient client-jsonl --require-version --addr {addr}"
+            ))
     );
     assert!(status.get("id").is_none(), "{status}");
 }
@@ -10628,7 +10634,9 @@ fn cli_search_auto_uses_warm_daemon_before_live_fallback() {
         value["read_batch_request"]["client_cli"]
             .as_str()
             .unwrap()
-            .contains(&format!("| orient client-jsonl --addr {addr}")),
+            .contains(&format!(
+                "| orient client-jsonl --require-version --addr {addr}"
+            )),
         "{value}"
     );
 
@@ -10873,6 +10881,51 @@ fn tcp_client_uses_default_addr_when_omitted() {
     assert!(stdout.contains("\"default_requests\""), "{stdout}");
 }
 
+#[test]
+fn tcp_client_require_version_streams_against_matching_daemon() {
+    let binary = assert_cmd::cargo::cargo_bin("orient");
+    let mut child = Command::new(&binary)
+        .args(["serve-tcp", "--addr", "127.0.0.1:0"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let stdout = child.stdout.take().unwrap();
+    let mut startup_reader = BufReader::new(stdout);
+    let mut startup = String::new();
+    startup_reader.read_line(&mut startup).unwrap();
+    let startup_json: serde_json::Value = serde_json::from_str(&startup).unwrap();
+    let addr = startup_json["addr"].as_str().unwrap();
+
+    let mut client = Command::new(&binary)
+        .args(["client-jsonl", "--require-version", "--addr", addr])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let request = serde_json::json!({
+        "id": "status",
+        "tool": "daemon_status",
+        "arguments": {}
+    });
+    writeln!(client.stdin.as_mut().unwrap(), "{request}").unwrap();
+    drop(client.stdin.take());
+    let output = client.wait_with_output().unwrap();
+
+    child.kill().unwrap();
+    let _ = child.wait();
+
+    assert!(output.status.success(), "{output:?}");
+    assert!(output.stderr.is_empty(), "{output:?}");
+    let response: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(response["id"], serde_json::json!("status"));
+    assert_eq!(
+        response["result"]["daemon_version"],
+        serde_json::json!(env!("CARGO_PKG_VERSION"))
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn unix_daemon_serves_json_lines_requests() {
@@ -10928,7 +10981,7 @@ fn unix_daemon_serves_json_lines_requests() {
             .as_str()
             .unwrap()
             .contains(&format!(
-                "| orient client-jsonl --socket {}",
+                "| orient client-jsonl --require-version --socket {}",
                 socket.to_str().unwrap()
             )),
         "{search_response}"
@@ -11050,7 +11103,7 @@ fn unix_daemon_status_cli_reports_runtime_cache() {
             .as_str()
             .unwrap()
             .contains(&format!(
-                "| orient client-jsonl --socket {}",
+                "| orient client-jsonl --require-version --socket {}",
                 socket.to_str().unwrap()
             )),
         "{status}"

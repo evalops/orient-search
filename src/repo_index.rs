@@ -229,7 +229,7 @@ impl ResultToolRequest {
         })
         .to_string();
         let client_cli = format!(
-            "printf '%s\\n' {} | orient client-jsonl",
+            "printf '%s\\n' {} | orient client-jsonl --require-version",
             shell_quote(&jsonl)
         );
         Self {

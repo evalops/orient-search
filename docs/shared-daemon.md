@@ -48,7 +48,7 @@ Unix sockets are available when a TCP port is inconvenient:
 
 ```bash
 orient serve-unix --socket "$ORIENT_SOCKET" --index-dir "$ORIENT_SHARDS"
-orient client-jsonl --socket "$ORIENT_SOCKET"
+orient client-jsonl --require-version --socket "$ORIENT_SOCKET"
 ```
 
 ## Agent Setup
