@@ -3574,6 +3574,27 @@ fn runtime_rejects_oversized_batches() {
     );
     assert!(error.contains("split into smaller read_ranges"), "{error}");
 
+    let too_many_open_range_lines = (0..=(MAX_BATCH_READ_LINES / MAX_READ_RANGE_LINES))
+        .map(|index| {
+            serde_json::json!({
+                "path": format!("src/open_auth_{index}.rs"),
+                "start": 1,
+                "lines": MAX_READ_RANGE_LINES
+            })
+        })
+        .collect::<Vec<_>>();
+    let response = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("too-many-open-range-lines"),
+        tool: "open_ranges".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "ranges": too_many_open_range_lines
+        }),
+    });
+    let error = response.error.unwrap();
+    assert!(error.contains("total lines"), "{error}");
+    assert!(error.contains("split into smaller open_ranges"), "{error}");
+
     let response = runtime.dispatch(ToolRequest {
         id: serde_json::json!("empty-ranges"),
         tool: "open_ranges".to_string(),
@@ -3584,6 +3605,38 @@ fn runtime_rejects_oversized_batches() {
     });
     let error = response.error.unwrap();
     assert!(error.contains("must not be empty"), "{error}");
+
+    let response = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("open-range-conflicting-indexes"),
+        tool: "open_range".to_string(),
+        arguments: serde_json::json!({
+            "path": "src/auth.rs",
+            "start": 1,
+            "lines": 1,
+            "index": repo.path().join("orient.index"),
+            "index_dir": repo.path().join(".orient-shards")
+        }),
+    });
+    let error = response.error.unwrap();
+    assert!(
+        error.contains("open_range accepts only one of index or index_dir"),
+        "{error}"
+    );
+
+    let response = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("open-ranges-conflicting-indexes"),
+        tool: "open_ranges".to_string(),
+        arguments: serde_json::json!({
+            "ranges": {"path": "src/auth.rs", "start": 1, "lines": 1},
+            "index": repo.path().join("orient.index"),
+            "index_dir": repo.path().join(".orient-shards")
+        }),
+    });
+    let error = response.error.unwrap();
+    assert!(
+        error.contains("open_ranges accepts only one of index or index_dir"),
+        "{error}"
+    );
 
     let response = runtime.dispatch(ToolRequest {
         id: serde_json::json!("zero-start"),

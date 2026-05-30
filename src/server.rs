@@ -3156,6 +3156,7 @@ impl ToolRuntime {
                 Ok(serde_json::to_value(map)?)
             }
             "read_range" | "open_range" => {
+                let tool_name = request.tool.as_str();
                 let path = string_arg(&request.arguments, "path")?;
                 let (start, lines) = read_window_args(&request.arguments)?;
                 let scope = read_scope_arg(&request.arguments)?;
@@ -3170,7 +3171,9 @@ impl ToolRuntime {
                 if request.arguments.get("index").is_some()
                     && request.arguments.get("index_dir").is_some()
                 {
-                    return Err(anyhow!("read_range accepts only one of index or index_dir"));
+                    return Err(anyhow!(
+                        "{tool_name} accepts only one of index or index_dir"
+                    ));
                 }
                 if let Some(index_dir) =
                     optional_string_arg(&request.arguments, "index_dir").map(PathBuf::from)
@@ -3203,7 +3206,7 @@ impl ToolRuntime {
                             range.start,
                             range.lines,
                             range.scope,
-                            "read_range",
+                            tool_name,
                         )? {
                             return Ok(serde_json::to_value(range)?);
                         }
@@ -3223,9 +3226,7 @@ impl ToolRuntime {
                 let repo = optional_string_arg(&request.arguments, "repo")
                     .map(PathBuf::from)
                     .map(Ok)
-                    .unwrap_or_else(|| {
-                        live_repo_from_client_cwd(&request.arguments, "read_range")
-                    })?;
+                    .unwrap_or_else(|| live_repo_from_client_cwd(&request.arguments, tool_name))?;
                 Ok(serde_json::to_value(read_file_range_scoped(
                     repo,
                     &range.path,
@@ -3235,12 +3236,13 @@ impl ToolRuntime {
                 )?)?)
             }
             "read_ranges" | "open_ranges" => {
-                let ranges = range_args(&request.arguments)?;
+                let tool_name = request.tool.as_str();
+                let ranges = range_args(&request.arguments, tool_name)?;
                 if request.arguments.get("index").is_some()
                     && request.arguments.get("index_dir").is_some()
                 {
                     return Err(anyhow!(
-                        "read_ranges accepts only one of index or index_dir"
+                        "{tool_name} accepts only one of index or index_dir"
                     ));
                 }
                 if let Some(index_dir) =
@@ -3285,7 +3287,7 @@ impl ToolRuntime {
                                 range.start,
                                 range.lines,
                                 range.scope,
-                                "read_ranges",
+                                tool_name,
                             )?
                             else {
                                 break;
@@ -3316,9 +3318,7 @@ impl ToolRuntime {
                 let repo = optional_string_arg(&request.arguments, "repo")
                     .map(PathBuf::from)
                     .map(Ok)
-                    .unwrap_or_else(|| {
-                        live_repo_from_client_cwd(&request.arguments, "read_ranges")
-                    })?;
+                    .unwrap_or_else(|| live_repo_from_client_cwd(&request.arguments, tool_name))?;
                 let mut results = Vec::new();
                 for range in ranges {
                     results.push(read_file_range_scoped(
@@ -4350,7 +4350,7 @@ impl ToolRuntime {
             }
             "read_index_ranges" | "open_index_ranges" => {
                 let index_path = self.index_path_arg_or_single_cached(&request.arguments)?;
-                let ranges = range_args(&request.arguments)?;
+                let ranges = range_args(&request.arguments, request.tool.as_str())?;
                 let index = self.cached_index(index_path)?;
                 let mut results = Vec::new();
                 for range in ranges {
@@ -4535,7 +4535,7 @@ impl ToolRuntime {
             }
             "read_shard_ranges" | "open_shard_ranges" => {
                 let index_dir = self.shard_dir_arg_or_single_cached(&request.arguments)?;
-                let ranges = range_args(&request.arguments)?;
+                let ranges = range_args(&request.arguments, request.tool.as_str())?;
                 let mut results = Vec::new();
                 for range in ranges {
                     results.push(self.read_shard_range_cached_scoped(
@@ -8204,7 +8204,7 @@ struct RangeArg {
     scope: RangeScope,
 }
 
-fn range_args(arguments: &Value) -> Result<Vec<RangeArg>> {
+fn range_args(arguments: &Value, tool_name: &str) -> Result<Vec<RangeArg>> {
     let value = arguments
         .get("ranges")
         .ok_or_else(|| anyhow!("missing ranges argument"))?;
@@ -8235,7 +8235,7 @@ fn range_args(arguments: &Value) -> Result<Vec<RangeArg>> {
         ranges.push(range_arg(value, default_scope)?);
     }
     let ranges = compact_range_args(ranges);
-    validate_batch_read_line_budget(&ranges)?;
+    validate_batch_read_line_budget(&ranges, tool_name)?;
     Ok(ranges)
 }
 
@@ -8301,14 +8301,14 @@ fn range_arg_end(range: &RangeArg) -> usize {
     range.start.saturating_add(range.lines.saturating_sub(1))
 }
 
-fn validate_batch_read_line_budget(ranges: &[RangeArg]) -> Result<()> {
+fn validate_batch_read_line_budget(ranges: &[RangeArg], tool_name: &str) -> Result<()> {
     let total = ranges
         .iter()
         .try_fold(0usize, |total, range| total.checked_add(range.lines))
         .ok_or_else(|| anyhow!("batch read line count overflowed"))?;
     if total > MAX_BATCH_READ_LINES {
         return Err(anyhow!(
-            "argument ranges requests {total} total lines, max {MAX_BATCH_READ_LINES}; split into smaller read_ranges calls or lower lines per range"
+            "argument ranges requests {total} total lines, max {MAX_BATCH_READ_LINES}; split into smaller {tool_name} calls or lower lines per range"
         ));
     }
     Ok(())
