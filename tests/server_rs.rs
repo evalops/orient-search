@@ -1207,7 +1207,7 @@ fn agent_guide_returns_local_agent_request_templates() {
     );
     assert_eq!(
         guide["quickstart"]["one_shot_search"],
-        "orient search-auto \"symbol:SessionManager token\""
+        "orient search-auto --retry-if-empty \"symbol:SessionManager token\""
     );
     assert!(
         guide["quickstart"]["multi_repo"]
@@ -1235,6 +1235,14 @@ fn agent_guide_returns_local_agent_request_templates() {
     assert_eq!(
         guide["request_templates"]["shard_search"]["tool"],
         "search_shards"
+    );
+    assert_eq!(
+        guide["request_templates"]["auto_search"]["arguments"]["retry_if_empty"],
+        serde_json::json!(true)
+    );
+    assert_eq!(
+        guide["request_templates"]["auto_search_batch"]["arguments"]["retry_if_empty"],
+        serde_json::json!(true)
     );
     assert_eq!(
         guide["request_templates"]["live_search"]["arguments"]["repo"],

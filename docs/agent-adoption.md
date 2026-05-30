@@ -80,13 +80,13 @@ or per-target runtime details.
 
 ```bash
 printf '%s\n' \
-  '{"id":"search","tool":"search_auto","arguments":{"query":"repo:service branch:main symbol:SessionManager token","limit":10,"explain":true,"refresh_if_stale":true}}' \
+  '{"id":"search","tool":"search_auto","arguments":{"query":"repo:service branch:main symbol:SessionManager token","limit":10,"explain":true,"refresh_if_stale":true,"retry_if_empty":true}}' \
   | orient client-jsonl
 ```
 
 ```bash
 printf '%s\n' \
-  '{"id":"searches","tool":"search_auto_batch","arguments":{"queries":["repo:service symbol:SessionManager token","origin:example/service path:auth token","repo:service mode:any SessionManager token"],"limit":10,"explain":true,"refresh_if_stale":true}}' \
+  '{"id":"searches","tool":"search_auto_batch","arguments":{"queries":["repo:service symbol:SessionManager token","origin:example/service path:auth token","repo:service mode:any SessionManager token"],"limit":10,"explain":true,"refresh_if_stale":true,"retry_if_empty":true}}' \
   | orient client-jsonl
 ```
 

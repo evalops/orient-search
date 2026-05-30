@@ -53,7 +53,7 @@ and cached file metadata. It does not collect telemetry.
 ## Search
 
 ```bash
-orient search-auto "symbol:SessionManager token"
+orient search-auto --retry-if-empty "symbol:SessionManager token"
 orient search-auto --no-daemon "symbol:SessionManager token"
 orient search --repo . "issue token"
 orient search --index "$ORIENT_INDEX" "issue token"

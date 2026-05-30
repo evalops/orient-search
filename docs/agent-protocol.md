@@ -127,7 +127,9 @@ no target flag is supplied, it first tries the shared TCP daemon at
 available, then searches the current directory as a live repo if no daemon is
 reachable. Use `--daemon-addr` for another TCP daemon or `--no-daemon` to force
 current-directory fallback. `orient search-auto-batch` follows the same
-daemon-first behavior.
+daemon-first behavior. Use `--retry-if-empty` or JSON-lines
+`retry_if_empty:true` for first-pass agent searches where one promoted repaired
+retry is preferable to manually parsing an empty result.
 `orient client-jsonl` automatically adds the shell's current working directory
 to no-target search, map, plan, symbol, read, and related-file requests. Other
 protocol clients should pass `cwd` explicitly so a shared shard daemon scopes

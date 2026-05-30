@@ -1251,7 +1251,7 @@ pub fn agent_guide(
             ],
             "client": client_command,
             "status": status_command,
-            "one_shot_search": "orient search-auto \"symbol:SessionManager token\"",
+            "one_shot_search": "orient search-auto --retry-if-empty \"symbol:SessionManager token\"",
             "agent_instructions": format!("orient agent-instructions --profile {} --index-dir {index_dir}", profile.name),
             "followup_request_hints": "Generated follow-up requests include jsonl, client_cli, and compact cli hints where available."
         },
@@ -1324,12 +1324,12 @@ pub fn agent_guide(
             "auto_search": {
                 "id": "search",
                 "tool": "search_auto",
-                "arguments": {"query": "symbol:SessionManager token", "limit": 10, "explain": true}
+                "arguments": {"query": "symbol:SessionManager token", "limit": 10, "explain": true, "retry_if_empty": true}
             },
             "auto_search_batch": {
                 "id": "searches",
                 "tool": "search_auto_batch",
-                "arguments": {"queries": ["symbol:SessionManager token", "path:src token"], "limit": 10, "explain": true}
+                "arguments": {"queries": ["symbol:SessionManager token", "path:src token"], "limit": 10, "explain": true, "retry_if_empty": true}
             },
             "indexed_repo_map": {
                 "id": "map",
