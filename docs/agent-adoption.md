@@ -3,7 +3,8 @@
 Orient adoption should be boring: start one shared daemon, give each local agent
 a small instruction snippet, and let returned follow-up requests drive search,
 reads, and query-plan recovery. Keep the guidance local and code-search focused;
-do not put private workspace layouts or agent runtime state into shared docs.
+do not put machine-specific layouts, prompts, transcripts, memories, or tool
+history into shared docs.
 
 For setup and shared-runtime operations, use [Shared Daemon](shared-daemon.md).
 For transport details and tool schemas, use [Agent Protocol](agent-protocol.md).
@@ -19,7 +20,7 @@ orient agent-instructions --profile generic --index-dir "$ORIENT_SHARDS"
 ```
 
 Keep that cache path local to the machine running the agents; the generated
-snippet should not contain private workspace layouts.
+snippet should not contain machine-specific layouts.
 
 Place the generated snippet in the local instruction file read by the coding
 agent. The snippet is intentionally tool-agnostic: it tells the agent to use

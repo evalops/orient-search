@@ -1382,7 +1382,7 @@ fn agent_guidance_defaults_use_neutral_cache_placeholders() {
             .as_array()
             .unwrap()
             .iter()
-            .any(|item| item.as_str().unwrap().contains("private workspace layouts"))
+            .any(|item| item.as_str().unwrap().contains("machine-specific layouts"))
     );
     assert!(!guide_json.contains("AGENTS.md"));
     assert!(!guide_json.contains("CLAUDE.md"));
@@ -1393,7 +1393,8 @@ fn agent_guidance_defaults_use_neutral_cache_placeholders() {
     assert!(instructions.contains("/path/to/local/cache/orient-shards"));
     assert!(!instructions.contains("/tmp/orient"));
     assert!(!instructions.contains("/tmp/repo"));
-    assert!(instructions.contains("private workspace layouts"));
+    assert!(instructions.contains("machine-specific layouts"));
+    assert!(instructions.contains("prompts, transcripts, memories, or tool history"));
     assert!(instructions.contains("the local agent instruction file for this repo"));
     assert!(!instructions.contains("AGENTS.md"));
     assert!(!instructions.contains("CLAUDE.md"));
