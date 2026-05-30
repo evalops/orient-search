@@ -445,8 +445,14 @@ fn infer_leading_location_term(
         return;
     };
     if apply_location_filter_path(path, target_line, filters) {
+        let trailing_is_diagnostic = trailing_term
+            .as_deref()
+            .is_some_and(diagnostic_message_prefix_term);
         terms.drain(0..=index);
-        if discard_remaining_diagnostic_terms {
+        if discard_remaining_diagnostic_terms
+            || trailing_is_diagnostic
+            || diagnostic_message_prefix_terms(terms)
+        {
             terms.clear();
         } else if let Some(trailing_term) = trailing_term {
             terms.insert(0, trailing_term);
@@ -655,12 +661,39 @@ fn diagnostic_arrow_prefix(term: &str) -> bool {
     matches!(trim_location_token_wrappers(term), "-->" | "--")
 }
 
+fn diagnostic_message_prefix_terms(terms: &[String]) -> bool {
+    terms
+        .first()
+        .is_some_and(|term| diagnostic_message_prefix_term(term))
+}
+
+fn diagnostic_message_prefix_term(term: &str) -> bool {
+    let term = trim_location_token_wrappers(term)
+        .trim_end_matches(':')
+        .to_ascii_lowercase();
+    matches!(
+        term.as_str(),
+        "error" | "warning" | "warn" | "notice" | "note" | "info" | "fatal"
+    )
+}
+
 fn split_leading_location_token(token: &str) -> Option<(String, usize, Option<String>)> {
+    let paren_normalized = normalize_parenthesized_location_token(token)?;
+    if !paren_normalized.is_empty()
+        && !paren_normalized.contains("://")
+        && let Some(location) = split_parenthesized_line_location(&paren_normalized)
+    {
+        return Some(location);
+    }
+
     let normalized = normalize_location_token(token)?;
     if normalized.is_empty() || normalized.contains("://") {
         return None;
     }
     if let Some(location) = split_hash_line_anchor(&normalized) {
+        return Some(location);
+    }
+    if let Some(location) = split_parenthesized_line_location(&normalized) {
         return Some(location);
     }
 
@@ -746,6 +779,50 @@ fn normalize_location_token(token: &str) -> Option<String> {
     let normalized = trim_location_token_wrappers(token).replace('\\', "/");
     let normalized = code_hosted_location_path(&normalized).unwrap_or(normalized);
     (!normalized.is_empty()).then_some(normalized)
+}
+
+fn normalize_parenthesized_location_token(token: &str) -> Option<String> {
+    let token = markdown_link_target(token).unwrap_or(token);
+    let normalized = trim_outer_location_wrappers(token)
+        .trim_end_matches(|ch| matches!(ch, ',' | ';' | '"' | '\''))
+        .replace('\\', "/");
+    let normalized = code_hosted_location_path(&normalized).unwrap_or(normalized);
+    (!normalized.is_empty()).then_some(normalized)
+}
+
+fn trim_outer_location_wrappers(mut token: &str) -> &str {
+    token = token.trim();
+    while let Some(stripped) = strip_balanced_outer_wrapper(token) {
+        token = stripped.trim();
+    }
+    token
+        .trim_start_matches(|ch| matches!(ch, '[' | '{' | '<' | '"' | '\''))
+        .trim_end_matches(|ch| matches!(ch, ']' | '}' | '>' | '"' | '\''))
+}
+
+fn strip_balanced_outer_wrapper(token: &str) -> Option<&str> {
+    let (open, close) = match token.as_bytes().first().copied()? {
+        b'(' => ('(', ')'),
+        b'[' => ('[', ']'),
+        b'{' => ('{', '}'),
+        b'<' => ('<', '>'),
+        _ => return None,
+    };
+    if !token.ends_with(close) {
+        return None;
+    }
+    let mut depth = 0usize;
+    for (index, ch) in token.char_indices() {
+        if ch == open {
+            depth += 1;
+        } else if ch == close {
+            depth = depth.checked_sub(1)?;
+            if depth == 0 && index + ch.len_utf8() != token.len() {
+                return None;
+            }
+        }
+    }
+    (depth == 0).then_some(&token[open.len_utf8()..token.len() - close.len_utf8()])
 }
 
 fn markdown_link_target(token: &str) -> Option<&str> {
@@ -1065,12 +1142,22 @@ fn term_eq_ignore_ascii_punctuation(term: &str, expected: &str) -> bool {
 }
 
 fn strip_location_suffix(value: &str) -> (String, Option<usize>) {
+    if let Some((path, line, _)) = normalize_parenthesized_location_token(value).and_then(|value| {
+        (!value.contains("://"))
+            .then(|| split_parenthesized_line_location(&value))
+            .flatten()
+    }) {
+        return (path, Some(line));
+    }
     let normalized =
         normalize_location_token(value).unwrap_or_else(|| value.trim().replace('\\', "/"));
     if let Some((path, line, _)) = split_hash_line_anchor(&normalized) {
         return (path, Some(line));
     }
     if let Some((path, line, _)) = split_colon_line_range_location(&normalized) {
+        return (path, Some(line));
+    }
+    if let Some((path, line, _)) = split_parenthesized_line_location(&normalized) {
         return (path, Some(line));
     }
     let Some((prefix, column_or_line)) = split_numeric_suffix(&normalized) else {
@@ -1116,6 +1203,30 @@ fn split_colon_line_range_location(value: &str) -> Option<(String, usize, Option
         return Some((path.to_string(), line, non_empty_location_tail(after_range)));
     }
     None
+}
+
+fn split_parenthesized_line_location(value: &str) -> Option<(String, usize, Option<String>)> {
+    let close = value.find(')')?;
+    let before_close = &value[..close];
+    let open = before_close.rfind('(')?;
+    let path = &before_close[..open];
+    if !looks_like_location_path(path) {
+        return None;
+    }
+    let (line, after_line) = split_leading_positive_number(before_close[open + 1..].trim())?;
+    let after_line = after_line.trim_start();
+    if !after_line.is_empty() {
+        let after_column_prefix = after_line.strip_prefix(',')?.trim_start();
+        let (_, after_column) = split_leading_positive_number(after_column_prefix)?;
+        if !after_column.trim().is_empty() {
+            return None;
+        }
+    }
+    let trailing = match value[close + 1..].trim_start() {
+        "" => None,
+        rest => non_empty_location_tail(rest.strip_prefix(':').unwrap_or(rest)),
+    };
+    Some((path.to_string(), line, trailing))
 }
 
 fn strip_colon_line_range(value: &str) -> Option<&str> {
@@ -1726,6 +1837,16 @@ mod tests {
         assert_eq!(file_range.filters.file.as_deref(), Some("Cargo.toml"));
         assert_eq!(file_range.filters.target_line, Some(12));
 
+        let paren_path = parse_query("path:src/server.rs(42,9)");
+        assert!(paren_path.terms.is_empty());
+        assert_eq!(paren_path.filters.path.as_deref(), Some("src/server.rs"));
+        assert_eq!(paren_path.filters.target_line, Some(42));
+
+        let paren_file = parse_query("file:Cargo.toml(12)");
+        assert!(paren_file.terms.is_empty());
+        assert_eq!(paren_file.filters.file.as_deref(), Some("Cargo.toml"));
+        assert_eq!(paren_file.filters.target_line, Some(12));
+
         let accidental_path = parse_query("file:src/server.rs:42");
         assert!(accidental_path.terms.is_empty());
         assert_eq!(
@@ -1867,6 +1988,23 @@ mod tests {
             Some("src/server.rs")
         );
         assert_eq!(colon_range_source_location.filters.target_line, Some(42));
+
+        let paren_source_location = parse_query("src/server.rs(42,9): borrowed value");
+        assert_eq!(paren_source_location.terms, vec!["borrowed", "value"]);
+        assert_eq!(
+            paren_source_location.filters.path.as_deref(),
+            Some("src/server.rs")
+        );
+        assert_eq!(paren_source_location.filters.target_line, Some(42));
+
+        let msbuild_source_location =
+            parse_query("src/server.rs(42,9): error CS1002: missing semicolon");
+        assert_eq!(msbuild_source_location.terms, Vec::<String>::new());
+        assert_eq!(
+            msbuild_source_location.filters.path.as_deref(),
+            Some("src/server.rs")
+        );
+        assert_eq!(msbuild_source_location.filters.target_line, Some(42));
 
         let markdown_source_location =
             parse_query("[src/server.rs#L42-L45](src/server.rs#L42-L45)");

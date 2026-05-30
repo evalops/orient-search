@@ -7590,6 +7590,12 @@ mod tests {
             DEFAULT_CLI_READ_RANGE_LINES
         );
 
+        let parenthesized_diagnostic =
+            CliRangeSpec::from_str("src/auth.rs(12,4): error CS1002: missing semicolon").unwrap();
+        assert_eq!(parenthesized_diagnostic.path, "src/auth.rs");
+        assert_eq!(parenthesized_diagnostic.start, 12);
+        assert_eq!(parenthesized_diagnostic.lines, DEFAULT_CLI_READ_RANGE_LINES);
+
         let copied_range = CliRangeSpec::from_str("src/auth.rs:12-15").unwrap();
         assert_eq!(copied_range.path, "src/auth.rs");
         assert_eq!(copied_range.start, 12);
