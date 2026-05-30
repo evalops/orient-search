@@ -4104,6 +4104,11 @@ fn runtime_search_plan_alias_accepts_live_index_and_shard_targets() {
         live_summary["primary_retry_request"]["tool"],
         serde_json::json!("search")
     );
+    assert!(
+        live_summary["primary_retry_request"]["arguments"]
+            .get("summary")
+            .is_none()
+    );
     assert!(live_summary.get("retry_requests").is_none());
     assert!(live_summary.get("planned_postings").is_none());
     assert!(live_summary.get("query_tokens").is_none());
@@ -4143,6 +4148,11 @@ fn runtime_search_plan_alias_accepts_live_index_and_shard_targets() {
         direct_index_summary["primary_retry_request"]["tool"],
         serde_json::json!("indexed_search_code")
     );
+    assert!(
+        direct_index_summary["primary_retry_request"]["arguments"]
+            .get("summary")
+            .is_none()
+    );
     assert!(direct_index_summary.get("retry_requests").is_none());
     assert!(direct_index_summary.get("planned_postings").is_none());
 
@@ -4181,6 +4191,11 @@ fn runtime_search_plan_alias_accepts_live_index_and_shard_targets() {
     assert_eq!(
         sharded_summary[0]["summary"]["primary_retry_request"]["tool"],
         serde_json::json!("search_shards")
+    );
+    assert!(
+        sharded_summary[0]["summary"]["primary_retry_request"]["arguments"]
+            .get("summary")
+            .is_none()
     );
 
     let indexed_batch = runtime.dispatch(ToolRequest {
@@ -4224,6 +4239,11 @@ fn runtime_search_plan_alias_accepts_live_index_and_shard_targets() {
     assert_eq!(
         indexed_batch_summary[0]["summary"]["primary_retry_request"]["tool"],
         serde_json::json!("search")
+    );
+    assert!(
+        indexed_batch_summary[0]["summary"]["primary_retry_request"]["arguments"]
+            .get("summary")
+            .is_none()
     );
     assert!(indexed_batch_summary[0].get("plan").is_none());
     assert!(indexed_batch_summary[0].get("plans").is_none());
@@ -4269,6 +4289,11 @@ fn runtime_search_plan_alias_accepts_live_index_and_shard_targets() {
     assert_eq!(
         shard_batch_summary[0]["summary"]["primary_retry_request"]["tool"],
         serde_json::json!("search")
+    );
+    assert!(
+        shard_batch_summary[0]["summary"]["primary_retry_request"]["arguments"]
+            .get("summary")
+            .is_none()
     );
     assert!(shard_batch_summary[0].get("plans").is_none());
     assert!(shard_batch_summary[0]["shards"].is_array());

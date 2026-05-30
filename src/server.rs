@@ -2753,6 +2753,7 @@ fn auto_query_plan_passthrough_arg(name: &str, target_name: &str) -> bool {
             | "explain"
             | "diagnose"
             | "retry_if_empty"
+            | "summary"
     ) {
         return false;
     }
@@ -3721,6 +3722,7 @@ fn retry_search_passthrough_arg(name: &str, target_name: &str) -> bool {
             | "explain"
             | "diagnose"
             | "retry_if_empty"
+            | "summary"
     ) {
         return false;
     }
