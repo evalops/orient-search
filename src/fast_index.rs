@@ -964,10 +964,14 @@ impl FastIndex {
             return Vec::new();
         }
 
-        let normalized = path.trim_start_matches('/').to_string();
-        let Some(source_file) = self.indexed_file(&normalized) else {
+        let requested_path = match normalize_index_relative_path(path) {
+            Ok(path) => path,
+            Err(_) => return Vec::new(),
+        };
+        let Some(source_file) = self.indexed_file_for_read(&requested_path) else {
             return Vec::new();
         };
+        let normalized = source_file.path.clone();
         if !repo_matches(&self.root, filters) || !self.matches_dependency_filters(filters) {
             return Vec::new();
         }
@@ -1070,12 +1074,19 @@ impl FastIndex {
             return Vec::new();
         }
 
-        let normalized_path = path.map(|value| value.trim_start_matches('/').to_string());
-        if let Some(path) = &normalized_path {
-            if self.indexed_file(path).is_none() {
+        let source_file = if let Some(path) = path {
+            let requested_path = match normalize_index_relative_path(path) {
+                Ok(path) => path,
+                Err(_) => return Vec::new(),
+            };
+            let Some(source_file) = self.indexed_file_for_read(&requested_path) else {
                 return Vec::new();
-            }
-        }
+            };
+            Some(source_file)
+        } else {
+            None
+        };
+        let normalized_path = source_file.map(|file| file.path.clone());
         let (query_terms, query_symbol, query_filters) =
             related_query_terms_symbol_and_filters(query);
         let filters = merge_filters(filters.clone(), query_filters);
@@ -1094,10 +1105,7 @@ impl FastIndex {
             .and_then(|path| Path::new(path).parent())
             .map(|value| value.to_string_lossy().to_string())
             .unwrap_or_default();
-        let source_reference_text = normalized_path
-            .as_ref()
-            .and_then(|path| self.indexed_file(path))
-            .map(|file| file.content.as_str());
+        let source_reference_text = source_file.map(|file| file.content.as_str());
         let source_reference_text_lower =
             source_reference_text.map(|text| text.to_ascii_lowercase());
         let mut related = Vec::new();

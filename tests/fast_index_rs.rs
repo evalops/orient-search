@@ -1445,6 +1445,14 @@ fn indexed_related_context_uses_persisted_metadata() {
                 && file.reason.contains("references symbol SessionManager")),
         "{related_files:?}"
     );
+    let cased_related_files = loaded.related_files("./SRC/AUTH.RS", 10);
+    assert!(
+        cased_related_files
+            .iter()
+            .any(|file| file.path == "tests/auth_test.rs"
+                && file.reason.contains("references symbol SessionManager")),
+        "{cased_related_files:?}"
+    );
     let test_related_files = loaded.related_files("tests/auth_test.rs", 10);
     assert!(
         test_related_files
@@ -1461,6 +1469,16 @@ fn indexed_related_context_uses_persisted_metadata() {
                 && symbol.reason.contains("same file")
         }),
         "{related_symbols:?}"
+    );
+    let cased_related_symbols =
+        loaded.related_symbols(Some("./SRC/AUTH.RS"), Some("SessionManager"), 10);
+    assert!(
+        cased_related_symbols.iter().any(|symbol| {
+            symbol.symbol.name == "SessionManager"
+                && symbol.symbol.path == "src/auth.rs"
+                && symbol.reason.contains("same file")
+        }),
+        "{cased_related_symbols:?}"
     );
     let exact_query_symbols = loaded.related_symbols(None, Some("SessionManager"), 1);
     assert_eq!(exact_query_symbols.len(), 1);
