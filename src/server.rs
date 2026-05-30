@@ -90,6 +90,8 @@ struct SearchResultSummary {
     top_paths: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     top_dirs: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    top_exts: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     max_score: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -118,6 +120,7 @@ fn search_result_summary(results: &[SearchResult]) -> SearchResultSummary {
         grouped_duplicate_count: grouped_duplicate_count_from_results(results),
         top_paths: search_summary_top_paths(results),
         top_dirs: search_summary_top_dirs(results),
+        top_exts: search_summary_top_exts(results),
         max_score: results.first().map(|result| result.score),
         min_score: results.last().map(|result| result.score),
     }
@@ -160,6 +163,32 @@ fn search_summary_dir(path: &str) -> String {
             }
         })
         .unwrap_or_else(|| ".".to_string())
+}
+
+fn search_summary_top_exts(results: &[SearchResult]) -> Vec<String> {
+    let mut exts = Vec::new();
+    for result in results {
+        let Some(ext) = search_summary_ext(&result.path) else {
+            continue;
+        };
+        if !exts.iter().any(|existing| existing == &ext) {
+            exts.push(ext);
+            if exts.len() == 5 {
+                break;
+            }
+        }
+    }
+    exts
+}
+
+fn search_summary_ext(path: &str) -> Option<String> {
+    let ext = Path::new(path).extension()?.to_string_lossy();
+    let ext = ext.trim();
+    if ext.is_empty() {
+        None
+    } else {
+        Some(ext.to_ascii_lowercase())
+    }
 }
 
 fn search_batch_result(
@@ -2928,6 +2957,10 @@ fn primary_retry_result_summary(result: &Value) -> Value {
     if !top_dirs.is_empty() {
         summary["top_dirs"] = json!(top_dirs);
     }
+    let top_exts = value_summary_top_exts(results);
+    if !top_exts.is_empty() {
+        summary["top_exts"] = json!(top_exts);
+    }
     if let Some(score) = results
         .first()
         .and_then(|item| item.get("score"))
@@ -2960,6 +2993,25 @@ fn value_summary_top_dirs(results: &[Value]) -> Vec<String> {
         }
     }
     dirs
+}
+
+fn value_summary_top_exts(results: &[Value]) -> Vec<String> {
+    let mut exts = Vec::new();
+    for item in results {
+        let Some(path) = item.get("path").and_then(Value::as_str) else {
+            continue;
+        };
+        let Some(ext) = search_summary_ext(path) else {
+            continue;
+        };
+        if !exts.iter().any(|existing| existing == &ext) {
+            exts.push(ext);
+            if exts.len() == 5 {
+                break;
+            }
+        }
+    }
+    exts
 }
 
 fn primary_retry_read_batch_request(
