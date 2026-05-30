@@ -78,6 +78,13 @@ fn content_term(token: &str) -> Option<String> {
     Some(value.to_string())
 }
 
+fn path_scope_key(key: &str) -> bool {
+    matches!(
+        key,
+        "path" | "dir" | "directory" | "folder" | "in" | "inside" | "under" | "within"
+    )
+}
+
 fn apply_match_mode(filters: &mut SearchFilters, token: &str, negated: bool) -> bool {
     if negated {
         return false;
@@ -137,7 +144,7 @@ fn apply_filter(filters: &mut SearchFilters, token: &str, negated: bool) -> bool
             }
             filters.target_line = target_line.or(filters.target_line);
         }
-        (false, "path" | "dir" | "directory" | "folder") => {
+        (false, key) if path_scope_key(key) => {
             let (value, target_line) = strip_location_suffix(&value);
             let value = strip_leading_current_dir_segments(value);
             filters.path = Some(value);
@@ -252,7 +259,7 @@ fn apply_filter(filters: &mut SearchFilters, token: &str, negated: bool) -> bool
         (true, "file" | "filename" | "file_name" | "file-name" | "basename") => {
             filters.exclude_file.push(value)
         }
-        (true, "path" | "dir" | "directory" | "folder") => filters.exclude_path.push(value),
+        (true, key) if path_scope_key(key) => filters.exclude_path.push(value),
         (true, "lang" | "language") => filters
             .exclude_language
             .push(normalize_language_filter(&value)),
@@ -1224,16 +1231,19 @@ mod tests {
     #[test]
     fn parses_agent_friendly_file_and_path_aliases() {
         let parsed = parse_query(
-            "folder:src directory:services filename:auth.rs lang:ts -lang:md -file_name:generated.rs -folder:vendor token",
+            "folder:src directory:services in:packages/auth filename:auth.rs lang:ts -lang:md -file_name:generated.rs -folder:vendor !under:third_party without:within:fixtures token",
         );
 
         assert_eq!(parsed.terms, vec!["token"]);
-        assert_eq!(parsed.filters.path.as_deref(), Some("services"));
+        assert_eq!(parsed.filters.path.as_deref(), Some("packages/auth"));
         assert_eq!(parsed.filters.file.as_deref(), Some("auth.rs"));
         assert_eq!(parsed.filters.language.as_deref(), Some("typescript"));
         assert_eq!(parsed.filters.exclude_language, vec!["markdown"]);
         assert_eq!(parsed.filters.exclude_file, vec!["generated.rs"]);
-        assert_eq!(parsed.filters.exclude_path, vec!["vendor"]);
+        assert_eq!(
+            parsed.filters.exclude_path,
+            vec!["vendor", "third_party", "fixtures"]
+        );
 
         let cli_style = parse_query(
             "file-name:auth.rs repo-filter:service target-line:12 require-all:true exclude-path:vendor exclude-file:generated.rs exclude-language:md exclude-extension:txt exclude-symbol:LegacyToken exclude-symbol-kind:class exclude-repo:old exclude-branch:wip exclude-origin:legacy exclude-dependency:serde exclude-import:legacy exclude-content:deprecated token auth",

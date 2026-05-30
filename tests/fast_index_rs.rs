@@ -1985,6 +1985,23 @@ fn query_language_filters_fallback_and_indexed_search() {
         .unwrap();
     assert_eq!(result_paths(&indexed_vendor), vec!["src/vendor_auth.rs"]);
 
+    let fallback_in_src = search_repo_fast_filtered(
+        repo.path(),
+        "in:src SessionManager",
+        10,
+        &Default::default(),
+    )
+    .unwrap();
+    let fallback_in_src_paths = result_paths(&fallback_in_src);
+    assert!(fallback_in_src_paths.contains(&"src/auth.rs".to_string()));
+    assert!(!fallback_in_src_paths.contains(&"docs/auth.md".to_string()));
+    let indexed_in_src = indexed
+        .search_filtered("in:src SessionManager", 10, &Default::default())
+        .unwrap();
+    let indexed_in_src_paths = result_paths(&indexed_in_src);
+    assert!(indexed_in_src_paths.contains(&"src/auth.rs".to_string()));
+    assert!(!indexed_in_src_paths.contains(&"docs/auth.md".to_string()));
+
     let fallback_no_vendor = search_repo_fast_filtered(
         repo.path(),
         "!vendor SessionManager",
@@ -2020,6 +2037,29 @@ fn query_language_filters_fallback_and_indexed_search() {
         .unwrap();
     assert!(result_paths(&indexed_without_vendor).contains(&"src/auth.rs".to_string()));
     assert!(!result_paths(&indexed_without_vendor).contains(&"src/vendor_auth.rs".to_string()));
+
+    let fallback_without_within_vendor = search_repo_fast_filtered(
+        repo.path(),
+        "without:within:vendor SessionManager",
+        10,
+        &Default::default(),
+    )
+    .unwrap();
+    assert!(result_paths(&fallback_without_within_vendor).contains(&"src/auth.rs".to_string()));
+    assert!(
+        !result_paths(&fallback_without_within_vendor).contains(&"src/vendor_auth.rs".to_string())
+    );
+    let indexed_without_within_vendor = indexed
+        .search_filtered(
+            "without:within:vendor SessionManager",
+            10,
+            &Default::default(),
+        )
+        .unwrap();
+    assert!(result_paths(&indexed_without_within_vendor).contains(&"src/auth.rs".to_string()));
+    assert!(
+        !result_paths(&indexed_without_within_vendor).contains(&"src/vendor_auth.rs".to_string())
+    );
 
     let fallback_not_docs = search_repo_fast_filtered(
         repo.path(),
