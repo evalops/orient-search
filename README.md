@@ -89,7 +89,7 @@ batch, and query-plan calls stay scoped to the active checkout. Those scoped
 defaults also set `refresh_if_stale:true`, so they refresh only that checkout's
 shard before use.
 
-Useful filters include `repo:`, `path:`/`dir:`, `file:`, `lang:`, `ext:`,
+Useful filters include `repo:`, `path:`/`dir:`/`in:`/`under:`, `file:`, `lang:`, `ext:`,
 `symbol:`, `kind:`/`type:`, `line:`, `test:`, `generated:`, `code:`,
 `content:`, quoted phrases, negative filters like `-path:vendor`, and `mode:any`
 for broad orientation. Bare filenames, pasted file locations, Markdown links,

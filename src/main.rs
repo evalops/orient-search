@@ -1063,7 +1063,11 @@ struct CommonSearchArgs {
         long,
         visible_alias = "dir",
         visible_alias = "directory",
-        visible_alias = "folder"
+        visible_alias = "folder",
+        visible_alias = "in",
+        visible_alias = "inside",
+        visible_alias = "under",
+        visible_alias = "within"
     )]
     path: Option<String>,
     #[arg(long, visible_alias = "lang")]

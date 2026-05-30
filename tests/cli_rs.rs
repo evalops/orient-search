@@ -158,7 +158,7 @@ fn cli_search_help_lists_snippet_modes() {
         .assert()
         .success()
         .stdout(predicate::str::contains(
-            "[aliases: --dir, --directory, --folder]",
+            "[aliases: --dir, --directory, --folder, --in, --inside, --under, --within]",
         ))
         .stdout(predicate::str::contains("[aliases: --lang]"))
         .stdout(predicate::str::contains("[aliases: --ext]"))
@@ -188,7 +188,7 @@ fn cli_search_accepts_visible_common_aliases() {
         "search",
         "--repo",
         repo.path().to_str().unwrap(),
-        "--dir",
+        "--in",
         "src",
         "--lang",
         "rs",
