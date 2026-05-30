@@ -3423,55 +3423,40 @@ fn push_alias(
 }
 
 fn shard_identity_matches(shard: &ShardEntry, filter: &str) -> bool {
-    let filter = filter.to_ascii_lowercase();
-    shard.name.to_ascii_lowercase().contains(&filter)
+    contains_ascii_case_insensitive(&shard.name, filter)
         || shard
             .root
             .file_name()
-            .map(|value| {
-                value
-                    .to_string_lossy()
-                    .to_ascii_lowercase()
-                    .contains(&filter)
-            })
+            .map(|value| contains_ascii_case_insensitive(&value.to_string_lossy(), filter))
             .unwrap_or(false)
-        || shard
-            .root
-            .to_string_lossy()
-            .to_ascii_lowercase()
-            .contains(&filter)
+        || contains_ascii_case_insensitive(&shard.root.to_string_lossy(), filter)
         || shard
             .git
             .as_ref()
-            .map(|git| git_metadata_matches(git, &filter))
+            .map(|git| git_metadata_matches(git, filter))
             .unwrap_or(false)
 }
 
 fn alias_matches(alias: &ShardAlias, filter: &str) -> bool {
-    alias
-        .name
-        .to_ascii_lowercase()
-        .contains(&filter.to_ascii_lowercase())
+    contains_ascii_case_insensitive(&alias.name, filter)
 }
 
 fn git_metadata_matches(git: &RepoGitMetadata, filter: &str) -> bool {
     git.origin
         .as_deref()
-        .is_some_and(|value| value.to_ascii_lowercase().contains(filter))
+        .is_some_and(|value| contains_ascii_case_insensitive(value, filter))
         || git
             .branch
             .as_deref()
-            .is_some_and(|value| value.to_ascii_lowercase().contains(filter))
+            .is_some_and(|value| contains_ascii_case_insensitive(value, filter))
         || git
             .git_kind
             .as_deref()
-            .is_some_and(|value| value.to_ascii_lowercase().contains(filter))
-        || git.git_common_dir.as_ref().is_some_and(|value| {
-            value
-                .to_string_lossy()
-                .to_ascii_lowercase()
-                .contains(filter)
-        })
+            .is_some_and(|value| contains_ascii_case_insensitive(value, filter))
+        || git
+            .git_common_dir
+            .as_ref()
+            .is_some_and(|value| contains_ascii_case_insensitive(&value.to_string_lossy(), filter))
 }
 
 fn shard_git_branch_matches(shard: &ShardEntry, filter: &str) -> bool {
@@ -3491,9 +3476,17 @@ fn shard_git_origin_matches(shard: &ShardEntry, filter: &str) -> bool {
 }
 
 fn metadata_filter_matches(value: &str, filter: &str) -> bool {
-    value
-        .to_ascii_lowercase()
-        .contains(&filter.to_ascii_lowercase())
+    contains_ascii_case_insensitive(value, filter)
+}
+
+fn contains_ascii_case_insensitive(haystack: &str, needle: &str) -> bool {
+    let haystack = haystack.as_bytes();
+    let needle = needle.as_bytes();
+    needle.is_empty()
+        || (needle.len() <= haystack.len()
+            && haystack
+                .windows(needle.len())
+                .any(|window| window.eq_ignore_ascii_case(needle)))
 }
 
 fn add_stats(total: &mut ShardBuildStats, stats: &IndexStats) {
@@ -3641,6 +3634,19 @@ mod tests {
         let mut bits = vec![0; SHARD_SUBSTRING_SKETCH_WORDS];
         push_content_substring_grams(value, &mut bits);
         bits
+    }
+
+    #[test]
+    fn ascii_case_insensitive_contains_matches_without_lowercase_inputs() {
+        assert!(contains_ascii_case_insensitive(
+            "Example/ServiceAuth",
+            "serviceauth"
+        ));
+        assert!(contains_ascii_case_insensitive(
+            "git@github.com:EvalOps/Orient-Search.git",
+            "orient-search"
+        ));
+        assert!(!contains_ascii_case_insensitive("billing", "auth"));
     }
 
     #[test]
