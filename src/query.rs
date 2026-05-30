@@ -1394,6 +1394,10 @@ pub fn normalize_symbol_kind(value: &str) -> String {
         "traits" => "trait".to_string(),
         "types" => "type".to_string(),
         "targets" | "recipe" | "recipes" | "task" | "tasks" => "target".to_string(),
+        "packages" => "package".to_string(),
+        "binary" | "binaries" | "bins" => "bin".to_string(),
+        "examples" => "example".to_string(),
+        "benches" | "benchmark" | "benchmarks" => "bench".to_string(),
         "scripts" | "npm-script" | "npm-scripts" | "package-script" | "package-scripts" => {
             "script".to_string()
         }
@@ -1415,6 +1419,10 @@ fn symbol_kind_from_shorthand_key(key: &str) -> Option<String> {
             | "var"
             | "target"
             | "script"
+            | "package"
+            | "bin"
+            | "example"
+            | "bench"
     )
     .then_some(kind)
 }
@@ -1435,6 +1443,10 @@ fn symbol_kind_from_type_value(value: &str) -> Option<String> {
             | "var"
             | "target"
             | "script"
+            | "package"
+            | "bin"
+            | "example"
+            | "bench"
     )
     .then_some(kind)
 }
@@ -2451,6 +2463,22 @@ mod tests {
             script_shorthand.filters.symbol_kind.as_deref(),
             Some("script")
         );
+
+        let package_shorthand = parse_query("package:auth-api");
+        assert!(package_shorthand.terms.is_empty());
+        assert_eq!(
+            package_shorthand.filters.symbol.as_deref(),
+            Some("auth-api")
+        );
+        assert_eq!(
+            package_shorthand.filters.symbol_kind.as_deref(),
+            Some("package")
+        );
+
+        let bin_shorthand = parse_query("bin:auth-worker");
+        assert!(bin_shorthand.terms.is_empty());
+        assert_eq!(bin_shorthand.filters.symbol.as_deref(), Some("auth-worker"));
+        assert_eq!(bin_shorthand.filters.symbol_kind.as_deref(), Some("bin"));
 
         let unknown = parse_query("type:file gateway");
         assert_eq!(unknown.terms, vec!["type:file", "gateway"]);

@@ -4794,6 +4794,9 @@ pub fn normalize_language_filter(value: &str) -> String {
 }
 
 pub(crate) fn extract_symbols(path: &str, text: &str, language: &str) -> Vec<Symbol> {
+    if is_cargo_toml_path(path) {
+        return extract_cargo_manifest_symbols(path, text);
+    }
     if is_package_json_path(path) {
         return extract_package_json_script_symbols(path, text);
     }
@@ -5141,6 +5144,112 @@ fn task_file_symbol_targets(text: &str) -> Vec<(String, usize)> {
         }
     }
     targets
+}
+
+fn is_cargo_toml_path(path: &str) -> bool {
+    Path::new(path).file_name().and_then(|value| value.to_str()) == Some("Cargo.toml")
+}
+
+fn extract_cargo_manifest_symbols(path: &str, text: &str) -> Vec<Symbol> {
+    let mut symbols = Vec::new();
+    let mut current_kind: Option<&'static str> = None;
+    for (index, line) in text.lines().enumerate() {
+        let trimmed = line.trim();
+        if let Some(kind) = cargo_manifest_table_symbol_kind(trimmed) {
+            current_kind = Some(kind);
+            continue;
+        }
+        if trimmed.starts_with('[') {
+            current_kind = None;
+            continue;
+        }
+        let Some(kind) = current_kind else {
+            continue;
+        };
+        let Some(name) = toml_name_assignment(trimmed) else {
+            continue;
+        };
+        symbols.push(Symbol {
+            name,
+            kind: kind.to_string(),
+            path: path.to_string(),
+            line: index + 1,
+        });
+        if kind == "package" || kind == "lib" {
+            current_kind = None;
+        }
+    }
+    symbols
+}
+
+fn cargo_manifest_table_symbol_kind(line: &str) -> Option<&'static str> {
+    let table = line
+        .strip_prefix("[[")
+        .and_then(|value| value.strip_suffix("]]"))
+        .or_else(|| {
+            line.strip_prefix('[')
+                .and_then(|value| value.strip_suffix(']'))
+        })?;
+    match table.trim() {
+        "package" => Some("package"),
+        "lib" => Some("lib"),
+        "bin" => Some("bin"),
+        "example" => Some("example"),
+        "bench" => Some("bench"),
+        _ => None,
+    }
+}
+
+fn toml_name_assignment(line: &str) -> Option<String> {
+    let line = strip_toml_comment(line).trim();
+    let (key, value) = line.split_once('=')?;
+    if key.trim() != "name" {
+        return None;
+    }
+    parse_toml_string(value.trim())
+}
+
+fn strip_toml_comment(line: &str) -> &str {
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut escaped = false;
+    for (index, ch) in line.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        match ch {
+            '\\' if in_double => escaped = true,
+            '"' if !in_single => in_double = !in_double,
+            '\'' if !in_double => in_single = !in_single,
+            '#' if !in_single && !in_double => return &line[..index],
+            _ => {}
+        }
+    }
+    line
+}
+
+fn parse_toml_string(value: &str) -> Option<String> {
+    if value.starts_with('"') {
+        let mut escaped = false;
+        for (index, ch) in value.char_indices().skip(1) {
+            if escaped {
+                escaped = false;
+                continue;
+            }
+            match ch {
+                '\\' => escaped = true,
+                '"' => return serde_json::from_str(&value[..=index]).ok(),
+                _ => {}
+            }
+        }
+        return None;
+    }
+    if let Some(rest) = value.strip_prefix('\'') {
+        let end = rest.find('\'')?;
+        return Some(rest[..end].to_string());
+    }
+    None
 }
 
 fn is_package_json_path(path: &str) -> bool {

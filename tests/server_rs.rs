@@ -7110,7 +7110,7 @@ fn runtime_warms_index_by_tool_request() {
     );
     assert_eq!(
         result["cached_index_details"][0]["symbols"],
-        serde_json::json!(2)
+        serde_json::json!(3)
     );
     assert!(
         result["cached_index_details"][0]["index_bytes"]
@@ -7146,7 +7146,7 @@ fn runtime_warms_index_by_tool_request() {
     );
     assert_eq!(result["footprint"]["loaded_indexes"], serde_json::json!(1));
     assert_eq!(result["footprint"]["loaded_files"], serde_json::json!(2));
-    assert_eq!(result["footprint"]["loaded_symbols"], serde_json::json!(2));
+    assert_eq!(result["footprint"]["loaded_symbols"], serde_json::json!(3));
     assert_eq!(
         result["footprint"]["cached_shard_manifests"],
         serde_json::json!(0)

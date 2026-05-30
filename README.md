@@ -105,7 +105,8 @@ accepted too. Language filters include common shorthands such as `lang:rs`,
 `lang:ts`, `lang:cpp`, `lang:csharp`, `lang:shell`, `lang:makefile`, and
 `lang:justfile`. `kind:target` and `recipe:name` can jump to Makefile and
 Justfile targets; `kind:script` and `script:name` can jump to package.json
-scripts. See
+scripts; `package:name`, `bin:name`, `example:name`, and `bench:name` can jump
+to Cargo manifest entries. See
 [Agent protocol](docs/agent-protocol.md) for the full query language.
 
 ## Protocol

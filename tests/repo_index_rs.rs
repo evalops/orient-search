@@ -788,6 +788,58 @@ release target='prod':
 }
 
 #[test]
+fn cargo_manifest_targets_work_as_symbols_across_live_and_persistent_indexes() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("Cargo.toml"),
+        r#"
+[package]
+name = "auth-api"
+version = "0.1.0"
+
+[[bin]]
+name = "auth-worker"
+path = "src/bin/worker.rs"
+
+[[example]]
+name = "replay-session"
+path = "examples/replay.rs"
+"#,
+    );
+
+    let live = RepoIndexer::new(repo.path()).build().unwrap();
+    let live_package = &live.find_symbol("auth-api", 10)[0];
+    assert_symbol(live_package, "Cargo.toml", "package");
+    assert_eq!(live_package.line, 3);
+    let live_bin = &live.find_symbol("auth-worker", 10)[0];
+    assert_symbol(live_bin, "Cargo.toml", "bin");
+    assert_eq!(live_bin.line, 7);
+
+    let fallback = search_repo_fast_filtered(
+        repo.path(),
+        "kind:bin symbol:auth-worker",
+        5,
+        &Default::default(),
+    )
+    .unwrap();
+    assert_eq!(fallback[0].path, "Cargo.toml");
+    assert!(fallback[0].reason.contains("symbol:auth-worker"));
+
+    let indexed = FastIndex::build(repo.path()).unwrap();
+    let indexed_package = &indexed.find_symbol("auth-api", 10)[0];
+    assert_symbol(indexed_package, "Cargo.toml", "package");
+    assert_eq!(indexed_package.line, 3);
+    let indexed_example = &indexed.find_symbol("replay-session", 10)[0];
+    assert_symbol(indexed_example, "Cargo.toml", "example");
+    assert_eq!(indexed_example.line, 11);
+    let indexed_results = indexed
+        .search_filtered("bin:auth-worker", 5, &Default::default())
+        .unwrap();
+    assert_eq!(indexed_results[0].path, "Cargo.toml");
+    assert!(indexed_results[0].reason.contains("symbol:auth-worker"));
+}
+
+#[test]
 fn package_json_scripts_work_as_symbols_across_live_and_persistent_indexes() {
     let repo = tempfile::tempdir().unwrap();
     write(
