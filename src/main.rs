@@ -1078,6 +1078,8 @@ struct CommonSearchArgs {
     snippet: SnippetModeArg,
     #[arg(long)]
     explain: bool,
+    #[arg(long = "format", default_value = "json", value_parser = ["json"])]
+    _format: String,
     #[arg(
         long = "exclude-file",
         alias = "exclude-filename",

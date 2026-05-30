@@ -204,6 +204,21 @@ fn cli_search_accepts_visible_common_aliases() {
     .success()
     .stdout(predicate::str::contains("src/auth.rs"))
     .stdout(predicate::str::contains("issue_token"));
+
+    let mut json_format = Command::cargo_bin("orient").unwrap();
+    json_format
+        .args([
+            "search",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--format",
+            "json",
+            "issue token",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("src/auth.rs"))
+        .stdout(predicate::str::contains("issue_token"));
 }
 
 #[test]
@@ -560,6 +575,20 @@ fn cli_search_auto_selects_live_indexed_and_shard_surfaces() {
             "--repo",
             repo.path().to_str().unwrap(),
             "--json",
+            "issue_token",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"surface\":\"fallback\""));
+
+    let mut live_format_json_compat = Command::cargo_bin("orient").unwrap();
+    live_format_json_compat
+        .args([
+            "search-auto",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--format",
+            "json",
             "issue_token",
         ])
         .assert()
