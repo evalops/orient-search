@@ -1692,6 +1692,29 @@ mod tests {
             None
         );
 
+        let gitlab_source_location = parse_query(
+            "https://gitlab.com/evalops/orient-search/-/blob/main/src/server.rs#L42-45",
+        );
+        assert!(gitlab_source_location.terms.is_empty());
+        assert_eq!(
+            gitlab_source_location.filters.path.as_deref(),
+            Some("src/server.rs")
+        );
+        assert_eq!(gitlab_source_location.filters.target_line, Some(42));
+
+        let gitlab_slashy_branch_source_location = parse_query(
+            "https://gitlab.com/evalops/orient-search/-/blob/feature/search/src/server.rs#L42-L45",
+        );
+        assert!(gitlab_slashy_branch_source_location.terms.is_empty());
+        assert_eq!(
+            gitlab_slashy_branch_source_location.filters.path.as_deref(),
+            Some("src/server.rs")
+        );
+        assert_eq!(
+            gitlab_slashy_branch_source_location.filters.target_line,
+            Some(42)
+        );
+
         let sourcegraph_source_location = parse_query(
             "https://sourcegraph.com/github.com/evalops/orient-search/-/blob/src/server.rs?L42:9",
         );
