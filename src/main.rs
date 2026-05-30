@@ -5535,7 +5535,10 @@ impl FromStr for CliRangeSpec {
         if let Some(range) = parse_copied_location_cli_range(value, scope) {
             return Ok(range);
         }
-        Err("range must be PATH:START:LINES[:SCOPE] or a copied PATH:LINE location".to_string())
+        Err(
+            "range must be PATH:START:LINES[:SCOPE] or a copied PATH:LINE/PATH:START-END location"
+                .to_string(),
+        )
     }
 }
 

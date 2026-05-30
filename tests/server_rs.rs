@@ -744,7 +744,7 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
     );
     assert_eq!(
         read_shard_ranges["input_schema"]["properties"]["ranges"]["description"],
-        "A compact range string, {path,start,lines} object, or array of them; path may be shard-prefixed or a unique unqualified shard-relative path."
+        "A compact range string, copied path:start-end string, {path,start,lines} object, or array of them; path may be shard-prefixed or a unique unqualified shard-relative path."
     );
     assert_eq!(
         read_shard_ranges["input_schema"]["properties"]["ranges"]["oneOf"][0]["properties"]["path"]

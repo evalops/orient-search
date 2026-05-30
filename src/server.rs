@@ -1423,6 +1423,7 @@ Generated paths, including hashed JavaScript bundles, are demoted by default; us
 After search, follow returned `next_action`, `next_read_batch_request`, `read_batch_request`, `read_request`, `related_request`, and `related_symbols_request`; each includes `jsonl` and `client_cli` for direct replay through `orient client-jsonl` when it wraps a tool request.\n\
 Use `read_batch_request.read_budget` to keep batch reads under the advertised hard limits; split large inspections into smaller calls instead of widening one huge request.\n\
 For manual context reads from a line inside a definition, pass `scope:\"symbol\"` so `read_range` or `read_ranges` anchors at the nearest function, class, or type definition.\n\
+Manual `read_range` and `read_ranges` calls accept pasted locations like `src/lib.rs:40-45` or `src/lib.rs#L40-L45`; use returned read requests when available.\n\
 When results are empty, noisy, or suspicious, use the returned `query_plan_request` or inline `query_plan_result` before broadening the search; pass `retry_if_empty:true` when you want Orient to execute the promoted retry once and return `primary_retry_result` immediately.\n\
 Orient is local code search only and does not collect telemetry.",
         instruction_target = profile.instruction_target
@@ -2082,20 +2083,20 @@ fn argument_description(tool_name: &str, name: &str) -> &'static str {
         }
         "path" => "Path substring filter or result path, depending on the tool.",
         "range" => {
-            "Single range object or copied location for read_range/open_range; accepts the same shape as a search result read_range."
+            "Single range object or copied location for read_range/open_range; accepts the same shape as a search result read_range, plus strings like path:start-end."
         }
         "dir" | "directory" | "folder" => {
             "Alias for path when filtering search results to a directory or path substring."
         }
         "filename" | "file_name" => "Alias for file when filtering by basename.",
         "ranges" if is_shard_range_tool(tool_name) => {
-            "A compact range string, {path,start,lines} object, or array of them; path may be shard-prefixed or a unique unqualified shard-relative path."
+            "A compact range string, copied path:start-end string, {path,start,lines} object, or array of them; path may be shard-prefixed or a unique unqualified shard-relative path."
         }
         "ranges" if is_index_range_tool(tool_name) => {
-            "A compact range string, {path,start,lines} object, or array of them for index-relative batch range reads."
+            "A compact range string, copied path:start-end string, {path,start,lines} object, or array of them for index-relative batch range reads."
         }
         "ranges" => {
-            "A compact range string, {path,start,lines} object, or array of them for repository-relative batch range reads."
+            "A compact range string, copied path:start-end string, {path,start,lines} object, or array of them for repository-relative batch range reads."
         }
         "limit" => "Maximum number of results to return.",
         "language" => "Detected language filter, such as rust, python, or typescript.",
