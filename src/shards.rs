@@ -2572,7 +2572,9 @@ pub(crate) fn shard_route_selection(
     filters: &SearchFilters,
 ) -> Result<Option<ShardRouteSelection>> {
     let requirements = shard_route_requirements(shard_query, filters);
-    if requirements.exact_hashes.is_empty() && requirements.trigram_hashes.is_empty() {
+    let has_term_requirements =
+        !requirements.exact_hashes.is_empty() || !requirements.trigram_hashes.is_empty();
+    if !has_term_requirements && !shard_route_filter_only_selectable(filters) {
         return Ok(None);
     }
     let Some(route) = load_manifest_route(index_dir)? else {
@@ -2584,17 +2586,23 @@ pub(crate) fn shard_route_selection(
         .iter()
         .map(|shard| shard.name.clone())
         .collect::<Vec<_>>();
-    let candidate_ids = match shard_route_candidate_ids(&route, &requirements) {
-        ShardRouteLookup::Candidates(candidate_ids) => candidate_ids,
-        ShardRouteLookup::MissingHash => {
-            return Ok(Some(ShardRouteSelection {
-                shards: Vec::new(),
-                shard_count,
-                shard_names,
-            }));
+    let candidate_ids = if has_term_requirements {
+        match shard_route_candidate_ids(&route, &requirements) {
+            ShardRouteLookup::Candidates(candidate_ids) => candidate_ids,
+            ShardRouteLookup::MissingHash => {
+                return Ok(Some(ShardRouteSelection {
+                    shards: Vec::new(),
+                    shard_count,
+                    shard_names,
+                }));
+            }
+            ShardRouteLookup::Omitted => return Ok(None),
+            ShardRouteLookup::Corrupt => return Ok(None),
         }
-        ShardRouteLookup::Omitted => return Ok(None),
-        ShardRouteLookup::Corrupt => return Ok(None),
+    } else {
+        (0..route.shards.len())
+            .filter_map(|id| u16::try_from(id).ok())
+            .collect()
     };
     let shards = candidate_ids
         .into_iter()
@@ -2607,6 +2615,15 @@ pub(crate) fn shard_route_selection(
         shard_count,
         shard_names,
     }))
+}
+
+fn shard_route_filter_only_selectable(filters: &SearchFilters) -> bool {
+    filters.symbol_kind.is_some()
+        || filters.language.is_some()
+        || filters.extension.is_some()
+        || filters.test.is_some()
+        || filters.generated.is_some()
+        || filters.code.is_some()
 }
 
 fn shard_entries_to_jobs(
@@ -3814,6 +3831,24 @@ mod tests {
         .unwrap();
         assert_eq!(
             rust_selection
+                .shards
+                .iter()
+                .map(|shard| shard.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["auth"]
+        );
+        let rust_filter_only_selection = shard_route_selection(
+            dir.path(),
+            "",
+            &SearchFilters {
+                language: Some("rust".to_string()),
+                ..SearchFilters::default()
+            },
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            rust_filter_only_selection
                 .shards
                 .iter()
                 .map(|shard| shard.name.as_str())

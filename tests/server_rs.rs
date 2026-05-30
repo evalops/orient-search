@@ -8535,6 +8535,101 @@ fn runtime_routed_shard_search_applies_filter_sketch_before_cold_load() {
 }
 
 #[test]
+fn runtime_filter_only_shard_search_uses_route_before_manifest_sidecar() {
+    let workspace = tempfile::tempdir().unwrap();
+    let rust_repo = workspace.path().join("rust-service");
+    let python_repo = workspace.path().join("python-service");
+    write(
+        &rust_repo.join("src/lib.rs"),
+        "pub fn route_filter_only_rust() -> bool { true }\n",
+    );
+    write(
+        &python_repo.join("app.py"),
+        "def route_filter_only_python():\n    return False\n",
+    );
+
+    let shard_dir = tempfile::tempdir().unwrap();
+    build_shards(&[rust_repo, python_repo], shard_dir.path()).unwrap();
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(shard_dir.path().join("manifest.json")).unwrap()).unwrap();
+    let python_index = manifest["shards"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|shard| shard["name"] == "python-service")
+        .unwrap()["index"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    fs::remove_file(shard_dir.path().join("manifest.bin")).unwrap();
+    fs::remove_file(shard_dir.path().join(python_index)).unwrap();
+
+    let runtime = ToolRuntime::default();
+    let response = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("search"),
+        tool: "search_shards".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": shard_dir.path(),
+            "query": "lang:rust",
+            "limit": 10
+        }),
+    });
+    assert!(response.error.is_none(), "{:?}", response.error);
+    let result = serde_json::to_string(&response.result).unwrap();
+    assert!(result.contains("rust-service/src/lib.rs"), "{result}");
+    assert!(!result.contains("python-service/app.py"), "{result}");
+    assert_eq!(runtime.cached_shard_manifest_count(), 0);
+    assert_eq!(runtime.cached_index_count(), 1);
+}
+
+#[test]
+fn runtime_filter_only_routed_shard_search_uses_filter_sketch_before_cold_load() {
+    let workspace = tempfile::tempdir().unwrap();
+    let rust_repo = workspace.path().join("rust-service");
+    let python_repo = workspace.path().join("python-service");
+    write(
+        &rust_repo.join("src/lib.rs"),
+        "pub fn only_rust_route_filter_symbol() -> bool { true }\n",
+    );
+    write(
+        &python_repo.join("app.py"),
+        "def only_python_route_filter_symbol():\n    return False\n",
+    );
+
+    let shard_dir = tempfile::tempdir().unwrap();
+    build_shards(&[rust_repo, python_repo], shard_dir.path()).unwrap();
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(shard_dir.path().join("manifest.json")).unwrap()).unwrap();
+    let python_index = manifest["shards"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|shard| shard["name"] == "python-service")
+        .unwrap()["index"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    fs::remove_file(shard_dir.path().join(python_index)).unwrap();
+
+    let runtime = ToolRuntime::default();
+    let response = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("search"),
+        tool: "search_shards".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": shard_dir.path(),
+            "query": "lang:rust",
+            "limit": 10
+        }),
+    });
+    assert!(response.error.is_none(), "{:?}", response.error);
+    let result = serde_json::to_string(&response.result).unwrap();
+    assert!(result.contains("rust-service/src/lib.rs"), "{result}");
+    assert!(!result.contains("python-service/app.py"), "{result}");
+    assert_eq!(runtime.cached_shard_manifest_count(), 0);
+    assert_eq!(runtime.cached_index_count(), 1);
+}
+
+#[test]
 fn runtime_search_auto_diagnose_prefers_retry_next_action_for_noisy_hits() {
     let repo = tempfile::tempdir().unwrap();
     for index in 0..8 {
