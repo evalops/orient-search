@@ -4864,7 +4864,7 @@ fn runtime_accepts_structured_negative_search_filters() {
     assert!(filter_only.error.is_none(), "{:?}", filter_only.error);
     let result = serde_json::to_string(&filter_only.result).unwrap();
     assert!(result.contains("src/auth.rs"), "{result}");
-    assert!(result.contains("path_filter_trigram_postings"), "{result}");
+    assert!(result.contains("file_name_filter"), "{result}");
     assert!(result.contains("file_filter"), "{result}");
 
     let location_filter = runtime.dispatch(ToolRequest {

@@ -70,6 +70,8 @@ pub struct FastIndex {
     path_ids: HashMap<String, u32>,
     #[serde(skip)]
     path_lower_ids: HashMap<String, u32>,
+    #[serde(skip)]
+    file_name_ids: HashMap<String, Vec<u32>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -364,6 +366,7 @@ impl FastIndex {
         let attribute_postings = rebuild_attribute_postings(&files);
         let path_ids = rebuild_path_ids(&files);
         let path_lower_ids = rebuild_path_lower_ids(&files);
+        let file_name_ids = rebuild_file_name_ids(&files);
         Ok(Self {
             version: INDEX_VERSION,
             root,
@@ -377,6 +380,7 @@ impl FastIndex {
             attribute_postings,
             path_ids,
             path_lower_ids,
+            file_name_ids,
         })
         .map(|index| RefreshOutcome {
             index,
@@ -493,6 +497,7 @@ impl FastIndex {
         self.path_trigram_postings = rebuild_path_trigram_postings(&self.files);
         self.path_ids = rebuild_path_ids(&self.files);
         self.path_lower_ids = rebuild_path_lower_ids(&self.files);
+        self.file_name_ids = rebuild_file_name_ids(&self.files);
     }
 
     pub fn refresh_stats(&self, outcome: &RefreshOutcome) -> RefreshStats {
@@ -1706,10 +1711,12 @@ impl FastIndex {
         if !filter_only_query(filters) {
             return false;
         }
+        let file_name_candidates = self.file_name_filter_candidate_ids(filters);
         match filter_only_candidate_ids(
             symbol_kind_postings,
             attribute_postings,
             path_filter_postings,
+            file_name_candidates.as_deref(),
             filters,
         ) {
             Some(candidate_ids) => {
@@ -1790,6 +1797,7 @@ impl FastIndex {
         let attribute_postings = attribute_postings_for_filters(&self.attribute_postings, &filters);
         let path_filter_postings =
             path_filter_trigram_postings_for_filters(&self.path_trigram_postings, &filters);
+        let file_name_candidates = self.file_name_filter_candidate_ids(&filters);
         if query_tokens.len() > 1 && !filters.match_any {
             filters.require_all = true;
         }
@@ -1799,21 +1807,27 @@ impl FastIndex {
             planned_symbol_query_name(&parsed.terms, &filters, parsed.explicit_content_terms);
         if query_tokens.is_empty() && query_trigrams.is_empty() {
             if filter_only_query(&filters) {
-                let exact_path_candidate_id = self.indexed_exact_path_filter_id(&filters);
-                let candidate_ids = exact_path_candidate_id
-                    .map(|file_id| vec![file_id])
+                let exact_path_candidate = self.indexed_exact_path_filter(&filters);
+                let candidate_ids = exact_path_candidate
+                    .as_ref()
+                    .map(|(_, file_id)| vec![*file_id])
                     .or_else(|| {
                         filter_only_candidate_ids(
                             &symbol_kind_postings,
                             &attribute_postings,
                             &path_filter_postings,
+                            file_name_candidates.as_deref(),
                             &filters,
                         )
                     });
-                let strategy = if exact_path_candidate_id.is_some() {
+                let strategy = if exact_path_candidate.is_some() {
                     "exact_path_filter"
                 } else {
-                    filter_only_strategy(&filters, &path_filter_postings)
+                    filter_only_strategy(
+                        &filters,
+                        &path_filter_postings,
+                        file_name_candidates.as_deref(),
+                    )
                 };
                 let path_filters = PathFilterMatcher::from_filters(&filters);
                 let final_match_count = match &candidate_ids {
@@ -1843,10 +1857,19 @@ impl FastIndex {
                     query_phrases,
                     query_trigrams,
                     active_filters: query_plan_filters(&filters),
-                    planned_postings: symbol_kind_postings
+                    planned_postings: exact_path_candidate
                         .iter()
-                        .map(|(kind, postings)| plan_posting("symbol_kind", kind, postings))
+                        .map(|(path, _)| plan_synthetic_posting("exact_path_filter", path, 1))
+                        .chain(
+                            symbol_kind_postings.iter().map(|(kind, postings)| {
+                                plan_posting("symbol_kind", kind, postings)
+                            }),
+                        )
                         .chain(attribute_postings.plan_postings())
+                        .chain(file_name_plan_postings(
+                            &filters,
+                            file_name_candidates.as_deref(),
+                        ))
                         .chain(path_filter_postings.plan_postings())
                         .collect(),
                     missing_terms: Vec::new(),
@@ -2108,21 +2131,28 @@ impl FastIndex {
         attribute_postings: &AttributeFilterPostings<'_>,
         path_filter_postings: &PathFilterTrigramPostings<'_>,
     ) -> Vec<SearchResult> {
-        let exact_path_candidate_id = self.indexed_exact_path_filter_id(filters);
-        let candidate_ids = exact_path_candidate_id
-            .map(|file_id| vec![file_id])
+        let exact_path_candidate = self.indexed_exact_path_filter(filters);
+        let file_name_candidates = self.file_name_filter_candidate_ids(filters);
+        let candidate_ids = exact_path_candidate
+            .as_ref()
+            .map(|(_, file_id)| vec![*file_id])
             .or_else(|| {
                 filter_only_candidate_ids(
                     symbol_kind_postings,
                     attribute_postings,
                     path_filter_postings,
+                    file_name_candidates.as_deref(),
                     filters,
                 )
             });
-        let strategy = if exact_path_candidate_id.is_some() {
+        let strategy = if exact_path_candidate.is_some() {
             "exact_path_filter"
         } else {
-            filter_only_strategy(filters, path_filter_postings)
+            filter_only_strategy(
+                filters,
+                path_filter_postings,
+                file_name_candidates.as_deref(),
+            )
         };
         let mut results = match &candidate_ids {
             Some(candidate_ids) => candidate_ids
@@ -2149,10 +2179,19 @@ impl FastIndex {
                 query_phrases: Vec::new(),
                 query_trigrams: Vec::new(),
                 active_filters: query_plan_filters(filters),
-                planned_postings: symbol_kind_postings
+                planned_postings: exact_path_candidate
                     .iter()
-                    .map(|(kind, postings)| plan_posting("symbol_kind", kind, postings))
+                    .map(|(path, _)| plan_synthetic_posting("exact_path_filter", path, 1))
+                    .chain(
+                        symbol_kind_postings
+                            .iter()
+                            .map(|(kind, postings)| plan_posting("symbol_kind", kind, postings)),
+                    )
                     .chain(attribute_postings.plan_postings())
+                    .chain(file_name_plan_postings(
+                        filters,
+                        file_name_candidates.as_deref(),
+                    ))
                     .chain(path_filter_postings.plan_postings())
                     .collect(),
                 missing_terms: Vec::new(),
@@ -2362,6 +2401,7 @@ impl FastIndexDisk {
             attribute_postings: decompress_posting_map(self.attribute_postings)?,
             path_ids: HashMap::new(),
             path_lower_ids: HashMap::new(),
+            file_name_ids: HashMap::new(),
         })
     }
 }
@@ -2404,6 +2444,7 @@ impl FastIndexDiskV12 {
             files,
             path_ids: HashMap::new(),
             path_lower_ids: HashMap::new(),
+            file_name_ids: HashMap::new(),
         })
     }
 }
@@ -3160,9 +3201,25 @@ fn indexed_file_matches_filters(file: &IndexedPath, filters: &SearchFilters) -> 
 }
 
 impl FastIndex {
-    fn indexed_exact_path_filter_id(&self, filters: &SearchFilters) -> Option<u32> {
+    fn indexed_exact_path_filter(&self, filters: &SearchFilters) -> Option<(String, u32)> {
         let path = normalize_exact_index_path_filter(filters.path.as_deref()?)?;
-        self.path_lower_ids.get(&path).copied()
+        self.path_lower_ids
+            .get(&path)
+            .copied()
+            .map(|file_id| (path, file_id))
+    }
+
+    fn file_name_filter_candidate_ids(&self, filters: &SearchFilters) -> Option<Vec<u32>> {
+        let file_filter = filters.file.as_deref()?;
+        let mut ids = Vec::new();
+        for (file_name_lower, file_ids) in &self.file_name_ids {
+            if filter_value_matches(file_name_lower, file_filter) {
+                ids.extend(file_ids.iter().copied());
+            }
+        }
+        ids.sort_unstable();
+        ids.dedup();
+        Some(ids)
     }
 }
 
@@ -4652,6 +4709,7 @@ fn filter_only_candidate_ids(
     symbol_kind_postings: &[(&String, &Vec<Posting>)],
     attribute_postings: &AttributeFilterPostings<'_>,
     path_filter_postings: &PathFilterTrigramPostings<'_>,
+    file_name_candidate_ids: Option<&[u32]>,
     filters: &SearchFilters,
 ) -> Option<Vec<u32>> {
     if filters.symbol_kind.is_some() && symbol_kind_postings.is_empty() {
@@ -4663,10 +4721,12 @@ fn filter_only_candidate_ids(
     if symbol_kind_postings.is_empty()
         && attribute_postings.is_empty()
         && path_filter_postings.is_empty()
+        && file_name_candidate_ids.is_none()
     {
         return None;
     }
-    let planned_postings = symbol_kind_postings
+    let mut candidate_ids = file_name_candidate_ids.map(|ids| ids.to_vec());
+    for postings in symbol_kind_postings
         .iter()
         .map(|(_, postings)| *postings)
         .chain(
@@ -4681,13 +4741,22 @@ fn filter_only_candidate_ids(
                 .iter()
                 .map(|(_, postings)| *postings),
         )
-        .collect::<Vec<_>>();
-    Some(intersect_planned_postings(&planned_postings, true))
+    {
+        candidate_ids = Some(match candidate_ids {
+            Some(ids) => intersect_sorted_ids_with_postings(&ids, postings),
+            None => posting_file_ids(postings),
+        });
+        if candidate_ids.as_ref().is_some_and(Vec::is_empty) {
+            break;
+        }
+    }
+    candidate_ids
 }
 
 fn filter_only_strategy(
     filters: &SearchFilters,
     path_filter_postings: &PathFilterTrigramPostings<'_>,
+    file_name_candidate_ids: Option<&[u32]>,
 ) -> &'static str {
     if filters.symbol_kind.is_some() {
         "symbol_kind_filter_postings"
@@ -4698,11 +4767,24 @@ fn filter_only_strategy(
         || filters.code.is_some()
     {
         "attribute_filter_postings"
+    } else if file_name_candidate_ids.is_some() {
+        "file_name_filter"
     } else if !path_filter_postings.is_empty() {
         "path_filter_trigram_postings"
     } else {
         "filter_scan"
     }
+}
+
+fn file_name_plan_postings(
+    filters: &SearchFilters,
+    file_name_candidate_ids: Option<&[u32]>,
+) -> Option<QueryPlanPosting> {
+    Some(plan_synthetic_posting(
+        "file_name_filter",
+        filters.file.as_deref()?,
+        file_name_candidate_ids?.len(),
+    ))
 }
 
 fn intersect_symbol_kind_postings(
@@ -4856,6 +4938,14 @@ fn plan_posting(kind: &str, value: &str, postings: &[Posting]) -> QueryPlanPosti
         kind: kind.to_string(),
         value: value.to_string(),
         postings: postings.len(),
+    }
+}
+
+fn plan_synthetic_posting(kind: &str, value: &str, postings: usize) -> QueryPlanPosting {
+    QueryPlanPosting {
+        kind: kind.to_string(),
+        value: value.to_string(),
+        postings,
     }
 }
 
@@ -5431,6 +5521,16 @@ fn rebuild_path_lower_ids(files: &[IndexedPath]) -> HashMap<String, u32> {
     let mut ids = HashMap::new();
     for (file_id, file) in files.iter().enumerate() {
         ids.entry(file.path_lower.clone()).or_insert(file_id as u32);
+    }
+    ids
+}
+
+fn rebuild_file_name_ids(files: &[IndexedPath]) -> HashMap<String, Vec<u32>> {
+    let mut ids: HashMap<String, Vec<u32>> = HashMap::new();
+    for (file_id, file) in files.iter().enumerate() {
+        ids.entry(file.file_name_lower.clone())
+            .or_default()
+            .push(file_id as u32);
     }
     ids
 }

@@ -2818,9 +2818,37 @@ fn path_filter_only_queries_use_path_trigram_prefilter_after_load() {
     let file_plan = loaded
         .query_plan("file:special_path_probe.rs", &SearchFilters::default())
         .unwrap();
-    assert_eq!(file_plan.strategy, "path_filter_trigram_postings");
+    assert_eq!(file_plan.strategy, "file_name_filter");
     assert_eq!(file_plan.candidate_count, 1);
     assert_eq!(file_plan.final_match_count, 1);
+    assert!(file_plan.planned_postings.iter().any(|posting| {
+        posting.kind == "file_name_filter"
+            && posting.value == "special_path_probe.rs"
+            && posting.postings == 1
+    }));
+
+    let short_file_results = loaded
+        .search_filtered(
+            "file:X",
+            10,
+            &SearchFilters {
+                explain: true,
+                ..SearchFilters::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(result_paths(&short_file_results), vec!["x.rs"]);
+    let short_file_plan = short_file_results[0].query_plan.as_ref().unwrap();
+    assert_eq!(short_file_plan.strategy, "file_name_filter");
+    assert_eq!(short_file_plan.candidate_count, 1);
+    assert!(
+        short_file_plan
+            .planned_postings
+            .iter()
+            .any(|posting| posting.kind == "file_name_filter"
+                && posting.value == "X"
+                && posting.postings == 1)
+    );
 
     let short_exact_plan = loaded
         .query_plan("path:./X.RS", &SearchFilters::default())
@@ -2828,6 +2856,9 @@ fn path_filter_only_queries_use_path_trigram_prefilter_after_load() {
     assert_eq!(short_exact_plan.strategy, "exact_path_filter");
     assert_eq!(short_exact_plan.candidate_count, 1);
     assert_eq!(short_exact_plan.final_match_count, 1);
+    assert!(short_exact_plan.planned_postings.iter().any(|posting| {
+        posting.kind == "exact_path_filter" && posting.value == "x.rs" && posting.postings == 1
+    }));
 
     let short_exact_results = loaded
         .search_filtered(
@@ -2843,6 +2874,19 @@ fn path_filter_only_queries_use_path_trigram_prefilter_after_load() {
     assert_eq!(
         short_exact_results[0].query_plan.as_ref().unwrap().strategy,
         "exact_path_filter"
+    );
+    assert!(
+        short_exact_results[0]
+            .query_plan
+            .as_ref()
+            .unwrap()
+            .planned_postings
+            .iter()
+            .any(|posting| {
+                posting.kind == "exact_path_filter"
+                    && posting.value == "x.rs"
+                    && posting.postings == 1
+            })
     );
 }
 
