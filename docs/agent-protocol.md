@@ -59,8 +59,10 @@ manifest. Call `warm_shards` only when every shard index should be loaded
 immediately.
 
 `daemon_status`, or the direct CLI wrapper `orient daemon-status`, reports the
-daemon's warmed indexes, registered shard directories, and `max_cached_indexes`
-cap. The JSON-lines tool is compact by default and omits cached paths and
+daemon version, warmed indexes, registered shard directories, and
+`max_cached_indexes` cap. If `daemon_version` is missing or differs from
+`orient --version`, restart the shared daemon before relying on warm cache
+behavior. The JSON-lines tool is compact by default and omits cached paths and
 per-target details; pass `details:true` only when an adapter needs them. The
 default CLI output is compact; use `orient daemon-status --format json` for
 registered-target details, `search_auto_default`, and copyable

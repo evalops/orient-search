@@ -104,10 +104,12 @@ orient daemon-status
 orient daemon-status --format json
 ```
 
-The compact CLI status is meant for humans. The JSON-lines `daemon_status` tool
-is also compact by default; pass `details:true` only when cached paths and
-per-target details are needed. When called with `cwd`, its default requests are
-scoped to the active checkout and set `refresh_if_stale:true`.
+The compact CLI status is meant for humans. It includes the daemon version; if
+that is missing or differs from `orient --version`, restart the shared daemon.
+The JSON-lines `daemon_status` tool is also compact by default; pass
+`details:true` only when cached paths and per-target details are needed. When
+called with `cwd`, its default requests are scoped to the active checkout and
+set `refresh_if_stale:true`.
 
 Refresh explicitly when needed:
 

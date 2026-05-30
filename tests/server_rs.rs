@@ -6073,6 +6073,10 @@ fn daemon_status_suggests_registering_warmed_shard_indexes() {
 
     let status = runtime.daemon_status();
     assert_eq!(
+        status["daemon_version"],
+        serde_json::json!(env!("CARGO_PKG_VERSION"))
+    );
+    assert_eq!(
         status["search_auto_default"]["surface"],
         serde_json::json!("shards")
     );
@@ -9831,6 +9835,14 @@ fn tcp_daemon_serves_json_lines_requests() {
     let mut startup = String::new();
     startup_reader.read_line(&mut startup).unwrap();
     let startup_json: serde_json::Value = serde_json::from_str(&startup).unwrap();
+    assert_eq!(
+        startup_json["daemon_version"],
+        serde_json::json!(env!("CARGO_PKG_VERSION"))
+    );
+    assert_eq!(
+        startup_json["daemon_status"]["daemon_version"],
+        serde_json::json!(env!("CARGO_PKG_VERSION"))
+    );
     let addr = startup_json["addr"].as_str().unwrap();
     assert!(
         startup_json["daemon_status"]["default_requests"]["search"]["client_cli"]
@@ -9909,6 +9921,14 @@ fn tcp_daemon_status_cli_reports_runtime_cache() {
 
     assert!(output.status.success(), "{output:?}");
     let status: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        status["daemon_version"],
+        serde_json::json!(env!("CARGO_PKG_VERSION"))
+    );
+    assert_eq!(
+        status["client_version"],
+        serde_json::json!(env!("CARGO_PKG_VERSION"))
+    );
     assert_eq!(status["cached_indexes"], serde_json::json!(0));
     assert_eq!(status["cached_shard_manifests"], serde_json::json!(0));
     assert_eq!(
@@ -9933,6 +9953,10 @@ fn tcp_daemon_status_cli_reports_runtime_cache() {
 
     assert!(full_output.status.success(), "{full_output:?}");
     let status: serde_json::Value = serde_json::from_slice(&full_output.stdout).unwrap();
+    assert_eq!(
+        status["daemon_version"],
+        serde_json::json!(env!("CARGO_PKG_VERSION"))
+    );
     assert!(status["search_auto_default"]["target"].as_str().is_some());
     let default_target = status["search_auto_default"]["target"].clone();
     assert!(default_target.as_str().is_some());
@@ -10417,6 +10441,15 @@ fn unix_daemon_status_cli_reports_runtime_cache() {
     let mut startup_reader = BufReader::new(stdout);
     let mut startup = String::new();
     startup_reader.read_line(&mut startup).unwrap();
+    let startup_json: serde_json::Value = serde_json::from_str(&startup).unwrap();
+    assert_eq!(
+        startup_json["daemon_version"],
+        serde_json::json!(env!("CARGO_PKG_VERSION"))
+    );
+    assert_eq!(
+        startup_json["daemon_status"]["daemon_version"],
+        serde_json::json!(env!("CARGO_PKG_VERSION"))
+    );
 
     let output = Command::new(&binary)
         .args(["daemon-status", "--socket", socket.to_str().unwrap()])
@@ -10438,6 +10471,14 @@ fn unix_daemon_status_cli_reports_runtime_cache() {
 
     assert!(output.status.success(), "{output:?}");
     let status: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        status["daemon_version"],
+        serde_json::json!(env!("CARGO_PKG_VERSION"))
+    );
+    assert_eq!(
+        status["client_version"],
+        serde_json::json!(env!("CARGO_PKG_VERSION"))
+    );
     assert_eq!(status["cached_indexes"], serde_json::json!(0));
     assert_eq!(status["cached_shard_manifests"], serde_json::json!(0));
     assert_eq!(status["details_omitted"], serde_json::json!(true));
@@ -10445,6 +10486,10 @@ fn unix_daemon_status_cli_reports_runtime_cache() {
 
     assert!(full_output.status.success(), "{full_output:?}");
     let status: serde_json::Value = serde_json::from_slice(&full_output.stdout).unwrap();
+    assert_eq!(
+        status["daemon_version"],
+        serde_json::json!(env!("CARGO_PKG_VERSION"))
+    );
     assert!(
         status["default_requests"]["search"]["client_cli"]
             .as_str()

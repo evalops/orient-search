@@ -722,6 +722,7 @@ impl ToolRuntime {
             daemon_default_cwd_requests,
         );
         let mut status = json!({
+            "daemon_version": env!("CARGO_PKG_VERSION"),
             "search_auto_default": search_auto_default.clone(),
             "default_requests": default_requests,
             "max_cached_indexes": self.max_cached_indexes(),

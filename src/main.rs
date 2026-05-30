@@ -4670,6 +4670,7 @@ fn run() -> Result<()> {
             let mut startup = serde_json::json!({
                 "addr": addr.clone(),
                 "transport": "tcp",
+                "daemon_version": env!("CARGO_PKG_VERSION"),
                 "max_cached_indexes": runtime.max_cached_indexes(),
                 "cached_indexes": runtime.cached_index_count(),
                 "ensured_shards": ensured_shards,
@@ -4716,6 +4717,7 @@ fn run() -> Result<()> {
             let mut startup = serde_json::json!({
                 "socket": socket.clone(),
                 "transport": "unix",
+                "daemon_version": env!("CARGO_PKG_VERSION"),
                 "max_cached_indexes": runtime.max_cached_indexes(),
                 "cached_indexes": runtime.cached_index_count(),
                 "ensured_shards": ensured_shards,
@@ -4874,6 +4876,11 @@ fn daemon_status_summary(status: &Value) -> Value {
         .and_then(Value::as_str)
         .is_some_and(|target| !target.is_empty());
     serde_json::json!({
+        "daemon_version": status
+            .get("daemon_version")
+            .cloned()
+            .unwrap_or(Value::Null),
+        "client_version": env!("CARGO_PKG_VERSION"),
         "search_auto_default": {
             "surface": search_default.get("surface").cloned().unwrap_or(Value::Null),
             "source": search_default.get("source").cloned().unwrap_or(Value::Null),
