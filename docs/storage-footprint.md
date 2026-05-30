@@ -54,9 +54,9 @@ Useful counters:
 - `manifest_route_substring_filter_shards`: shards carrying the long-substring
   Bloom filter used to reject broad trigram false positives before opening
   shard indexes. The route sidecar also carries compact filter sketches so
-  language, extension, test, generated, code, symbol-kind, long file/path, and
-  simple long dependency/import scopes can prune routed shard candidates before
-  cold index loads.
+  language, extension, test, generated, code, symbol-kind, short and long
+  file/path scopes, and simple long dependency/import scopes can prune routed
+  shard candidates before cold index loads.
 - `largest_shards`: largest shard indexes in a shard directory
 
 `manifest.json` is intentionally slim and keeps repo identity, aliases, git

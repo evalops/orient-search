@@ -10462,6 +10462,62 @@ fn runtime_path_filter_shard_search_uses_route_before_cold_load() {
 }
 
 #[test]
+fn runtime_short_file_filter_shard_search_uses_route_before_cold_load() {
+    let workspace = tempfile::tempdir().unwrap();
+    let go_repo = workspace.path().join("go-service");
+    let rust_repo = workspace.path().join("rust-service");
+    write(
+        &go_repo.join("go.mod"),
+        "module example.com/go-service\n\ngo 1.22\n",
+    );
+    write(
+        &go_repo.join("main.go"),
+        "package main\nfunc short_filter_token() {}\n",
+    );
+    write(
+        &rust_repo.join("Cargo.toml"),
+        "[package]\nname='rust-service'\nversion='0.1.0'\n",
+    );
+    write(
+        &rust_repo.join("src/lib.rs"),
+        "pub fn short_filter_token() {}\n",
+    );
+
+    let shard_dir = tempfile::tempdir().unwrap();
+    build_shards(&[go_repo, rust_repo], shard_dir.path()).unwrap();
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(shard_dir.path().join("manifest.json")).unwrap()).unwrap();
+    let rust_index = manifest["shards"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|shard| shard["name"] == "rust-service")
+        .unwrap()["index"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    fs::remove_file(shard_dir.path().join("manifest.bin")).unwrap();
+    fs::remove_file(shard_dir.path().join(rust_index)).unwrap();
+
+    let runtime = ToolRuntime::default();
+    let response = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("search"),
+        tool: "search_shards".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": shard_dir.path(),
+            "query": "file:go.mod",
+            "limit": 10
+        }),
+    });
+    assert!(response.error.is_none(), "{:?}", response.error);
+    let result = serde_json::to_string(&response.result).unwrap();
+    assert!(result.contains("go-service/go.mod"), "{result}");
+    assert!(!result.contains("rust-service"), "{result}");
+    assert_eq!(runtime.cached_shard_manifest_count(), 0);
+    assert_eq!(runtime.cached_index_count(), 1);
+}
+
+#[test]
 fn runtime_filter_only_routed_shard_search_uses_filter_sketch_before_cold_load() {
     let workspace = tempfile::tempdir().unwrap();
     let rust_repo = workspace.path().join("rust-service");

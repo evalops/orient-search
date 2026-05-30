@@ -24,8 +24,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 pub const SHARD_MANIFEST_FORMAT_VERSION: u32 = 1;
 const SHARD_MANIFEST_VERSION: u32 = SHARD_MANIFEST_FORMAT_VERSION;
 const SHARD_MANIFEST_SIDECAR_VERSION: u32 = 2;
-const SHARD_MANIFEST_PREFILTER_VERSION: u32 = 1;
-const SHARD_MANIFEST_ROUTE_VERSION: u32 = 8;
+const SHARD_MANIFEST_PREFILTER_VERSION: u32 = 2;
+const SHARD_MANIFEST_ROUTE_VERSION: u32 = 9;
 const SHARD_MANIFEST_FILE: &str = "manifest.json";
 const SHARD_MANIFEST_SIDECAR_FILE: &str = "manifest.bin";
 const SHARD_MANIFEST_PREFILTER_FILE: &str = "manifest.prefilter.bin";
@@ -2274,6 +2274,8 @@ fn shard_query_sketch(index: &FastIndex) -> ShardQuerySketch {
     }
     for file in &index.files {
         push_route_value_substring_grams(&file.path_lower, &mut substring_bits);
+        push_route_short_filter_hashes(&file.path_lower, &mut exact_hashes);
+        push_route_short_filter_hashes(&file.file_name_lower, &mut exact_hashes);
         push_content_identifier_hashes(&file.content, &mut exact_hashes);
         push_content_substring_grams(&file.content, &mut substring_bits);
     }
@@ -2494,6 +2496,16 @@ fn push_route_value_substring_grams(value: &str, substring_bits: &mut [u64]) {
     }
 }
 
+fn push_route_short_filter_hashes(value: &str, exact_hashes: &mut Vec<u32>) {
+    let route_value = route_substring_value(value);
+    let chars = route_value.chars().collect::<Vec<_>>();
+    for len in 3..SHARD_ROUTE_SUBSTRING_GRAM_CHARS.min(chars.len() + 1) {
+        for window in chars.windows(len) {
+            exact_hashes.push(sketch_fingerprint(&window.iter().collect::<String>()));
+        }
+    }
+}
+
 // Keep this normalization aligned with content substring grams for identifier-like
 // dependency/import filters. Separators are intentionally dropped for path filters.
 fn route_substring_value(value: &str) -> String {
@@ -2502,6 +2514,27 @@ fn route_substring_value(value: &str) -> String {
         .flat_map(char::to_lowercase)
         .filter(|ch| ch.is_ascii_alphanumeric() || *ch == '_')
         .collect()
+}
+
+fn route_filter_exact_hashes(filters: &SearchFilters) -> Vec<u32> {
+    let mut hashes = Vec::new();
+    for value in filters
+        .file
+        .iter()
+        .chain(filters.path.iter())
+        .filter(|value| {
+            !value.contains('*') && !value.contains('?') && !Path::new(value.as_str()).is_absolute()
+        })
+    {
+        let route_value = route_substring_value(value);
+        let len = route_value.chars().count();
+        if (3..SHARD_ROUTE_SUBSTRING_GRAM_CHARS).contains(&len) {
+            hashes.push(sketch_fingerprint(&route_value));
+        }
+    }
+    hashes.sort_unstable();
+    hashes.dedup();
+    hashes
 }
 
 fn route_filter_substring_grams(filters: &SearchFilters) -> Vec<String> {
@@ -2741,6 +2774,7 @@ fn shard_route_filter_only_selectable(filters: &SearchFilters) -> bool {
         || filters.test.is_some()
         || filters.generated.is_some()
         || filters.code.is_some()
+        || !route_filter_exact_hashes(filters).is_empty()
         || !route_filter_substring_grams(filters).is_empty()
 }
 
@@ -2984,6 +3018,7 @@ fn shard_prefilter_required_exact_hashes(shard_query: &str, filters: &SearchFilt
     {
         hashes.push(sketch_fingerprint(&identifier));
     }
+    hashes.extend(route_filter_exact_hashes(filters));
 
     let require_all = filters.require_all || (query_tokens.len() > 1 && !filters.match_any);
     if require_all || filters.symbol_kind.is_some() || query_tokens.len() == 1 {
@@ -3895,6 +3930,41 @@ mod tests {
         .unwrap();
 
         assert_eq!(load_manifest(dir.path()).unwrap(), manifest);
+    }
+
+    #[test]
+    fn stale_prefilter_missing_short_route_hash_is_ignored() {
+        let dir = tempfile::tempdir().unwrap();
+        let auth = dir.path().join("auth");
+        fs::create_dir_all(&auth).unwrap();
+
+        let manifest = test_manifest(&auth, None);
+        save_manifest(dir.path(), &manifest).unwrap();
+        let filters = SearchFilters {
+            file: Some("go.mod".to_string()),
+            ..SearchFilters::default()
+        };
+        assert!(
+            shard_prefilter_query_impossible(dir.path(), "", &filters).unwrap(),
+            "current prefilter without the short file hash should reject"
+        );
+
+        let stale_prefilter = ShardManifestPrefilter {
+            version: SHARD_MANIFEST_PREFILTER_VERSION - 1,
+            json_fingerprint: manifest_file_fingerprint(&dir.path().join(SHARD_MANIFEST_FILE))
+                .unwrap(),
+            exact_hashes: Vec::new(),
+        };
+        fs::write(
+            dir.path().join(SHARD_MANIFEST_PREFILTER_FILE),
+            bincode::serialize(&stale_prefilter).unwrap(),
+        )
+        .unwrap();
+
+        assert!(
+            !shard_prefilter_query_impossible(dir.path(), "", &filters).unwrap(),
+            "stale prefilters must be ignored instead of creating false negatives"
+        );
     }
 
     #[test]
