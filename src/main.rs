@@ -5110,6 +5110,11 @@ fn doctor_report(config: DoctorConfig) -> DoctorReport {
                 format!("daemon reachable; search_auto default surface is {default_surface}"),
                 Some(status.clone()),
             ));
+            let (version_check, version_recommendation) = doctor_daemon_version_check(&status);
+            checks.push(version_check);
+            if let Some(recommendation) = version_recommendation {
+                recommendations.push(recommendation);
+            }
             daemon_status = Some(status);
         }
         Err(error) => {
@@ -5187,6 +5192,54 @@ fn doctor_report(config: DoctorConfig) -> DoctorReport {
         daemon_status,
         index_status,
         shard_status: shard_status_value,
+    }
+}
+
+fn doctor_daemon_version_check(status: &Value) -> (DoctorCheck, Option<String>) {
+    let client_version = env!("CARGO_PKG_VERSION");
+    let daemon_version = status
+        .get("daemon_version")
+        .and_then(Value::as_str)
+        .filter(|version| !version.trim().is_empty());
+
+    let details = Some(serde_json::json!({
+        "client_version": client_version,
+        "daemon_version": daemon_version,
+    }));
+
+    match daemon_version {
+        Some(version) if version == client_version => (
+            doctor_check(
+                "daemon:version",
+                DoctorCheckStatus::Ok,
+                format!("daemon version matches client: {version}"),
+                details,
+            ),
+            None,
+        ),
+        Some(version) => (
+            doctor_check(
+                "daemon:version",
+                DoctorCheckStatus::Warn,
+                format!("daemon version {version} differs from client {client_version}"),
+                details,
+            ),
+            Some(format!(
+                "restart the shared orient daemon so daemon_version {version} matches client_version {client_version}"
+            )),
+        ),
+        None => (
+            doctor_check(
+                "daemon:version",
+                DoctorCheckStatus::Warn,
+                "daemon did not report daemon_version; restart or update the shared daemon",
+                details,
+            ),
+            Some(
+                "restart or update the shared orient daemon; older daemons do not report daemon_version"
+                    .to_string(),
+            ),
+        ),
     }
 }
 
@@ -6341,6 +6394,52 @@ mod tests {
     fn cli_range_spec_rejects_zero_start_or_lines() {
         assert!(CliRangeSpec::from_str("src/auth.rs:0:1").is_err());
         assert!(CliRangeSpec::from_str("src/auth.rs:1:0").is_err());
+    }
+
+    #[test]
+    fn doctor_daemon_version_check_accepts_matching_version() {
+        let status = serde_json::json!({
+            "daemon_version": env!("CARGO_PKG_VERSION"),
+        });
+
+        let (check, recommendation) = doctor_daemon_version_check(&status);
+
+        assert_eq!(check.name, "daemon:version");
+        assert_eq!(check.status, DoctorCheckStatus::Ok);
+        assert!(check.message.contains("matches client"));
+        assert!(recommendation.is_none());
+    }
+
+    #[test]
+    fn doctor_daemon_version_check_warns_on_mismatch() {
+        let status = serde_json::json!({
+            "daemon_version": "0.0.0-stale",
+        });
+
+        let (check, recommendation) = doctor_daemon_version_check(&status);
+
+        assert_eq!(check.name, "daemon:version");
+        assert_eq!(check.status, DoctorCheckStatus::Warn);
+        assert!(check.message.contains("differs from client"));
+        assert!(
+            recommendation
+                .unwrap()
+                .contains("restart the shared orient daemon")
+        );
+    }
+
+    #[test]
+    fn doctor_daemon_version_check_warns_when_missing() {
+        let status = serde_json::json!({
+            "cached_indexes": 1,
+        });
+
+        let (check, recommendation) = doctor_daemon_version_check(&status);
+
+        assert_eq!(check.name, "daemon:version");
+        assert_eq!(check.status, DoctorCheckStatus::Warn);
+        assert!(check.message.contains("did not report daemon_version"));
+        assert!(recommendation.unwrap().contains("older daemons"));
     }
 
     #[test]
