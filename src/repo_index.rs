@@ -389,6 +389,8 @@ pub struct QueryPlan {
     pub final_match_count: usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub diagnosis: Option<QueryPlanDiagnosis>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<QueryPlanSummary>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub repair_hints: Vec<QueryPlanRepairHint>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -471,6 +473,7 @@ impl QueryPlan {
             scored_candidate_count: 0,
             final_match_count: 0,
             diagnosis: None,
+            summary: None,
             repair_hints: Vec::new(),
             retry_requests: Vec::new(),
             primary_retry_request: None,
@@ -480,11 +483,16 @@ impl QueryPlan {
 
     pub fn with_diagnosis(mut self) -> Self {
         self.diagnosis = Some(QueryPlanDiagnosis::from_plan(&self));
+        self.refresh_summary();
         self
     }
 
     pub fn compact_summary(&self) -> QueryPlanSummary {
         QueryPlanSummary::from_plan(self)
+    }
+
+    fn refresh_summary(&mut self) {
+        self.summary = Some(self.compact_summary());
     }
 
     pub fn set_retry_requests(&mut self, retry_requests: Vec<ResultToolRequest>) {
@@ -494,6 +502,7 @@ impl QueryPlan {
             .primary_retry_request
             .clone()
             .map(QueryPlanNextAction::retry);
+        self.refresh_summary();
     }
 }
 

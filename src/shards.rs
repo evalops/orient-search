@@ -1307,6 +1307,7 @@ pub(crate) fn shard_selection_miss_plan(
             scored_candidate_count: 0,
             final_match_count: 0,
             diagnosis: None,
+            summary: None,
             repair_hints: vec![QueryPlanRepairHint {
                 kind: "relax_filters".to_string(),
                 action: query_plan_repair_action("relax_filters").to_string(),

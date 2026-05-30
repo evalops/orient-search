@@ -1803,6 +1803,7 @@ impl FastIndex {
                 scored_candidate_count: 0,
                 final_match_count: 0,
                 diagnosis: None,
+                summary: None,
                 repair_hints: repo_scope_mismatch_repair_hints(&filters, &retry_query),
                 retry_requests: Vec::new(),
                 primary_retry_request: None,
@@ -1828,6 +1829,7 @@ impl FastIndex {
                 scored_candidate_count: 0,
                 final_match_count: 0,
                 diagnosis: None,
+                summary: None,
                 repair_hints: vec![repair_hint(
                     "dependency_filter_mismatch",
                     "The dependency filter does not match this index. Relax dep: or choose a matching shard/index.",
@@ -1924,6 +1926,7 @@ impl FastIndex {
                     scored_candidate_count: final_match_count,
                     final_match_count,
                     diagnosis: None,
+                    summary: None,
                     repair_hints: filter_scan_repair_hints(
                         &filters,
                         &self.symbol_kind_postings,
@@ -1953,6 +1956,7 @@ impl FastIndex {
                 scored_candidate_count: 0,
                 final_match_count: 0,
                 diagnosis: None,
+                summary: None,
                 repair_hints: vec![repair_hint(
                     "empty_query",
                     "Add a content term, quoted literal, symbol:, or positive file/path/lang/ext/test filter.",
@@ -2246,6 +2250,7 @@ impl FastIndex {
                 scored_candidate_count: final_match_count,
                 final_match_count,
                 diagnosis: None,
+                summary: None,
                 repair_hints: filter_scan_repair_hints(
                     filters,
                     &self.symbol_kind_postings,
@@ -3554,6 +3559,7 @@ fn indexed_query_plan(
         scored_candidate_count,
         final_match_count,
         diagnosis: None,
+        summary: None,
         repair_hints,
         retry_requests: Vec::new(),
         primary_retry_request: None,

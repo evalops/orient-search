@@ -2566,7 +2566,7 @@ fn cli_search_surfaces_accept_structured_filters() {
         .stdout(predicate::str::contains("test:true"));
 
     let mut search_plan = Command::cargo_bin("orient").unwrap();
-    search_plan
+    let output = search_plan
         .args([
             "search-plan",
             "--repo",
@@ -2575,13 +2575,29 @@ fn cli_search_surfaces_accept_structured_filters() {
             "--dir",
             "src",
         ])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("\"active_filters\""))
-        .stdout(predicate::str::contains("\"missing_terms\""))
-        .stdout(predicate::str::contains("definitely"))
-        .stdout(predicate::str::contains("missing"))
-        .stdout(predicate::str::contains("drop_missing_terms"));
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let plan: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(plan["active_filters"].is_array());
+    assert!(plan["missing_terms"].is_array());
+    assert_eq!(
+        plan["summary"]["status"],
+        serde_json::json!("missing_terms")
+    );
+    assert_eq!(
+        plan["summary"]["primary_hint_kind"],
+        serde_json::json!("drop_missing_terms")
+    );
+    assert_eq!(
+        plan["summary"]["primary_retry_request"],
+        plan["primary_retry_request"]
+    );
+    assert_eq!(plan["summary"]["promoted_next_action"], plan["next_action"]);
+    let plan_text = String::from_utf8(output.stdout).unwrap();
+    assert!(plan_text.contains("definitely"));
+    assert!(plan_text.contains("missing"));
+    assert!(plan_text.contains("drop_missing_terms"));
 
     let mut search_plan_batch = Command::cargo_bin("orient").unwrap();
     search_plan_batch
