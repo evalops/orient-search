@@ -425,7 +425,9 @@ fn infer_leading_location_term(
         return;
     }
 
-    if let Some((path, target_line)) = diagnostic_block_location_term(terms) {
+    if let Some((path, target_line)) =
+        stack_block_location_term(terms).or_else(|| diagnostic_block_location_term(terms))
+    {
         apply_location_filter(path, target_line, terms, filters);
         return;
     }
@@ -504,6 +506,23 @@ fn diagnostic_block_location_term(terms: &[String]) -> Option<(String, usize)> {
     None
 }
 
+fn stack_block_location_term(terms: &[String]) -> Option<(String, usize)> {
+    for start in 1..terms.len().min(64) {
+        if let Some((_, path, line, _)) = python_file_location_terms(&terms[start..]) {
+            return Some((path, line));
+        }
+        if !stack_frame_prefix(&terms[start]) {
+            continue;
+        }
+        for location in terms[start + 1..].iter().take(4) {
+            if let Some((path, line, _)) = split_leading_location_token(location) {
+                return Some((path, line));
+            }
+        }
+    }
+    None
+}
+
 fn leading_location_term(terms: &[String]) -> Option<(usize, String, usize, Option<String>)> {
     if let Some(location) = python_file_location_terms(terms) {
         return Some(location);
@@ -546,12 +565,21 @@ fn stack_location_prefix(terms: &[String]) -> bool {
         return true;
     };
     let first = trim_location_token_wrappers(first).to_ascii_lowercase();
-    (matches!(first.as_str(), "at" | "from" | "file") || diagnostic_arrow_prefix(&first))
+    (stack_frame_prefix(&first) || diagnostic_arrow_prefix(&first))
         && terms.len() <= 3
         && terms[1..].iter().all(|term| {
             let term = trim_location_token_wrappers(term);
             !term.is_empty() && !term.contains(':') && !looks_like_location_path(term)
         })
+}
+
+fn stack_frame_prefix(term: &str) -> bool {
+    matches!(
+        trim_location_token_wrappers(term)
+            .to_ascii_lowercase()
+            .as_str(),
+        "at" | "from" | "file"
+    )
 }
 
 fn diagnostic_arrow_prefix(term: &str) -> bool {
@@ -1667,6 +1695,26 @@ mod tests {
             Some("src/server.rs")
         );
         assert_eq!(rust_diagnostic_block.filters.target_line, Some(42));
+
+        let python_traceback_block = parse_query(
+            "Traceback (most recent call last):\n  File \"src/server.rs\", line 42, in handle_request\n    issue_token()",
+        );
+        assert_eq!(python_traceback_block.terms, Vec::<String>::new());
+        assert_eq!(
+            python_traceback_block.filters.path.as_deref(),
+            Some("src/server.rs")
+        );
+        assert_eq!(python_traceback_block.filters.target_line, Some(42));
+
+        let js_stack_block = parse_query(
+            "Error: boom\n    at handleRequest (src/server.rs:42:9)\n    at main (src/main.rs:7:1)",
+        );
+        assert_eq!(js_stack_block.terms, Vec::<String>::new());
+        assert_eq!(
+            js_stack_block.filters.path.as_deref(),
+            Some("src/server.rs")
+        );
+        assert_eq!(js_stack_block.filters.target_line, Some(42));
 
         let dot_source_location = parse_query("./src/server.rs:42:9");
         assert!(dot_source_location.terms.is_empty());

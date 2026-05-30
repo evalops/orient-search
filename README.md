@@ -98,8 +98,9 @@ shard before use.
 Useful filters include `repo:`, `path:`/`dir:`/`in:`/`under:`, `file:`, `lang:`, `ext:`,
 `symbol:`, `kind:`/`type:`, `line:`, `test:`, `generated:`, `code:`,
 `content:`, quoted phrases, negative filters like `-path:vendor`, and `mode:any`
-for broad orientation. Bare filenames, pasted file locations, Markdown links,
-and hosted code links resolve to anchored file searches. See
+for broad orientation. Bare filenames, pasted file locations, Python tracebacks,
+JavaScript stack frames, Markdown links, and hosted code links resolve to
+anchored file searches. See
 [Agent protocol](docs/agent-protocol.md) for the full query language.
 
 ## Protocol

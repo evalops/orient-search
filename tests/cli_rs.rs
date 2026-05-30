@@ -2157,6 +2157,36 @@ fn cli_outputs_repo_map_and_reads_ranges() {
         .stdout(predicate::str::contains("\"start_line\":5"))
         .stdout(predicate::str::contains("issue_token"));
 
+    let mut python_traceback_read_range = Command::cargo_bin("orient").unwrap();
+    python_traceback_read_range
+        .args([
+            "read-range",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--",
+            "Traceback (most recent call last):\n  File \"src/auth.rs\", line 5, in issue_token\n    return issue_token(user_id)",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"path\":\"src/auth.rs\""))
+        .stdout(predicate::str::contains("\"start_line\":5"))
+        .stdout(predicate::str::contains("issue_token"));
+
+    let mut js_stack_read_range = Command::cargo_bin("orient").unwrap();
+    js_stack_read_range
+        .args([
+            "read-range",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--",
+            "Error: boom\n    at issueToken (src/auth.rs:5:13)\n    at main (src/lib.rs:1:1)",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"path\":\"src/auth.rs\""))
+        .stdout(predicate::str::contains("\"start_line\":5"))
+        .stdout(predicate::str::contains("issue_token"));
+
     let mut oversized_compact_read_range = Command::cargo_bin("orient").unwrap();
     oversized_compact_read_range
         .args([

@@ -6721,7 +6721,7 @@ fn parse_compact_cli_range(
         .filter(|path| !path.is_empty())
         .ok_or_else(|| "range must be PATH:START:LINES".to_string())?
         .to_string();
-    if path_has_diagnostic_location_prefix(&path) {
+    if path_has_embedded_location_prefix(&path) {
         return Ok(None);
     }
     if start == 0 || lines == 0 {
@@ -6735,8 +6735,12 @@ fn parse_compact_cli_range(
     }))
 }
 
-fn path_has_diagnostic_location_prefix(path: &str) -> bool {
+fn path_has_embedded_location_prefix(path: &str) -> bool {
+    let lower = path.to_ascii_lowercase();
     path.contains("-->")
+        || path.contains('\n')
+        || lower.trim_start().starts_with("at ")
+        || lower.contains(" at ")
 }
 
 fn parse_copied_location_cli_range(value: &str, scope: Option<RangeScope>) -> Option<CliRangeSpec> {

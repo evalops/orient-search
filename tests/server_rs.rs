@@ -3291,6 +3291,58 @@ fn runtime_read_alias_accepts_live_index_and_shard_targets() {
             .contains("issue_token")
     );
 
+    let live_python_traceback_range = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("live-python-traceback-range"),
+        tool: "read_range".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "range": "Traceback (most recent call last):\n  File \"src/auth.rs\", line 5, in issue_token\n    return issue_token(user_id)",
+            "scope": "exact"
+        }),
+    });
+    assert!(
+        live_python_traceback_range.error.is_none(),
+        "{:?}",
+        live_python_traceback_range.error
+    );
+    let live_python_traceback_range = live_python_traceback_range.result.unwrap();
+    assert_eq!(
+        live_python_traceback_range["path"],
+        serde_json::json!("src/auth.rs")
+    );
+    assert!(
+        live_python_traceback_range["text"]
+            .as_str()
+            .unwrap()
+            .contains("issue_token")
+    );
+
+    let live_js_stack_range = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("live-js-stack-range"),
+        tool: "read_range".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "range": "Error: boom\n    at issueToken (src/auth.rs:5:13)\n    at main (src/lib.rs:1:1)",
+            "scope": "exact"
+        }),
+    });
+    assert!(
+        live_js_stack_range.error.is_none(),
+        "{:?}",
+        live_js_stack_range.error
+    );
+    let live_js_stack_range = live_js_stack_range.result.unwrap();
+    assert_eq!(
+        live_js_stack_range["path"],
+        serde_json::json!("src/auth.rs")
+    );
+    assert!(
+        live_js_stack_range["text"]
+            .as_str()
+            .unwrap()
+            .contains("issue_token")
+    );
+
     let indexed_range_string = runtime.dispatch(ToolRequest {
         id: serde_json::json!("indexed-range-string"),
         tool: "read_index_range".to_string(),
