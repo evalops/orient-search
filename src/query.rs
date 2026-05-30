@@ -458,6 +458,9 @@ fn split_leading_location_token(token: &str) -> Option<(String, usize, Option<St
         if after_line.is_empty() {
             return Some((path.to_string(), line, None));
         }
+        if let Some(after_range) = strip_colon_line_range(after_line) {
+            return Some((path.to_string(), line, non_empty_location_tail(after_range)));
+        }
         let Some(after_line_colon) = after_line.strip_prefix(':') else {
             continue;
         };
@@ -610,6 +613,9 @@ fn strip_location_suffix(value: &str) -> (String, Option<usize>) {
     if let Some((path, line, _)) = split_hash_line_anchor(&normalized) {
         return (path, Some(line));
     }
+    if let Some((path, line, _)) = split_colon_line_range_location(&normalized) {
+        return (path, Some(line));
+    }
     let Some((prefix, column_or_line)) = split_numeric_suffix(&normalized) else {
         return (normalized, None);
     };
@@ -635,6 +641,33 @@ fn split_numeric_suffix(value: &str) -> Option<(&str, usize)> {
     }
     let number = suffix.parse::<usize>().ok()?;
     (number > 0).then_some((prefix, number))
+}
+
+fn split_colon_line_range_location(value: &str) -> Option<(String, usize, Option<String>)> {
+    for (path_end, _) in value.match_indices(':') {
+        let path = &value[..path_end];
+        if !looks_like_location_path(path) {
+            continue;
+        }
+        let rest = &value[path_end + 1..];
+        let Some((line, after_line)) = split_leading_positive_number(rest) else {
+            continue;
+        };
+        let Some(after_range) = strip_colon_line_range(after_line) else {
+            continue;
+        };
+        return Some((path.to_string(), line, non_empty_location_tail(after_range)));
+    }
+    None
+}
+
+fn strip_colon_line_range(value: &str) -> Option<&str> {
+    let rest = value.strip_prefix('-')?;
+    let (_, after_range) = split_leading_positive_number(rest)?;
+    if after_range.is_empty() {
+        return Some("");
+    }
+    after_range.strip_prefix(':')
 }
 
 fn split_leading_positive_number(value: &str) -> Option<(usize, &str)> {
@@ -1167,6 +1200,11 @@ mod tests {
         assert_eq!(file.filters.file.as_deref(), Some("Cargo.toml"));
         assert_eq!(file.filters.target_line, Some(12));
 
+        let file_range = parse_query("file:Cargo.toml:12-18");
+        assert!(file_range.terms.is_empty());
+        assert_eq!(file_range.filters.file.as_deref(), Some("Cargo.toml"));
+        assert_eq!(file_range.filters.target_line, Some(12));
+
         let accidental_path = parse_query("file:src/server.rs:42");
         assert!(accidental_path.terms.is_empty());
         assert_eq!(
@@ -1227,6 +1265,14 @@ mod tests {
         );
         assert_eq!(hash_range_source_location.filters.target_line, Some(42));
 
+        let colon_range_source_location = parse_query("src/server.rs:42-45");
+        assert!(colon_range_source_location.terms.is_empty());
+        assert_eq!(
+            colon_range_source_location.filters.path.as_deref(),
+            Some("src/server.rs")
+        );
+        assert_eq!(colon_range_source_location.filters.target_line, Some(42));
+
         let markdown_source_location =
             parse_query("[src/server.rs#L42-L45](src/server.rs#L42-L45)");
         assert!(markdown_source_location.terms.is_empty());
@@ -1285,6 +1331,14 @@ mod tests {
             Some("src/server.rs")
         );
         assert_eq!(copied_source_column_line.filters.target_line, Some(42));
+
+        let copied_range_source_line = parse_query("src/server.rs:42-45: handle_request");
+        assert_eq!(copied_range_source_line.terms, vec!["handle_request"]);
+        assert_eq!(
+            copied_range_source_line.filters.path.as_deref(),
+            Some("src/server.rs")
+        );
+        assert_eq!(copied_range_source_line.filters.target_line, Some(42));
 
         let wrapped_source_location = parse_query("(src/server.rs:42:9)");
         assert!(wrapped_source_location.terms.is_empty());
