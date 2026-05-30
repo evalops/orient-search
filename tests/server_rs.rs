@@ -10364,6 +10364,104 @@ fn runtime_filter_only_shard_search_uses_route_before_manifest_sidecar() {
 }
 
 #[test]
+fn runtime_path_filter_shard_search_uses_route_before_cold_load() {
+    let workspace = tempfile::tempdir().unwrap();
+    let rust_repo = workspace.path().join("rust-service");
+    let python_repo = workspace.path().join("python-service");
+    write(
+        &rust_repo.join("Cargo.toml"),
+        "[package]\nname='rust-service'\nversion='0.1.0'\n[dependencies]\nserde_json='1'\n",
+    );
+    write(
+        &rust_repo.join("src/lib.rs"),
+        "use serde_json::Value;\npub fn issue_token() -> Value { Value::Null }\n",
+    );
+    write(
+        &python_repo.join("pyproject.toml"),
+        "[project]\nname='python-service'\ndependencies=['requests']\n",
+    );
+    write(
+        &python_repo.join("app.py"),
+        "def issue_token():\n    return 'requests backed'\n",
+    );
+
+    let shard_dir = tempfile::tempdir().unwrap();
+    build_shards(&[rust_repo, python_repo], shard_dir.path()).unwrap();
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(shard_dir.path().join("manifest.json")).unwrap()).unwrap();
+    let python_index = manifest["shards"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|shard| shard["name"] == "python-service")
+        .unwrap()["index"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    fs::remove_file(shard_dir.path().join("manifest.bin")).unwrap();
+    fs::remove_file(shard_dir.path().join(python_index)).unwrap();
+
+    let runtime = ToolRuntime::default();
+    let response = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("search"),
+        tool: "search_shards".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": shard_dir.path(),
+            "query": "file:Cargo.toml",
+            "limit": 10
+        }),
+    });
+    assert!(response.error.is_none(), "{:?}", response.error);
+    let result = serde_json::to_string(&response.result).unwrap();
+    assert!(result.contains("rust-service/Cargo.toml"), "{result}");
+    assert!(!result.contains("python-service"), "{result}");
+    assert_eq!(runtime.cached_shard_manifest_count(), 0);
+    assert_eq!(runtime.cached_index_count(), 1);
+
+    let path_response = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("search"),
+        tool: "search_shards".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": shard_dir.path(),
+            "query": "path:src/lib.rs issue token",
+            "limit": 10
+        }),
+    });
+    assert!(path_response.error.is_none(), "{:?}", path_response.error);
+    let path_result = serde_json::to_string(&path_response.result).unwrap();
+    assert!(
+        path_result.contains("rust-service/src/lib.rs"),
+        "{path_result}"
+    );
+    assert!(!path_result.contains("python-service"), "{path_result}");
+    assert_eq!(runtime.cached_shard_manifest_count(), 0);
+    assert_eq!(runtime.cached_index_count(), 1);
+
+    let scoped_response = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("search"),
+        tool: "search_shards".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": shard_dir.path(),
+            "query": "dep:serde_json import:serde_json issue token",
+            "limit": 10
+        }),
+    });
+    assert!(
+        scoped_response.error.is_none(),
+        "{:?}",
+        scoped_response.error
+    );
+    let scoped_result = serde_json::to_string(&scoped_response.result).unwrap();
+    assert!(
+        scoped_result.contains("rust-service/src/lib.rs"),
+        "{scoped_result}"
+    );
+    assert!(!scoped_result.contains("python-service"), "{scoped_result}");
+    assert_eq!(runtime.cached_shard_manifest_count(), 0);
+    assert_eq!(runtime.cached_index_count(), 1);
+}
+
+#[test]
 fn runtime_filter_only_routed_shard_search_uses_filter_sketch_before_cold_load() {
     let workspace = tempfile::tempdir().unwrap();
     let rust_repo = workspace.path().join("rust-service");

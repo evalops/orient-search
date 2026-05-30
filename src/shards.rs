@@ -25,7 +25,7 @@ pub const SHARD_MANIFEST_FORMAT_VERSION: u32 = 1;
 const SHARD_MANIFEST_VERSION: u32 = SHARD_MANIFEST_FORMAT_VERSION;
 const SHARD_MANIFEST_SIDECAR_VERSION: u32 = 2;
 const SHARD_MANIFEST_PREFILTER_VERSION: u32 = 1;
-const SHARD_MANIFEST_ROUTE_VERSION: u32 = 7;
+const SHARD_MANIFEST_ROUTE_VERSION: u32 = 8;
 const SHARD_MANIFEST_FILE: &str = "manifest.json";
 const SHARD_MANIFEST_SIDECAR_FILE: &str = "manifest.bin";
 const SHARD_MANIFEST_PREFILTER_FILE: &str = "manifest.prefilter.bin";
@@ -2273,6 +2273,7 @@ fn shard_query_sketch(index: &FastIndex) -> ShardQuerySketch {
         exact_hashes.push(sketch_fingerprint(key));
     }
     for file in &index.files {
+        push_route_value_substring_grams(&file.path_lower, &mut substring_bits);
         push_content_identifier_hashes(&file.content, &mut exact_hashes);
         push_content_substring_grams(&file.content, &mut substring_bits);
     }
@@ -2486,6 +2487,52 @@ fn push_identifier_hash(identifier: &mut String, exact_hashes: &mut Vec<u32>) {
     identifier.clear();
 }
 
+fn push_route_value_substring_grams(value: &str, substring_bits: &mut [u64]) {
+    let route_value = route_substring_value(value);
+    for gram in shard_query_substring_grams(&route_value) {
+        sketch_insert(substring_bits, &gram);
+    }
+}
+
+// Keep this normalization aligned with content substring grams for identifier-like
+// dependency/import filters. Separators are intentionally dropped for path filters.
+fn route_substring_value(value: &str) -> String {
+    value
+        .chars()
+        .flat_map(char::to_lowercase)
+        .filter(|ch| ch.is_ascii_alphanumeric() || *ch == '_')
+        .collect()
+}
+
+fn route_filter_substring_grams(filters: &SearchFilters) -> Vec<String> {
+    let mut grams = Vec::new();
+    for value in filters
+        .file
+        .iter()
+        .chain(filters.path.iter())
+        .filter(|value| {
+            !value.contains('*') && !value.contains('?') && !Path::new(value.as_str()).is_absolute()
+        })
+    {
+        grams.extend(shard_query_substring_grams(&route_substring_value(value)));
+    }
+    for value in filters
+        .dependency
+        .iter()
+        .chain(filters.import.iter())
+        .filter(|value| {
+            value
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+        })
+    {
+        grams.extend(shard_query_substring_grams(&route_substring_value(value)));
+    }
+    grams.sort();
+    grams.dedup();
+    grams
+}
+
 fn shard_sketch_exact_may_contain(sketch: &ShardQuerySketch, token: &str) -> bool {
     if !sketch.exact_hashes.is_empty() {
         return sketch
@@ -2641,9 +2688,10 @@ pub(crate) fn shard_route_selection(
     filters: &SearchFilters,
 ) -> Result<Option<ShardRouteSelection>> {
     let requirements = shard_route_requirements(shard_query, filters);
-    let has_term_requirements =
-        !requirements.exact_hashes.is_empty() || !requirements.trigram_hashes.is_empty();
-    if !has_term_requirements && !shard_route_filter_only_selectable(filters) {
+    let has_route_requirements = !requirements.exact_hashes.is_empty()
+        || !requirements.trigram_hashes.is_empty()
+        || !requirements.substring_grams.is_empty();
+    if !has_route_requirements && !shard_route_filter_only_selectable(filters) {
         return Ok(None);
     }
     let Some(route) = load_manifest_route(index_dir)? else {
@@ -2655,7 +2703,7 @@ pub(crate) fn shard_route_selection(
         .iter()
         .map(|shard| shard.name.clone())
         .collect::<Vec<_>>();
-    let candidate_ids = if has_term_requirements {
+    let candidate_ids = if has_route_requirements {
         match shard_route_candidate_ids(&route, &requirements) {
             ShardRouteLookup::Candidates(candidate_ids) => candidate_ids,
             ShardRouteLookup::MissingHash => {
@@ -2693,6 +2741,7 @@ fn shard_route_filter_only_selectable(filters: &SearchFilters) -> bool {
         || filters.test.is_some()
         || filters.generated.is_some()
         || filters.code.is_some()
+        || !route_filter_substring_grams(filters).is_empty()
 }
 
 fn shard_entries_to_jobs(
@@ -2830,7 +2879,7 @@ fn shard_route_requirements(shard_query: &str, filters: &SearchFilters) -> Shard
                 .map(|trigram| sketch_fingerprint(&trigram)),
         );
     }
-    let substring_grams = if filters.symbol_kind.is_none()
+    let mut substring_grams = if filters.symbol_kind.is_none()
         && query_tokens.len() == 1
         && shard_allows_substring_prefilter(&query_tokens[0])
     {
@@ -2838,6 +2887,9 @@ fn shard_route_requirements(shard_query: &str, filters: &SearchFilters) -> Shard
     } else {
         Vec::new()
     };
+    substring_grams.extend(route_filter_substring_grams(filters));
+    substring_grams.sort();
+    substring_grams.dedup();
     trigram_hashes.sort_unstable();
     trigram_hashes.dedup();
     ShardRouteRequirements {
