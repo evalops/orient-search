@@ -1039,7 +1039,13 @@ struct CommonSearchArgs {
     require_all: bool,
     #[arg(long, conflicts_with = "require_all")]
     any_terms: bool,
-    #[arg(long, value_enum, default_value = "medium")]
+    #[arg(
+        long,
+        visible_alias = "snippet-mode",
+        alias = "snippet_mode",
+        value_enum,
+        default_value = "medium"
+    )]
     snippet: SnippetModeArg,
     #[arg(long)]
     explain: bool,

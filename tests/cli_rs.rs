@@ -130,6 +130,7 @@ fn cli_search_help_lists_snippet_modes() {
         .assert()
         .success()
         .stdout(predicate::str::contains("--snippet <SNIPPET>"))
+        .stdout(predicate::str::contains("--snippet-mode"))
         .stdout(predicate::str::contains("short"))
         .stdout(predicate::str::contains("medium"))
         .stdout(predicate::str::contains("block"))
@@ -157,6 +158,53 @@ fn cli_rejects_invalid_snippet_mode_before_searching() {
     .stderr(predicate::str::contains("medium"))
     .stderr(predicate::str::contains("block"))
     .stderr(predicate::str::contains("symbol"));
+}
+
+#[test]
+fn cli_accepts_agent_friendly_snippet_mode_alias() {
+    let repo = sample_repo();
+    let index_path = repo.path().join(".orient/index");
+
+    let mut live = Command::cargo_bin("orient").unwrap();
+    live.args([
+        "search",
+        "--repo",
+        repo.path().to_str().unwrap(),
+        "--snippet-mode",
+        "block",
+        "issue token",
+    ])
+    .assert()
+    .success()
+    .stdout(predicate::str::contains("src/auth.rs"))
+    .stdout(predicate::str::contains("SessionManager"));
+
+    let mut ensure_index = Command::cargo_bin("orient").unwrap();
+    ensure_index
+        .args([
+            "ensure-index",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--index",
+            index_path.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let mut indexed = Command::cargo_bin("orient").unwrap();
+    indexed
+        .args([
+            "indexed-search",
+            "--index",
+            index_path.to_str().unwrap(),
+            "--snippet_mode",
+            "symbol",
+            "issue token",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("src/auth.rs"))
+        .stdout(predicate::str::contains("\"read_range\""));
 }
 
 #[test]
