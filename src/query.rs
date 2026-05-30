@@ -43,6 +43,7 @@ pub fn parse_query(input: &str) -> ParsedQuery {
     infer_leading_location_term(&mut terms, &mut filters, explicit_content_terms);
     infer_pytest_command_node_id_term(&mut terms, &mut filters, explicit_content_terms);
     infer_leading_pytest_node_id_term(&mut terms, &mut filters, explicit_content_terms);
+    infer_js_test_command_path_term(&mut terms, &mut filters, explicit_content_terms);
     infer_cargo_test_command_symbol_term(&mut terms, &mut filters, explicit_content_terms);
     infer_go_test_run_command_symbol_term(&mut terms, &mut filters, explicit_content_terms);
     if terms.len() > 1 && !filters.match_any {
@@ -593,6 +594,132 @@ fn is_pytest_command_word(value: &str) -> bool {
 
 fn is_pytest_command_flag_term(value: &str) -> bool {
     matches!(value, "m" | "q" | "s" | "v" | "vv")
+}
+
+fn infer_js_test_command_path_term(
+    terms: &mut Vec<String>,
+    filters: &mut SearchFilters,
+    explicit_content_terms: bool,
+) {
+    if explicit_content_terms
+        || terms.len() < 2
+        || filters.file.is_some()
+        || filters.path.is_some()
+        || filters.symbol.is_some()
+    {
+        return;
+    }
+
+    let path_terms: Vec<_> = terms
+        .iter()
+        .enumerate()
+        .filter_map(|(index, term)| js_test_command_path(term).map(|path| (index, path)))
+        .collect();
+    let [(path_index, path)] = path_terms.as_slice() else {
+        return;
+    };
+    if !is_js_test_command_context(terms, *path_index) {
+        return;
+    }
+
+    let path = strip_leading_current_dir_segments(path.clone());
+    let applied = if path.contains('/') {
+        filters.path = Some(path);
+        true
+    } else {
+        filters.file = Some(path);
+        true
+    };
+    if !applied {
+        return;
+    }
+
+    filters
+        .exclude_content
+        .retain(|term| !is_js_test_command_flag_term(term));
+    terms.clear();
+    filters.require_all = false;
+}
+
+fn is_js_test_command_context(terms: &[String], path_index: usize) -> bool {
+    let mut saw_package_manager = false;
+    let mut saw_test_word = false;
+    let mut saw_runner = false;
+    for (index, term) in terms.iter().enumerate() {
+        if index == path_index {
+            continue;
+        }
+        let term = trim_location_token_wrappers(term).to_ascii_lowercase();
+        if matches!(term.as_str(), "jest" | "vitest") {
+            saw_runner = true;
+            continue;
+        }
+        if matches!(term.as_str(), "npm" | "pnpm" | "yarn" | "bun" | "npx") {
+            saw_package_manager = true;
+            continue;
+        }
+        if term == "test" {
+            saw_test_word = true;
+            continue;
+        }
+        if is_js_test_command_word(&term) {
+            continue;
+        }
+        return false;
+    }
+    saw_runner || (saw_package_manager && saw_test_word)
+}
+
+fn is_js_test_command_word(value: &str) -> bool {
+    matches!(value, "run" | "node" | "tsx" | "js")
+}
+
+fn js_test_command_path(value: &str) -> Option<String> {
+    let value = trim_location_token_wrappers(value);
+    if value.is_empty()
+        || value.starts_with('-')
+        || value.contains(char::is_whitespace)
+        || value.contains("://")
+    {
+        return None;
+    }
+
+    let (path, _) = strip_location_suffix(value);
+    let path = strip_leading_current_dir_segments(path);
+    if path.is_empty() || (!path.contains('/') && !looks_like_file_name_query(&path)) {
+        return None;
+    }
+
+    let file_name = path.rsplit('/').next().unwrap_or(path.as_str());
+    let lower_path = path.to_ascii_lowercase();
+    let lower_file = file_name.to_ascii_lowercase();
+    let extension = lower_file.rsplit_once('.')?.1;
+    if !js_test_file_extension(extension) {
+        return None;
+    }
+    if lower_file.contains(".test.")
+        || lower_file.contains(".spec.")
+        || lower_path.split('/').any(|segment| segment == "__tests__")
+    {
+        Some(path)
+    } else {
+        None
+    }
+}
+
+fn js_test_file_extension(extension: &str) -> bool {
+    matches!(
+        extension,
+        "js" | "jsx" | "ts" | "tsx" | "mjs" | "cjs" | "mts" | "cts"
+    )
+}
+
+fn is_js_test_command_flag_term(value: &str) -> bool {
+    let value = value.trim_start_matches('-');
+    matches!(
+        value,
+        "" | "runInBand" | "watch" | "watchAll" | "coverage" | "passWithNoTests"
+    )
 }
 
 fn infer_cargo_test_command_symbol_term(
@@ -2399,6 +2526,41 @@ mod tests {
             Some("tests/test_auth.py")
         );
         assert_eq!(pytest_command.filters.target_line, None);
+
+        let vitest_command = parse_query("pnpm vitest src/auth.test.ts");
+        assert!(vitest_command.terms.is_empty());
+        assert_eq!(
+            vitest_command.filters.path.as_deref(),
+            Some("src/auth.test.ts")
+        );
+        assert!(!vitest_command.filters.require_all);
+
+        let npm_test_command = parse_query("npm test -- ./src/auth.test.ts --runInBand");
+        assert!(npm_test_command.terms.is_empty());
+        assert_eq!(
+            npm_test_command.filters.path.as_deref(),
+            Some("src/auth.test.ts")
+        );
+        assert!(npm_test_command.filters.exclude_content.is_empty());
+
+        let jest_file_command = parse_query("npx jest auth.spec.tsx");
+        assert!(jest_file_command.terms.is_empty());
+        assert_eq!(
+            jest_file_command.filters.file.as_deref(),
+            Some("auth.spec.tsx")
+        );
+
+        let tests_dir_command = parse_query("bun test src/__tests__/auth.ts");
+        assert!(tests_dir_command.terms.is_empty());
+        assert_eq!(
+            tests_dir_command.filters.path.as_deref(),
+            Some("src/__tests__/auth.ts")
+        );
+
+        let npm_install_command = parse_query("npm install left-pad auth.test.ts");
+        assert_eq!(npm_install_command.filters.file, None);
+        assert_eq!(npm_install_command.filters.path, None);
+        assert!(!npm_install_command.terms.is_empty());
 
         let cargo_test_command = parse_query("cargo test parser_accepts_locations");
         assert!(cargo_test_command.terms.is_empty());
