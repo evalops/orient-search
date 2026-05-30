@@ -523,7 +523,7 @@ fn cli_outputs_agent_instructions() {
     ))
     .stdout(predicate::str::contains("search_auto_batch"))
     .stdout(predicate::str::contains("read_batch_request"))
-    .stdout(predicate::str::contains("agent activity logs"));
+    .stdout(predicate::str::contains("has no telemetry"));
 }
 
 #[test]

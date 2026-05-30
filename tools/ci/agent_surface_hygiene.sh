@@ -62,7 +62,7 @@ for pattern in "${regex_patterns[@]}"; do
 done
 
 for file in "${scratch}"/agent-instructions-*.txt; do
-  grep -q 'agent activity logs' "${file}"
+  grep -q 'has no telemetry' "${file}"
   grep -q 'local code discovery and bounded file reads' "${file}"
 done
 

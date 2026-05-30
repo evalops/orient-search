@@ -3,7 +3,7 @@
 Orient Search is a local code-search daemon for coding agents. It provides repo
 maps, indexed search, query plans, and bounded file reads so agents can inspect
 code quickly without repeated filesystem scans. It stores local code-search
-artifacts only and does not collect agent activity logs.
+artifacts only and has no telemetry.
 
 ## Shared Daemon
 
@@ -50,8 +50,8 @@ differs from `orient --version`, restart the shared daemon. The JSON-lines
 need cached paths and per-target details.
 
 The daemon shares local search artifacts only: indexes, shard manifests, repo
-maps, and cached file metadata. It is not a remote service or general agent
-state store.
+maps, and cached file metadata. It is not a remote service or a general runtime
+state layer.
 
 ## Search
 
@@ -135,7 +135,7 @@ definition.
 Orient stores source snapshots and line offsets in persisted indexes so bounded
 reads stay fast even when served by a shared daemon. Keep indexes in a local
 cache and out of source control. Indexes contain source text and search metadata,
-not agent activity logs.
+with no telemetry.
 
 Use:
 

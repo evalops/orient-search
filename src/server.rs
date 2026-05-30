@@ -1695,7 +1695,7 @@ pub fn agent_guide(
         "adapter_notes": [
             profile.adapter_note,
             "Keep cache paths local to the machine running the agents; do not copy machine-specific layouts into shared docs or reusable instructions.",
-            "Orient shares code-search artifacts only; it does not collect agent activity logs.",
+            "Orient shares code-search artifacts only and has no telemetry.",
             "Prefer JSON-lines/MCP tool calls and returned follow-up requests over repeated shell scans."
         ],
         "preferred_surfaces": {
@@ -1845,7 +1845,7 @@ Use Orient for local code discovery and bounded file reads before `rg`, `find`, 
 Prefer the shared daemon when it is running: `{client_command}`.\n\
 Copy this snippet into {instruction_target}.\n\
 Keep cache paths local to the machine running the agents; do not copy machine-specific layouts into shared docs or reusable instructions.\n\
-Orient shares code-search artifacts only; it does not collect agent activity logs.\n\
+Orient shares code-search artifacts only and has no telemetry.\n\
 For many local repos, bootstrap it with `orient ensure-shards --discover-root /path/to/workspaces --output-dir {index_dir} --family-limit 2` and `orient serve-tcp --addr {addr} --index-dir {index_dir}`.\n\
 For one repo, bootstrap it with `orient ensure-index --repo {repo} --index {index}` and `orient serve-tcp --addr {addr} --index {index}`.\n\
 At the start of a task, call `daemon_status` or `agent_guide`, then use `search_auto` with `retry_if_empty:true` for normal lookup and `search_auto_batch` with `retry_if_empty:true` for alternate query phrasings.\n\
@@ -1860,8 +1860,7 @@ Use `read_batch_request.read_budget` to keep batch reads under the advertised ha
 For manual context reads from a line inside a definition, pass `scope:\"symbol\"` so `read_range` or `read_ranges` anchors at the nearest function, class, or type definition.\n\
 Manual `read_range` and `read_ranges` calls accept pasted locations like `src/lib.rs:40-45` or `src/lib.rs#L40-L45`; use returned read requests when available.\n\
 When results are empty, noisy, or suspicious, read `query_plan_summary` first, then use the returned `query_plan_request` or inline `query_plan_result` before broadening the search; pass `retry_if_empty:true` when you want Orient to execute the promoted retry once and return `primary_retry_result` immediately.\n\
-Fall back to shell search only when Orient is unavailable or its query plan is not useful for the task.\n\
-Orient is local code search only and does not collect agent activity logs.",
+Fall back to shell search only when Orient is unavailable or its query plan is not useful for the task.",
         instruction_target = profile.instruction_target
     )
 }

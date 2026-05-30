@@ -2,8 +2,7 @@
 
 Run one shared Orient daemon for the repos agents are actively editing. Local
 agents share repo maps, indexes, query plans, and bounded reads without each one
-rescanning the same files. The daemon stays local and does not collect agent
-activity logs.
+rescanning the same files. The daemon stays local and has no telemetry.
 
 In this doc, "shared" means shared by local clients on the same machine. Orient
 is a local code-search service, not a hosted indexing service.
@@ -135,8 +134,8 @@ place them in a cache directory, do not commit them, and do not copy them to
 shared storage unless the indexed source is allowed there too.
 
 The daemon cache contains code-search artifacts only: opened index files,
-derived postings, repo metadata, and freshness state. It is not a general agent
-state store.
+derived postings, repo metadata, and freshness state. It is not a general
+runtime state layer.
 
 Public docs and examples should use environment variables or neutral
 placeholders. Keep machine-specific paths, user names, and workspace layouts out
