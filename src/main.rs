@@ -1291,6 +1291,8 @@ struct RelatedSymbolFilterArgs {
         alias = "exclude-term"
     )]
     exclude_content: Vec<String>,
+    #[arg(long = "format", default_value = "json", value_parser = ["json"])]
+    _format: String,
 }
 
 fn search_filters_from_args(
