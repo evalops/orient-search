@@ -33,7 +33,7 @@ const DEFAULT_RELATED_FILE_READ_LINES: usize = 80;
 pub(crate) const DEFAULT_SYMBOL_READ_CONTEXT_BEFORE: usize = 20;
 const DEFAULT_SYMBOL_READ_LINES: usize = 80;
 const RIPGREP_TIMEOUT: Duration = Duration::from_millis(250);
-const RIPGREP_POLL_INTERVAL: Duration = Duration::from_millis(5);
+const RIPGREP_POLL_INTERVAL: Duration = Duration::from_millis(1);
 const SYMBOL_REFERENCE_LOWERCASE_THRESHOLD: usize = 16;
 pub(crate) const GENERATED_PATH_SCORE_MULTIPLIER: f64 = 0.2;
 const GENERATED_DIRECTORY_SEGMENTS: &[&str] = &[
@@ -2318,7 +2318,7 @@ fn search_repo_ripgrep(
     let mut scored: HashMap<String, SearchResult> = HashMap::new();
     let mut path_filter_cache = HashMap::<String, Option<String>>::new();
     let mut content_filter_cache = HashMap::<String, bool>::new();
-    let max_matches = (limit.max(1) * 300).clamp(1_000, 8_000);
+    let max_matches = fallback_ripgrep_match_cap(limit);
     let mut match_count = 0usize;
     let deadline = Instant::now() + timeout;
 
@@ -2430,6 +2430,10 @@ fn search_repo_ripgrep(
     }
     anchor_results_on_target_line(root, &mut results, filters);
     Ok(Some(finalize_results_for_filters(results, limit, filters)))
+}
+
+fn fallback_ripgrep_match_cap(limit: usize) -> usize {
+    (limit.max(1) * 25).clamp(250, 2_000)
 }
 
 const TEST_RIPGREP_GLOBS: &[&str] = &[
@@ -7845,6 +7849,15 @@ mod tests {
         assert_eq!(fallback_streaming_candidate_cap(10), 2_000);
         assert_eq!(fallback_streaming_candidate_cap(100), 5_000);
         assert_eq!(fallback_streaming_candidate_cap(1_000), 5_000);
+    }
+
+    #[test]
+    fn fallback_ripgrep_match_cap_keeps_broad_queries_bounded() {
+        assert_eq!(fallback_ripgrep_match_cap(0), 250);
+        assert_eq!(fallback_ripgrep_match_cap(1), 250);
+        assert_eq!(fallback_ripgrep_match_cap(10), 250);
+        assert_eq!(fallback_ripgrep_match_cap(100), 2_000);
+        assert_eq!(fallback_ripgrep_match_cap(1_000), 2_000);
     }
 
     #[test]
