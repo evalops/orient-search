@@ -2671,6 +2671,18 @@ fn bare_path_like_queries_use_filter_only_fast_paths() {
     .unwrap();
     assert_eq!(result_paths(&hosted_location_fallback), vec!["src/lib.rs"]);
     assert_eq!(hosted_location_fallback[0].match_lines, vec![40]);
+    let hosted_column_location_fallback = search_repo_fast_filtered(
+        repo.path(),
+        "https://github.com/evalops/orient-search/blob/main/src/lib.rs#L40C9-L41C1",
+        10,
+        &filters,
+    )
+    .unwrap();
+    assert_eq!(
+        result_paths(&hosted_column_location_fallback),
+        vec!["src/lib.rs"]
+    );
+    assert_eq!(hosted_column_location_fallback[0].match_lines, vec![40]);
     let hosted_query_location_fallback = search_repo_fast_filtered(
         repo.path(),
         "https://github.com/evalops/orient-search/blob/main/src/lib.rs?plain=1#L40-L45",
@@ -2853,6 +2865,18 @@ fn bare_path_like_queries_use_filter_only_fast_paths() {
         .unwrap();
     assert_eq!(result_paths(&hosted_location_indexed), vec!["src/lib.rs"]);
     assert_eq!(hosted_location_indexed[0].match_lines, vec![40]);
+    let hosted_column_location_indexed = index
+        .search_filtered(
+            "https://github.com/evalops/orient-search/blob/main/src/lib.rs#L40C9-L41C1",
+            10,
+            &filters,
+        )
+        .unwrap();
+    assert_eq!(
+        result_paths(&hosted_column_location_indexed),
+        vec!["src/lib.rs"]
+    );
+    assert_eq!(hosted_column_location_indexed[0].match_lines, vec![40]);
     let hosted_query_location_indexed = index
         .search_filtered(
             "https://github.com/evalops/orient-search/blob/main/src/lib.rs?plain=1#L40-L45",

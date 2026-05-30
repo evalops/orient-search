@@ -559,6 +559,7 @@ fn split_hash_line_anchor(value: &str) -> Option<(String, usize, Option<String>)
 }
 
 fn strip_hash_line_range(value: &str) -> &str {
+    let value = strip_hash_line_column(value);
     let Some(rest) = value.strip_prefix('-') else {
         return value;
     };
@@ -567,7 +568,16 @@ fn strip_hash_line_range(value: &str) -> &str {
         .or_else(|| rest.strip_prefix('l'))
         .unwrap_or(rest);
     split_leading_positive_number(rest)
-        .map(|(_, after_range)| after_range)
+        .map(|(_, after_range)| strip_hash_line_column(after_range))
+        .unwrap_or(value)
+}
+
+fn strip_hash_line_column(value: &str) -> &str {
+    let Some(rest) = value.strip_prefix('C').or_else(|| value.strip_prefix('c')) else {
+        return value;
+    };
+    split_leading_positive_number(rest)
+        .map(|(_, after_column)| after_column)
         .unwrap_or(value)
 }
 
@@ -1372,6 +1382,14 @@ mod tests {
         );
         assert_eq!(hash_range_source_location.filters.target_line, Some(42));
 
+        let hash_column_source_location = parse_query("src/server.rs#L42C5-L45C9");
+        assert!(hash_column_source_location.terms.is_empty());
+        assert_eq!(
+            hash_column_source_location.filters.path.as_deref(),
+            Some("src/server.rs")
+        );
+        assert_eq!(hash_column_source_location.filters.target_line, Some(42));
+
         let colon_range_source_location = parse_query("src/server.rs:42-45");
         assert!(colon_range_source_location.terms.is_empty());
         assert_eq!(
@@ -1408,6 +1426,16 @@ mod tests {
             Some("src/server.rs")
         );
         assert_eq!(hosted_query_source_location.filters.target_line, Some(42));
+
+        let hosted_column_source_location = parse_query(
+            "https://github.com/evalops/orient-search/blob/main/src/server.rs#L42C5-L45C9",
+        );
+        assert!(hosted_column_source_location.terms.is_empty());
+        assert_eq!(
+            hosted_column_source_location.filters.path.as_deref(),
+            Some("src/server.rs")
+        );
+        assert_eq!(hosted_column_source_location.filters.target_line, Some(42));
 
         let sourcegraph_source_location = parse_query(
             "https://sourcegraph.com/github.com/evalops/orient-search/-/blob/src/server.rs?L42:9",
