@@ -84,7 +84,7 @@ fn search_batch_result(
     read_batch_request: Option<ResultToolRequest>,
     results: Vec<SearchResult>,
 ) -> SearchBatchResult {
-    let next_action = read_batch_next_action(&read_batch_request);
+    let next_action = search_batch_next_action(&read_batch_request, &query_plan_request);
     SearchBatchResult {
         query,
         query_plan_request,
@@ -120,6 +120,20 @@ fn search_batch_followups<T: Serialize + ?Sized>(
             shard_scope_filters,
         ),
     )
+}
+
+fn search_batch_next_action(
+    read_batch_request: &Option<ResultToolRequest>,
+    query_plan_request: &ResultToolRequest,
+) -> Option<Value> {
+    read_batch_next_action(read_batch_request).or_else(|| {
+        Some(json!({
+            "kind": "query_plan",
+            "source": "query_plan_request",
+            "summary": "Plan a repaired or narrower query for this empty batch item.",
+            "request": query_plan_request
+        }))
+    })
 }
 
 fn read_batch_next_action(read_batch_request: &Option<ResultToolRequest>) -> Option<Value> {
@@ -1356,7 +1370,7 @@ pub fn agent_guide(
             "Use search_auto.query_plan_request, a search_auto_batch item query_plan_request, or a search batch item query_plan_request when results are empty or noisy.",
             "Use search_auto.repo_map_request, a search_auto_batch item repo_map_request, or a search batch item repo_map_request when the agent needs entrypoints, tests, commands, or top symbols for the chosen surface.",
             "Use search_auto.next_read_batch_request or a search_auto_batch item next_read_batch_request as the preferred immediate read follow-up after automatic retries.",
-            "Use search_auto.next_action or a search_auto_batch item next_action when the wrapper wants one prioritized follow-up request.",
+            "Use search_auto.next_action or a search batch item next_action when the wrapper wants one prioritized follow-up request; empty search batch items point at query_plan_request.",
             "Use search_auto.read_batch_request, a search_auto_batch item read_batch_request, or a search batch item next_action/read_batch_request to read top ranges in one call.",
             "Use symbol batch item next_action/read_batch_request to read candidate definitions for one requested symbol name.",
             "Use read_batch_request.read_budget to keep batch reads under hard_limits.max_batch_read_lines; split large inspections instead of widening one call.",

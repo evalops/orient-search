@@ -2601,6 +2601,34 @@ fn cli_batches_searches_across_fallback_indexed_and_shards() {
             "\"source\":\"read_batch_request\"",
         ));
 
+    let mut empty_fallback = Command::cargo_bin("orient").unwrap();
+    let empty_fallback = empty_fallback
+        .args([
+            "search-batch",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "orient_absent_token_zzq_20260529",
+            "--limit",
+            "2",
+            "--require-all",
+        ])
+        .output()
+        .unwrap();
+    assert!(empty_fallback.status.success());
+    let empty_fallback: serde_json::Value = serde_json::from_slice(&empty_fallback.stdout).unwrap();
+    assert_eq!(
+        empty_fallback[0]["read_batch_request"],
+        serde_json::Value::Null
+    );
+    assert_eq!(
+        empty_fallback[0]["next_action"]["source"],
+        serde_json::json!("query_plan_request")
+    );
+    assert_eq!(
+        empty_fallback[0]["next_action"]["request"],
+        empty_fallback[0]["query_plan_request"]
+    );
+
     let index_path = repo.path().join(".orient/index");
     let mut index = Command::cargo_bin("orient").unwrap();
     index

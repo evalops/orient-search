@@ -76,6 +76,8 @@ The generated rule should keep agents on this loop. See
   `query_plan_request` objects directly. Batch search tools return these on
   each item so wrappers can retry, map, or read without changing protocol
   shape.
+- Prefer a batch item's `next_action.request`: hit items point at the bounded
+  read request, and empty items point at the query-plan request.
 - Pass `refresh_if_stale:true` when live files may have changed. With `cwd`,
   Orient refreshes only the active checkout's shard. For `search_auto_batch`,
   Orient coalesces refresh across the batch's selected shard roots before

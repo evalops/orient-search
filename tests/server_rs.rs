@@ -1312,7 +1312,7 @@ fn runtime_serves_agent_guide_for_json_lines_wrappers() {
         "Use search_auto.query_plan_result or a search_auto_batch item query_plan_result immediately when an automatic search is empty.",
         "Use search_auto.query_plan_request, a search_auto_batch item query_plan_request, or a search batch item query_plan_request when results are empty or noisy.",
         "Use search_auto.repo_map_request, a search_auto_batch item repo_map_request, or a search batch item repo_map_request when the agent needs entrypoints, tests, commands, or top symbols for the chosen surface.",
-        "Use search_auto.next_action or a search_auto_batch item next_action when the wrapper wants one prioritized follow-up request.",
+        "Use search_auto.next_action or a search batch item next_action when the wrapper wants one prioritized follow-up request; empty search batch items point at query_plan_request.",
         "Use search_auto.read_batch_request, a search_auto_batch item read_batch_request, or a search batch item next_action/read_batch_request to read top ranges in one call.",
         "Use symbol batch item next_action/read_batch_request to read candidate definitions for one requested symbol name.",
         "Use read_batch_request.read_budget to keep batch reads under hard_limits.max_batch_read_lines; split large inspections instead of widening one call.",
@@ -3676,13 +3676,31 @@ fn runtime_batches_searches_and_query_plans_against_repo_index_and_shards() {
         tool: "search_batch".to_string(),
         arguments: serde_json::json!({
             "repo": repo.path(),
-            "queries": ["SessionManager", "invoice total"],
+            "queries": ["SessionManager", "invoice total", "orient_absent_token_zzq_20260529"],
             "limit": 2,
             "require_all": true
         }),
     });
     assert!(fallback.error.is_none(), "{:?}", fallback.error);
-    let result = serde_json::to_string(&fallback.result).unwrap();
+    let fallback = fallback.result.unwrap();
+    assert_eq!(
+        fallback[0]["next_action"]["source"],
+        serde_json::json!("read_batch_request")
+    );
+    assert_eq!(fallback[2]["read_batch_request"], serde_json::Value::Null);
+    assert_eq!(
+        fallback[2]["next_action"]["source"],
+        serde_json::json!("query_plan_request")
+    );
+    assert_eq!(
+        fallback[2]["next_action"]["request"],
+        fallback[2]["query_plan_request"]
+    );
+    assert_eq!(
+        fallback[2]["next_action"]["request"]["arguments"]["query"],
+        "orient_absent_token_zzq_20260529"
+    );
+    let result = serde_json::to_string(&fallback).unwrap();
     assert!(result.contains("\"query\":\"SessionManager\""), "{result}");
     assert!(result.contains("src/auth.rs"), "{result}");
     assert!(result.contains("\"query\":\"invoice total\""), "{result}");

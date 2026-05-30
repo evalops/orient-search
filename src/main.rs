@@ -1390,7 +1390,7 @@ fn search_batch_result(
     read_batch_request: Option<ResultToolRequest>,
     results: Vec<SearchResult>,
 ) -> SearchBatchResult {
-    let next_action = read_batch_next_action(&read_batch_request);
+    let next_action = search_batch_next_action(&read_batch_request, &query_plan_request);
     SearchBatchResult {
         query,
         query_plan_request,
@@ -1399,6 +1399,20 @@ fn search_batch_result(
         next_action,
         results,
     }
+}
+
+fn search_batch_next_action(
+    read_batch_request: &Option<ResultToolRequest>,
+    query_plan_request: &ResultToolRequest,
+) -> Option<Value> {
+    read_batch_next_action(read_batch_request).or_else(|| {
+        Some(serde_json::json!({
+            "kind": "query_plan",
+            "source": "query_plan_request",
+            "summary": "Plan a repaired or narrower query for this empty batch item.",
+            "request": query_plan_request
+        }))
+    })
 }
 
 fn read_batch_next_action(read_batch_request: &Option<ResultToolRequest>) -> Option<Value> {

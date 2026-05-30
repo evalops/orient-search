@@ -50,7 +50,7 @@ The rule should tell agents:
 - Prefer `next_read_batch_request` after `search_auto` or `search_auto_batch`;
   it points at normal hits when present and retry hits after automatic repair.
 - When `next_action` is present, run `next_action.request` first; it chooses
-  between refresh, read, retry, and map follow-ups.
+  between refresh, read, retry, map, and empty-result query-plan follow-ups.
 - When opening context manually from a line inside a definition, pass
   `scope:"symbol"` on `read_range` or `read_ranges` so the returned window
   starts from the nearest enclosing function, class, or type definition.

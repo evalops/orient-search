@@ -127,7 +127,8 @@ around nearby entrypoints without inventing a second call shape. Automatic
 searches also expose `next_read_batch_request`, which points to the best
 immediate batch read after normal results or an automatic retry. Their
 `next_action` field wraps the best immediate follow-up request with a compact
-`kind`, `source`, and `summary`.
+`kind`, `source`, and `summary`; empty search batch items point it at
+`query_plan_request`.
 Plan batch responses also promote each repaired item's `next_action`, so
 wrappers can retry from `item.next_action` without digging through nested plan
 objects.
