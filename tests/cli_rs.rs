@@ -363,6 +363,57 @@ fn cli_search_line_filter_anchors_file_results() {
 }
 
 #[test]
+fn cli_accepts_filter_only_symbol_search_without_empty_query_placeholder() {
+    let repo = sample_repo();
+    let index_path = repo.path().join(".orient/index");
+
+    let mut live = Command::cargo_bin("orient").unwrap();
+    live.args([
+        "search",
+        "--repo",
+        repo.path().to_str().unwrap(),
+        "--symbol",
+        "issue_token",
+        "--snippet",
+        "symbol",
+    ])
+    .assert()
+    .success()
+    .stdout(predicate::str::contains("\"path\":\"src/auth.rs\""))
+    .stdout(predicate::str::contains("\"read_range\""))
+    .stdout(predicate::str::contains("issue_token"));
+
+    let mut ensure_index = Command::cargo_bin("orient").unwrap();
+    ensure_index
+        .args([
+            "ensure-index",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--index",
+            index_path.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let mut indexed = Command::cargo_bin("orient").unwrap();
+    indexed
+        .args([
+            "indexed-search",
+            "--index",
+            index_path.to_str().unwrap(),
+            "--symbol",
+            "issue_token",
+            "--snippet",
+            "symbol",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"path\":\"src/auth.rs\""))
+        .stdout(predicate::str::contains("\"read_range\""))
+        .stdout(predicate::str::contains("issue_token"));
+}
+
+#[test]
 fn cli_suppresses_broken_pipe_when_output_consumer_closes() {
     let binary = assert_cmd::cargo::cargo_bin("orient");
     let mut child = ProcessCommand::new(binary)

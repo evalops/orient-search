@@ -189,7 +189,7 @@ enum Commands {
     SearchShards {
         #[arg(long)]
         index_dir: PathBuf,
-        #[arg(allow_hyphen_values = true, required_unless_present = "query_arg")]
+        #[arg(allow_hyphen_values = true)]
         query: Option<String>,
         #[arg(long = "query", value_name = "QUERY", conflicts_with = "query")]
         query_arg: Option<String>,
@@ -223,7 +223,7 @@ enum Commands {
     ShardPlan {
         #[arg(long)]
         index_dir: PathBuf,
-        #[arg(allow_hyphen_values = true, required_unless_present = "query_arg")]
+        #[arg(allow_hyphen_values = true)]
         query: Option<String>,
         #[arg(long = "query", value_name = "QUERY", conflicts_with = "query")]
         query_arg: Option<String>,
@@ -381,7 +381,7 @@ enum Commands {
     IndexPlan {
         #[arg(long)]
         index: PathBuf,
-        #[arg(allow_hyphen_values = true, required_unless_present = "query_arg")]
+        #[arg(allow_hyphen_values = true)]
         query: Option<String>,
         #[arg(long = "query", value_name = "QUERY", conflicts_with = "query")]
         query_arg: Option<String>,
@@ -415,7 +415,7 @@ enum Commands {
         index: Option<PathBuf>,
         #[arg(long, conflicts_with = "index")]
         index_dir: Option<PathBuf>,
-        #[arg(allow_hyphen_values = true, required_unless_present = "query_arg")]
+        #[arg(allow_hyphen_values = true)]
         query: Option<String>,
         #[arg(long = "query", value_name = "QUERY", conflicts_with = "query")]
         query_arg: Option<String>,
@@ -510,7 +510,7 @@ enum Commands {
         index: Option<PathBuf>,
         #[arg(long, conflicts_with = "index")]
         index_dir: Option<PathBuf>,
-        #[arg(allow_hyphen_values = true, required_unless_present = "query_arg")]
+        #[arg(allow_hyphen_values = true)]
         query: Option<String>,
         #[arg(long = "query", value_name = "QUERY", conflicts_with = "query")]
         query_arg: Option<String>,
@@ -530,7 +530,7 @@ enum Commands {
         retry_if_empty: bool,
     },
     SearchAuto {
-        #[arg(allow_hyphen_values = true, required_unless_present = "query_arg")]
+        #[arg(allow_hyphen_values = true)]
         query: Option<String>,
         #[arg(long = "query", value_name = "QUERY", conflicts_with = "query")]
         query_arg: Option<String>,
@@ -618,7 +618,7 @@ enum Commands {
     IndexedSearch {
         #[arg(long)]
         index: PathBuf,
-        #[arg(allow_hyphen_values = true, required_unless_present = "query_arg")]
+        #[arg(allow_hyphen_values = true)]
         query: Option<String>,
         #[arg(long = "query", value_name = "QUERY", conflicts_with = "query")]
         query_arg: Option<String>,
@@ -7072,6 +7072,7 @@ fn cli_filter_only_query(filters: &SearchFilters) -> bool {
         || filters.path.is_some()
         || filters.language.is_some()
         || filters.extension.is_some()
+        || filters.symbol.is_some()
         || filters.symbol_kind.is_some()
         || filters.repo.is_some()
         || filters.branch.is_some()
