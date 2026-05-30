@@ -70,7 +70,8 @@ uses the shared daemon at `127.0.0.1:8796` when available, then falls back to a
 live search of the current directory. When run from inside a git checkout, the
 daemon request is scoped to that checkout so multi-repo shard daemons stay
 focused on the agent's current task and only load matching shard indexes. Use
-`--daemon-addr` for another TCP daemon or `--no-daemon` to force local fallback.
+`--daemon-addr` or `ORIENT_ADDR` for another TCP daemon, `ORIENT_SOCKET` for a
+Unix socket daemon, or `--no-daemon` to force local fallback.
 
 `orient client-jsonl` adds the shell's current working directory to no-target
 search, map, plan, symbol, read, and related-file calls. Generated client
@@ -83,6 +84,8 @@ shared multi-repo daemons focused on the current task. With the same scope,
 index is stale, plus a top-level ready-to-run `refresh_request` that refreshes
 and repeats the search. Shard freshness includes branch/origin metadata drift,
 so switching branches without touching files is still detected.
+`client-jsonl` and `daemon-status` also honor `ORIENT_SOCKET` and `ORIENT_ADDR`
+when no transport flag is passed, with explicit flags taking precedence.
 When a JSON-lines or MCP client calls `daemon_status` with `cwd`, the returned
 `default_requests` also include that `cwd`, so copyable first map, search,
 batch, and query-plan calls stay scoped to the active checkout. Those scoped

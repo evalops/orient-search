@@ -364,7 +364,9 @@ fn cli_help_shows_default_daemon_addr_for_agent_clients() {
         .args(["client-jsonl", "--help"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("[default: 127.0.0.1:8796]"))
+        .stdout(predicate::str::contains("--addr"))
+        .stdout(predicate::str::contains("ORIENT_ADDR"))
+        .stdout(predicate::str::contains("127.0.0.1:8796"))
         .stdout(predicate::str::contains("--require-version"));
 
     let mut status = Command::cargo_bin("orient").unwrap();
@@ -372,14 +374,18 @@ fn cli_help_shows_default_daemon_addr_for_agent_clients() {
         .args(["daemon-status", "--help"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("[default: 127.0.0.1:8796]"));
+        .stdout(predicate::str::contains("--addr"))
+        .stdout(predicate::str::contains("ORIENT_ADDR"))
+        .stdout(predicate::str::contains("127.0.0.1:8796"));
 
     let mut doctor = Command::cargo_bin("orient").unwrap();
     doctor
         .args(["doctor", "--help"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("[default: 127.0.0.1:8796]"))
+        .stdout(predicate::str::contains("--addr"))
+        .stdout(predicate::str::contains("ORIENT_ADDR"))
+        .stdout(predicate::str::contains("127.0.0.1:8796"))
         .stdout(predicate::str::contains("--index-dir"));
 
     let mut mcp = Command::cargo_bin("orient").unwrap();

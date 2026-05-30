@@ -16,6 +16,7 @@ export ORIENT_WORKSPACES=/path/to/workspaces
 export ORIENT_SHARDS=/path/to/local/cache/orient-shards
 export ORIENT_INDEX=/path/to/local/cache/orient.index
 export ORIENT_REPO=/path/to/repo
+export ORIENT_ADDR=127.0.0.1:8796
 export ORIENT_SOCKET=/path/to/local/cache/orient.sock
 
 orient ensure-shards \
@@ -24,7 +25,7 @@ orient ensure-shards \
   --family-limit 2
 
 orient serve-tcp \
-  --addr 127.0.0.1:8796 \
+  --addr "$ORIENT_ADDR" \
   --index-dir "$ORIENT_SHARDS"
 ```
 
@@ -50,6 +51,12 @@ orient serve-unix --socket "$ORIENT_SOCKET" --index-dir "$ORIENT_SHARDS"
 orient client-jsonl --require-version --socket "$ORIENT_SOCKET"
 ```
 
+`orient client-jsonl`, `orient daemon-status`, `orient search-auto`, and
+`orient search-auto-batch` read `ORIENT_SOCKET` first and then `ORIENT_ADDR`
+when no explicit `--socket` / `--addr` flag is provided. Explicit flags still
+win. This keeps multiple local agents pointed at the same shared daemon without
+copying transport flags into every request.
+
 ## Agent Setup
 
 Generate a short local instruction snippet for the current daemon target:
@@ -66,7 +73,8 @@ The generated snippet should keep agents on this loop. See
   query phrasings.
 - From shell, use bare `orient search-auto ...` or `orient search-auto-batch
   ...`. They try the default TCP daemon first and fall back to the current
-  directory when no daemon is reachable.
+  directory when no daemon is reachable. Set `ORIENT_ADDR` or `ORIENT_SOCKET`
+  to point bare commands at a non-default shared daemon.
 - From JSON-lines or MCP-style clients, pass `cwd` on no-target search, map,
   plan, symbol, read, and related-file calls. The daemon scopes those requests
   to the active checkout.

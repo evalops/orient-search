@@ -48,6 +48,26 @@ use std::time::Instant;
 
 const DEFAULT_DAEMON_ADDR: &str = "127.0.0.1:8796";
 const DEFAULT_CLI_READ_RANGE_LINES: usize = 80;
+const ORIENT_ADDR_ENV: &str = "ORIENT_ADDR";
+#[cfg(unix)]
+const ORIENT_SOCKET_ENV: &str = "ORIENT_SOCKET";
+
+#[derive(Debug, Clone)]
+enum DaemonTarget {
+    Tcp(String),
+    #[cfg(unix)]
+    Unix(PathBuf),
+}
+
+impl DaemonTarget {
+    fn client_command(&self) -> String {
+        match self {
+            DaemonTarget::Tcp(addr) => tcp_client_command(addr),
+            #[cfg(unix)]
+            DaemonTarget::Unix(socket) => unix_client_command(socket),
+        }
+    }
+}
 
 #[derive(Debug, Parser)]
 #[command(name = "orient")]
@@ -530,8 +550,12 @@ enum Commands {
         diagnose: bool,
         #[arg(long)]
         retry_if_empty: bool,
-        #[arg(long = "daemon-addr", visible_alias = "addr", default_value = DEFAULT_DAEMON_ADDR)]
-        daemon_addr: String,
+        #[arg(
+            long = "daemon-addr",
+            visible_alias = "addr",
+            help = "TCP daemon address; falls back to ORIENT_ADDR or 127.0.0.1:8796"
+        )]
+        daemon_addr: Option<String>,
         #[arg(long)]
         no_daemon: bool,
     },
@@ -558,8 +582,12 @@ enum Commands {
         diagnose: bool,
         #[arg(long)]
         retry_if_empty: bool,
-        #[arg(long = "daemon-addr", visible_alias = "addr", default_value = DEFAULT_DAEMON_ADDR)]
-        daemon_addr: String,
+        #[arg(
+            long = "daemon-addr",
+            visible_alias = "addr",
+            help = "TCP daemon address; falls back to ORIENT_ADDR or 127.0.0.1:8796"
+        )]
+        daemon_addr: Option<String>,
         #[arg(long)]
         no_daemon: bool,
     },
@@ -899,8 +927,11 @@ enum Commands {
         index: Option<String>,
         #[arg(long)]
         index_dir: Option<String>,
-        #[arg(long, default_value = "127.0.0.1:8796")]
-        addr: String,
+        #[arg(
+            long,
+            help = "TCP daemon address; falls back to ORIENT_ADDR or 127.0.0.1:8796"
+        )]
+        addr: Option<String>,
         #[arg(long, value_enum, default_value_t = AgentProfileArg::Generic)]
         profile: AgentProfileArg,
     },
@@ -911,15 +942,21 @@ enum Commands {
         index: Option<String>,
         #[arg(long)]
         index_dir: Option<String>,
-        #[arg(long, default_value = "127.0.0.1:8796")]
-        addr: String,
+        #[arg(
+            long,
+            help = "TCP daemon address; falls back to ORIENT_ADDR or 127.0.0.1:8796"
+        )]
+        addr: Option<String>,
         #[arg(long, value_enum, default_value_t = AgentProfileArg::Generic)]
         profile: AgentProfileArg,
     },
     DaemonStatus {
-        #[arg(long)]
+        #[arg(long, help = "Unix daemon socket; falls back to ORIENT_SOCKET")]
         socket: Option<PathBuf>,
-        #[arg(long, default_value = DEFAULT_DAEMON_ADDR)]
+        #[arg(
+            long,
+            help = "TCP daemon address; falls back to ORIENT_ADDR or 127.0.0.1:8796"
+        )]
         addr: Option<String>,
         #[arg(long, default_value = "summary", value_parser = ["summary", "json"])]
         format: String,
@@ -931,9 +968,12 @@ enum Commands {
         index: Option<PathBuf>,
         #[arg(long = "index-dir")]
         index_dir: Option<PathBuf>,
-        #[arg(long)]
+        #[arg(long, help = "Unix daemon socket; falls back to ORIENT_SOCKET")]
         socket: Option<PathBuf>,
-        #[arg(long, default_value = DEFAULT_DAEMON_ADDR)]
+        #[arg(
+            long,
+            help = "TCP daemon address; falls back to ORIENT_ADDR or 127.0.0.1:8796"
+        )]
         addr: Option<String>,
         #[arg(long, default_value = "text", value_parser = ["text", "json"])]
         format: String,
@@ -996,9 +1036,12 @@ enum Commands {
         nested_manifests: bool,
     },
     ClientJsonl {
-        #[arg(long)]
+        #[arg(long, help = "Unix daemon socket; falls back to ORIENT_SOCKET")]
         socket: Option<PathBuf>,
-        #[arg(long, default_value = DEFAULT_DAEMON_ADDR)]
+        #[arg(
+            long,
+            help = "TCP daemon address; falls back to ORIENT_ADDR or 127.0.0.1:8796"
+        )]
         addr: Option<String>,
         #[arg(long)]
         require_version: bool,
@@ -4016,6 +4059,7 @@ fn run() -> Result<()> {
             let filters = search_filters_from_args(&filters, repo_filter.clone())?;
             let query = cli_single_query_for_filters(query, query_arg, &filters)?;
             if repo.is_none() && index.is_none() && index_dir.is_none() && !no_daemon {
+                let daemon_target = resolve_daemon_target(None, daemon_addr);
                 let mut filters = filters.clone();
                 infer_current_repo_filter_if_missing(&mut filters);
                 let arguments = daemon_search_auto_arguments(
@@ -4028,9 +4072,9 @@ fn run() -> Result<()> {
                     retry_if_empty,
                 );
                 if let Some(mut result) =
-                    try_daemon_tool_request_tcp(&daemon_addr, "search_auto", arguments)?
+                    try_daemon_tool_request(&daemon_target, "search_auto", arguments)?
                 {
-                    retarget_client_cli_commands(&mut result, &tcp_client_command(&daemon_addr));
+                    retarget_client_cli_commands(&mut result, &daemon_target.client_command());
                     println!("{}", serde_json::to_string(&result)?);
                     return Ok(());
                 }
@@ -4342,6 +4386,7 @@ fn run() -> Result<()> {
         } => {
             let queries = cli_batch_queries(queries)?;
             if repo.is_none() && index.is_none() && index_dir.is_none() && !no_daemon {
+                let daemon_target = resolve_daemon_target(None, daemon_addr);
                 let mut filters = search_filters_from_args(&filters, repo_filter.clone())?;
                 infer_current_repo_filter_if_missing(&mut filters);
                 let arguments = daemon_search_auto_batch_arguments(
@@ -4354,9 +4399,9 @@ fn run() -> Result<()> {
                     retry_if_empty,
                 );
                 if let Some(mut result) =
-                    try_daemon_tool_request_tcp(&daemon_addr, "search_auto_batch", arguments)?
+                    try_daemon_tool_request(&daemon_target, "search_auto_batch", arguments)?
                 {
-                    retarget_client_cli_commands(&mut result, &tcp_client_command(&daemon_addr));
+                    retarget_client_cli_commands(&mut result, &daemon_target.client_command());
                     println!("{}", serde_json::to_string(&result)?);
                     return Ok(());
                 }
@@ -5422,6 +5467,7 @@ fn run() -> Result<()> {
             addr,
             profile,
         } => {
+            let addr = resolve_daemon_addr(addr);
             println!(
                 "{}",
                 serde_json::to_string(&agent_guide(
@@ -5440,6 +5486,7 @@ fn run() -> Result<()> {
             addr,
             profile,
         } => {
+            let addr = resolve_daemon_addr(addr);
             println!(
                 "{}",
                 agent_instructions(
@@ -5456,15 +5503,9 @@ fn run() -> Result<()> {
             addr,
             format,
         } => {
-            let (mut status, client_command) = if let Some(socket) = socket {
-                (
-                    daemon_status_unix(&socket)?,
-                    unix_client_command(socket.as_path()),
-                )
-            } else {
-                let addr = addr.as_deref().unwrap_or(DEFAULT_DAEMON_ADDR);
-                (daemon_status_tcp(addr)?, tcp_client_command(addr))
-            };
+            let target = resolve_daemon_target(socket, addr);
+            let mut status = daemon_status_for_target(&target)?;
+            let client_command = target.client_command();
             retarget_client_cli_commands(&mut status, &client_command);
             let output = if format == "json" {
                 status
@@ -5482,12 +5523,12 @@ fn run() -> Result<()> {
             format,
             strict,
         } => {
+            let target = resolve_daemon_target(socket, addr);
             let report = doctor_report(DoctorConfig {
                 repo,
                 index,
                 index_dir,
-                socket,
-                addr: addr.unwrap_or_else(|| DEFAULT_DAEMON_ADDR.to_string()),
+                target,
             });
             match format.as_str() {
                 "json" => println!("{}", serde_json::to_string(&report)?),
@@ -5602,14 +5643,8 @@ fn run() -> Result<()> {
             addr,
             require_version,
         } => {
-            if let Some(socket) = socket {
-                client_jsonl_unix(&socket, require_version)?;
-            } else {
-                client_jsonl_tcp(
-                    addr.as_deref().unwrap_or(DEFAULT_DAEMON_ADDR),
-                    require_version,
-                )?;
-            }
+            let target = resolve_daemon_target(socket, addr);
+            client_jsonl_target(&target, require_version)?;
         }
     }
     Ok(())
@@ -5657,6 +5692,44 @@ fn bootstrap_runtime(
     Ok((runtime, ensured_shards))
 }
 
+fn non_empty_env_var(name: &str) -> Option<String> {
+    env::var(name)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn daemon_addr_from_env() -> Option<String> {
+    non_empty_env_var(ORIENT_ADDR_ENV)
+}
+
+#[cfg(unix)]
+fn daemon_socket_from_env() -> Option<PathBuf> {
+    non_empty_env_var(ORIENT_SOCKET_ENV).map(PathBuf::from)
+}
+
+fn resolve_daemon_addr(addr: Option<String>) -> String {
+    addr.or_else(daemon_addr_from_env)
+        .unwrap_or_else(|| DEFAULT_DAEMON_ADDR.to_string())
+}
+
+fn resolve_daemon_target(socket: Option<PathBuf>, addr: Option<String>) -> DaemonTarget {
+    #[cfg(unix)]
+    if let Some(socket) = socket {
+        return DaemonTarget::Unix(socket);
+    }
+    #[cfg(not(unix))]
+    let _ = socket;
+    if let Some(addr) = addr {
+        return DaemonTarget::Tcp(addr);
+    }
+    #[cfg(unix)]
+    if let Some(socket) = daemon_socket_from_env() {
+        return DaemonTarget::Unix(socket);
+    }
+    DaemonTarget::Tcp(resolve_daemon_addr(None))
+}
+
 fn client_jsonl_tcp(addr: &str, require_version: bool) -> Result<()> {
     client_jsonl_stream(TcpStream::connect(addr)?, require_version)
 }
@@ -5666,8 +5739,24 @@ fn client_jsonl_unix(socket: &Path, require_version: bool) -> Result<()> {
     client_jsonl_stream(UnixStream::connect(socket)?, require_version)
 }
 
+fn client_jsonl_target(target: &DaemonTarget, require_version: bool) -> Result<()> {
+    match target {
+        DaemonTarget::Tcp(addr) => client_jsonl_tcp(addr, require_version),
+        #[cfg(unix)]
+        DaemonTarget::Unix(socket) => client_jsonl_unix(socket, require_version),
+    }
+}
+
 fn daemon_status_tcp(addr: &str) -> Result<Value> {
     daemon_status_stream(TcpStream::connect(addr)?)
+}
+
+fn daemon_status_for_target(target: &DaemonTarget) -> Result<Value> {
+    match target {
+        DaemonTarget::Tcp(addr) => daemon_status_tcp(addr),
+        #[cfg(unix)]
+        DaemonTarget::Unix(socket) => daemon_status_unix(socket),
+    }
 }
 
 fn try_daemon_tool_request_tcp(addr: &str, tool: &str, arguments: Value) -> Result<Option<Value>> {
@@ -5676,6 +5765,31 @@ fn try_daemon_tool_request_tcp(addr: &str, tool: &str, arguments: Value) -> Resu
         Err(_) => return Ok(None),
     };
     daemon_tool_request_stream(stream, tool, arguments).map(Some)
+}
+
+#[cfg(unix)]
+fn try_daemon_tool_request_unix(
+    socket: &Path,
+    tool: &str,
+    arguments: Value,
+) -> Result<Option<Value>> {
+    let stream = match UnixStream::connect(socket) {
+        Ok(stream) => stream,
+        Err(_) => return Ok(None),
+    };
+    daemon_tool_request_stream(stream, tool, arguments).map(Some)
+}
+
+fn try_daemon_tool_request(
+    target: &DaemonTarget,
+    tool: &str,
+    arguments: Value,
+) -> Result<Option<Value>> {
+    match target {
+        DaemonTarget::Tcp(addr) => try_daemon_tool_request_tcp(addr, tool, arguments),
+        #[cfg(unix)]
+        DaemonTarget::Unix(socket) => try_daemon_tool_request_unix(socket, tool, arguments),
+    }
 }
 
 fn daemon_tool_request_stream(
@@ -5835,8 +5949,7 @@ struct DoctorConfig {
     repo: PathBuf,
     index: Option<PathBuf>,
     index_dir: Option<PathBuf>,
-    socket: Option<PathBuf>,
-    addr: String,
+    target: DaemonTarget,
 }
 
 fn doctor_report(config: DoctorConfig) -> DoctorReport {
@@ -5983,11 +6096,8 @@ fn doctor_report(config: DoctorConfig) -> DoctorReport {
         }
     }
 
-    let daemon_result = if let Some(socket) = config.socket.as_ref() {
-        daemon_status_unix(socket).map(|status| (status, unix_client_command(socket)))
-    } else {
-        daemon_status_tcp(&config.addr).map(|status| (status, tcp_client_command(&config.addr)))
-    };
+    let daemon_result = daemon_status_for_target(&config.target)
+        .map(|status| (status, config.target.client_command()));
     match daemon_result {
         Ok((mut status, client_command)) => {
             retarget_client_cli_commands(&mut status, &client_command);
@@ -6016,32 +6126,38 @@ fn doctor_report(config: DoctorConfig) -> DoctorReport {
                 format!("daemon is not reachable: {error}"),
                 None,
             ));
-            if let Some(socket) = config.socket.as_ref() {
-                if let Some(index_dir) = config.index_dir.as_ref() {
-                    commands.push(format!(
-                        "orient serve-unix --socket {} --index-dir {}",
-                        shell_quote_path(socket),
-                        shell_quote_path(index_dir)
-                    ));
-                } else if let Some(index) = config.index.as_ref() {
-                    commands.push(format!(
-                        "orient serve-unix --socket {} --index {}",
-                        shell_quote_path(socket),
-                        shell_quote_path(index)
-                    ));
+            match &config.target {
+                #[cfg(unix)]
+                DaemonTarget::Unix(socket) => {
+                    if let Some(index_dir) = config.index_dir.as_ref() {
+                        commands.push(format!(
+                            "orient serve-unix --socket {} --index-dir {}",
+                            shell_quote_path(socket),
+                            shell_quote_path(index_dir)
+                        ));
+                    } else if let Some(index) = config.index.as_ref() {
+                        commands.push(format!(
+                            "orient serve-unix --socket {} --index {}",
+                            shell_quote_path(socket),
+                            shell_quote_path(index)
+                        ));
+                    }
                 }
-            } else if let Some(index_dir) = config.index_dir.as_ref() {
-                commands.push(format!(
-                    "orient serve-tcp --addr {} --index-dir {}",
-                    shell_quote(&config.addr),
-                    shell_quote_path(index_dir)
-                ));
-            } else if let Some(index) = config.index.as_ref() {
-                commands.push(format!(
-                    "orient serve-tcp --addr {} --index {}",
-                    shell_quote(&config.addr),
-                    shell_quote_path(index)
-                ));
+                DaemonTarget::Tcp(addr) => {
+                    if let Some(index_dir) = config.index_dir.as_ref() {
+                        commands.push(format!(
+                            "orient serve-tcp --addr {} --index-dir {}",
+                            shell_quote(addr),
+                            shell_quote_path(index_dir)
+                        ));
+                    } else if let Some(index) = config.index.as_ref() {
+                        commands.push(format!(
+                            "orient serve-tcp --addr {} --index {}",
+                            shell_quote(addr),
+                            shell_quote_path(index)
+                        ));
+                    }
+                }
             }
         }
     }
@@ -6053,16 +6169,27 @@ fn doctor_report(config: DoctorConfig) -> DoctorReport {
         commands.push(
             "orient ensure-shards --discover-root /path/to/workspaces --output-dir /tmp/orient-shards --family-limit 2".to_string(),
         );
-        commands.push(format!(
-            "orient serve-tcp --addr {} --index-dir /tmp/orient-shards",
-            shell_quote(&config.addr)
-        ));
+        commands.push(match &config.target {
+            DaemonTarget::Tcp(addr) => format!(
+                "orient serve-tcp --addr {} --index-dir /tmp/orient-shards",
+                shell_quote(addr)
+            ),
+            #[cfg(unix)]
+            DaemonTarget::Unix(socket) => format!(
+                "orient serve-unix --socket {} --index-dir /tmp/orient-shards",
+                shell_quote_path(socket)
+            ),
+        });
     }
     if daemon_status.is_some() {
-        commands.push(if config.socket.is_some() {
-            "orient client-jsonl --socket <socket>".to_string()
-        } else {
-            format!("orient client-jsonl --addr {}", shell_quote(&config.addr))
+        commands.push(match &config.target {
+            DaemonTarget::Tcp(addr) => {
+                format!("orient client-jsonl --addr {}", shell_quote(addr))
+            }
+            #[cfg(unix)]
+            DaemonTarget::Unix(socket) => {
+                format!("orient client-jsonl --socket {}", shell_quote_path(socket))
+            }
         });
     }
 

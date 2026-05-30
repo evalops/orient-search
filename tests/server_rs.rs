@@ -10986,6 +10986,13 @@ fn cli_search_auto_uses_warm_daemon_before_live_fallback() {
         ])
         .output()
         .unwrap();
+    let env_output = Command::new(&binary)
+        .current_dir(empty_cwd.path())
+        .env("ORIENT_ADDR", addr)
+        .env_remove("ORIENT_SOCKET")
+        .args(["search-auto", "issue_token"])
+        .output()
+        .unwrap();
     let local_output = Command::new(&binary)
         .current_dir(empty_cwd.path())
         .args([
@@ -11032,6 +11039,17 @@ fn cli_search_auto_uses_warm_daemon_before_live_fallback() {
             .unwrap()
             .ends_with("/orient.index"),
         "{batch}"
+    );
+
+    assert!(env_output.status.success(), "{env_output:?}");
+    let env_value: serde_json::Value = serde_json::from_slice(&env_output.stdout).unwrap();
+    assert_eq!(env_value["surface"], serde_json::json!("indexed"));
+    assert!(
+        env_value["target"]
+            .as_str()
+            .unwrap()
+            .ends_with("/orient.index"),
+        "{env_value}"
     );
 
     assert!(local_output.status.success(), "{local_output:?}");
@@ -11240,6 +11258,8 @@ fn tcp_client_uses_default_addr_when_omitted() {
 
     let mut client = Command::new(binary)
         .arg("client-jsonl")
+        .env_remove("ORIENT_ADDR")
+        .env_remove("ORIENT_SOCKET")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
@@ -11262,6 +11282,65 @@ fn tcp_client_uses_default_addr_when_omitted() {
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.contains("\"id\":\"status\""), "{stdout}");
     assert!(stdout.contains("\"default_requests\""), "{stdout}");
+}
+
+#[test]
+fn daemon_clients_use_env_addr_when_flags_are_omitted() {
+    let binary = assert_cmd::cargo::cargo_bin("orient");
+    let mut child = Command::new(&binary)
+        .args(["serve-tcp", "--addr", "127.0.0.1:0"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let stdout = child.stdout.take().unwrap();
+    let mut startup_reader = BufReader::new(stdout);
+    let mut startup = String::new();
+    startup_reader.read_line(&mut startup).unwrap();
+    let startup_json: serde_json::Value = serde_json::from_str(&startup).unwrap();
+    let addr = startup_json["addr"].as_str().unwrap();
+
+    let mut client = Command::new(&binary)
+        .arg("client-jsonl")
+        .env("ORIENT_ADDR", addr)
+        .env_remove("ORIENT_SOCKET")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let request = serde_json::json!({
+        "id": "status",
+        "tool": "daemon_status",
+        "arguments": {}
+    });
+    writeln!(client.stdin.as_mut().unwrap(), "{request}").unwrap();
+    drop(client.stdin.take());
+    let client_output = client.wait_with_output().unwrap();
+    let status_output = Command::new(&binary)
+        .args(["daemon-status", "--format", "json"])
+        .env("ORIENT_ADDR", addr)
+        .env_remove("ORIENT_SOCKET")
+        .output()
+        .unwrap();
+
+    child.kill().unwrap();
+    let _ = child.wait();
+
+    assert!(client_output.status.success(), "{client_output:?}");
+    assert!(client_output.stderr.is_empty(), "{client_output:?}");
+    let response: serde_json::Value = serde_json::from_slice(&client_output.stdout).unwrap();
+    assert_eq!(response["id"], serde_json::json!("status"));
+    assert_eq!(
+        response["result"]["daemon_version"],
+        serde_json::json!(env!("CARGO_PKG_VERSION"))
+    );
+    assert!(status_output.status.success(), "{status_output:?}");
+    let status: serde_json::Value = serde_json::from_slice(&status_output.stdout).unwrap();
+    assert_eq!(
+        status["daemon_version"],
+        serde_json::json!(env!("CARGO_PKG_VERSION"))
+    );
 }
 
 #[test]
@@ -11410,6 +11489,96 @@ fn unix_client_forwards_json_lines_requests() {
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.contains("\"id\":\"status\""), "{stdout}");
     assert!(stdout.contains("\"cached_indexes\":0"), "{stdout}");
+}
+
+#[cfg(unix)]
+#[test]
+fn daemon_clients_use_env_socket_when_flags_are_omitted() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/auth.rs"),
+        "pub fn issue_token() -> &'static str { \"ok\" }\n",
+    );
+    let index_path = repo.path().join("orient.index");
+    FastIndex::build(repo.path())
+        .unwrap()
+        .save(&index_path)
+        .unwrap();
+    let socket_dir = tempfile::tempdir().unwrap();
+    let socket = socket_dir.path().join("orient.sock");
+    let binary = assert_cmd::cargo::cargo_bin("orient");
+    let mut child = Command::new(&binary)
+        .args([
+            "serve-unix",
+            "--socket",
+            socket.to_str().unwrap(),
+            "--index",
+            index_path.to_str().unwrap(),
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let stdout = child.stdout.take().unwrap();
+    let mut startup_reader = BufReader::new(stdout);
+    let mut startup = String::new();
+    startup_reader.read_line(&mut startup).unwrap();
+
+    let mut client = Command::new(&binary)
+        .arg("client-jsonl")
+        .env("ORIENT_SOCKET", &socket)
+        .env("ORIENT_ADDR", "127.0.0.1:1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let request = serde_json::json!({
+        "id": "status",
+        "tool": "daemon_status",
+        "arguments": {}
+    });
+    writeln!(client.stdin.as_mut().unwrap(), "{request}").unwrap();
+    drop(client.stdin.take());
+    let client_output = client.wait_with_output().unwrap();
+    let status_output = Command::new(&binary)
+        .args(["daemon-status", "--format", "json"])
+        .env("ORIENT_SOCKET", &socket)
+        .env("ORIENT_ADDR", "127.0.0.1:1")
+        .output()
+        .unwrap();
+    let empty_cwd = tempfile::tempdir().unwrap();
+    let search_output = Command::new(&binary)
+        .current_dir(empty_cwd.path())
+        .args(["search-auto", "issue_token"])
+        .env("ORIENT_SOCKET", &socket)
+        .env("ORIENT_ADDR", "127.0.0.1:1")
+        .output()
+        .unwrap();
+
+    child.kill().unwrap();
+    let _ = child.wait();
+
+    assert!(client_output.status.success(), "{client_output:?}");
+    assert!(client_output.stderr.is_empty(), "{client_output:?}");
+    let response: serde_json::Value = serde_json::from_slice(&client_output.stdout).unwrap();
+    assert_eq!(response["id"], serde_json::json!("status"));
+    assert!(status_output.status.success(), "{status_output:?}");
+    let status: serde_json::Value = serde_json::from_slice(&status_output.stdout).unwrap();
+    assert_eq!(
+        status["daemon_version"],
+        serde_json::json!(env!("CARGO_PKG_VERSION"))
+    );
+    assert!(search_output.status.success(), "{search_output:?}");
+    let search: serde_json::Value = serde_json::from_slice(&search_output.stdout).unwrap();
+    assert_eq!(search["surface"], serde_json::json!("indexed"));
+    assert!(
+        search["target"]
+            .as_str()
+            .unwrap()
+            .ends_with("/orient.index"),
+        "{search}"
+    );
 }
 
 #[cfg(unix)]
