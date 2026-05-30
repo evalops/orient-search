@@ -6419,15 +6419,15 @@ impl ToolRuntime {
         if shard_prefilter_query_impossible(index_dir, &shard_query, &filters)? {
             return Ok(Vec::new());
         }
-        let jobs = if let Some(manifest) = self.cached_shard_manifest_if_fresh(index_dir)? {
+        let jobs = if let Some(shards) = shard_route_entries(index_dir, &shard_query, &filters)? {
+            shard_jobs_from_entries(shards, &shard_query, &filters, true)
+        } else if let Some(manifest) = self.cached_shard_manifest_if_fresh(index_dir)? {
             shard_jobs_from_entries(
                 manifest.shards.iter().cloned(),
                 &shard_query,
                 &filters,
                 true,
             )
-        } else if let Some(shards) = shard_route_entries(index_dir, &shard_query, &filters)? {
-            shard_jobs_from_entries(shards, &shard_query, &filters, true)
         } else {
             let manifest = self.cached_shard_manifest(index_dir)?;
             shard_jobs_from_entries(

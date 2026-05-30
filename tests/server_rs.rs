@@ -8811,6 +8811,61 @@ fn runtime_shard_search_uses_route_before_manifest_cache() {
 }
 
 #[test]
+fn runtime_cached_shard_search_prefers_route_over_cached_manifest() {
+    let workspace = tempfile::tempdir().unwrap();
+    let hit_repo = workspace.path().join("hit-service");
+    let miss_repo = workspace.path().join("miss-service");
+    write(
+        &hit_repo.join("src/lib.rs"),
+        "pub fn prefixruntime_trigramprobesuffix() -> bool { true }\n",
+    );
+    write(
+        &miss_repo.join("src/lib.rs"),
+        "pub fn unrelated_cached_runtime_trigram_service() -> bool { false }\n\
+         // tri rig igr gra ram amp mpr pro rob obe\n",
+    );
+
+    let shard_dir = tempfile::tempdir().unwrap();
+    build_shards(&[hit_repo, miss_repo], shard_dir.path()).unwrap();
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(shard_dir.path().join("manifest.json")).unwrap()).unwrap();
+    let miss_index = manifest["shards"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|shard| shard["name"] == "miss-service")
+        .unwrap()["index"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let runtime = ToolRuntime::default();
+    assert_eq!(
+        runtime
+            .register_shards(shard_dir.path().to_path_buf())
+            .unwrap(),
+        2
+    );
+    fs::remove_file(shard_dir.path().join(miss_index)).unwrap();
+
+    let response = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("search"),
+        tool: "search_shards".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": shard_dir.path(),
+            "query": "trigramprobe",
+            "limit": 10
+        }),
+    });
+    assert!(response.error.is_none(), "{:?}", response.error);
+    let result = serde_json::to_string(&response.result).unwrap();
+    assert!(result.contains("hit-service/src/lib.rs"), "{result}");
+    assert!(!result.contains("miss-service/src/lib.rs"), "{result}");
+    assert_eq!(runtime.cached_shard_manifest_count(), 1);
+    assert_eq!(runtime.cached_index_count(), 1);
+}
+
+#[test]
 fn runtime_routed_shard_search_applies_filter_sketch_before_cold_load() {
     let workspace = tempfile::tempdir().unwrap();
     let rust_repo = workspace.path().join("rust-service");
