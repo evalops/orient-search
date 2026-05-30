@@ -4438,6 +4438,19 @@ fn runtime_batches_searches_and_query_plans_against_repo_index_and_shards() {
         "{result}"
     );
     assert!(result.contains("drop_missing_terms"), "{result}");
+    let live_plan_batch = live_plan_batch.result.as_ref().unwrap();
+    assert_eq!(
+        live_plan_batch[0]["summary"]["status"],
+        serde_json::json!("missing_terms")
+    );
+    assert_eq!(
+        live_plan_batch[0]["summary"]["missing_terms"][0],
+        serde_json::json!("missingterm")
+    );
+    assert_eq!(
+        live_plan_batch[0]["summary"]["promoted_next_action"],
+        live_plan_batch[0]["next_action"]
+    );
 
     let indexed_plans = runtime.dispatch(ToolRequest {
         id: serde_json::json!("indexed-plan-batch"),
@@ -4463,6 +4476,19 @@ fn runtime_batches_searches_and_query_plans_against_repo_index_and_shards() {
     assert!(result.contains("absentterm"), "{result}");
     assert!(result.contains("drop_missing_terms"), "{result}");
     assert!(result.contains("\"next_action\""), "{result}");
+    let indexed_plans = indexed_plans.result.as_ref().unwrap();
+    assert_eq!(
+        indexed_plans[1]["summary"]["status"],
+        serde_json::json!("missing_terms")
+    );
+    assert_eq!(
+        indexed_plans[1]["summary"]["suggested_query"],
+        serde_json::json!("invoice")
+    );
+    assert_eq!(
+        indexed_plans[1]["summary"]["primary_retry_request"],
+        indexed_plans[1]["plan"]["primary_retry_request"]
+    );
 
     let indexed_plan_alias = runtime.dispatch(ToolRequest {
         id: serde_json::json!("index-plan-alias"),

@@ -8,8 +8,8 @@ use orient::fast_index::{FastIndex, INDEX_FORMAT_VERSION, RefreshStats};
 use orient::query::{merge_filters, normalize_symbol_kind, parse_query};
 use orient::repo_index::{
     DEFAULT_REPO_MAP_READ_BATCH_RANGES, MAX_READ_RANGE_LINES, MAX_RESULT_READ_BATCH_RANGES,
-    QueryPlan, QueryPlanFilter, QueryPlanNextAction, RangeScope, RepoIndexer, RepoMapDetail,
-    ResultToolRequest, SearchFilters, SearchResult, SnippetMode, SymbolLookupResult,
+    QueryPlan, QueryPlanFilter, QueryPlanNextAction, QueryPlanSummary, RangeScope, RepoIndexer,
+    RepoMapDetail, ResultToolRequest, SearchFilters, SearchResult, SnippetMode, SymbolLookupResult,
     attach_repo_map_read_batch_request_with_limit, attach_result_context,
     attach_result_read_requests, attach_result_related_requests,
     attach_result_related_symbol_requests, normalize_language_filter,
@@ -1499,6 +1499,7 @@ fn read_batch_next_action(read_batch_request: &Option<ResultToolRequest>) -> Opt
 #[derive(Debug, Clone, Serialize)]
 struct IndexedQueryPlanBatchResult {
     query: String,
+    summary: QueryPlanSummary,
     #[serde(skip_serializing_if = "Option::is_none")]
     next_action: Option<QueryPlanNextAction>,
     plan: QueryPlan,
@@ -1507,6 +1508,7 @@ struct IndexedQueryPlanBatchResult {
 #[derive(Debug, Clone, Serialize)]
 struct QueryPlanBatchResult {
     query: String,
+    summary: QueryPlanSummary,
     #[serde(skip_serializing_if = "Option::is_none")]
     next_action: Option<QueryPlanNextAction>,
     plan: QueryPlan,
@@ -1522,8 +1524,10 @@ struct ShardQueryPlanBatchResult {
 
 fn indexed_query_plan_batch_result(query: String, plan: QueryPlan) -> IndexedQueryPlanBatchResult {
     let next_action = plan.next_action.clone();
+    let summary = plan.compact_summary();
     IndexedQueryPlanBatchResult {
         query,
+        summary,
         next_action,
         plan,
     }
@@ -1531,8 +1535,10 @@ fn indexed_query_plan_batch_result(query: String, plan: QueryPlan) -> IndexedQue
 
 fn query_plan_batch_result(query: String, plan: QueryPlan) -> QueryPlanBatchResult {
     let next_action = plan.next_action.clone();
+    let summary = plan.compact_summary();
     QueryPlanBatchResult {
         query,
+        summary,
         next_action,
         plan,
     }

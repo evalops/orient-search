@@ -3065,6 +3065,9 @@ fn cli_batches_searches_across_fallback_indexed_and_shards() {
             "\"query\":\"SessionManager missingterm\"",
         ))
         .stdout(predicate::str::contains("\"query\":\"invoice absentterm\""))
+        .stdout(predicate::str::contains("\"summary\""))
+        .stdout(predicate::str::contains("\"status\":\"missing_terms\""))
+        .stdout(predicate::str::contains("\"suggested_query\":\"invoice\""))
         .stdout(predicate::str::contains("\"missing_terms\""))
         .stdout(predicate::str::contains("\"next_action\""))
         .stdout(predicate::str::contains("drop_missing_terms"));

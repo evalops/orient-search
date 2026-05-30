@@ -260,6 +260,10 @@ fn is_zero(value: &usize) -> bool {
     *value == 0
 }
 
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 pub fn read_batch_action_summary(request: &ResultToolRequest, fallback: &str) -> String {
     let Some(budget) = &request.read_budget else {
         return fallback.to_string();
@@ -409,6 +413,38 @@ pub struct QueryPlanDiagnosis {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct QueryPlanSummary {
+    pub status: String,
+    pub summary: String,
+    pub next_action: String,
+    pub candidate_count: usize,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub candidate_cap: usize,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub candidate_cap_hit: bool,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub filtered_candidate_count: usize,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub final_match_count: usize,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub missing_terms: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub missing_trigrams: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub active_filters: Vec<QueryPlanFilter>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub primary_hint_kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub primary_hint_action: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suggested_query: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub primary_retry_request: Option<ResultToolRequest>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub promoted_next_action: Option<QueryPlanNextAction>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct QueryPlanNextAction {
     pub kind: String,
     pub source: String,
@@ -422,6 +458,10 @@ impl QueryPlan {
         self
     }
 
+    pub fn compact_summary(&self) -> QueryPlanSummary {
+        QueryPlanSummary::from_plan(self)
+    }
+
     pub fn set_retry_requests(&mut self, retry_requests: Vec<ResultToolRequest>) {
         self.retry_requests = retry_requests;
         self.primary_retry_request = self.retry_requests.first().cloned();
@@ -429,6 +469,33 @@ impl QueryPlan {
             .primary_retry_request
             .clone()
             .map(QueryPlanNextAction::retry);
+    }
+}
+
+impl QueryPlanSummary {
+    fn from_plan(plan: &QueryPlan) -> Self {
+        let diagnosis = plan
+            .diagnosis
+            .clone()
+            .unwrap_or_else(|| QueryPlanDiagnosis::from_plan(plan));
+        Self {
+            status: diagnosis.status,
+            summary: diagnosis.summary,
+            next_action: diagnosis.next_action,
+            candidate_count: plan.candidate_count,
+            candidate_cap: plan.candidate_cap,
+            candidate_cap_hit: plan.candidate_cap_hit,
+            filtered_candidate_count: plan.filtered_candidate_count,
+            final_match_count: plan.final_match_count,
+            missing_terms: plan.missing_terms.clone(),
+            missing_trigrams: plan.missing_trigrams.clone(),
+            active_filters: plan.active_filters.clone(),
+            primary_hint_kind: diagnosis.primary_hint_kind,
+            primary_hint_action: diagnosis.primary_hint_action,
+            suggested_query: diagnosis.suggested_query,
+            primary_retry_request: plan.primary_retry_request.clone(),
+            promoted_next_action: plan.next_action.clone(),
+        }
     }
 }
 

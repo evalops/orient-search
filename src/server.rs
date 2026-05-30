@@ -8,8 +8,8 @@ pub use crate::repo_index::MAX_BATCH_READ_LINES;
 use crate::repo_index::{
     DEFAULT_REPO_MAP_READ_BATCH_RANGES, MAX_ATTACHED_CONTEXT_LINES, MAX_READ_RANGE_LINES,
     MAX_RESULT_READ_BATCH_RANGES, MAX_SEARCH_RESULTS, QueryPlan, QueryPlanFilter,
-    QueryPlanNextAction, RangeScope, RepoIndexer, RepoMapDetail, ResultToolRequest, SearchFilters,
-    SearchResult, SnippetMode, Symbol, SymbolLookupResult,
+    QueryPlanNextAction, QueryPlanSummary, RangeScope, RepoIndexer, RepoMapDetail,
+    ResultToolRequest, SearchFilters, SearchResult, SnippetMode, Symbol, SymbolLookupResult,
     attach_repo_map_read_batch_request_with_limit, attach_result_context,
     attach_result_read_requests, attach_result_related_requests,
     attach_result_related_symbol_requests, finalize_results_for_filters, normalize_language_filter,
@@ -199,6 +199,7 @@ struct SearchFreshness {
 #[derive(Debug, Serialize)]
 struct IndexedQueryPlanBatchResult {
     query: String,
+    summary: QueryPlanSummary,
     #[serde(skip_serializing_if = "Option::is_none")]
     next_action: Option<QueryPlanNextAction>,
     plan: QueryPlan,
@@ -207,6 +208,7 @@ struct IndexedQueryPlanBatchResult {
 #[derive(Debug, Serialize)]
 struct QueryPlanBatchResult {
     query: String,
+    summary: QueryPlanSummary,
     #[serde(skip_serializing_if = "Option::is_none")]
     next_action: Option<QueryPlanNextAction>,
     plan: QueryPlan,
@@ -222,8 +224,10 @@ struct ShardQueryPlanBatchResult {
 
 fn indexed_query_plan_batch_result(query: String, plan: QueryPlan) -> IndexedQueryPlanBatchResult {
     let next_action = plan.next_action.clone();
+    let summary = plan.compact_summary();
     IndexedQueryPlanBatchResult {
         query,
+        summary,
         next_action,
         plan,
     }
@@ -231,8 +235,10 @@ fn indexed_query_plan_batch_result(query: String, plan: QueryPlan) -> IndexedQue
 
 fn query_plan_batch_result(query: String, plan: QueryPlan) -> QueryPlanBatchResult {
     let next_action = plan.next_action.clone();
+    let summary = plan.compact_summary();
     QueryPlanBatchResult {
         query,
+        summary,
         next_action,
         plan,
     }
