@@ -24,8 +24,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 pub const SHARD_MANIFEST_FORMAT_VERSION: u32 = 1;
 const SHARD_MANIFEST_VERSION: u32 = SHARD_MANIFEST_FORMAT_VERSION;
 const SHARD_MANIFEST_SIDECAR_VERSION: u32 = 2;
-const SHARD_MANIFEST_PREFILTER_VERSION: u32 = 2;
-const SHARD_MANIFEST_ROUTE_VERSION: u32 = 9;
+const SHARD_MANIFEST_PREFILTER_VERSION: u32 = 3;
+const SHARD_MANIFEST_ROUTE_VERSION: u32 = 10;
 const SHARD_MANIFEST_FILE: &str = "manifest.json";
 const SHARD_MANIFEST_SIDECAR_FILE: &str = "manifest.bin";
 const SHARD_MANIFEST_PREFILTER_FILE: &str = "manifest.prefilter.bin";
@@ -41,6 +41,7 @@ const SHARD_KIND_SKETCH_WORDS: usize = 16;
 const SHARD_FILTER_SKETCH_WORDS: usize = 64;
 const SHARD_SUBSTRING_PREFILTER_MAX_TOKEN_CHARS: usize = 20;
 const SHARD_ROUTE_SUBSTRING_GRAM_CHARS: usize = 6;
+const SHARD_ROUTE_SHORT_FILTER_MIN_CHARS: usize = 2;
 pub const DEFAULT_MAX_SHARD_WORKERS: usize = 8;
 pub const MAX_SHARD_WORKERS_ENV: &str = "ORIENT_MAX_SHARD_WORKERS";
 
@@ -2499,7 +2500,9 @@ fn push_route_value_substring_grams(value: &str, substring_bits: &mut [u64]) {
 fn push_route_short_filter_hashes(value: &str, exact_hashes: &mut Vec<u32>) {
     let route_value = route_substring_value(value);
     let chars = route_value.chars().collect::<Vec<_>>();
-    for len in 3..SHARD_ROUTE_SUBSTRING_GRAM_CHARS.min(chars.len() + 1) {
+    for len in
+        SHARD_ROUTE_SHORT_FILTER_MIN_CHARS..SHARD_ROUTE_SUBSTRING_GRAM_CHARS.min(chars.len() + 1)
+    {
         for window in chars.windows(len) {
             exact_hashes.push(sketch_fingerprint(&window.iter().collect::<String>()));
         }
@@ -2528,7 +2531,7 @@ fn route_filter_exact_hashes(filters: &SearchFilters) -> Vec<u32> {
     {
         let route_value = route_substring_value(value);
         let len = route_value.chars().count();
-        if (3..SHARD_ROUTE_SUBSTRING_GRAM_CHARS).contains(&len) {
+        if (SHARD_ROUTE_SHORT_FILTER_MIN_CHARS..SHARD_ROUTE_SUBSTRING_GRAM_CHARS).contains(&len) {
             hashes.push(sketch_fingerprint(&route_value));
         }
     }
@@ -3941,7 +3944,7 @@ mod tests {
         let manifest = test_manifest(&auth, None);
         save_manifest(dir.path(), &manifest).unwrap();
         let filters = SearchFilters {
-            file: Some("go.mod".to_string()),
+            file: Some("rs".to_string()),
             ..SearchFilters::default()
         };
         assert!(
