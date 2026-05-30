@@ -1686,6 +1686,10 @@ fn query_language_filters_fallback_and_indexed_search() {
         "SessionManager issue token docs.\n",
     );
     write(
+        &repo.path().join("notes/deprecated_auth.md"),
+        "SessionManager issue token docs deprecated.\n",
+    );
+    write(
         &repo.path().join("src/generated/session.generated.rs"),
         "pub struct SessionManagerGenerated;\npub fn issue_token_generated() {}\n",
     );
@@ -1714,6 +1718,24 @@ fn query_language_filters_fallback_and_indexed_search() {
         .unwrap();
     assert_eq!(indexed_results.len(), 1);
     assert_eq!(indexed_results[0].path, "src/auth.rs");
+
+    let negative_term_query = "content:SessionManager -deprecated";
+    let fallback_negative_term = search_repo_fast_filtered(
+        repo.path(),
+        negative_term_query,
+        10,
+        &SearchFilters::default(),
+    )
+    .unwrap();
+    let fallback_negative_term_paths = result_paths(&fallback_negative_term);
+    assert!(fallback_negative_term_paths.contains(&"docs/auth.md".to_string()));
+    assert!(!fallback_negative_term_paths.contains(&"notes/deprecated_auth.md".to_string()));
+    let indexed_negative_term = indexed
+        .search_filtered(negative_term_query, 10, &SearchFilters::default())
+        .unwrap();
+    let indexed_negative_term_paths = result_paths(&indexed_negative_term);
+    assert!(indexed_negative_term_paths.contains(&"docs/auth.md".to_string()));
+    assert!(!indexed_negative_term_paths.contains(&"notes/deprecated_auth.md".to_string()));
 
     let line_query = "path:src/auth.rs line:1 issue token";
     let fallback_line =

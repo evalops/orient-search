@@ -33,7 +33,12 @@ pub fn parse_query(input: &str) -> ParsedQuery {
         {
             continue;
         }
-        if !negated && !token.trim().is_empty() {
+        if negated {
+            let token = token.trim();
+            if !token.is_empty() {
+                filters.exclude_content.push(token.to_string());
+            }
+        } else if !token.trim().is_empty() {
             terms.push(token);
         }
     }
@@ -928,15 +933,21 @@ mod tests {
 
     #[test]
     fn parses_terms_quotes_filters_and_negatives() {
-        let parsed =
-            parse_query(r#"symbol:SessionManager lang:rust -dir:docs "issue token" test:false"#);
+        let parsed = parse_query(
+            r#"symbol:SessionManager lang:rust -dir:docs "issue token" -deprecated test:false"#,
+        );
 
         assert_eq!(parsed.terms, vec!["issue token"]);
         assert_eq!(parsed.filters.symbol.as_deref(), Some("SessionManager"));
         assert_eq!(parsed.filters.language.as_deref(), Some("rust"));
         assert_eq!(parsed.filters.exclude_path, vec!["docs"]);
+        assert_eq!(parsed.filters.exclude_content, vec!["deprecated"]);
         assert_eq!(parsed.filters.test, Some(false));
         assert_eq!(query_phrases(&parsed.terms), vec!["issue token"]);
+
+        let phrase = parse_query(r#"SessionManager -"legacy token""#);
+        assert_eq!(phrase.terms, vec!["SessionManager"]);
+        assert_eq!(phrase.filters.exclude_content, vec!["legacy token"]);
     }
 
     #[test]

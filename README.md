@@ -84,8 +84,8 @@ shard before use.
 Useful filters: `repo:`, `path:`/`dir:`, `file:`, `lang:`, `ext:`, `symbol:`,
 `kind:`/`type:`, `line:`, `dep:`, `import:`, `test:`, `generated:`, `code:`,
 `is:test`, `is:source`, `is:code`, `is:docs`, `is:generated`, `content:`,
-quoted phrases, negative filters like `-path:vendor`, and `mode:any` for broad
-orientation.
+quoted phrases, negative filters like `-path:vendor`, bare negative terms like
+`-deprecated`, and `mode:any` for broad orientation.
 Bare filename and path-like queries such as `Cargo.toml` or `src/lib.rs` use the
 same fast path filters. Use `content:Cargo.toml` when you want references to the
 string instead of the file itself. Pasted locations such as `src/lib.rs:42`,
