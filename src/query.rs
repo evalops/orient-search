@@ -1163,6 +1163,7 @@ pub fn normalize_symbol_kind(value: &str) -> String {
         "interfaces" => "interface".to_string(),
         "traits" => "trait".to_string(),
         "types" => "type".to_string(),
+        "targets" | "recipe" | "recipes" | "task" | "tasks" => "target".to_string(),
         other => other.to_string(),
     }
 }
@@ -1171,7 +1172,15 @@ fn symbol_kind_from_shorthand_key(key: &str) -> Option<String> {
     let kind = normalize_symbol_kind(key);
     matches!(
         kind.as_str(),
-        "function" | "class" | "interface" | "struct" | "enum" | "trait" | "const" | "var"
+        "function"
+            | "class"
+            | "interface"
+            | "struct"
+            | "enum"
+            | "trait"
+            | "const"
+            | "var"
+            | "target"
     )
     .then_some(kind)
 }
@@ -1190,6 +1199,7 @@ fn symbol_kind_from_type_value(value: &str) -> Option<String> {
             | "const"
             | "let"
             | "var"
+            | "target"
     )
     .then_some(kind)
 }
@@ -2117,6 +2127,18 @@ mod tests {
 
         let excluded = parse_query("-symbol-type:interfaces gateway");
         assert_eq!(excluded.filters.exclude_symbol_kind, vec!["interface"]);
+
+        let target = parse_query("kind:target deploy");
+        assert_eq!(target.terms, vec!["deploy"]);
+        assert_eq!(target.filters.symbol_kind.as_deref(), Some("target"));
+
+        let recipe_shorthand = parse_query("recipe:release");
+        assert!(recipe_shorthand.terms.is_empty());
+        assert_eq!(recipe_shorthand.filters.symbol.as_deref(), Some("release"));
+        assert_eq!(
+            recipe_shorthand.filters.symbol_kind.as_deref(),
+            Some("target")
+        );
 
         let unknown = parse_query("type:file gateway");
         assert_eq!(unknown.terms, vec!["type:file", "gateway"]);

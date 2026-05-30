@@ -2051,7 +2051,9 @@ fn rg_language_globs(language: &str) -> &'static [&'static str] {
         "xml" => &["**/*.xml"],
         "gradle" => &["**/*.gradle", "**/*.gradle.kts"],
         "dockerfile" => &["**/Dockerfile"],
+        "makefile" => &["**/Makefile"],
         "justfile" => &["**/Justfile"],
+        "shell" => &["**/*.sh", "**/*.bash", "**/*.zsh", "**/*.fish", "**/*.bats"],
         "go-mod" => &["**/go.mod", "**/go.sum"],
         _ => &[],
     }
@@ -4609,7 +4611,7 @@ pub fn language_for(path: &Path) -> Option<String> {
     if let Some(language) = special_file_language(&file_name) {
         return Some(language.to_string());
     }
-    if matches!(file_name.as_ref(), "README" | "Makefile") {
+    if matches!(file_name.as_ref(), "README") {
         return Some("text".to_string());
     }
     let ext = path.extension()?.to_string_lossy().to_lowercase();
@@ -4648,6 +4650,7 @@ fn special_file_language(file_name: &str) -> Option<&'static str> {
         "Dockerfile" => Some("dockerfile"),
         "Gemfile" => Some("ruby"),
         "Justfile" => Some("justfile"),
+        "Makefile" => Some("makefile"),
         "go.mod" | "go.sum" => Some("go-mod"),
         "pom.xml" => Some("xml"),
         "build.gradle" | "build.gradle.kts" | "settings.gradle" | "settings.gradle.kts" => {
@@ -4696,6 +4699,7 @@ pub fn normalize_language_filter(value: &str) -> String {
         "xml" => "xml".to_string(),
         "gradle" => "gradle".to_string(),
         "docker" | "dockerfile" => "dockerfile".to_string(),
+        "make" | "makefile" => "makefile".to_string(),
         "just" | "justfile" => "justfile".to_string(),
         "gomod" | "go-mod" | "go.mod" => "go-mod".to_string(),
         "txt" | "text" => "text".to_string(),
@@ -4730,6 +4734,9 @@ pub(crate) fn extract_symbols(path: &str, text: &str, language: &str) -> Vec<Sym
     }
     if language == "shell" {
         return extract_shell_symbols(path, text);
+    }
+    if language == "makefile" || language == "justfile" {
+        return extract_task_file_symbols(path, text);
     }
     if !language_supports_generic_symbols(language) {
         return Vec::new();
@@ -4999,6 +5006,52 @@ fn extract_shell_symbols(path: &str, text: &str) -> Vec<Symbol> {
             })
         })
         .collect()
+}
+
+fn extract_task_file_symbols(path: &str, text: &str) -> Vec<Symbol> {
+    task_file_symbol_targets(text)
+        .into_iter()
+        .map(|(name, line)| Symbol {
+            name,
+            kind: "target".to_string(),
+            path: path.to_string(),
+            line,
+        })
+        .collect()
+}
+
+fn task_file_symbol_targets(text: &str) -> Vec<(String, usize)> {
+    let mut targets = Vec::new();
+    for (index, line) in text.lines().enumerate() {
+        let line = line.split('#').next().unwrap_or("").trim_end();
+        if line.is_empty()
+            || line.chars().next().is_some_and(char::is_whitespace)
+            || line.starts_with('.')
+        {
+            continue;
+        }
+        let Some((target, _)) = line.split_once(':') else {
+            continue;
+        };
+        let target = target.split_whitespace().next().unwrap_or("").trim();
+        if target.is_empty()
+            || target.contains('=')
+            || target.contains('%')
+            || target.contains('/')
+            || !target
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
+        {
+            continue;
+        }
+        if !targets
+            .iter()
+            .any(|(seen, _): &(String, usize)| seen == target)
+        {
+            targets.push((target.to_string(), index + 1));
+        }
+    }
+    targets
 }
 
 fn extract_go_symbols(path: &str, text: &str) -> Vec<Symbol> {

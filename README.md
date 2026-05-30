@@ -102,7 +102,9 @@ for broad orientation. Bare filenames, pasted file locations, in-repo absolute
 paths, Python tracebacks, JavaScript stack frames, Markdown links, and hosted
 code links resolve to anchored file searches. Go panic stack locations are
 accepted too. Language filters include common shorthands such as `lang:rs`,
-`lang:ts`, `lang:cpp`, `lang:csharp`, and `lang:shell`. See
+`lang:ts`, `lang:cpp`, `lang:csharp`, `lang:shell`, `lang:makefile`, and
+`lang:justfile`. `kind:target` and `recipe:name` can jump to Makefile and
+Justfile targets. See
 [Agent protocol](docs/agent-protocol.md) for the full query language.
 
 ## Protocol

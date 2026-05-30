@@ -714,6 +714,62 @@ function refresh_cache {
 }
 
 #[test]
+fn task_file_targets_work_as_symbols_across_live_and_persistent_indexes() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("Makefile"),
+        r#"
+.PHONY: test deploy
+test:
+	pytest
+
+deploy ENV=prod:
+	./scripts/deploy.sh
+
+clean-build:
+	rm -rf build
+"#,
+    );
+    write(
+        &repo.path().join("Justfile"),
+        r#"
+test:
+    cargo test
+
+release target='prod':
+    cargo build --release
+"#,
+    );
+
+    let live = RepoIndexer::new(repo.path()).build().unwrap();
+    assert_symbol(&live.find_symbol("deploy", 10)[0], "Makefile", "target");
+    assert_symbol(
+        &live.find_symbol("clean-build", 10)[0],
+        "Makefile",
+        "target",
+    );
+    assert_symbol(&live.find_symbol("release", 10)[0], "Justfile", "target");
+
+    let fallback = search_repo_fast_filtered(
+        repo.path(),
+        "kind:target symbol:deploy",
+        5,
+        &Default::default(),
+    )
+    .unwrap();
+    assert_eq!(fallback[0].path, "Makefile");
+    assert!(fallback[0].reason.contains("symbol:deploy"));
+
+    let indexed = FastIndex::build(repo.path()).unwrap();
+    assert_symbol(&indexed.find_symbol("release", 10)[0], "Justfile", "target");
+    let indexed_results = indexed
+        .search_filtered("kind:target symbol:clean-build", 5, &Default::default())
+        .unwrap();
+    assert_eq!(indexed_results[0].path, "Makefile");
+    assert!(indexed_results[0].reason.contains("symbol:clean-build"));
+}
+
+#[test]
 fn generic_extractor_indexes_traits_types_and_exported_symbols() {
     let repo = tempfile::tempdir().unwrap();
     write(
