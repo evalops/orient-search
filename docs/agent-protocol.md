@@ -110,7 +110,7 @@ Use the fastest surface that matches your setup:
 - `search_code` for a live repo without a prebuilt index.
 - `indexed_search_code` for one persistent repo index.
 - `search_shards` for a multi-repo shard directory.
-- `search_auto_batch`, `search_batch`, `indexed_search_batch`, or `search_shards_batch` when an agent wants to try several query formulations in one round trip. On shard paths, `search_auto_batch` and explicit `search_shards_batch` apply `refresh_if_stale:true` once across the selected shard roots instead of refreshing per query. The JSON-lines `search_batch` tool accepts `repo`, `index`, or `index_dir` for the same target-aware plain result shape as `search`; the CLI mirrors this as `search-batch --repo`, `search-batch --index`, or `search-batch --index-dir`. The indexed and shard-specific batch tools remain available for explicit adapters.
+- `search_auto_batch`, `search_batch`, `indexed_search_batch`, or `search_shards_batch` when an agent wants to try several query formulations in one round trip. Each batch item returns target-aware `query_plan_request`, `repo_map_request`, read follow-ups, and `next_action` when there are ranges to read. On shard paths, `search_auto_batch` and explicit `search_shards_batch` apply `refresh_if_stale:true` once across the selected shard roots instead of refreshing per query. The JSON-lines `search_batch` tool accepts `repo`, `index`, or `index_dir` for the same target-aware plain result shape as `search`; the CLI mirrors this as `search-batch --repo`, `search-batch --index`, or `search-batch --index-dir`. The indexed and shard-specific batch tools remain available for explicit adapters.
 - `search_plan`, `indexed_query_plan`, or `shard_query_plan` when a search returns empty or suspicious results and the agent needs missing terms plus retry hints. JSON-lines `search_plan` accepts `repo`, `index`, or `index_dir` for target-aware diagnostics; explicit `search_query_plan`, `indexed_query_plan`, and `shard_query_plan` remain available for adapters that prefer surface-specific tools. Plans include `next_action`, `primary_retry_request`, and ready-to-send `retry_requests` when a repair hint has a suggested query; plan batch items promote the same `next_action` at the item level. The CLI mirrors this as `search-plan --repo`, `search-plan --index`, or `search-plan --index-dir`; explicit `index-plan` and `shard-plan` remain available.
 
 CLI-style JSON-lines aliases are accepted for the most guessable names:
@@ -195,14 +195,15 @@ Search results include:
 - `context`: optional attached file context when `context_lines` is set.
 - `explanation` and `query_plan` when `explain` is set.
 
-`search_auto` and each `search_auto_batch` item also include follow-ups for the
-chosen live, indexed, or shard surface:
+`search_auto`, each `search_auto_batch` item, and explicit search batch items
+include follow-ups for the chosen live, indexed, or shard surface:
 
 - `next_action`: the best immediate follow-up as
   `{kind,source,summary,request}`. Wrappers can run this first before
   inspecting the rest of the response.
-- `next_read_batch_request`: the preferred read follow-up, using normal hits
-  first and retry hits when the original result set was empty.
+- `next_read_batch_request`: on automatic searches, the preferred read
+  follow-up, using normal hits first and retry hits when the original result set
+  was empty.
 - `query_plan_request`: a ready-to-send plan request for empty, noisy, or
   suspicious results.
 - `repo_map_request`: a target-aware map request for entrypoints, tests,
@@ -219,9 +220,9 @@ once and receive `primary_retry_result`; if that retry returns hits, Orient also
 returns a target-aware read batch request for those hits. Set `diagnose:true`
 when results are noisy or suspicious to include inline diagnostics even when the
 search already returned hits. Batch search items from `search_batch`,
-`indexed_search_batch`, and `search_shards_batch` include the same
-`read_batch_request` shape plus `next_action` pointing at that read when
-matches are present. Repo-map responses include a top-level
+`indexed_search_batch`, and `search_shards_batch` include the same plan/map
+follow-up shape plus `read_batch_request` and `next_action` pointing at that
+read when matches are present. Repo-map responses include a top-level
 `read_batch_request` covering source entrypoints, top symbol definitions, tests,
 manifests, important files, and related context in that order. Like single read
 requests, generated batch read requests include compact `path:start:lines`

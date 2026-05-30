@@ -2592,6 +2592,10 @@ fn cli_batches_searches_across_fallback_indexed_and_shards() {
         .stdout(predicate::str::contains("src/auth.rs"))
         .stdout(predicate::str::contains("\"query\":\"invoice total\""))
         .stdout(predicate::str::contains("src/billing.rs"))
+        .stdout(predicate::str::contains("\"query_plan_request\""))
+        .stdout(predicate::str::contains("\"repo_map_request\""))
+        .stdout(predicate::str::contains("\"tool\":\"search_plan\""))
+        .stdout(predicate::str::contains("\"tool\":\"repo_map\""))
         .stdout(predicate::str::contains("\"next_action\""))
         .stdout(predicate::str::contains(
             "\"source\":\"read_batch_request\"",
@@ -2625,7 +2629,9 @@ fn cli_batches_searches_across_fallback_indexed_and_shards() {
         .assert()
         .success()
         .stdout(predicate::str::contains("src/auth.rs"))
-        .stdout(predicate::str::contains("src/billing.rs"));
+        .stdout(predicate::str::contains("src/billing.rs"))
+        .stdout(predicate::str::contains("\"tool\":\"indexed_query_plan\""))
+        .stdout(predicate::str::contains("\"tool\":\"indexed_repo_map\""));
 
     let mut generic_indexed = Command::cargo_bin("orient").unwrap();
     generic_indexed
@@ -2645,6 +2651,10 @@ fn cli_batches_searches_across_fallback_indexed_and_shards() {
         .stdout(predicate::str::contains("src/auth.rs"))
         .stdout(predicate::str::contains("\"query\":\"invoice total\""))
         .stdout(predicate::str::contains("src/billing.rs"))
+        .stdout(predicate::str::contains("\"query_plan_request\""))
+        .stdout(predicate::str::contains("\"repo_map_request\""))
+        .stdout(predicate::str::contains("\"tool\":\"search_plan\""))
+        .stdout(predicate::str::contains("\"tool\":\"repo_map\""))
         .stdout(predicate::str::contains("\"tool\":\"read_range\""))
         .stdout(predicate::str::contains("\"tool\":\"read_ranges\""))
         .stdout(predicate::str::contains("\"next_action\""))
@@ -2681,7 +2691,9 @@ fn cli_batches_searches_across_fallback_indexed_and_shards() {
         .assert()
         .success()
         .stdout(predicate::str::contains("src/auth.rs"))
-        .stdout(predicate::str::contains("src/billing.rs"));
+        .stdout(predicate::str::contains("src/billing.rs"))
+        .stdout(predicate::str::contains("\"tool\":\"shard_query_plan\""))
+        .stdout(predicate::str::contains("\"tool\":\"shard_repo_map\""));
 
     let mut generic_shards = Command::cargo_bin("orient").unwrap();
     generic_shards
@@ -2701,6 +2713,10 @@ fn cli_batches_searches_across_fallback_indexed_and_shards() {
         .stdout(predicate::str::contains("src/auth.rs"))
         .stdout(predicate::str::contains("\"query\":\"invoice total\""))
         .stdout(predicate::str::contains("src/billing.rs"))
+        .stdout(predicate::str::contains("\"query_plan_request\""))
+        .stdout(predicate::str::contains("\"repo_map_request\""))
+        .stdout(predicate::str::contains("\"tool\":\"search_plan\""))
+        .stdout(predicate::str::contains("\"tool\":\"repo_map\""))
         .stdout(predicate::str::contains("\"tool\":\"read_range\""))
         .stdout(predicate::str::contains("\"tool\":\"read_ranges\""))
         .stdout(predicate::str::contains("\"next_action\""))

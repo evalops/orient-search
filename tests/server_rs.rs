@@ -1310,8 +1310,8 @@ fn runtime_serves_agent_guide_for_json_lines_wrappers() {
     let followups = guide["result_followups"].as_array().unwrap();
     for expected in [
         "Use search_auto.query_plan_result or a search_auto_batch item query_plan_result immediately when an automatic search is empty.",
-        "Use search_auto.query_plan_request or a search_auto_batch item query_plan_request when results are empty or noisy.",
-        "Use search_auto.repo_map_request or a search_auto_batch item repo_map_request when the agent needs entrypoints, tests, commands, or top symbols for the chosen surface.",
+        "Use search_auto.query_plan_request, a search_auto_batch item query_plan_request, or a search batch item query_plan_request when results are empty or noisy.",
+        "Use search_auto.repo_map_request, a search_auto_batch item repo_map_request, or a search batch item repo_map_request when the agent needs entrypoints, tests, commands, or top symbols for the chosen surface.",
         "Use search_auto.next_action or a search_auto_batch item next_action when the wrapper wants one prioritized follow-up request.",
         "Use search_auto.read_batch_request, a search_auto_batch item read_batch_request, or a search batch item next_action/read_batch_request to read top ranges in one call.",
         "Use symbol batch item next_action/read_batch_request to read candidate definitions for one requested symbol name.",
@@ -2402,6 +2402,24 @@ fn runtime_search_alias_accepts_live_index_and_shard_targets() {
         live_batch[0]["results"][0]["read_request"]["tool"],
         "read_range"
     );
+    assert_eq!(live_batch[0]["query_plan_request"]["tool"], "search_plan");
+    assert_eq!(live_batch[0]["repo_map_request"]["tool"], "repo_map");
+    assert_eq!(
+        live_batch[0]["query_plan_request"]["arguments"]["repo"],
+        serde_json::json!(repo.path())
+    );
+    assert_eq!(
+        live_batch[0]["repo_map_request"]["arguments"]["repo"],
+        serde_json::json!(repo.path())
+    );
+    assert_eq!(
+        live_batch[0]["repo_map_request"]["arguments"]["detail"],
+        "compact"
+    );
+    assert_eq!(
+        live_batch[0]["repo_map_request"]["arguments"]["read_limit"],
+        DEFAULT_REPO_MAP_READ_BATCH_RANGES
+    );
 
     let indexed_batch = runtime.dispatch(ToolRequest {
         id: serde_json::json!("indexed-batch"),
@@ -2431,6 +2449,19 @@ fn runtime_search_alias_accepts_live_index_and_shard_targets() {
         indexed_batch[0]["results"][0]["read_request"]["arguments"]["index"],
         serde_json::json!(repo.path().join(".orient/index"))
     );
+    assert_eq!(
+        indexed_batch[0]["query_plan_request"]["tool"],
+        "search_plan"
+    );
+    assert_eq!(indexed_batch[0]["repo_map_request"]["tool"], "repo_map");
+    assert_eq!(
+        indexed_batch[0]["query_plan_request"]["arguments"]["index"],
+        serde_json::json!(repo.path().join(".orient/index"))
+    );
+    assert_eq!(
+        indexed_batch[0]["repo_map_request"]["arguments"]["index"],
+        serde_json::json!(repo.path().join(".orient/index"))
+    );
 
     let shard_batch = runtime.dispatch(ToolRequest {
         id: serde_json::json!("shard-batch"),
@@ -2455,6 +2486,16 @@ fn runtime_search_alias_accepts_live_index_and_shard_targets() {
     );
     assert_eq!(
         shard_batch[0]["results"][0]["read_request"]["arguments"]["index_dir"],
+        serde_json::json!(repo.path().join(".orient-shards"))
+    );
+    assert_eq!(shard_batch[0]["query_plan_request"]["tool"], "search_plan");
+    assert_eq!(shard_batch[0]["repo_map_request"]["tool"], "repo_map");
+    assert_eq!(
+        shard_batch[0]["query_plan_request"]["arguments"]["index_dir"],
+        serde_json::json!(repo.path().join(".orient-shards"))
+    );
+    assert_eq!(
+        shard_batch[0]["repo_map_request"]["arguments"]["index_dir"],
         serde_json::json!(repo.path().join(".orient-shards"))
     );
 
@@ -3658,7 +3699,21 @@ fn runtime_batches_searches_and_query_plans_against_repo_index_and_shards() {
         }),
     });
     assert!(indexed.error.is_none(), "{:?}", indexed.error);
-    let result = serde_json::to_string(&indexed.result).unwrap();
+    let indexed = indexed.result.unwrap();
+    assert_eq!(
+        indexed[0]["query_plan_request"]["tool"],
+        "indexed_query_plan"
+    );
+    assert_eq!(indexed[0]["repo_map_request"]["tool"], "indexed_repo_map");
+    assert_eq!(
+        indexed[0]["query_plan_request"]["arguments"]["index"],
+        serde_json::json!(&index_path)
+    );
+    assert_eq!(
+        indexed[0]["repo_map_request"]["arguments"]["index"],
+        serde_json::json!(&index_path)
+    );
+    let result = serde_json::to_string(&indexed).unwrap();
     assert!(result.contains("src/auth.rs"), "{result}");
     assert!(result.contains("src/billing.rs"), "{result}");
 
@@ -7045,6 +7100,20 @@ fn runtime_search_auto_batch_refreshes_selected_shards_without_unselected_shards
     });
     assert!(batch.error.is_none(), "{:?}", batch.error);
     let batch = batch.result.unwrap();
+    assert_eq!(batch[0]["query_plan_request"]["tool"], "shard_query_plan");
+    assert_eq!(batch[0]["repo_map_request"]["tool"], "repo_map");
+    assert!(
+        batch[0]["query_plan_request"]["arguments"]["index_dir"]
+            .as_str()
+            .unwrap()
+            .ends_with("/shards")
+    );
+    assert!(
+        batch[0]["repo_map_request"]["arguments"]["index_dir"]
+            .as_str()
+            .unwrap()
+            .ends_with("/shards")
+    );
     let first_batch_item = serde_json::to_string(&batch[0]).unwrap();
     assert!(
         first_batch_item.contains("current-app/src/new_current.rs"),
@@ -7137,6 +7206,16 @@ fn runtime_search_shards_batch_refreshes_selected_shards_without_unselected_shar
     });
     assert!(batch.error.is_none(), "{:?}", batch.error);
     let batch = batch.result.unwrap();
+    assert_eq!(batch[0]["query_plan_request"]["tool"], "shard_query_plan");
+    assert_eq!(batch[0]["repo_map_request"]["tool"], "shard_repo_map");
+    assert_eq!(
+        batch[0]["query_plan_request"]["arguments"]["index_dir"],
+        serde_json::json!(&shard_dir)
+    );
+    assert_eq!(
+        batch[0]["repo_map_request"]["arguments"]["index_dir"],
+        serde_json::json!(&shard_dir)
+    );
     let first_batch_item = serde_json::to_string(&batch[0]).unwrap();
     assert!(
         first_batch_item.contains("current-app/src/new_current.rs"),

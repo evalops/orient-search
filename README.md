@@ -121,10 +121,13 @@ and query-plan follow-ups with `jsonl`, `client_cli`, and compact CLI hints.
 Generated related-file and related-symbol follow-ups set
 `include_read_batch:true`, so their responses include one batch read follow-up
 for all returned context.
-`search_auto` and `search_auto_batch` also expose `next_read_batch_request`,
-which points to the best immediate batch read after normal results or an
-automatic retry. Their `next_action` field wraps the best immediate follow-up
-request with a compact `kind`, `source`, and `summary`.
+`search_auto`, `search_auto_batch`, and search batch items expose ready
+query-plan and repo-map requests, so agents can diagnose weak hits or orient
+around nearby entrypoints without inventing a second call shape. Automatic
+searches also expose `next_read_batch_request`, which points to the best
+immediate batch read after normal results or an automatic retry. Their
+`next_action` field wraps the best immediate follow-up request with a compact
+`kind`, `source`, and `summary`.
 Plan batch responses also promote each repaired item's `next_action`, so
 wrappers can retry from `item.next_action` without digging through nested plan
 objects.

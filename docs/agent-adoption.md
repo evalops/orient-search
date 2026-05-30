@@ -45,7 +45,8 @@ The rule should tell agents:
   the returned map, search, batch, and query-plan calls will keep the active
   checkout scope and set `refresh_if_stale:true`.
 - Follow returned `read_*`, `related_*`, `repo_map_request`, and
-  `query_plan_request` objects directly.
+  `query_plan_request` objects directly. `search_auto_batch`, `search_batch`,
+  `indexed_search_batch`, and `search_shards_batch` return these per item.
 - Prefer `next_read_batch_request` after `search_auto` or `search_auto_batch`;
   it points at normal hits when present and retry hits after automatic repair.
 - When `next_action` is present, run `next_action.request` first; it chooses

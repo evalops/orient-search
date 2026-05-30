@@ -73,7 +73,9 @@ The generated rule should keep agents on this loop. See
   for the active checkout; the returned map, search, batch, and query-plan
   requests keep that same scope and set `refresh_if_stale:true`.
 - Follow returned `read_*`, `related_*`, `repo_map_request`, and
-  `query_plan_request` objects directly.
+  `query_plan_request` objects directly. Batch search tools return these on
+  each item so wrappers can retry, map, or read without changing protocol
+  shape.
 - Pass `refresh_if_stale:true` when live files may have changed. With `cwd`,
   Orient refreshes only the active checkout's shard. For `search_auto_batch`,
   Orient coalesces refresh across the batch's selected shard roots before

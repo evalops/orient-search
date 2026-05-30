@@ -1374,6 +1374,8 @@ struct QueryBench {
 #[derive(Debug, Clone, Serialize)]
 struct SearchBatchResult {
     query: String,
+    query_plan_request: ResultToolRequest,
+    repo_map_request: ResultToolRequest,
     #[serde(skip_serializing_if = "Option::is_none")]
     read_batch_request: Option<ResultToolRequest>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1383,12 +1385,16 @@ struct SearchBatchResult {
 
 fn search_batch_result(
     query: String,
+    query_plan_request: ResultToolRequest,
+    repo_map_request: ResultToolRequest,
     read_batch_request: Option<ResultToolRequest>,
     results: Vec<SearchResult>,
 ) -> SearchBatchResult {
     let next_action = read_batch_next_action(&read_batch_request);
     SearchBatchResult {
         query,
+        query_plan_request,
+        repo_map_request,
         read_batch_request,
         next_action,
         results,
@@ -1606,6 +1612,53 @@ fn attach_cli_result_query_plan_retry_requests<T: Serialize>(
             filters,
         ));
     }
+}
+
+fn cli_search_batch_followups<T: Serialize + ?Sized>(
+    query_plan_tool: &str,
+    repo_map_tool: &str,
+    target_name: &str,
+    target_value: &T,
+    query: &str,
+    filters: &SearchFilters,
+) -> (ResultToolRequest, ResultToolRequest) {
+    (
+        cli_query_plan_request(query_plan_tool, target_name, target_value, query, filters),
+        cli_repo_map_request(repo_map_tool, target_name, target_value, filters),
+    )
+}
+
+fn cli_query_plan_request<T: Serialize + ?Sized>(
+    tool: &str,
+    target_name: &str,
+    target_value: &T,
+    query: &str,
+    filters: &SearchFilters,
+) -> ResultToolRequest {
+    let mut arguments = Map::new();
+    add_filter_retry_args(&mut arguments, filters, target_name, None);
+    arguments.insert(target_name.to_string(), serde_json::json!(target_value));
+    arguments.insert("query".to_string(), serde_json::json!(query));
+    ResultToolRequest::new(tool.to_string(), Value::Object(arguments))
+}
+
+fn cli_repo_map_request<T: Serialize + ?Sized>(
+    tool: &str,
+    target_name: &str,
+    target_value: &T,
+    filters: &SearchFilters,
+) -> ResultToolRequest {
+    let mut arguments = Map::new();
+    arguments.insert(target_name.to_string(), serde_json::json!(target_value));
+    arguments.insert("detail".to_string(), serde_json::json!("compact"));
+    arguments.insert(
+        "read_limit".to_string(),
+        serde_json::json!(DEFAULT_REPO_MAP_READ_BATCH_RANGES),
+    );
+    if target_name == "index_dir" {
+        add_shard_scope_filter_args(&mut arguments, filters);
+    }
+    ResultToolRequest::new(tool.to_string(), Value::Object(arguments))
 }
 
 fn cli_retry_requests<T: Serialize>(
@@ -2412,7 +2465,22 @@ fn run() -> Result<()> {
                     "read_shard_ranges",
                     read_request_args("index_dir", &index_dir),
                 );
-                batch.push(search_batch_result(query, read_batch_request, results));
+                let shard_scope_filters = shard_scope_filters_for_query(&filters, &query);
+                let (query_plan_request, repo_map_request) = cli_search_batch_followups(
+                    "shard_query_plan",
+                    "shard_repo_map",
+                    "index_dir",
+                    &index_dir,
+                    &query,
+                    &shard_scope_filters,
+                );
+                batch.push(search_batch_result(
+                    query,
+                    query_plan_request,
+                    repo_map_request,
+                    read_batch_request,
+                    results,
+                ));
             }
             println!("{}", serde_json::to_string(&batch)?);
         }
@@ -3651,7 +3719,22 @@ fn run() -> Result<()> {
                         "read_ranges",
                         read_request_args("index_dir", &index_dir),
                     );
-                    batch.push(search_batch_result(query, read_batch_request, results));
+                    let shard_scope_filters = shard_scope_filters_for_query(&filters, &query);
+                    let (query_plan_request, repo_map_request) = cli_search_batch_followups(
+                        "search_plan",
+                        "repo_map",
+                        "index_dir",
+                        &index_dir,
+                        &query,
+                        &shard_scope_filters,
+                    );
+                    batch.push(search_batch_result(
+                        query,
+                        query_plan_request,
+                        repo_map_request,
+                        read_batch_request,
+                        results,
+                    ));
                 }
             } else if let Some(index_path) = index {
                 let index = load_index_for_search(index_path.clone(), refresh_if_stale)?;
@@ -3689,7 +3772,21 @@ fn run() -> Result<()> {
                         "read_ranges",
                         read_request_args("index", &index_path),
                     );
-                    batch.push(search_batch_result(query, read_batch_request, results));
+                    let (query_plan_request, repo_map_request) = cli_search_batch_followups(
+                        "search_plan",
+                        "repo_map",
+                        "index",
+                        &index_path,
+                        &query,
+                        &filters,
+                    );
+                    batch.push(search_batch_result(
+                        query,
+                        query_plan_request,
+                        repo_map_request,
+                        read_batch_request,
+                        results,
+                    ));
                 }
             } else {
                 for query in queries {
@@ -3719,7 +3816,21 @@ fn run() -> Result<()> {
                         "read_ranges",
                         read_request_args("repo", &repo),
                     );
-                    batch.push(search_batch_result(query, read_batch_request, results));
+                    let (query_plan_request, repo_map_request) = cli_search_batch_followups(
+                        "search_plan",
+                        "repo_map",
+                        "repo",
+                        &repo,
+                        &query,
+                        &filters,
+                    );
+                    batch.push(search_batch_result(
+                        query,
+                        query_plan_request,
+                        repo_map_request,
+                        read_batch_request,
+                        results,
+                    ));
                 }
             }
             println!("{}", serde_json::to_string(&batch)?);
@@ -3816,7 +3927,21 @@ fn run() -> Result<()> {
                     "read_index_ranges",
                     read_request_args("index", &index_path),
                 );
-                batch.push(search_batch_result(query, read_batch_request, results));
+                let (query_plan_request, repo_map_request) = cli_search_batch_followups(
+                    "indexed_query_plan",
+                    "indexed_repo_map",
+                    "index",
+                    &index_path,
+                    &query,
+                    &filters,
+                );
+                batch.push(search_batch_result(
+                    query,
+                    query_plan_request,
+                    repo_map_request,
+                    read_batch_request,
+                    results,
+                ));
             }
             println!("{}", serde_json::to_string(&batch)?);
         }

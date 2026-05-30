@@ -68,6 +68,8 @@ pub struct ToolResponse {
 #[derive(Debug, Serialize)]
 struct SearchBatchResult {
     query: String,
+    query_plan_request: ResultToolRequest,
+    repo_map_request: ResultToolRequest,
     #[serde(skip_serializing_if = "Option::is_none")]
     read_batch_request: Option<ResultToolRequest>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -77,16 +79,47 @@ struct SearchBatchResult {
 
 fn search_batch_result(
     query: String,
+    query_plan_request: ResultToolRequest,
+    repo_map_request: ResultToolRequest,
     read_batch_request: Option<ResultToolRequest>,
     results: Vec<SearchResult>,
 ) -> SearchBatchResult {
     let next_action = read_batch_next_action(&read_batch_request);
     SearchBatchResult {
         query,
+        query_plan_request,
+        repo_map_request,
         read_batch_request,
         next_action,
         results,
     }
+}
+
+fn search_batch_followups<T: Serialize + ?Sized>(
+    query_plan_tool: &str,
+    repo_map_tool: &str,
+    target_name: &str,
+    target_value: &T,
+    source_arguments: &Value,
+    query: &str,
+    shard_scope_filters: Option<&SearchFilters>,
+) -> (ResultToolRequest, ResultToolRequest) {
+    (
+        auto_query_plan_request(
+            query_plan_tool,
+            target_name,
+            target_value,
+            source_arguments,
+            query,
+        ),
+        auto_repo_map_request(
+            repo_map_tool,
+            target_name,
+            target_value,
+            source_arguments,
+            shard_scope_filters,
+        ),
+    )
 }
 
 fn read_batch_next_action(read_batch_request: &Option<ResultToolRequest>) -> Option<Value> {
@@ -1320,8 +1353,8 @@ pub fn agent_guide(
         "result_followups": [
             "Use search_auto.query_plan_result or a search_auto_batch item query_plan_result immediately when an automatic search is empty.",
             "Set retry_if_empty:true on search_auto or search_auto_batch to run primary_retry_request once and receive primary_retry_result in the same call.",
-            "Use search_auto.query_plan_request or a search_auto_batch item query_plan_request when results are empty or noisy.",
-            "Use search_auto.repo_map_request or a search_auto_batch item repo_map_request when the agent needs entrypoints, tests, commands, or top symbols for the chosen surface.",
+            "Use search_auto.query_plan_request, a search_auto_batch item query_plan_request, or a search batch item query_plan_request when results are empty or noisy.",
+            "Use search_auto.repo_map_request, a search_auto_batch item repo_map_request, or a search batch item repo_map_request when the agent needs entrypoints, tests, commands, or top symbols for the chosen surface.",
             "Use search_auto.next_read_batch_request or a search_auto_batch item next_read_batch_request as the preferred immediate read follow-up after automatic retries.",
             "Use search_auto.next_action or a search_auto_batch item next_action when the wrapper wants one prioritized follow-up request.",
             "Use search_auto.read_batch_request, a search_auto_batch item read_batch_request, or a search batch item next_action/read_batch_request to read top ranges in one call.",
@@ -3629,7 +3662,24 @@ impl ToolRuntime {
                             "read_ranges",
                             read_request_args("index_dir", &index_dir),
                         );
-                        batch.push(search_batch_result(query, read_batch_request, results));
+                        let shard_scope_filters =
+                            merge_filters(filters.clone(), parse_query(&query).filters);
+                        let (query_plan_request, repo_map_request) = search_batch_followups(
+                            "search_plan",
+                            "repo_map",
+                            "index_dir",
+                            &index_dir,
+                            &request.arguments,
+                            &query,
+                            Some(&shard_scope_filters),
+                        );
+                        batch.push(search_batch_result(
+                            query,
+                            query_plan_request,
+                            repo_map_request,
+                            read_batch_request,
+                            results,
+                        ));
                     }
                     return Ok(serde_json::to_value(batch)?);
                 }
@@ -3669,7 +3719,22 @@ impl ToolRuntime {
                             "read_ranges",
                             read_request_args("index", &index_path),
                         );
-                        batch.push(search_batch_result(query, read_batch_request, results));
+                        let (query_plan_request, repo_map_request) = search_batch_followups(
+                            "search_plan",
+                            "repo_map",
+                            "index",
+                            &index_path,
+                            &request.arguments,
+                            &query,
+                            None,
+                        );
+                        batch.push(search_batch_result(
+                            query,
+                            query_plan_request,
+                            repo_map_request,
+                            read_batch_request,
+                            results,
+                        ));
                     }
                     return Ok(serde_json::to_value(batch)?);
                 }
@@ -3719,8 +3784,21 @@ impl ToolRuntime {
                                 "read_ranges",
                                 read_request_args("index_dir", &index_dir),
                             );
+                            let shard_scope_filters =
+                                merge_filters(filters.clone(), parse_query(query).filters);
+                            let (query_plan_request, repo_map_request) = search_batch_followups(
+                                "search_plan",
+                                "repo_map",
+                                "index_dir",
+                                &index_dir,
+                                &scoped_arguments,
+                                query,
+                                Some(&shard_scope_filters),
+                            );
                             batch.push(search_batch_result(
                                 query.clone(),
+                                query_plan_request,
+                                repo_map_request,
                                 read_batch_request,
                                 results,
                             ));
@@ -3766,8 +3844,19 @@ impl ToolRuntime {
                                     "read_ranges",
                                     read_request_args("index", &index_path),
                                 );
+                                let (query_plan_request, repo_map_request) = search_batch_followups(
+                                    "search_plan",
+                                    "repo_map",
+                                    "index",
+                                    &index_path,
+                                    &scoped_arguments,
+                                    query,
+                                    None,
+                                );
                                 batch.push(search_batch_result(
                                     query.clone(),
+                                    query_plan_request,
+                                    repo_map_request,
                                     read_batch_request,
                                     results,
                                 ));
@@ -3810,7 +3899,22 @@ impl ToolRuntime {
                         "read_ranges",
                         read_request_args("repo", &repo),
                     );
-                    batch.push(search_batch_result(query, read_batch_request, results));
+                    let (query_plan_request, repo_map_request) = search_batch_followups(
+                        "search_plan",
+                        "repo_map",
+                        "repo",
+                        &repo,
+                        &request.arguments,
+                        &query,
+                        None,
+                    );
+                    batch.push(search_batch_result(
+                        query,
+                        query_plan_request,
+                        repo_map_request,
+                        read_batch_request,
+                        results,
+                    ));
                 }
                 Ok(serde_json::to_value(batch)?)
             }
@@ -4163,7 +4267,22 @@ impl ToolRuntime {
                         "read_index_ranges",
                         read_request_args("index", &index_path),
                     );
-                    batch.push(search_batch_result(query, read_batch_request, results));
+                    let (query_plan_request, repo_map_request) = search_batch_followups(
+                        "indexed_query_plan",
+                        "indexed_repo_map",
+                        "index",
+                        &index_path,
+                        &request.arguments,
+                        &query,
+                        None,
+                    );
+                    batch.push(search_batch_result(
+                        query,
+                        query_plan_request,
+                        repo_map_request,
+                        read_batch_request,
+                        results,
+                    ));
                 }
                 Ok(serde_json::to_value(batch)?)
             }
@@ -4330,7 +4449,24 @@ impl ToolRuntime {
                         "read_shard_ranges",
                         read_request_args("index_dir", &index_dir),
                     );
-                    batch.push(search_batch_result(query, read_batch_request, results));
+                    let shard_scope_filters =
+                        merge_filters(filters.clone(), parse_query(&query).filters);
+                    let (query_plan_request, repo_map_request) = search_batch_followups(
+                        "shard_query_plan",
+                        "shard_repo_map",
+                        "index_dir",
+                        &index_dir,
+                        &scoped_arguments,
+                        &query,
+                        Some(&shard_scope_filters),
+                    );
+                    batch.push(search_batch_result(
+                        query,
+                        query_plan_request,
+                        repo_map_request,
+                        read_batch_request,
+                        results,
+                    ));
                 }
                 Ok(serde_json::to_value(batch)?)
             }
