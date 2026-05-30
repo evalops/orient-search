@@ -102,10 +102,12 @@ for broad orientation. Bare filenames, pasted file locations, in-repo absolute
 paths, Python tracebacks, JavaScript stack frames, Markdown links, and hosted
 code links resolve to anchored file searches. Go panic stack locations are
 accepted too. Pytest node IDs and simple pytest commands such as
-`pytest tests/test_auth.py::test_login -q` resolve to the test file. Language
-filters include common shorthands such as `lang:rs`, `lang:ts`, `lang:cpp`,
-`lang:csharp`, `lang:shell`, `lang:makefile`, and `lang:justfile`.
-`kind:target` and `recipe:name` can jump to Makefile targets,
+`pytest tests/test_auth.py::test_login -q` resolve to the test file. Simple
+Cargo test commands such as `cargo test parser_accepts_locations` resolve to
+the Rust test function. Language filters include common shorthands such as
+`lang:rs`, `lang:ts`, `lang:cpp`, `lang:csharp`, `lang:shell`,
+`lang:makefile`, and `lang:justfile`. `kind:target` and `recipe:name` can jump
+to Makefile targets,
 Justfile targets, GitHub Actions jobs, and Bazel BUILD rule names. Pasted Bazel
 labels like `//tools/search:orient_cli` and `:agent_smoke_test` infer target
 symbol searches too, including inside commands like

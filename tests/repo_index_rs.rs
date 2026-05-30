@@ -1660,6 +1660,55 @@ def pytest_login_helper():
 }
 
 #[test]
+fn cargo_test_commands_search_target_test_functions() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("tests/parser_rs.rs"),
+        r#"
+#[test]
+fn parser_accepts_locations() {
+    assert!(true);
+}
+"#,
+    );
+    write(
+        &repo.path().join("src/lib.rs"),
+        r#"
+pub fn cargo_test_helper() {}
+"#,
+    );
+
+    let fallback = search_repo_fast_filtered(
+        repo.path(),
+        "cargo test parser_accepts_locations",
+        5,
+        &Default::default(),
+    )
+    .unwrap();
+    assert_eq!(fallback[0].path, "tests/parser_rs.rs");
+    assert!(
+        fallback[0]
+            .reason
+            .contains("symbol:parser_accepts_locations")
+    );
+
+    let indexed = FastIndex::build(repo.path()).unwrap();
+    let indexed_results = indexed
+        .search_filtered(
+            "cargo test parser_rs::parser_accepts_locations",
+            5,
+            &Default::default(),
+        )
+        .unwrap();
+    assert_eq!(indexed_results[0].path, "tests/parser_rs.rs");
+    assert!(
+        indexed_results[0]
+            .reason
+            .contains("symbol:parser_accepts_locations")
+    );
+}
+
+#[test]
 fn fallback_line_range_tracks_displayed_contiguous_snippet_block() {
     let repo = tempfile::tempdir().unwrap();
     let mut source = String::from("alpha first hit\n");

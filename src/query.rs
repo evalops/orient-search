@@ -43,6 +43,7 @@ pub fn parse_query(input: &str) -> ParsedQuery {
     infer_leading_location_term(&mut terms, &mut filters, explicit_content_terms);
     infer_pytest_command_node_id_term(&mut terms, &mut filters, explicit_content_terms);
     infer_leading_pytest_node_id_term(&mut terms, &mut filters, explicit_content_terms);
+    infer_cargo_test_command_symbol_term(&mut terms, &mut filters, explicit_content_terms);
     if terms.len() > 1 && !filters.match_any {
         filters.require_all = true;
     }
@@ -591,6 +592,70 @@ fn is_pytest_command_word(value: &str) -> bool {
 
 fn is_pytest_command_flag_term(value: &str) -> bool {
     matches!(value, "m" | "q" | "s" | "v" | "vv")
+}
+
+fn infer_cargo_test_command_symbol_term(
+    terms: &mut Vec<String>,
+    filters: &mut SearchFilters,
+    explicit_content_terms: bool,
+) {
+    if explicit_content_terms
+        || terms.len() < 3
+        || filters.file.is_some()
+        || filters.path.is_some()
+        || filters.symbol.is_some()
+    {
+        return;
+    }
+
+    let mut saw_cargo = false;
+    let mut saw_test = false;
+    let mut targets = Vec::new();
+    for term in terms.iter() {
+        let term = trim_location_token_wrappers(term);
+        let lower = term.to_ascii_lowercase();
+        if lower == "cargo" {
+            saw_cargo = true;
+            continue;
+        }
+        if lower == "test" {
+            saw_test = true;
+            continue;
+        }
+        let Some(target) = cargo_test_symbol_target(term) else {
+            return;
+        };
+        targets.push(target);
+    }
+
+    let [target] = targets.as_slice() else {
+        return;
+    };
+    if !saw_cargo || !saw_test {
+        return;
+    }
+
+    filters.symbol = Some(target.clone());
+    filters.symbol_kind = Some("function".to_string());
+    terms.clear();
+    filters.require_all = false;
+}
+
+fn cargo_test_symbol_target(value: &str) -> Option<String> {
+    let target = value.rsplit("::").next().unwrap_or(value).trim();
+    if !is_rust_test_symbol_name(target) {
+        return None;
+    }
+    Some(target.to_string())
+}
+
+fn is_rust_test_symbol_name(value: &str) -> bool {
+    let mut chars = value.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    (first == '_' || first.is_ascii_alphabetic())
+        && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
 }
 
 fn infer_leading_pytest_node_id_term(
@@ -2217,6 +2282,29 @@ mod tests {
             Some("tests/test_auth.py")
         );
         assert_eq!(pytest_command.filters.target_line, None);
+
+        let cargo_test_command = parse_query("cargo test parser_accepts_locations");
+        assert!(cargo_test_command.terms.is_empty());
+        assert_eq!(
+            cargo_test_command.filters.symbol.as_deref(),
+            Some("parser_accepts_locations")
+        );
+        assert_eq!(
+            cargo_test_command.filters.symbol_kind.as_deref(),
+            Some("function")
+        );
+
+        let cargo_test_module_path =
+            parse_query("cargo test query::tests::parser_accepts_locations");
+        assert!(cargo_test_module_path.terms.is_empty());
+        assert_eq!(
+            cargo_test_module_path.filters.symbol.as_deref(),
+            Some("parser_accepts_locations")
+        );
+        assert_eq!(
+            cargo_test_module_path.filters.symbol_kind.as_deref(),
+            Some("function")
+        );
 
         let pytest_failure_line = parse_query("FAILED tests/test_auth.py::test_login - failed");
         assert!(pytest_failure_line.terms.is_empty());
