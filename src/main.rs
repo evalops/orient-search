@@ -446,7 +446,7 @@ enum Commands {
         #[arg(long)]
         summary: bool,
     },
-    #[command(alias = "open-range")]
+    #[command(visible_alias = "open-range")]
     ReadRange {
         #[arg(long, default_value = ".")]
         repo: PathBuf,
@@ -474,7 +474,7 @@ enum Commands {
         #[arg(long = "format", default_value = "json", value_parser = ["json"])]
         format: String,
     },
-    #[command(alias = "open-ranges")]
+    #[command(visible_alias = "open-ranges")]
     ReadRanges {
         #[arg(long, default_value = ".")]
         repo: PathBuf,

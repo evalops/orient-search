@@ -146,6 +146,10 @@ fn cli_help_stays_focused_on_local_code_search() {
     cmd.arg("--help")
         .assert()
         .success()
+        .stdout(predicate::str::contains("read-range"))
+        .stdout(predicate::str::contains("open-range"))
+        .stdout(predicate::str::contains("read-ranges"))
+        .stdout(predicate::str::contains("open-ranges"))
         .stdout(predicate::str::contains("eval-adoption").not())
         .stdout(predicate::str::contains("transcript").not())
         .stdout(predicate::str::contains("analytics").not());
@@ -1291,6 +1295,19 @@ fn cli_rejects_oversized_batches() {
 #[test]
 fn cli_read_ranges_can_return_compact_summary() {
     let repo = sample_repo();
+    let mut open_range = Command::cargo_bin("orient").unwrap();
+    open_range
+        .args([
+            "open-range",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "src/auth.rs:5:1",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"path\":\"src/auth.rs\""))
+        .stdout(predicate::str::contains("issue_token"));
+
     let mut default_shape = Command::cargo_bin("orient").unwrap();
     let default_shape = default_shape
         .args([
@@ -1304,6 +1321,20 @@ fn cli_read_ranges_can_return_compact_summary() {
     assert!(default_shape.status.success());
     let default_shape: serde_json::Value = serde_json::from_slice(&default_shape.stdout).unwrap();
     assert!(default_shape.as_array().is_some());
+
+    let mut open_ranges = Command::cargo_bin("orient").unwrap();
+    open_ranges
+        .args([
+            "open-ranges",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--summary",
+            "src/auth.rs:1:1",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"range_count\":1"))
+        .stdout(predicate::str::contains("\"path\":\"src/auth.rs\""));
 
     let mut summarized = Command::cargo_bin("orient").unwrap();
     let summarized = summarized
