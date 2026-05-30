@@ -4797,6 +4797,9 @@ pub(crate) fn extract_symbols(path: &str, text: &str, language: &str) -> Vec<Sym
     if is_cargo_toml_path(path) {
         return extract_cargo_manifest_symbols(path, text);
     }
+    if is_pyproject_toml_path(path) {
+        return extract_pyproject_symbols(path, text);
+    }
     if is_package_json_path(path) {
         return extract_package_json_script_symbols(path, text);
     }
@@ -5250,6 +5253,72 @@ fn parse_toml_string(value: &str) -> Option<String> {
         return Some(rest[..end].to_string());
     }
     None
+}
+
+fn is_pyproject_toml_path(path: &str) -> bool {
+    Path::new(path).file_name().and_then(|value| value.to_str()) == Some("pyproject.toml")
+}
+
+fn extract_pyproject_symbols(path: &str, text: &str) -> Vec<Symbol> {
+    let mut symbols = Vec::new();
+    let mut current_kind: Option<&'static str> = None;
+    for (index, line) in text.lines().enumerate() {
+        let trimmed = line.trim();
+        if let Some(kind) = pyproject_table_symbol_kind(trimmed) {
+            current_kind = Some(kind);
+            continue;
+        }
+        if trimmed.starts_with('[') {
+            current_kind = None;
+            continue;
+        }
+        let Some(kind) = current_kind else {
+            continue;
+        };
+        if kind == "package" {
+            let Some(name) = toml_name_assignment(trimmed) else {
+                continue;
+            };
+            symbols.push(Symbol {
+                name,
+                kind: "package".to_string(),
+                path: path.to_string(),
+                line: index + 1,
+            });
+            current_kind = None;
+        } else if let Some(name) = toml_key_assignment(trimmed) {
+            symbols.push(Symbol {
+                name,
+                kind: "script".to_string(),
+                path: path.to_string(),
+                line: index + 1,
+            });
+        }
+    }
+    symbols
+}
+
+fn pyproject_table_symbol_kind(line: &str) -> Option<&'static str> {
+    let table = line.strip_prefix('[')?.strip_suffix(']')?.trim();
+    match table {
+        "project" | "tool.poetry" => Some("package"),
+        "project.scripts" | "project.gui-scripts" | "tool.poetry.scripts" => Some("script"),
+        _ => None,
+    }
+}
+
+fn toml_key_assignment(line: &str) -> Option<String> {
+    let line = strip_toml_comment(line).trim();
+    let (key, _) = line.split_once('=')?;
+    let key = key.trim();
+    if key.is_empty() {
+        return None;
+    }
+    if key.starts_with('"') || key.starts_with('\'') {
+        parse_toml_string(key)
+    } else {
+        Some(key.to_string())
+    }
 }
 
 fn is_package_json_path(path: &str) -> bool {

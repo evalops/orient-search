@@ -840,6 +840,52 @@ path = "examples/replay.rs"
 }
 
 #[test]
+fn pyproject_entries_work_as_symbols_across_live_and_persistent_indexes() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("pyproject.toml"),
+        r#"
+[project]
+name = "agent-tools"
+version = "0.1.0"
+
+[project.scripts]
+orient-agent = "agent_tools.cli:main"
+
+[tool.poetry.scripts]
+legacy-agent = "agent_tools.legacy:main"
+"#,
+    );
+
+    let live = RepoIndexer::new(repo.path()).build().unwrap();
+    let live_package = &live.find_symbol("agent-tools", 10)[0];
+    assert_symbol(live_package, "pyproject.toml", "package");
+    assert_eq!(live_package.line, 3);
+    let live_script = &live.find_symbol("orient-agent", 10)[0];
+    assert_symbol(live_script, "pyproject.toml", "script");
+    assert_eq!(live_script.line, 7);
+
+    let fallback =
+        search_repo_fast_filtered(repo.path(), "script:orient-agent", 5, &Default::default())
+            .unwrap();
+    assert_eq!(fallback[0].path, "pyproject.toml");
+    assert!(fallback[0].reason.contains("symbol:orient-agent"));
+
+    let indexed = FastIndex::build(repo.path()).unwrap();
+    let indexed_package = &indexed.find_symbol("agent-tools", 10)[0];
+    assert_symbol(indexed_package, "pyproject.toml", "package");
+    assert_eq!(indexed_package.line, 3);
+    let indexed_legacy = &indexed.find_symbol("legacy-agent", 10)[0];
+    assert_symbol(indexed_legacy, "pyproject.toml", "script");
+    assert_eq!(indexed_legacy.line, 10);
+    let indexed_results = indexed
+        .search_filtered("package:agent-tools", 5, &Default::default())
+        .unwrap();
+    assert_eq!(indexed_results[0].path, "pyproject.toml");
+    assert!(indexed_results[0].reason.contains("symbol:agent-tools"));
+}
+
+#[test]
 fn package_json_scripts_work_as_symbols_across_live_and_persistent_indexes() {
     let repo = tempfile::tempdir().unwrap();
     write(
