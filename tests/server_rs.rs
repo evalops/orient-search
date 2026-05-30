@@ -232,6 +232,18 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         serde_json::json!(["short", "medium", "block", "symbol"])
     );
     assert_eq!(
+        search["input_schema"]["properties"]["snippet_mode"]["enum"],
+        serde_json::json!(["short", "medium", "block", "symbol"])
+    );
+    assert_eq!(
+        search["input_schema"]["properties"]["snippet_mode"]["default"],
+        "medium"
+    );
+    assert_eq!(
+        search["input_schema"]["properties"]["snippet_mode"]["description"],
+        "Alias for snippet."
+    );
+    assert_eq!(
         search["input_schema"]["properties"]["lang"]["description"],
         "Alias for language."
     );
@@ -3713,7 +3725,37 @@ fn runtime_rejects_oversized_batches() {
     });
     let error = response.error.unwrap();
     assert!(
-        error.contains("snippet must be one of: short, medium, block, symbol"),
+        error.contains("snippet mode must be one of: short, medium, block, symbol"),
+        "{error}"
+    );
+
+    let response = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("valid-snippet-mode-alias"),
+        tool: "search_code".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "query": "SessionManager",
+            "snippet_mode": "short"
+        }),
+    });
+    assert!(response.error.is_none(), "{response:?}");
+    assert!(
+        response.result.is_some(),
+        "snippet_mode alias search should return a result payload"
+    );
+
+    let response = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("invalid-snippet-mode-alias"),
+        tool: "search_code".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "query": "SessionManager",
+            "snippet_mode": "wide"
+        }),
+    });
+    let error = response.error.unwrap();
+    assert!(
+        error.contains("snippet mode must be one of: short, medium, block, symbol"),
         "{error}"
     );
 

@@ -1869,7 +1869,7 @@ fn argument_default(tool_name: &str, name: &str) -> Option<Value> {
         (_, "start") => Some(json!(1)),
         (_, "lines") => Some(json!(80)),
         (_, "scope") => Some(json!("exact")),
-        (_, "snippet") => Some(json!("medium")),
+        (_, "snippet" | "snippet_mode") => Some(json!("medium")),
         (_, "detail") => Some(json!("compact")),
         ("agent_guide" | "agent_instructions", "profile") => Some(json!("generic")),
         (_, "context_lines") => Some(json!(0)),
@@ -1886,7 +1886,7 @@ fn argument_default(tool_name: &str, name: &str) -> Option<Value> {
 
 fn argument_enum(name: &str) -> Option<&'static [&'static str]> {
     match name {
-        "snippet" => Some(&["short", "medium", "block", "symbol"]),
+        "snippet" | "snippet_mode" => Some(&["short", "medium", "block", "symbol"]),
         "scope" => Some(&["exact", "symbol"]),
         "detail" => Some(&["compact", "full"]),
         "profile" => Some(&["generic", "codex", "claude", "amp"]),
@@ -2018,6 +2018,7 @@ fn argument_description(tool_name: &str, name: &str) -> &'static str {
             "When true, include only implementation source-code paths; when false, exclude implementation source-code paths."
         }
         "snippet" => "Snippet mode: short, medium, block, or symbol.",
+        "snippet_mode" => "Alias for snippet.",
         "detail" => {
             "Repo-map detail level: compact keeps first-orientation payloads small; full includes all available import hints."
         }
@@ -2190,6 +2191,7 @@ fn auto_query_plan_passthrough_arg(name: &str, target_name: &str) -> bool {
             | "limit"
             | "context_lines"
             | "snippet"
+            | "snippet_mode"
             | "explain"
             | "diagnose"
             | "retry_if_empty"
@@ -2894,6 +2896,7 @@ fn retry_search_passthrough_arg(name: &str, target_name: &str) -> bool {
             | "limit"
             | "context_lines"
             | "snippet"
+            | "snippet_mode"
             | "explain"
             | "diagnose"
             | "retry_if_empty"
@@ -7202,6 +7205,7 @@ const SEARCH_OPTIONAL_ARGS: &[&str] = &[
     "generated",
     "code",
     "snippet",
+    "snippet_mode",
     "explain",
     "require_all",
     "any_terms",
@@ -7268,6 +7272,7 @@ const SEARCH_TARGET_OPTIONAL_ARGS: &[&str] = &[
     "generated",
     "code",
     "snippet",
+    "snippet_mode",
     "explain",
     "require_all",
     "any_terms",
@@ -7772,6 +7777,7 @@ const SEARCH_AUTO_OPTIONAL_ARGS: &[&str] = &[
     "generated",
     "code",
     "snippet",
+    "snippet_mode",
     "explain",
     "require_all",
     "any_terms",
@@ -7838,6 +7844,7 @@ const SEARCH_INDEX_OPTIONAL_ARGS: &[&str] = &[
     "generated",
     "code",
     "snippet",
+    "snippet_mode",
     "explain",
     "require_all",
     "any_terms",
@@ -8541,11 +8548,11 @@ fn context_lines_arg(arguments: &Value) -> Result<usize> {
 }
 
 fn snippet_mode_arg(arguments: &Value) -> Result<SnippetMode> {
-    let Some(value) = optional_string_arg(arguments, "snippet") else {
+    let Some(value) = optional_string_arg_any(arguments, &["snippet", "snippet_mode"]) else {
         return Ok(SnippetMode::default());
     };
     SnippetMode::parse(&value)
-        .ok_or_else(|| anyhow!("snippet must be one of: short, medium, block, symbol"))
+        .ok_or_else(|| anyhow!("snippet mode must be one of: short, medium, block, symbol"))
 }
 
 fn is_zero(value: &usize) -> bool {
