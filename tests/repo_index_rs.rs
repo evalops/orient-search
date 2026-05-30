@@ -805,6 +805,14 @@ fn package_json_scripts_work_as_symbols_across_live_and_persistent_indexes() {
 }
 "#,
     );
+    write(
+        &repo.path().join("compact/package.json"),
+        r#"
+{
+  "scripts": {"compact-build": "vite build", "compact:test": "vitest"}
+}
+"#,
+    );
 
     let live = RepoIndexer::new(repo.path()).build().unwrap();
     assert_symbol(
@@ -817,6 +825,9 @@ fn package_json_scripts_work_as_symbols_across_live_and_persistent_indexes() {
         "package.json",
         "script",
     );
+    let live_compact = &live.find_symbol("compact-build", 10)[0];
+    assert_symbol(live_compact, "compact/package.json", "script");
+    assert_eq!(live_compact.line, 3);
 
     let fallback = search_repo_fast_filtered(
         repo.path(),
@@ -834,6 +845,9 @@ fn package_json_scripts_work_as_symbols_across_live_and_persistent_indexes() {
         "package.json",
         "script",
     );
+    let indexed_compact = &indexed.find_symbol("compact-build", 10)[0];
+    assert_symbol(indexed_compact, "compact/package.json", "script");
+    assert_eq!(indexed_compact.line, 3);
     let indexed_results = indexed
         .search_filtered("script:build:prod", 5, &Default::default())
         .unwrap();

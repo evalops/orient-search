@@ -5166,25 +5166,29 @@ fn extract_package_json_script_symbols(path: &str, text: &str) -> Vec<Symbol> {
 }
 
 fn package_json_script_line(text: &str, script: &str) -> Option<usize> {
-    let needle = format!("\"{script}\"");
+    let needle = serde_json::to_string(script).ok()?;
     let mut in_scripts = false;
     let mut depth = 0usize;
     for (index, line) in text.lines().enumerate() {
+        let opens = line.matches('{').count();
+        let closes = line.matches('}').count();
+        let mut entered_on_line = false;
         if !in_scripts {
             if line.contains("\"scripts\"") && line.contains('{') {
                 in_scripts = true;
-                depth = line
-                    .matches('{')
-                    .count()
-                    .saturating_sub(line.matches('}').count());
+                entered_on_line = true;
+                depth = opens.saturating_sub(closes);
+            } else {
+                continue;
             }
-            continue;
         }
         if depth <= 1 && line.contains(&needle) {
             return Some(index + 1);
         }
-        depth = depth.saturating_add(line.matches('{').count());
-        depth = depth.saturating_sub(line.matches('}').count());
+        if !entered_on_line {
+            depth = depth.saturating_add(opens);
+            depth = depth.saturating_sub(closes);
+        }
         if depth == 0 {
             break;
         }
