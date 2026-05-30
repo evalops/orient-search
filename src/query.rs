@@ -41,6 +41,7 @@ pub fn parse_query(input: &str) -> ParsedQuery {
     }
 
     infer_leading_location_term(&mut terms, &mut filters, explicit_content_terms);
+    infer_pytest_command_node_id_term(&mut terms, &mut filters, explicit_content_terms);
     infer_leading_pytest_node_id_term(&mut terms, &mut filters, explicit_content_terms);
     if terms.len() > 1 && !filters.match_any {
         filters.require_all = true;
@@ -513,6 +514,83 @@ fn is_bazel_label_target(value: &str) -> bool {
         && value
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.'))
+}
+
+fn infer_pytest_command_node_id_term(
+    terms: &mut Vec<String>,
+    filters: &mut SearchFilters,
+    explicit_content_terms: bool,
+) {
+    if explicit_content_terms
+        || terms.len() < 2
+        || filters.file.is_some()
+        || filters.path.is_some()
+        || filters.symbol.is_some()
+    {
+        return;
+    }
+
+    let node_terms: Vec<_> = terms
+        .iter()
+        .enumerate()
+        .filter_map(|(index, term)| pytest_node_id_path(term).map(|path| (index, path)))
+        .collect();
+    let [(node_index, path)] = node_terms.as_slice() else {
+        return;
+    };
+    if !is_pytest_command_context(terms, *node_index) {
+        return;
+    }
+
+    let path = strip_leading_current_dir_segments(path.clone());
+    let applied = if path.contains('/') {
+        filters.path = Some(path);
+        true
+    } else if looks_like_file_name_query(&path) {
+        filters.file = Some(path);
+        true
+    } else {
+        false
+    };
+    if !applied {
+        return;
+    }
+
+    filters
+        .exclude_content
+        .retain(|term| !is_pytest_command_flag_term(term));
+    terms.clear();
+    filters.require_all = false;
+}
+
+fn is_pytest_command_context(terms: &[String], node_index: usize) -> bool {
+    let mut saw_pytest_runner = false;
+    for (index, term) in terms.iter().enumerate() {
+        if index == node_index {
+            continue;
+        }
+        let term = trim_location_token_wrappers(term).to_ascii_lowercase();
+        if matches!(term.as_str(), "pytest" | "py.test") {
+            saw_pytest_runner = true;
+            continue;
+        }
+        if is_pytest_command_word(&term) {
+            continue;
+        }
+        return false;
+    }
+    saw_pytest_runner
+}
+
+fn is_pytest_command_word(value: &str) -> bool {
+    matches!(value, "python" | "python3" | "uv" | "poetry" | "run")
+        || value
+            .strip_prefix("python")
+            .is_some_and(|version| version.chars().all(|ch| ch.is_ascii_digit() || ch == '.'))
+}
+
+fn is_pytest_command_flag_term(value: &str) -> bool {
+    matches!(value, "m" | "q" | "s" | "v" | "vv")
 }
 
 fn infer_leading_pytest_node_id_term(
@@ -2131,6 +2209,14 @@ mod tests {
             Some("tests/test_auth.py")
         );
         assert_eq!(pytest_node_id.filters.target_line, None);
+
+        let pytest_command = parse_query("pytest tests/test_auth.py::test_login -q");
+        assert!(pytest_command.terms.is_empty());
+        assert_eq!(
+            pytest_command.filters.path.as_deref(),
+            Some("tests/test_auth.py")
+        );
+        assert_eq!(pytest_command.filters.target_line, None);
 
         let pytest_failure_line = parse_query("FAILED tests/test_auth.py::test_login - failed");
         assert!(pytest_failure_line.terms.is_empty());

@@ -1622,6 +1622,44 @@ fn repo_briefs_keep_import_hints_compact_without_breaking_import_filters() {
 }
 
 #[test]
+fn pytest_commands_search_target_test_files() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("tests/test_auth.py"),
+        r#"
+def test_login():
+    assert True
+"#,
+    );
+    write(
+        &repo.path().join("src/auth.py"),
+        r#"
+def pytest_login_helper():
+    return True
+"#,
+    );
+
+    let fallback = search_repo_fast_filtered(
+        repo.path(),
+        "pytest tests/test_auth.py::test_login -q",
+        5,
+        &Default::default(),
+    )
+    .unwrap();
+    assert_eq!(fallback[0].path, "tests/test_auth.py");
+
+    let indexed = FastIndex::build(repo.path()).unwrap();
+    let indexed_results = indexed
+        .search_filtered(
+            "python -m pytest tests/test_auth.py::test_login",
+            5,
+            &Default::default(),
+        )
+        .unwrap();
+    assert_eq!(indexed_results[0].path, "tests/test_auth.py");
+}
+
+#[test]
 fn fallback_line_range_tracks_displayed_contiguous_snippet_block() {
     let repo = tempfile::tempdir().unwrap();
     let mut source = String::from("alpha first hit\n");
