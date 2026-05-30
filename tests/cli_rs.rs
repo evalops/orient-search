@@ -2271,6 +2271,7 @@ fn cli_searches_symbols_and_related_files() {
             repo.path().to_str().unwrap(),
             "--format",
             "json",
+            "--include-read-batch",
             "--path",
             "src/auth.rs",
             "--query",
@@ -2278,6 +2279,12 @@ fn cli_searches_symbols_and_related_files() {
         ])
         .assert()
         .success()
+        .stdout(predicate::str::contains("\"summary\""))
+        .stdout(predicate::str::contains("\"status\":\"matched\""))
+        .stdout(predicate::str::contains("\"result_count\""))
+        .stdout(predicate::str::contains("\"results\""))
+        .stdout(predicate::str::contains("\"read_batch_request\""))
+        .stdout(predicate::str::contains("\"next_action\""))
         .stdout(predicate::str::contains("SessionManager"))
         .stdout(predicate::str::contains("same file"))
         .stdout(predicate::str::contains("\"read_request\""))

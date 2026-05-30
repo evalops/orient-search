@@ -3091,6 +3091,14 @@ fn runtime_related_alias_accepts_live_index_and_shard_targets() {
     });
     assert!(live_batch.error.is_none(), "{:?}", live_batch.error);
     let live_batch = live_batch.result.unwrap();
+    assert_eq!(
+        live_batch["summary"]["status"],
+        serde_json::json!("matched")
+    );
+    assert_eq!(
+        live_batch["summary"]["result_count"],
+        serde_json::json!(live_batch["results"].as_array().unwrap().len())
+    );
     assert!(
         live_batch["results"]
             .as_array()
@@ -3193,6 +3201,14 @@ fn runtime_related_alias_accepts_live_index_and_shard_targets() {
         indexed_symbol_batch.error
     );
     let indexed_symbol_batch = indexed_symbol_batch.result.unwrap();
+    assert_eq!(
+        indexed_symbol_batch["summary"]["status"],
+        serde_json::json!("matched")
+    );
+    assert_eq!(
+        indexed_symbol_batch["summary"]["result_count"],
+        serde_json::json!(indexed_symbol_batch["results"].as_array().unwrap().len())
+    );
     assert!(
         indexed_symbol_batch["results"].as_array().unwrap().len() >= 1,
         "{indexed_symbol_batch:?}"
@@ -3213,6 +3229,34 @@ fn runtime_related_alias_accepts_live_index_and_shard_targets() {
         indexed_symbol_batch["next_action"]["request"],
         indexed_symbol_batch["read_batch_request"]
     );
+
+    let missing_related_symbols = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("missing-related-symbols-batch"),
+        tool: "related_symbols".to_string(),
+        arguments: serde_json::json!({
+            "index": repo.path().join(".orient/index"),
+            "query": "DefinitelyMissingSymbol",
+            "limit": 5,
+            "include_read_batch": true
+        }),
+    });
+    assert!(
+        missing_related_symbols.error.is_none(),
+        "{:?}",
+        missing_related_symbols.error
+    );
+    let missing_related_symbols = missing_related_symbols.result.unwrap();
+    assert_eq!(
+        missing_related_symbols["summary"]["status"],
+        serde_json::json!("not_found")
+    );
+    assert_eq!(
+        missing_related_symbols["summary"]["result_count"],
+        serde_json::json!(0)
+    );
+    assert_eq!(missing_related_symbols["results"], serde_json::json!([]));
+    assert!(missing_related_symbols["read_batch_request"].is_null());
+    assert!(missing_related_symbols["next_action"].is_null());
 
     let missing_shard_path = runtime.dispatch(ToolRequest {
         id: serde_json::json!("missing-shard-path"),

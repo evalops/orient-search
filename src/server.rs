@@ -2759,6 +2759,7 @@ fn related_lookup_response<T: Serialize>(
     base_arguments: Map<String, Value>,
     summary: &str,
 ) -> Result<Value> {
+    let result_count = results.len();
     let results = serde_json::to_value(results)?;
     if !include_read_batch {
         return Ok(results);
@@ -2773,10 +2774,18 @@ fn related_lookup_response<T: Serialize>(
         })
     });
     Ok(json!({
+        "summary": related_lookup_summary(result_count),
         "results": results,
         "read_batch_request": read_batch_request,
         "next_action": next_action
     }))
+}
+
+fn related_lookup_summary(result_count: usize) -> Value {
+    json!({
+        "status": if result_count == 0 { "not_found" } else { "matched" },
+        "result_count": result_count
+    })
 }
 
 fn promoted_next_read_batch_request(
