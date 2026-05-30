@@ -5,18 +5,18 @@ use crate::query::{
     query_with_filters_text,
 };
 use crate::repo_index::{
-    FileRange, GENERATED_PATH_SCORE_MULTIPLIER, MAX_READ_RANGE_LINES, PathFilterMatcher, QueryPlan,
-    QueryPlanFilter, QueryPlanPosting, QueryPlanRepairHint, RangeScope, RankSignal, RelatedFile,
-    RelatedSymbol, RepoBrief, RepoMap, RepoMapDetail, SearchFilters, SearchResult, SnippetMode,
-    Symbol, best_snippet_at_line, best_snippet_for_path_with_phrases, capped_search_limit,
-    command_hints_from_manifest_texts, content_duplicate_key, dependency_filters_match,
-    dependency_hints_from_manifest_texts, extract_symbols, filter_only_query, filter_value_matches,
-    finalize_results_for_filters, import_hints_from_source_texts, is_entrypoint_path,
-    is_generated_path, is_ignored, is_important_file, is_manifest_file, is_source_code_language,
-    is_test_path, known_commands_from_hints, language_for,
-    matches_filters_with_compiled_path_metadata, normalize_language_filter,
-    normalize_search_filters_for_root, normalize_token, query_plan_repair_action,
-    read_range_summary, referenced_symbol_name, regular_file_metadata,
+    FileRange, FilterPattern, GENERATED_PATH_SCORE_MULTIPLIER, MAX_READ_RANGE_LINES,
+    PathFilterMatcher, QueryPlan, QueryPlanFilter, QueryPlanPosting, QueryPlanRepairHint,
+    RangeScope, RankSignal, RelatedFile, RelatedSymbol, RepoBrief, RepoMap, RepoMapDetail,
+    SearchFilters, SearchResult, SnippetMode, Symbol, best_snippet_at_line,
+    best_snippet_for_path_with_phrases, capped_search_limit, command_hints_from_manifest_texts,
+    content_duplicate_key, dependency_filters_match, dependency_hints_from_manifest_texts,
+    extract_symbols, filter_only_query, filter_value_matches, finalize_results_for_filters,
+    import_hints_from_source_texts, is_entrypoint_path, is_generated_path, is_ignored,
+    is_important_file, is_manifest_file, is_source_code_language, is_test_path,
+    known_commands_from_hints, language_for, matches_filters_with_compiled_path_metadata,
+    normalize_language_filter, normalize_search_filters_for_root, normalize_token,
+    query_plan_repair_action, read_range_summary, referenced_symbol_name, regular_file_metadata,
     related_file_reference_symbol_candidate, related_query_terms_symbol_and_filters,
     related_stem_terms, repo_map_seed_paths, repo_matches, result_matches_all_tokens,
     result_matches_symbol_filters, round4, score_filter_only_path_match,
@@ -3100,10 +3100,11 @@ fn query_plan_filters_for_candidates(
                 filter.field.as_str(),
                 "repo" | "branch" | "origin" | "dependency" | "line"
             ) {
+                let compiled = CompiledQueryPlanFilter::new(&filter);
                 let matched = candidate_ids
                     .iter()
                     .filter_map(|file_id| files.get(*file_id as usize))
-                    .filter(|file| indexed_path_matches_plan_filter(file, &filter))
+                    .filter(|file| compiled.matches(file))
                     .count();
                 filter.candidate_matches = Some(matched);
                 filter.candidate_rejections = Some(total.saturating_sub(matched));
@@ -3113,56 +3114,117 @@ fn query_plan_filters_for_candidates(
         .collect()
 }
 
-fn indexed_path_matches_plan_filter(file: &IndexedPath, filter: &QueryPlanFilter) -> bool {
-    let matches = match filter.field.as_str() {
-        "file" => filter_value_matches(&file.file_name_lower, &filter.value),
-        "path" => filter_value_matches(&file.path_lower, &filter.value),
-        "language" => file.language == normalize_language_filter(&filter.value),
-        "extension" => file.extension_lower.as_deref().is_some_and(|extension| {
-            extension
-                == filter
-                    .value
-                    .trim()
-                    .trim_start_matches('.')
-                    .to_ascii_lowercase()
-        }),
-        "symbol" => indexed_path_matches_symbol_filter(file, &filter.value),
-        "symbol_kind" => indexed_path_matches_symbol_kind_filter(file, &filter.value),
-        "import" => indexed_path_matches_import_filter(file, &filter.value),
-        "content" => {
-            !filter.value.trim().is_empty()
-                && !source_excluded_content_filters_match(
-                    &file.content,
-                    &SearchFilters {
-                        exclude_content: vec![filter.value.clone()],
-                        ..SearchFilters::default()
-                    },
-                )
+#[derive(Debug, Clone)]
+struct CompiledQueryPlanFilter {
+    field: String,
+    value: String,
+    negated: bool,
+    file: Option<FilterPattern>,
+    path: Option<FilterPattern>,
+    language: Option<String>,
+    extension: Option<String>,
+    boolean: Option<bool>,
+    content_lower: Option<String>,
+    content_phrase: Option<String>,
+}
+
+impl CompiledQueryPlanFilter {
+    fn new(filter: &QueryPlanFilter) -> Self {
+        let value = filter.value.clone();
+        let trimmed = filter.value.trim().to_string();
+        Self {
+            field: filter.field.clone(),
+            value,
+            negated: filter.negated,
+            file: (filter.field == "file").then(|| FilterPattern::new(&trimmed)),
+            path: (filter.field == "path").then(|| FilterPattern::new(&trimmed)),
+            language: (filter.field == "language").then(|| normalize_language_filter(&trimmed)),
+            extension: (filter.field == "extension")
+                .then(|| trimmed.trim_start_matches('.').to_ascii_lowercase()),
+            boolean: matches!(filter.field.as_str(), "test" | "generated" | "code")
+                .then(|| plan_filter_bool(&trimmed)),
+            content_lower: (filter.field == "content" && !trimmed.is_empty())
+                .then(|| trimmed.to_ascii_lowercase()),
+            content_phrase: (filter.field == "content")
+                .then(|| normalize_phrase_text(&trimmed))
+                .filter(|phrase| !phrase.is_empty()),
         }
-        "test" => {
-            let wanted = matches!(
-                filter.value.to_ascii_lowercase().as_str(),
-                "1" | "true" | "yes" | "y"
-            );
-            is_test_path(&file.path_lower) == wanted
+    }
+
+    fn matches(&self, file: &IndexedPath) -> bool {
+        let matches = match self.field.as_str() {
+            "file" => self
+                .file
+                .as_ref()
+                .is_some_and(|pattern| pattern.matches(&file.file_name_lower)),
+            "path" => self
+                .path
+                .as_ref()
+                .is_some_and(|pattern| pattern.matches(&file.path_lower)),
+            "language" => self
+                .language
+                .as_deref()
+                .is_some_and(|language| file.language == language),
+            "extension" => self.extension.as_deref().is_some_and(|wanted| {
+                file.extension_lower
+                    .as_deref()
+                    .is_some_and(|extension| extension == wanted)
+            }),
+            "symbol" => indexed_path_matches_symbol_filter(file, &self.value),
+            "symbol_kind" => indexed_path_matches_symbol_kind_filter(file, &self.value),
+            "import" => indexed_path_matches_import_filter(file, &self.value),
+            "content" => self.content_matches(&file.content),
+            "test" => self
+                .boolean
+                .is_some_and(|wanted| is_test_path(&file.path_lower) == wanted),
+            "generated" => self
+                .boolean
+                .is_some_and(|wanted| is_generated_path(&file.path_lower) == wanted),
+            "code" => self
+                .boolean
+                .is_some_and(|wanted| is_source_code_language(&file.language) == wanted),
+            _ => true,
+        };
+        matches != self.negated
+    }
+
+    fn content_matches(&self, text: &str) -> bool {
+        let Some(content_lower) = self.content_lower.as_deref() else {
+            return false;
+        };
+        let text_lower = text.to_ascii_lowercase();
+        if text_lower.contains(content_lower) {
+            return true;
         }
-        "generated" => {
-            let wanted = matches!(
-                filter.value.to_ascii_lowercase().as_str(),
-                "1" | "true" | "yes" | "y"
-            );
-            is_generated_path(&file.path_lower) == wanted
-        }
-        "code" => {
-            let wanted = matches!(
-                filter.value.to_ascii_lowercase().as_str(),
-                "1" | "true" | "yes" | "y"
-            );
-            crate::repo_index::is_source_code_language(&file.language) == wanted
-        }
-        _ => true,
-    };
-    matches != filter.negated
+        self.content_phrase
+            .as_deref()
+            .is_some_and(|phrase| normalize_phrase_text(text).contains(phrase))
+    }
+}
+
+fn plan_filter_bool(value: &str) -> bool {
+    matches!(
+        value.to_ascii_lowercase().as_str(),
+        "1" | "true" | "yes" | "y"
+    )
+}
+
+#[cfg(test)]
+mod indexed_plan_filter_tests {
+    use super::*;
+
+    #[test]
+    fn compiled_plan_filter_normalizes_reused_values_once() {
+        let extension = CompiledQueryPlanFilter::new(&plan_filter("extension", ".RS", false));
+        assert_eq!(extension.extension.as_deref(), Some("rs"));
+        assert_eq!(extension.boolean, None);
+
+        let language = CompiledQueryPlanFilter::new(&plan_filter("language", "rs", false));
+        assert_eq!(language.language.as_deref(), Some("rust"));
+
+        let test = CompiledQueryPlanFilter::new(&plan_filter("test", "YES", false));
+        assert_eq!(test.boolean, Some(true));
+    }
 }
 
 fn indexed_filter_candidate_ids(

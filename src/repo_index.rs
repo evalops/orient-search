@@ -943,19 +943,19 @@ pub(crate) struct PathFilterMatcher {
 }
 
 #[derive(Debug, Clone)]
-struct FilterPattern {
+pub(crate) struct FilterPattern {
     value: String,
     wildcard: bool,
 }
 
 impl FilterPattern {
-    fn new(filter: &str) -> Self {
+    pub(crate) fn new(filter: &str) -> Self {
         let value = normalize_path_filter(filter);
         let wildcard = value.contains('*') || value.contains('?');
         Self { value, wildcard }
     }
 
-    fn matches(&self, haystack_lower: &str) -> bool {
+    pub(crate) fn matches(&self, haystack_lower: &str) -> bool {
         if self.wildcard {
             wildcard_matches(&self.value, haystack_lower)
         } else {

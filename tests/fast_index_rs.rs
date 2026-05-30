@@ -3081,6 +3081,39 @@ fn filter_only_file_queries_keep_scanning_after_content_rejections() {
 }
 
 #[test]
+fn indexed_query_plan_counts_negative_content_filter_survivors() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/clean_a.rs"),
+        "pub fn issue_token() { let session = \"clean\"; }\n",
+    );
+    write(
+        &repo.path().join("src/clean_b.rs"),
+        "pub fn issue_token_backup() { let session = \"clean\"; }\n",
+    );
+    write(
+        &repo.path().join("src/legacy.rs"),
+        "pub fn issue_token_legacy() { let session = \"legacy\"; }\n",
+    );
+
+    let index = FastIndex::build(repo.path()).unwrap();
+    let plan = index
+        .query_plan("issue token -content:legacy", &SearchFilters::default())
+        .unwrap();
+
+    assert_eq!(plan.candidate_count, 3);
+    assert_eq!(plan.filtered_candidate_count, 2);
+    assert_eq!(plan.final_match_count, 2);
+    let content_filter = plan
+        .active_filters
+        .iter()
+        .find(|filter| filter.field == "content" && filter.value == "legacy" && filter.negated)
+        .unwrap();
+    assert_eq!(content_filter.candidate_matches, Some(2));
+    assert_eq!(content_filter.candidate_rejections, Some(1));
+}
+
+#[test]
 fn quoted_phrases_require_exact_matches_and_explain_phrase_signals() {
     let repo = tempfile::tempdir().unwrap();
     write(
