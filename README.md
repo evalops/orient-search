@@ -158,6 +158,10 @@ bazel run //:ci_perf_gates
 ORIENT_WIDE_SHARDS=0 bazel run //:ci_wide_perf
 ```
 
+The wide perf gate chooses the local projects workspace when it exists, then
+falls back to the common code workspace; set `ORIENT_WIDE_ROOT` to force a
+different local root.
+
 `bench-search` and `bench-shards` emit per-query samples plus a compact
 `summary` with query count, total samples, max p95/p99, max sample, and the
 slowest query. Use `--fail-p95-ms` for hard gates and `--baseline` /

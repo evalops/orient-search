@@ -78,6 +78,9 @@ bazel run //:ci_perf_gates
 ORIENT_WIDE_SHARDS=0 bazel run //:ci_wide_perf
 ```
 
+The wide perf gate chooses the local projects workspace when present, falls
+back to the common code workspace, and can be pinned with `ORIENT_WIDE_ROOT`.
+
 For shared daemon or footprint changes, also run:
 
 ```bash
