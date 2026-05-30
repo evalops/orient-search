@@ -1336,6 +1336,28 @@ pub struct RepoMapRelatedSymbol {
     pub score: f64,
 }
 
+pub(crate) fn sort_repo_map_related_files(related: &mut [RepoMapRelatedFile]) {
+    related.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(Ordering::Equal)
+            .then_with(|| a.source_path.cmp(&b.source_path))
+            .then_with(|| a.path.cmp(&b.path))
+    });
+}
+
+pub(crate) fn sort_repo_map_related_symbols(related: &mut [RepoMapRelatedSymbol]) {
+    related.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(Ordering::Equal)
+            .then_with(|| a.source_path.cmp(&b.source_path))
+            .then_with(|| a.symbol.path.cmp(&b.symbol.path))
+            .then_with(|| a.symbol.line.cmp(&b.symbol.line))
+            .then_with(|| a.symbol.name.cmp(&b.symbol.name))
+    });
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FileRange {
     #[serde(default)]
@@ -3492,6 +3514,7 @@ impl RepoIndex {
                 }
             }
         }
+        sort_repo_map_related_files(&mut related);
         related.truncate(limit);
         related
     }
@@ -3527,6 +3550,7 @@ impl RepoIndex {
                 }
             }
         }
+        sort_repo_map_related_symbols(&mut related);
         related.truncate(limit);
         related
     }
@@ -7858,6 +7882,74 @@ mod tests {
         assert_eq!(fallback_ripgrep_match_cap(10), 250);
         assert_eq!(fallback_ripgrep_match_cap(100), 2_000);
         assert_eq!(fallback_ripgrep_match_cap(1_000), 2_000);
+    }
+
+    #[test]
+    fn repo_map_related_files_sort_before_truncation_by_usefulness() {
+        let mut related = vec![
+            RepoMapRelatedFile {
+                source_path: "src/lib.rs".to_string(),
+                path: "src/main.rs".to_string(),
+                reason: "same directory".to_string(),
+                score: 1.0,
+            },
+            RepoMapRelatedFile {
+                source_path: "tests/auth_test.rs".to_string(),
+                path: "src/auth.rs".to_string(),
+                reason: "source/test counterpart".to_string(),
+                score: 12.0,
+            },
+            RepoMapRelatedFile {
+                source_path: "Cargo.toml".to_string(),
+                path: "Cargo.lock".to_string(),
+                reason: "shares stem Cargo".to_string(),
+                score: 7.0,
+            },
+        ];
+
+        sort_repo_map_related_files(&mut related);
+        related.truncate(2);
+
+        assert_eq!(
+            related
+                .iter()
+                .map(|item| item.path.as_str())
+                .collect::<Vec<_>>(),
+            vec!["src/auth.rs", "Cargo.lock"]
+        );
+    }
+
+    #[test]
+    fn repo_map_related_symbols_sort_before_truncation_by_usefulness() {
+        let mut related = vec![
+            RepoMapRelatedSymbol {
+                source_path: "src/lib.rs".to_string(),
+                symbol: Symbol {
+                    name: "Helper".to_string(),
+                    kind: "struct".to_string(),
+                    path: "src/helper.rs".to_string(),
+                    line: 8,
+                },
+                reason: "same directory".to_string(),
+                score: 4.0,
+            },
+            RepoMapRelatedSymbol {
+                source_path: "src/auth.rs".to_string(),
+                symbol: Symbol {
+                    name: "IssueToken".to_string(),
+                    kind: "function".to_string(),
+                    path: "src/token.rs".to_string(),
+                    line: 20,
+                },
+                reason: "referenced by source".to_string(),
+                score: 34.0,
+            },
+        ];
+
+        sort_repo_map_related_symbols(&mut related);
+        related.truncate(1);
+
+        assert_eq!(related[0].symbol.name, "IssueToken");
     }
 
     #[test]
