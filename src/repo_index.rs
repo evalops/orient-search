@@ -6153,7 +6153,7 @@ pub fn result_value_read_batch_request(
     })
 }
 
-fn grouped_duplicate_count_from_results(results: &[SearchResult]) -> usize {
+pub(crate) fn grouped_duplicate_count_from_results(results: &[SearchResult]) -> usize {
     results
         .iter()
         .filter_map(|result| result.duplicate_group.as_ref())
@@ -6161,7 +6161,7 @@ fn grouped_duplicate_count_from_results(results: &[SearchResult]) -> usize {
         .sum()
 }
 
-fn grouped_duplicate_count_from_value(result: &serde_json::Value) -> usize {
+pub(crate) fn grouped_duplicate_count_from_value(result: &serde_json::Value) -> usize {
     result
         .as_array()
         .into_iter()

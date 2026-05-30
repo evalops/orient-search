@@ -966,6 +966,10 @@ fn cli_search_auto_read_action_reports_grouped_duplicate_budget() {
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
 
     assert_eq!(
+        value["summary"]["grouped_duplicate_count"],
+        serde_json::json!(1)
+    );
+    assert_eq!(
         value["read_batch_request"]["read_budget"]["grouped_duplicate_count"],
         serde_json::json!(1)
     );
@@ -974,6 +978,26 @@ fn cli_search_auto_read_action_reports_grouped_duplicate_budget() {
         serde_json::json!(
             "Read 1 bounded range (80 total lines). 1 grouped duplicate path is represented by the canonical results."
         )
+    );
+
+    let retry_output = Command::cargo_bin("orient")
+        .unwrap()
+        .args([
+            "search-auto",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--limit",
+            "10",
+            "--retry-if-empty",
+            "issue token session definitely_missing",
+        ])
+        .output()
+        .unwrap();
+    assert!(retry_output.status.success());
+    let retry_value: serde_json::Value = serde_json::from_slice(&retry_output.stdout).unwrap();
+    assert_eq!(
+        retry_value["primary_retry_result"]["summary"]["grouped_duplicate_count"],
+        serde_json::json!(1)
     );
 }
 

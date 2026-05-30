@@ -116,8 +116,10 @@ use `find_symbol_batch` when the next step is opening all matching definitions.
 
 `search_auto`, `search_auto_batch`, and plan batch items expose
 `query_plan_summary` or `summary` alongside full plans, plus `next_action` when
-Orient can choose the best immediate follow-up. Use those compact fields first;
-open the full plan only when a wrapper needs detailed diagnostics.
+Orient can choose the best immediate follow-up. Search summaries also surface
+grouped duplicate counts when repeated worktree or copied files collapse into a
+canonical result. Use those compact fields first; open the full plan only when a
+wrapper needs detailed diagnostics.
 
 Batch read follow-ups include `read_budget` so wrappers can split large reads
 before hitting range or line caps. Manual reads accept copied file locations such

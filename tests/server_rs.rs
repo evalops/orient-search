@@ -2755,6 +2755,57 @@ fn runtime_search_alias_accepts_live_index_and_shard_targets() {
 }
 
 #[test]
+fn runtime_search_auto_summary_reports_grouped_duplicates() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("one/src/auth.rs"),
+        "pub fn issue_token() { let token = \"session\"; }\n",
+    );
+    write(
+        &repo.path().join("two/src/auth.rs"),
+        "pub fn issue_token() { let token = \"session\"; }\n",
+    );
+
+    let runtime = ToolRuntime::default();
+    let result = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("dedupe-live"),
+        tool: "search_auto".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "query": "issue token session",
+            "limit": 10
+        }),
+    });
+    assert!(result.error.is_none(), "{:?}", result.error);
+    let result = result.result.unwrap();
+    assert_eq!(
+        result["summary"]["grouped_duplicate_count"],
+        serde_json::json!(1)
+    );
+    assert_eq!(
+        result["read_batch_request"]["read_budget"]["grouped_duplicate_count"],
+        serde_json::json!(1)
+    );
+
+    let retry = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("dedupe-live-retry"),
+        tool: "search_auto".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "query": "issue token session definitely_missing",
+            "limit": 10,
+            "retry_if_empty": true
+        }),
+    });
+    assert!(retry.error.is_none(), "{:?}", retry.error);
+    let retry = retry.result.unwrap();
+    assert_eq!(
+        retry["primary_retry_result"]["summary"]["grouped_duplicate_count"],
+        serde_json::json!(1)
+    );
+}
+
+#[test]
 fn runtime_read_alias_accepts_live_index_and_shard_targets() {
     let repo = tempfile::tempdir().unwrap();
     write(

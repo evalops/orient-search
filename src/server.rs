@@ -12,11 +12,13 @@ use crate::repo_index::{
     ResultToolRequest, SearchFilters, SearchResult, SnippetMode, Symbol, SymbolLookupResult,
     attach_repo_map_read_batch_request_with_limit, attach_result_context,
     attach_result_read_requests, attach_result_related_requests,
-    attach_result_related_symbol_requests, finalize_results_for_filters, normalize_language_filter,
-    normalize_token, query_plan_filter_field_present, read_batch_action_summary, read_file_range,
-    read_file_range_scoped, related_file_lookup_results, related_symbol_lookup_results,
-    result_read_batch_request, result_value_read_batch_request, search_repo_fast_filtered,
-    symbol_lookup_read_batch_request, symbol_lookup_results,
+    attach_result_related_symbol_requests, finalize_results_for_filters,
+    grouped_duplicate_count_from_results, grouped_duplicate_count_from_value,
+    normalize_language_filter, normalize_token, query_plan_filter_field_present,
+    read_batch_action_summary, read_file_range, read_file_range_scoped,
+    related_file_lookup_results, related_symbol_lookup_results, result_read_batch_request,
+    result_value_read_batch_request, search_repo_fast_filtered, symbol_lookup_read_batch_request,
+    symbol_lookup_results,
 };
 use crate::shards::{
     ShardEntry, ShardFreshness, ShardManifest, ShardQueryPlan, ShardRepoMap, ShardSearchScope,
@@ -82,6 +84,8 @@ struct SearchBatchResult {
 struct SearchResultSummary {
     status: String,
     result_count: usize,
+    #[serde(skip_serializing_if = "is_zero")]
+    grouped_duplicate_count: usize,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     top_paths: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -109,6 +113,7 @@ fn search_result_summary(results: &[SearchResult]) -> SearchResultSummary {
             "matched".to_string()
         },
         result_count,
+        grouped_duplicate_count: grouped_duplicate_count_from_results(results),
         top_paths: search_summary_top_paths(results),
         max_score: results.first().map(|result| result.score),
         min_score: results.last().map(|result| result.score),
@@ -2868,6 +2873,10 @@ fn primary_retry_result_summary(result: &Value) -> Value {
         "status": if results.is_empty() { "not_found" } else { "matched" },
         "result_count": results.len()
     });
+    let grouped_duplicate_count = grouped_duplicate_count_from_value(result);
+    if grouped_duplicate_count > 0 {
+        summary["grouped_duplicate_count"] = json!(grouped_duplicate_count);
+    }
     let mut top_paths = Vec::new();
     for item in results {
         let Some(path) = item.get("path").and_then(Value::as_str) else {

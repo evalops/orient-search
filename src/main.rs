@@ -1521,6 +1521,8 @@ struct SearchBatchResult {
 struct SearchResultSummary {
     status: String,
     result_count: usize,
+    #[serde(skip_serializing_if = "main_is_zero")]
+    grouped_duplicate_count: usize,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     top_paths: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1538,10 +1540,35 @@ fn search_result_summary(results: &[SearchResult]) -> SearchResultSummary {
             "matched".to_string()
         },
         result_count,
+        grouped_duplicate_count: cli_grouped_duplicate_count_from_results(results),
         top_paths: search_summary_top_paths(results),
         max_score: results.first().map(|result| result.score),
         min_score: results.last().map(|result| result.score),
     }
+}
+
+fn main_is_zero(value: &usize) -> bool {
+    *value == 0
+}
+
+fn cli_grouped_duplicate_count_from_results(results: &[SearchResult]) -> usize {
+    results
+        .iter()
+        .filter_map(|result| result.duplicate_group.as_ref())
+        .map(|group| group.duplicate_count)
+        .sum()
+}
+
+fn cli_grouped_duplicate_count_from_value(result: &Value) -> usize {
+    result
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|item| item.get("duplicate_group"))
+        .filter_map(|group| group.get("duplicate_count"))
+        .filter_map(Value::as_u64)
+        .filter_map(|count| usize::try_from(count).ok())
+        .sum()
 }
 
 fn search_summary_top_paths(results: &[SearchResult]) -> Vec<String> {
@@ -2455,6 +2482,10 @@ fn primary_cli_retry_result_summary(result: &Value) -> Value {
         "status": if results.is_empty() { "not_found" } else { "matched" },
         "result_count": results.len()
     });
+    let grouped_duplicate_count = cli_grouped_duplicate_count_from_value(result);
+    if grouped_duplicate_count > 0 {
+        summary["grouped_duplicate_count"] = serde_json::json!(grouped_duplicate_count);
+    }
     let mut top_paths = Vec::new();
     for item in results {
         let Some(path) = item.get("path").and_then(Value::as_str) else {
