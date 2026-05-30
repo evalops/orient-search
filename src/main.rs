@@ -5749,12 +5749,14 @@ fn daemon_target_agent_args(target: &DaemonTarget) -> (Option<String>, Option<St
 }
 
 fn client_jsonl_tcp(addr: &str, require_version: bool) -> Result<()> {
-    client_jsonl_stream(TcpStream::connect(addr)?, require_version)
+    let target = format!("tcp {addr}");
+    client_jsonl_stream(TcpStream::connect(addr)?, require_version, Some(&target))
 }
 
 #[cfg(unix)]
 fn client_jsonl_unix(socket: &Path, require_version: bool) -> Result<()> {
-    client_jsonl_stream(UnixStream::connect(socket)?, require_version)
+    let target = format!("unix {}", socket.display());
+    client_jsonl_stream(UnixStream::connect(socket)?, require_version, Some(&target))
 }
 
 fn client_jsonl_target(target: &DaemonTarget, require_version: bool) -> Result<()> {
@@ -6379,19 +6381,24 @@ fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 
-fn client_jsonl_stream(stream: impl Read + Write, require_version: bool) -> Result<()> {
+fn client_jsonl_stream(
+    stream: impl Read + Write,
+    require_version: bool,
+    target_label: Option<&str>,
+) -> Result<()> {
     let cwd = env::current_dir().ok();
-    client_jsonl_stream_with_cwd(stream, cwd.as_deref(), require_version)
+    client_jsonl_stream_with_cwd(stream, cwd.as_deref(), require_version, target_label)
 }
 
 fn client_jsonl_stream_with_cwd(
     stream: impl Read + Write,
     cwd: Option<&Path>,
     require_version: bool,
+    target_label: Option<&str>,
 ) -> Result<()> {
     let mut reader = BufReader::new(stream);
     if require_version {
-        require_matching_daemon_version(&mut reader)?;
+        require_matching_daemon_version(&mut reader, target_label)?;
     }
     let stdin = io::stdin();
     let mut stdout = io::stdout();
@@ -6417,8 +6424,15 @@ fn client_jsonl_stream_with_cwd(
     Ok(())
 }
 
-fn require_matching_daemon_version(stream: &mut BufReader<impl Read + Write>) -> Result<()> {
+fn require_matching_daemon_version(
+    stream: &mut BufReader<impl Read + Write>,
+    target_label: Option<&str>,
+) -> Result<()> {
     let client_version = env!("CARGO_PKG_VERSION");
+    let target = target_label
+        .filter(|target| !target.trim().is_empty())
+        .map(|target| format!(" on {target}"))
+        .unwrap_or_default();
     let request = serde_json::json!({
         "id": "client-version-check",
         "tool": "daemon_status",
@@ -6445,12 +6459,12 @@ fn require_matching_daemon_version(stream: &mut BufReader<impl Read + Write>) ->
         .filter(|version| !version.trim().is_empty())
         .ok_or_else(|| {
             anyhow::anyhow!(
-                "daemon did not report daemon_version; restart or update the shared orient daemon"
+                "daemon{target} did not report daemon_version; restart or update the shared orient daemon"
             )
         })?;
     if daemon_version != client_version {
         bail!(
-            "daemon version {daemon_version} differs from client {client_version}; restart the shared orient daemon"
+            "daemon{target} version {daemon_version} differs from client {client_version}; restart the shared orient daemon"
         );
     }
     Ok(())
@@ -7700,7 +7714,7 @@ mod tests {
         });
         let mut stream = BufReader::new(VersionCheckStream::new(response));
 
-        require_matching_daemon_version(&mut stream).unwrap();
+        require_matching_daemon_version(&mut stream, None).unwrap();
 
         let written = String::from_utf8(stream.get_ref().written.clone()).unwrap();
         assert!(written.contains("\"tool\":\"daemon_status\""), "{written}");
@@ -7713,20 +7727,22 @@ mod tests {
             "result": {"cached_indexes": 0}
         });
         let mut stream = BufReader::new(VersionCheckStream::new(missing));
-        let error = require_matching_daemon_version(&mut stream)
+        let error = require_matching_daemon_version(&mut stream, Some("tcp 127.0.0.1:8796"))
             .unwrap_err()
             .to_string();
         assert!(error.contains("did not report daemon_version"), "{error}");
+        assert!(error.contains("tcp 127.0.0.1:8796"), "{error}");
 
         let stale = serde_json::json!({
             "id": "client-version-check",
             "result": {"daemon_version": "0.0.0-stale"}
         });
         let mut stream = BufReader::new(VersionCheckStream::new(stale));
-        let error = require_matching_daemon_version(&mut stream)
+        let error = require_matching_daemon_version(&mut stream, Some("unix /tmp/orient.sock"))
             .unwrap_err()
             .to_string();
         assert!(error.contains("differs from client"), "{error}");
+        assert!(error.contains("unix /tmp/orient.sock"), "{error}");
     }
 
     #[test]
