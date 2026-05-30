@@ -162,6 +162,8 @@ static CSHARP_METHOD_SYMBOL_RE: LazyLock<Regex> = LazyLock::new(|| {
 static SHELL_FUNCTION_SYMBOL_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^\s*(?:function\s+)?([A-Za-z_][A-Za-z0-9_-]*)\s*(?:\(\s*\))?\s*\{").unwrap()
 });
+static BAZEL_NAME_ASSIGNMENT_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"\bname\s*=\s*("[^"\\]*(?:\\.[^"\\]*)*"|'[^']*')"#).unwrap());
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Symbol {
@@ -4923,6 +4925,9 @@ pub(crate) fn extract_symbols(path: &str, text: &str, language: &str) -> Vec<Sym
     if is_dockerfile_path(path) {
         return extract_dockerfile_stage_symbols(path, text);
     }
+    if is_bazel_build_path(path) {
+        return extract_bazel_build_target_symbols(path, text);
+    }
     if language == "python" {
         return extract_python_symbols(path, text);
     }
@@ -5354,6 +5359,87 @@ fn yaml_mapping_key(line: &str) -> Option<String> {
         return None;
     }
     Some(key.trim_matches('"').trim_matches('\'').to_string())
+}
+
+fn is_bazel_build_path(path: &str) -> bool {
+    matches!(
+        Path::new(path).file_name().and_then(|value| value.to_str()),
+        Some("BUILD" | "BUILD.bazel")
+    )
+}
+
+fn extract_bazel_build_target_symbols(path: &str, text: &str) -> Vec<Symbol> {
+    bazel_build_rule_targets(text)
+        .into_iter()
+        .map(|(name, line)| Symbol {
+            name,
+            kind: "target".to_string(),
+            path: path.to_string(),
+            line,
+        })
+        .collect()
+}
+
+fn bazel_build_rule_targets(text: &str) -> Vec<(String, usize)> {
+    let mut targets = Vec::new();
+    let mut in_rule = false;
+    let mut paren_depth: isize = 0;
+
+    for (index, line) in text.lines().enumerate() {
+        let line = strip_toml_comment(line).trim();
+        if line.is_empty() {
+            continue;
+        }
+
+        if !in_rule {
+            if bazel_rule_call_name(line).is_none() {
+                continue;
+            }
+            in_rule = true;
+            paren_depth = 0;
+        }
+
+        if let Some(target) = bazel_name_assignment(line)
+            && !targets
+                .iter()
+                .any(|(seen, _): &(String, usize)| seen == &target)
+        {
+            targets.push((target, index + 1));
+        }
+
+        paren_depth += line.chars().filter(|ch| *ch == '(').count() as isize;
+        paren_depth -= line.chars().filter(|ch| *ch == ')').count() as isize;
+        if paren_depth <= 0 {
+            in_rule = false;
+            paren_depth = 0;
+        }
+    }
+
+    targets
+}
+
+fn bazel_rule_call_name(line: &str) -> Option<&str> {
+    let open = line.find('(')?;
+    let name = line[..open].trim();
+    if name.is_empty()
+        || !name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.'))
+    {
+        return None;
+    }
+    if matches!(
+        name,
+        "load" | "package" | "exports_files" | "glob" | "select" | "visibility"
+    ) {
+        return None;
+    }
+    Some(name)
+}
+
+fn bazel_name_assignment(line: &str) -> Option<String> {
+    let captures = BAZEL_NAME_ASSIGNMENT_RE.captures(line)?;
+    parse_toml_string(captures.get(1)?.as_str())
 }
 
 fn is_docker_compose_path(path: &str) -> bool {

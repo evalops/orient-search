@@ -837,6 +837,59 @@ jobs:
 }
 
 #[test]
+fn bazel_build_targets_work_as_symbols_across_live_and_persistent_indexes() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("BUILD.bazel"),
+        r#"
+load("@rules_rust//rust:defs.bzl", "rust_library")
+
+rust_library(
+    name = "orient_lib",
+    srcs = ["src/lib.rs"],
+)
+
+py_test(name = "agent_smoke_test", srcs = ["agent_smoke_test.py"])
+
+exports_files(["README.md"])
+"#,
+    );
+
+    let live = RepoIndexer::new(repo.path()).build().unwrap();
+    let live_lib = &live.find_symbol("orient_lib", 10)[0];
+    assert_symbol(live_lib, "BUILD.bazel", "target");
+    assert_eq!(live_lib.line, 5);
+    let live_test = &live.find_symbol("agent_smoke_test", 10)[0];
+    assert_symbol(live_test, "BUILD.bazel", "target");
+    assert_eq!(live_test.line, 9);
+    assert!(live.find_symbol("README.md", 10).is_empty());
+
+    let fallback =
+        search_repo_fast_filtered(repo.path(), "target:orient_lib", 5, &Default::default())
+            .unwrap();
+    assert_eq!(fallback[0].path, "BUILD.bazel");
+    assert!(fallback[0].reason.contains("symbol:orient_lib"));
+
+    let indexed = FastIndex::build(repo.path()).unwrap();
+    let indexed_test = &indexed.find_symbol("agent_smoke_test", 10)[0];
+    assert_symbol(indexed_test, "BUILD.bazel", "target");
+    assert_eq!(indexed_test.line, 9);
+    let indexed_results = indexed
+        .search_filtered(
+            "kind:target symbol:agent_smoke_test",
+            5,
+            &Default::default(),
+        )
+        .unwrap();
+    assert_eq!(indexed_results[0].path, "BUILD.bazel");
+    assert!(
+        indexed_results[0]
+            .reason
+            .contains("symbol:agent_smoke_test")
+    );
+}
+
+#[test]
 fn docker_compose_services_work_as_symbols_across_live_and_persistent_indexes() {
     let repo = tempfile::tempdir().unwrap();
     write(
