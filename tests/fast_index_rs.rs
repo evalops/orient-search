@@ -2912,6 +2912,18 @@ fn bare_path_like_queries_use_filter_only_fast_paths() {
         vec!["src/lib.rs"]
     );
     assert_eq!(parenthesized_location_fallback[0].match_lines, vec![40]);
+    let java_stack_location_fallback = search_repo_fast_filtered(
+        repo.path(),
+        "java.lang.IllegalStateException\n    at com.example.Lib.target_entrypoint(src/lib.rs:40)",
+        10,
+        &filters,
+    )
+    .unwrap();
+    assert_eq!(
+        result_paths(&java_stack_location_fallback),
+        vec!["src/lib.rs"]
+    );
+    assert_eq!(java_stack_location_fallback[0].match_lines, vec![40]);
     assert!(
         search_repo_fast_filtered(repo.path(), "missing/src/lib.rs:40:9", 10, &filters)
             .unwrap()
@@ -3177,6 +3189,18 @@ fn bare_path_like_queries_use_filter_only_fast_paths() {
         vec!["src/lib.rs"]
     );
     assert_eq!(parenthesized_location_indexed[0].match_lines, vec![40]);
+    let java_stack_location_indexed = index
+        .search_filtered(
+            "java.lang.IllegalStateException\n    at com.example.Lib.target_entrypoint(src/lib.rs:40)",
+            10,
+            &filters,
+        )
+        .unwrap();
+    assert_eq!(
+        result_paths(&java_stack_location_indexed),
+        vec!["src/lib.rs"]
+    );
+    assert_eq!(java_stack_location_indexed[0].match_lines, vec![40]);
     let copied_line_indexed = index
         .search_filtered("src/lib.rs:40: pub fn target_entrypoint", 10, &filters)
         .unwrap();

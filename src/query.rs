@@ -685,6 +685,12 @@ fn split_leading_location_token(token: &str) -> Option<(String, usize, Option<St
     {
         return Some(location);
     }
+    if !paren_normalized.is_empty()
+        && !paren_normalized.contains("://")
+        && let Some(location) = split_embedded_parenthesized_location(&paren_normalized)
+    {
+        return Some(location);
+    }
 
     let normalized = normalize_location_token(token)?;
     if normalized.is_empty() || normalized.contains("://") {
@@ -1227,6 +1233,64 @@ fn split_parenthesized_line_location(value: &str) -> Option<(String, usize, Opti
         rest => non_empty_location_tail(rest.strip_prefix(':').unwrap_or(rest)),
     };
     Some((path.to_string(), line, trailing))
+}
+
+fn split_embedded_parenthesized_location(value: &str) -> Option<(String, usize, Option<String>)> {
+    let close = value.rfind(')')?;
+    let before_close = &value[..close];
+    let open = before_close.rfind('(')?;
+    let prefix = before_close[..open].trim();
+    if prefix.is_empty()
+        || prefix.chars().any(char::is_whitespace)
+        || looks_like_location_path(prefix)
+    {
+        return None;
+    }
+    let inner = before_close[open + 1..].trim();
+    if inner.is_empty() || inner.contains("://") {
+        return None;
+    }
+    let (path, line, _) = split_location_fragment(inner)?;
+    let trailing = match value[close + 1..].trim_start() {
+        "" => None,
+        rest => non_empty_location_tail(rest.strip_prefix(':').unwrap_or(rest)),
+    };
+    Some((path, line, trailing))
+}
+
+fn split_location_fragment(value: &str) -> Option<(String, usize, Option<String>)> {
+    if let Some(location) = split_hash_line_anchor(value) {
+        return Some(location);
+    }
+    if let Some(location) = split_parenthesized_line_location(value) {
+        return Some(location);
+    }
+    for (path_end, _) in value.match_indices(':') {
+        let path = &value[..path_end];
+        if !looks_like_location_path(path) {
+            continue;
+        }
+        let rest = &value[path_end + 1..];
+        let (line, after_line) = split_leading_positive_number(rest)?;
+        if after_line.is_empty() {
+            return Some((path.to_string(), line, None));
+        }
+        if let Some(after_range) = strip_colon_line_range(after_line) {
+            return Some((path.to_string(), line, non_empty_location_tail(after_range)));
+        }
+        let Some(after_line_colon) = after_line.strip_prefix(':') else {
+            continue;
+        };
+        if after_line_colon.is_empty() {
+            return Some((path.to_string(), line, None));
+        }
+        if let Some((_, after_column)) = split_leading_positive_number(after_line_colon)
+            && after_column.is_empty()
+        {
+            return Some((path.to_string(), line, None));
+        }
+    }
+    None
 }
 
 fn strip_colon_line_range(value: &str) -> Option<&str> {
@@ -1939,6 +2003,26 @@ mod tests {
             Some("src/server.rs")
         );
         assert_eq!(js_stack_block.filters.target_line, Some(42));
+
+        let java_stack_block = parse_query(
+            "java.lang.IllegalStateException: boom\n    at com.example.Service.handle(Service.java:42)\n    at com.example.Main.main(Main.java:7)",
+        );
+        assert_eq!(java_stack_block.terms, Vec::<String>::new());
+        assert_eq!(
+            java_stack_block.filters.file.as_deref(),
+            Some("Service.java")
+        );
+        assert_eq!(java_stack_block.filters.target_line, Some(42));
+
+        let kotlin_stack_block = parse_query(
+            "Exception in thread \"main\"\n    at com.example.ServiceKt.handle(Service.kt:42:9)",
+        );
+        assert_eq!(kotlin_stack_block.terms, Vec::<String>::new());
+        assert_eq!(
+            kotlin_stack_block.filters.file.as_deref(),
+            Some("Service.kt")
+        );
+        assert_eq!(kotlin_stack_block.filters.target_line, Some(42));
 
         let go_panic_block =
             parse_query("panic: boom\n\nmain.handleRequest()\n\t/tmp/work/src/server.rs:42 +0x20");

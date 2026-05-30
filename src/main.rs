@@ -7596,6 +7596,12 @@ mod tests {
         assert_eq!(parenthesized_diagnostic.start, 12);
         assert_eq!(parenthesized_diagnostic.lines, DEFAULT_CLI_READ_RANGE_LINES);
 
+        let java_stack_frame =
+            CliRangeSpec::from_str("at com.example.Auth.issue(Auth.java:12)").unwrap();
+        assert_eq!(java_stack_frame.path, "Auth.java");
+        assert_eq!(java_stack_frame.start, 12);
+        assert_eq!(java_stack_frame.lines, DEFAULT_CLI_READ_RANGE_LINES);
+
         let copied_range = CliRangeSpec::from_str("src/auth.rs:12-15").unwrap();
         assert_eq!(copied_range.path, "src/auth.rs");
         assert_eq!(copied_range.start, 12);
