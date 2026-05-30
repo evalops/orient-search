@@ -533,6 +533,48 @@ fn cli_outputs_agent_instructions() {
 }
 
 #[test]
+fn cli_agent_guidance_accepts_socket_targets() {
+    let mut guide = Command::cargo_bin("orient").unwrap();
+    guide
+        .args([
+            "agent-guide",
+            "--index-dir",
+            "/tmp/orient-shards",
+            "--socket",
+            "/tmp/orient.sock",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "orient client-jsonl --require-version --socket /tmp/orient.sock",
+        ))
+        .stdout(predicate::str::contains(
+            "orient serve-unix --socket /tmp/orient.sock --index-dir /tmp/orient-shards",
+        ))
+        .stdout(predicate::str::contains(
+            "orient agent-instructions --profile generic --index-dir /tmp/orient-shards --socket /tmp/orient.sock",
+        ));
+
+    let mut instructions = Command::cargo_bin("orient").unwrap();
+    instructions
+        .args([
+            "agent-instructions",
+            "--index-dir",
+            "/tmp/orient-shards",
+            "--socket",
+            "/tmp/orient.sock",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "orient client-jsonl --require-version --socket /tmp/orient.sock",
+        ))
+        .stdout(predicate::str::contains(
+            "orient serve-unix --socket /tmp/orient.sock --index-dir /tmp/orient-shards",
+        ));
+}
+
+#[test]
 fn cli_search_auto_selects_live_indexed_and_shard_surfaces() {
     let repo = sample_repo();
     let index_path = repo.path().join("orient.index");

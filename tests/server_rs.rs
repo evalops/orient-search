@@ -1083,6 +1083,10 @@ fn mcp_manifest_exposes_input_schema_for_adapter_wrappers() {
         "127.0.0.1:8796"
     );
     assert_eq!(
+        agent_guide_tool["inputSchema"]["properties"]["socket"]["type"],
+        "string"
+    );
+    assert_eq!(
         agent_guide_tool["inputSchema"]["properties"]["profile"]["enum"],
         serde_json::json!(["generic", "codex", "claude", "amp"])
     );
@@ -1094,6 +1098,10 @@ fn mcp_manifest_exposes_input_schema_for_adapter_wrappers() {
     assert_eq!(
         agent_instructions_tool["inputSchema"]["properties"]["profile"]["default"],
         "generic"
+    );
+    assert_eq!(
+        agent_instructions_tool["inputSchema"]["properties"]["socket"]["type"],
+        "string"
     );
     assert_eq!(
         repo_map["inputSchema"]["properties"]["detail"]["enum"],
@@ -1210,6 +1218,7 @@ fn agent_guide_returns_local_agent_request_templates() {
         Some("/tmp/repo.index"),
         Some("/tmp/orient-shards"),
         Some("127.0.0.1:9999"),
+        None,
         Some("codex"),
     );
     assert_eq!(guide["profile"], "codex");
@@ -1260,7 +1269,7 @@ fn agent_guide_returns_local_agent_request_templates() {
     );
     assert_eq!(
         guide["quickstart"]["agent_instructions"],
-        "orient agent-instructions --profile codex --index-dir /tmp/orient-shards"
+        "orient agent-instructions --profile codex --index-dir /tmp/orient-shards --addr 127.0.0.1:9999"
     );
     assert!(
         guide["quickstart"]["single_repo"]
@@ -1375,6 +1384,7 @@ fn agent_instructions_returns_copyable_local_agent_snippet() {
         Some("/tmp/repo.index"),
         Some("/tmp/orient-shards"),
         Some("127.0.0.1:9999"),
+        None,
         Some("claude"),
     );
     for expected in [
@@ -1405,8 +1415,67 @@ fn agent_instructions_returns_copyable_local_agent_snippet() {
 }
 
 #[test]
+fn agent_guidance_can_target_unix_socket_daemons() {
+    let socket = "/tmp/orient-agent.sock";
+    let guide = agent_guide(
+        Some("/work/repo"),
+        Some("/tmp/repo.index"),
+        Some("/tmp/orient-shards"),
+        Some("127.0.0.1:9999"),
+        Some(socket),
+        Some("codex"),
+    );
+    let guide_json = serde_json::to_string(&guide).unwrap();
+    assert!(
+        guide_json
+            .contains("orient client-jsonl --require-version --socket /tmp/orient-agent.sock")
+    );
+    assert!(
+        guide_json.contains("orient daemon-status --socket /tmp/orient-agent.sock --format json")
+    );
+    assert!(guide_json.contains(
+        "orient serve-unix --socket /tmp/orient-agent.sock --index-dir /tmp/orient-shards"
+    ));
+    assert!(
+        guide_json
+            .contains("orient serve-unix --socket /tmp/orient-agent.sock --index /tmp/repo.index")
+    );
+    assert_eq!(
+        guide["quickstart"]["client"],
+        serde_json::json!("orient client-jsonl --require-version --socket /tmp/orient-agent.sock")
+    );
+    assert_eq!(
+        guide["quickstart"]["agent_instructions"],
+        serde_json::json!(
+            "orient agent-instructions --profile codex --index-dir /tmp/orient-shards --socket /tmp/orient-agent.sock"
+        )
+    );
+
+    let instructions = agent_instructions(
+        Some("/work/repo"),
+        Some("/tmp/repo.index"),
+        Some("/tmp/orient-shards"),
+        Some("127.0.0.1:9999"),
+        Some(socket),
+        Some("codex"),
+    );
+    assert!(
+        instructions
+            .contains("orient client-jsonl --require-version --socket /tmp/orient-agent.sock")
+    );
+    assert!(instructions.contains(
+        "orient serve-unix --socket /tmp/orient-agent.sock --index-dir /tmp/orient-shards"
+    ));
+    assert!(
+        instructions
+            .contains("orient serve-unix --socket /tmp/orient-agent.sock --index /tmp/repo.index")
+    );
+    assert!(!instructions.contains("orient serve-tcp --addr 127.0.0.1:9999"));
+}
+
+#[test]
 fn agent_guidance_defaults_use_neutral_cache_placeholders() {
-    let guide = agent_guide(None, None, None, None, None);
+    let guide = agent_guide(None, None, None, None, None, None);
     let guide_json = serde_json::to_string(&guide).unwrap();
     assert_eq!(guide["profile"], "generic");
     assert!(guide_json.contains("/path/to/local/cache/orient.index"));
@@ -1424,7 +1493,7 @@ fn agent_guidance_defaults_use_neutral_cache_placeholders() {
     assert!(!guide_json.contains("CLAUDE.md"));
     assert!(!guide_json.contains("Amp rules"));
 
-    let instructions = agent_instructions(None, None, None, None, None);
+    let instructions = agent_instructions(None, None, None, None, None, None);
     assert!(instructions.contains("/path/to/local/cache/orient.index"));
     assert!(instructions.contains("/path/to/local/cache/orient-shards"));
     assert!(!instructions.contains("/tmp/orient"));
@@ -1439,18 +1508,18 @@ fn agent_guidance_defaults_use_neutral_cache_placeholders() {
 
 #[test]
 fn agent_guidance_profiles_keep_instruction_surfaces_neutral() {
-    let codex = agent_instructions(None, None, None, None, Some("codex"));
+    let codex = agent_instructions(None, None, None, None, None, Some("codex"));
     assert!(codex.contains("selected coding agent"));
     assert!(!codex.contains("Selected profile"));
     assert!(!codex.contains("AGENTS.md"));
     assert!(!codex.contains("CLAUDE.md"));
 
-    let claude = agent_instructions(None, None, None, None, Some("claude-code"));
+    let claude = agent_instructions(None, None, None, None, None, Some("claude-code"));
     assert!(claude.contains("selected coding agent"));
     assert!(!claude.contains("CLAUDE.md"));
     assert!(!claude.contains("AGENTS.md"));
 
-    let amp = agent_guide(None, None, None, None, Some("amp"));
+    let amp = agent_guide(None, None, None, None, None, Some("amp"));
     assert_eq!(amp["profile"], "amp");
     assert!(
         amp["instruction_target"]
@@ -1521,13 +1590,17 @@ fn runtime_serves_agent_instructions_for_local_instruction_files() {
             "index": "/tmp/repo.index",
             "index_dir": "/tmp/orient-shards",
             "addr": "127.0.0.1:9999",
+            "socket": "/tmp/orient-agent.sock",
             "profile": "amp"
         }),
     });
     assert!(response.error.is_none(), "{:?}", response.error);
     let result = response.result.unwrap();
     let instructions = result["instructions"].as_str().unwrap();
-    assert!(instructions.contains("orient client-jsonl --require-version --addr 127.0.0.1:9999"));
+    assert!(
+        instructions
+            .contains("orient client-jsonl --require-version --socket /tmp/orient-agent.sock")
+    );
     assert!(instructions.contains("search_auto"));
     assert!(instructions.contains("search_auto_default"));
     assert!(instructions.contains("next_action"));

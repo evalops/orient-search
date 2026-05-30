@@ -65,6 +65,9 @@ Generate a short local instruction snippet for the current daemon target:
 orient agent-instructions --profile generic --index-dir "$ORIENT_SHARDS"
 ```
 
+For a socket daemon, either export `ORIENT_SOCKET` first or add
+`--socket "$ORIENT_SOCKET"` to the command.
+
 The generated snippet should keep agents on this loop. See
 [Agent adoption](agent-adoption.md) for adapter examples.
 

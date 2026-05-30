@@ -43,6 +43,9 @@ orient daemon-status
 orient daemon-status --format json
 ```
 
+When using a Unix socket daemon, pass `--socket "$ORIENT_SOCKET"` or export
+`ORIENT_SOCKET` before generating instructions.
+
 `daemon-status` reports the daemon version, process id, uptime, shard worker cap,
 registered shard directories, and warmed indexes. If the version is missing or
 differs from `orient --version`, restart the shared daemon. The JSON-lines

@@ -927,6 +927,8 @@ enum Commands {
         index: Option<String>,
         #[arg(long)]
         index_dir: Option<String>,
+        #[arg(long, help = "Unix daemon socket; falls back to ORIENT_SOCKET")]
+        socket: Option<PathBuf>,
         #[arg(
             long,
             help = "TCP daemon address; falls back to ORIENT_ADDR or 127.0.0.1:8796"
@@ -942,6 +944,8 @@ enum Commands {
         index: Option<String>,
         #[arg(long)]
         index_dir: Option<String>,
+        #[arg(long, help = "Unix daemon socket; falls back to ORIENT_SOCKET")]
+        socket: Option<PathBuf>,
         #[arg(
             long,
             help = "TCP daemon address; falls back to ORIENT_ADDR or 127.0.0.1:8796"
@@ -5464,17 +5468,20 @@ fn run() -> Result<()> {
             repo,
             index,
             index_dir,
+            socket,
             addr,
             profile,
         } => {
-            let addr = resolve_daemon_addr(addr);
+            let target = resolve_daemon_target(socket, addr);
+            let (addr, socket) = daemon_target_agent_args(&target);
             println!(
                 "{}",
                 serde_json::to_string(&agent_guide(
                     repo.as_deref(),
                     index.as_deref(),
                     index_dir.as_deref(),
-                    Some(&addr),
+                    addr.as_deref(),
+                    socket.as_deref(),
                     Some(profile.as_str()),
                 ))?
             );
@@ -5483,17 +5490,20 @@ fn run() -> Result<()> {
             repo,
             index,
             index_dir,
+            socket,
             addr,
             profile,
         } => {
-            let addr = resolve_daemon_addr(addr);
+            let target = resolve_daemon_target(socket, addr);
+            let (addr, socket) = daemon_target_agent_args(&target);
             println!(
                 "{}",
                 agent_instructions(
                     repo.as_deref(),
                     index.as_deref(),
                     index_dir.as_deref(),
-                    Some(&addr),
+                    addr.as_deref(),
+                    socket.as_deref(),
                     Some(profile.as_str()),
                 )
             );
@@ -5728,6 +5738,14 @@ fn resolve_daemon_target(socket: Option<PathBuf>, addr: Option<String>) -> Daemo
         return DaemonTarget::Unix(socket);
     }
     DaemonTarget::Tcp(resolve_daemon_addr(None))
+}
+
+fn daemon_target_agent_args(target: &DaemonTarget) -> (Option<String>, Option<String>) {
+    match target {
+        DaemonTarget::Tcp(addr) => (Some(addr.clone()), None),
+        #[cfg(unix)]
+        DaemonTarget::Unix(socket) => (None, Some(socket.to_string_lossy().to_string())),
+    }
 }
 
 fn client_jsonl_tcp(addr: &str, require_version: bool) -> Result<()> {

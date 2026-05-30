@@ -1237,13 +1237,13 @@ pub fn tool_manifest() -> Value {
             "agent_guide",
             "Return a compact Orient workflow guide and request templates for local coding agents.",
             &[],
-            &["repo", "index", "index_dir", "addr", "profile"],
+            &["repo", "index", "index_dir", "addr", "socket", "profile"],
         ),
         tool_entry(
             "agent_instructions",
             "Return compact copyable local-agent instructions for using Orient first.",
             &[],
-            &["repo", "index", "index_dir", "addr", "profile"],
+            &["repo", "index", "index_dir", "addr", "socket", "profile"],
         ),
         tool_entry(
             "daemon_status",
@@ -1654,6 +1654,7 @@ pub fn agent_guide(
     index: Option<&str>,
     index_dir: Option<&str>,
     addr: Option<&str>,
+    socket: Option<&str>,
     profile: Option<&str>,
 ) -> Value {
     let repo = repo.unwrap_or("/path/to/repo");
@@ -1661,28 +1662,31 @@ pub fn agent_guide(
     let index_dir = index_dir.unwrap_or("/path/to/local/cache/orient-shards");
     let addr = addr.unwrap_or(DEFAULT_DAEMON_ADDR);
     let profile = agent_profile(profile);
-    let client_command = tcp_client_command(addr);
-    let status_command = daemon_status_command(addr);
+    let client_command = agent_client_command(addr, socket);
+    let status_command = agent_status_command(addr, socket);
+    let multi_repo_serve = agent_serve_command(addr, socket, "index-dir", index_dir);
+    let single_repo_serve = agent_serve_command(addr, socket, "index", index);
+    let instructions_command = agent_instructions_command(addr, socket, profile.name, index_dir);
     json!({
         "name": "Orient Search",
         "purpose": "Fast local code search for coding agents; no telemetry.",
         "profile": profile.name,
         "instruction_target": profile.instruction_target,
-        "instruction_snippet": agent_instructions(Some(repo), Some(index), Some(index_dir), Some(addr), Some(profile.name)),
+        "instruction_snippet": agent_instructions(Some(repo), Some(index), Some(index_dir), Some(addr), socket, Some(profile.name)),
         "quickstart": {
             "install": "cargo install --git https://github.com/evalops/orient-search",
             "multi_repo": [
                 format!("orient ensure-shards --discover-root /path/to/workspaces --output-dir {index_dir} --family-limit 2"),
-                format!("orient serve-tcp --addr {addr} --index-dir {index_dir}")
+                multi_repo_serve
             ],
             "single_repo": [
                 format!("orient ensure-index --repo {repo} --index {index}"),
-                format!("orient serve-tcp --addr {addr} --index {index}")
+                single_repo_serve
             ],
             "client": client_command,
             "status": status_command,
             "one_shot_search": "orient search-auto --retry-if-empty \"symbol:SessionManager token\"",
-            "agent_instructions": format!("orient agent-instructions --profile {} --index-dir {index_dir}", profile.name),
+            "agent_instructions": instructions_command,
             "followup_request_hints": "Generated follow-up requests include jsonl, client_cli, and compact cli hints where available."
         },
         "recommended_loop": [
@@ -1727,16 +1731,18 @@ pub fn agent_guide(
         "transports": {
             "stdio": "orient serve-jsonl",
             "tcp_daemon": format!("orient serve-tcp --addr {addr} --index-dir {index_dir}"),
-            "tcp_client": tcp_client_command(addr)
+            "tcp_client": tcp_client_command(addr),
+            "unix_daemon": socket.map(|socket| agent_serve_command(addr, Some(socket), "index-dir", index_dir)),
+            "unix_client": socket.map(|socket| agent_client_command(addr, Some(socket)))
         },
         "setup_commands": {
             "single_repo": [
                 format!("orient ensure-index --repo {repo} --index {index}"),
-                format!("orient serve-tcp --addr {addr} --index {index}")
+                agent_serve_command(addr, socket, "index", index)
             ],
             "multi_repo_shards": [
                 format!("orient ensure-shards --discover-root /path/to/workspaces --output-dir {index_dir} --family-limit 2"),
-                format!("orient serve-tcp --addr {addr} --index-dir {index_dir}")
+                agent_serve_command(addr, socket, "index-dir", index_dir)
             ]
         },
         "request_templates": {
@@ -1831,6 +1837,7 @@ pub fn agent_instructions(
     index: Option<&str>,
     index_dir: Option<&str>,
     addr: Option<&str>,
+    socket: Option<&str>,
     profile: Option<&str>,
 ) -> String {
     let repo = repo.unwrap_or("/path/to/repo");
@@ -1838,7 +1845,9 @@ pub fn agent_instructions(
     let index_dir = index_dir.unwrap_or("/path/to/local/cache/orient-shards");
     let addr = addr.unwrap_or(DEFAULT_DAEMON_ADDR);
     let profile = agent_profile(profile);
-    let client_command = tcp_client_command(addr);
+    let client_command = agent_client_command(addr, socket);
+    let multi_repo_serve = agent_serve_command(addr, socket, "index-dir", index_dir);
+    let single_repo_serve = agent_serve_command(addr, socket, "index", index);
     format!(
         "## Orient Search\n\
 Use Orient for local code discovery and bounded file reads before `rg`, `find`, `ls`, `grep`, `cat`, or ad hoc filesystem scans.\n\
@@ -1846,8 +1855,8 @@ Prefer the shared daemon when it is running: `{client_command}`.\n\
 Copy this snippet into {instruction_target}.\n\
 Keep cache paths local to the machine running the agents; do not copy machine-specific layouts into shared docs or reusable instructions.\n\
 Orient shares code-search artifacts only and has no telemetry.\n\
-For many local repos, bootstrap it with `orient ensure-shards --discover-root /path/to/workspaces --output-dir {index_dir} --family-limit 2` and `orient serve-tcp --addr {addr} --index-dir {index_dir}`.\n\
-For one repo, bootstrap it with `orient ensure-index --repo {repo} --index {index}` and `orient serve-tcp --addr {addr} --index {index}`.\n\
+For many local repos, bootstrap it with `orient ensure-shards --discover-root /path/to/workspaces --output-dir {index_dir} --family-limit 2` and `{multi_repo_serve}`.\n\
+For one repo, bootstrap it with `orient ensure-index --repo {repo} --index {index}` and `{single_repo_serve}`.\n\
 At the start of a task, call `daemon_status` or `agent_guide`, then use `search_auto` with `retry_if_empty:true` for normal lookup and `search_auto_batch` with `retry_if_empty:true` for alternate query phrasings.\n\
 Trust `daemon_status.search_auto_default` to see whether no-target `search_auto` will use a registered shard directory, warmed index, or the daemon current directory; run any `daemon_status.repair_requests`, then use `daemon_status.default_requests` for copyable first repo-map/search/query-plan calls.\n\
 When calling `search`, `search_batch`, `search_auto`, `search_auto_batch`, `repo_map`, `search_plan`, `find_symbol`, `read_range`, `read_ranges`, `related_files`, or `related_symbols` through JSON-lines/MCP without an explicit target, pass `cwd` so shared shard daemons scope results to the current git checkout.\n\
@@ -1900,6 +1909,72 @@ fn agent_profile(profile: Option<&str>) -> AgentProfile {
             instruction_target: "the local agent instruction file for this repo",
             adapter_note: "Selected profile: generic; place the snippet in the local instruction file your coding agent reads.",
         },
+    }
+}
+
+fn non_empty_agent_socket(socket: Option<&str>) -> Option<&str> {
+    socket.map(str::trim).filter(|socket| !socket.is_empty())
+}
+
+fn agent_client_command(addr: &str, socket: Option<&str>) -> String {
+    if let Some(socket) = non_empty_agent_socket(socket) {
+        unix_client_command(Path::new(socket))
+    } else {
+        tcp_client_command(addr)
+    }
+}
+
+fn agent_status_command(addr: &str, socket: Option<&str>) -> String {
+    if let Some(socket) = non_empty_agent_socket(socket) {
+        format!(
+            "orient daemon-status --socket {} --format json",
+            shell_quote(socket)
+        )
+    } else {
+        daemon_status_command(addr)
+    }
+}
+
+fn agent_serve_command(
+    addr: &str,
+    socket: Option<&str>,
+    target_flag: &str,
+    target: &str,
+) -> String {
+    if let Some(socket) = non_empty_agent_socket(socket) {
+        format!(
+            "orient serve-unix --socket {} --{} {}",
+            shell_quote(socket),
+            target_flag,
+            shell_quote(target)
+        )
+    } else {
+        format!(
+            "orient serve-tcp --addr {} --{} {}",
+            shell_quote(addr),
+            target_flag,
+            shell_quote(target)
+        )
+    }
+}
+
+fn agent_instructions_command(
+    addr: &str,
+    socket: Option<&str>,
+    profile: &str,
+    index_dir: &str,
+) -> String {
+    let base = format!(
+        "orient agent-instructions --profile {} --index-dir {}",
+        shell_quote(profile),
+        shell_quote(index_dir)
+    );
+    if let Some(socket) = non_empty_agent_socket(socket) {
+        format!("{base} --socket {}", shell_quote(socket))
+    } else if addr != DEFAULT_DAEMON_ADDR {
+        format!("{base} --addr {}", shell_quote(addr))
+    } else {
+        base
     }
 }
 
@@ -3818,6 +3893,7 @@ impl ToolRuntime {
                 optional_string_arg(&request.arguments, "index").as_deref(),
                 optional_string_arg(&request.arguments, "index_dir").as_deref(),
                 optional_string_arg(&request.arguments, "addr").as_deref(),
+                optional_string_arg(&request.arguments, "socket").as_deref(),
                 optional_string_arg(&request.arguments, "profile").as_deref(),
             )),
             "agent_instructions" => Ok(json!({
@@ -3826,6 +3902,7 @@ impl ToolRuntime {
                     optional_string_arg(&request.arguments, "index").as_deref(),
                     optional_string_arg(&request.arguments, "index_dir").as_deref(),
                     optional_string_arg(&request.arguments, "addr").as_deref(),
+                    optional_string_arg(&request.arguments, "socket").as_deref(),
                     optional_string_arg(&request.arguments, "profile").as_deref(),
                 )
             })),
