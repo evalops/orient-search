@@ -838,6 +838,14 @@ impl FastIndex {
             .filter(|file| file.path == path)
     }
 
+    fn indexed_file_for_read(&self, path: &str) -> Option<&IndexedPath> {
+        self.indexed_file(path).or_else(|| {
+            self.path_lower_ids
+                .get(&path.to_ascii_lowercase())
+                .and_then(|file_id| self.files.get(*file_id as usize))
+        })
+    }
+
     pub fn find_symbol(&self, name: &str, limit: usize) -> Vec<Symbol> {
         self.find_symbol_filtered(name, limit, &SearchFilters::default())
     }
@@ -935,7 +943,7 @@ impl FastIndex {
     ) -> Result<FileRange> {
         let normalized = normalize_index_relative_path(path)?;
         let file = self
-            .indexed_file(&normalized)
+            .indexed_file_for_read(&normalized)
             .ok_or_else(|| anyhow::anyhow!("path is not present in index: {normalized}"))?;
         Ok(indexed_file_range_scoped(
             file, start_line, line_count, scope,
@@ -1711,12 +1719,12 @@ impl FastIndex {
         if !filter_only_query(filters) {
             return false;
         }
-        let file_name_candidates = self.file_name_filter_candidate_ids(filters);
         match filter_only_candidate_ids(
             symbol_kind_postings,
             attribute_postings,
             path_filter_postings,
-            file_name_candidates.as_deref(),
+            &self.files,
+            &self.file_name_ids,
             filters,
         ) {
             Some(candidate_ids) => {
@@ -1797,7 +1805,6 @@ impl FastIndex {
         let attribute_postings = attribute_postings_for_filters(&self.attribute_postings, &filters);
         let path_filter_postings =
             path_filter_trigram_postings_for_filters(&self.path_trigram_postings, &filters);
-        let file_name_candidates = self.file_name_filter_candidate_ids(&filters);
         if query_tokens.len() > 1 && !filters.match_any {
             filters.require_all = true;
         }
@@ -1816,18 +1823,15 @@ impl FastIndex {
                             &symbol_kind_postings,
                             &attribute_postings,
                             &path_filter_postings,
-                            file_name_candidates.as_deref(),
+                            &self.files,
+                            &self.file_name_ids,
                             &filters,
                         )
                     });
                 let strategy = if exact_path_candidate.is_some() {
                     "exact_path_filter"
                 } else {
-                    filter_only_strategy(
-                        &filters,
-                        &path_filter_postings,
-                        file_name_candidates.as_deref(),
-                    )
+                    filter_only_strategy(&filters, &path_filter_postings)
                 };
                 let path_filters = PathFilterMatcher::from_filters(&filters);
                 let final_match_count = match &candidate_ids {
@@ -1866,10 +1870,7 @@ impl FastIndex {
                             }),
                         )
                         .chain(attribute_postings.plan_postings())
-                        .chain(file_name_plan_postings(
-                            &filters,
-                            file_name_candidates.as_deref(),
-                        ))
+                        .chain(file_name_plan_postings(&filters, candidate_ids.as_deref()))
                         .chain(path_filter_postings.plan_postings())
                         .collect(),
                     missing_terms: Vec::new(),
@@ -2132,7 +2133,6 @@ impl FastIndex {
         path_filter_postings: &PathFilterTrigramPostings<'_>,
     ) -> Vec<SearchResult> {
         let exact_path_candidate = self.indexed_exact_path_filter(filters);
-        let file_name_candidates = self.file_name_filter_candidate_ids(filters);
         let candidate_ids = exact_path_candidate
             .as_ref()
             .map(|(_, file_id)| vec![*file_id])
@@ -2141,18 +2141,15 @@ impl FastIndex {
                     symbol_kind_postings,
                     attribute_postings,
                     path_filter_postings,
-                    file_name_candidates.as_deref(),
+                    &self.files,
+                    &self.file_name_ids,
                     filters,
                 )
             });
         let strategy = if exact_path_candidate.is_some() {
             "exact_path_filter"
         } else {
-            filter_only_strategy(
-                filters,
-                path_filter_postings,
-                file_name_candidates.as_deref(),
-            )
+            filter_only_strategy(filters, path_filter_postings)
         };
         let mut results = match &candidate_ids {
             Some(candidate_ids) => candidate_ids
@@ -2188,10 +2185,7 @@ impl FastIndex {
                             .map(|(kind, postings)| plan_posting("symbol_kind", kind, postings)),
                     )
                     .chain(attribute_postings.plan_postings())
-                    .chain(file_name_plan_postings(
-                        filters,
-                        file_name_candidates.as_deref(),
-                    ))
+                    .chain(file_name_plan_postings(filters, candidate_ids.as_deref()))
                     .chain(path_filter_postings.plan_postings())
                     .collect(),
                 missing_terms: Vec::new(),
@@ -3207,19 +3201,6 @@ impl FastIndex {
             .get(&path)
             .copied()
             .map(|file_id| (path, file_id))
-    }
-
-    fn file_name_filter_candidate_ids(&self, filters: &SearchFilters) -> Option<Vec<u32>> {
-        let file_filter = filters.file.as_deref()?;
-        let mut ids = Vec::new();
-        for (file_name_lower, file_ids) in &self.file_name_ids {
-            if filter_value_matches(file_name_lower, file_filter) {
-                ids.extend(file_ids.iter().copied());
-            }
-        }
-        ids.sort_unstable();
-        ids.dedup();
-        Some(ids)
     }
 }
 
@@ -4709,7 +4690,8 @@ fn filter_only_candidate_ids(
     symbol_kind_postings: &[(&String, &Vec<Posting>)],
     attribute_postings: &AttributeFilterPostings<'_>,
     path_filter_postings: &PathFilterTrigramPostings<'_>,
-    file_name_candidate_ids: Option<&[u32]>,
+    files: &[IndexedPath],
+    file_name_ids: &HashMap<String, Vec<u32>>,
     filters: &SearchFilters,
 ) -> Option<Vec<u32>> {
     if filters.symbol_kind.is_some() && symbol_kind_postings.is_empty() {
@@ -4721,11 +4703,11 @@ fn filter_only_candidate_ids(
     if symbol_kind_postings.is_empty()
         && attribute_postings.is_empty()
         && path_filter_postings.is_empty()
-        && file_name_candidate_ids.is_none()
+        && filters.file.is_none()
     {
         return None;
     }
-    let mut candidate_ids = file_name_candidate_ids.map(|ids| ids.to_vec());
+    let mut candidate_ids: Option<Vec<u32>> = None;
     for postings in symbol_kind_postings
         .iter()
         .map(|(_, postings)| *postings)
@@ -4750,13 +4732,12 @@ fn filter_only_candidate_ids(
             break;
         }
     }
-    candidate_ids
+    filter_file_name_candidates(candidate_ids, files, file_name_ids, filters)
 }
 
 fn filter_only_strategy(
     filters: &SearchFilters,
     path_filter_postings: &PathFilterTrigramPostings<'_>,
-    file_name_candidate_ids: Option<&[u32]>,
 ) -> &'static str {
     if filters.symbol_kind.is_some() {
         "symbol_kind_filter_postings"
@@ -4767,7 +4748,7 @@ fn filter_only_strategy(
         || filters.code.is_some()
     {
         "attribute_filter_postings"
-    } else if file_name_candidate_ids.is_some() {
+    } else if filters.file.is_some() {
         "file_name_filter"
     } else if !path_filter_postings.is_empty() {
         "path_filter_trigram_postings"
@@ -4785,6 +4766,38 @@ fn file_name_plan_postings(
         filters.file.as_deref()?,
         file_name_candidate_ids?.len(),
     ))
+}
+
+fn filter_file_name_candidates(
+    candidate_ids: Option<Vec<u32>>,
+    files: &[IndexedPath],
+    file_name_ids: &HashMap<String, Vec<u32>>,
+    filters: &SearchFilters,
+) -> Option<Vec<u32>> {
+    let Some(file_filter) = filters.file.as_deref() else {
+        return candidate_ids;
+    };
+    if let Some(candidate_ids) = candidate_ids {
+        return Some(
+            candidate_ids
+                .into_iter()
+                .filter(|file_id| {
+                    files.get(*file_id as usize).is_some_and(|file| {
+                        filter_value_matches(&file.file_name_lower, file_filter)
+                    })
+                })
+                .collect(),
+        );
+    }
+    let mut ids = Vec::new();
+    for (file_name_lower, file_ids) in file_name_ids {
+        if filter_value_matches(file_name_lower, file_filter) {
+            ids.extend(file_ids.iter().copied());
+        }
+    }
+    ids.sort_unstable();
+    ids.dedup();
+    Some(ids)
 }
 
 fn intersect_symbol_kind_postings(

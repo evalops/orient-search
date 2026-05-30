@@ -196,6 +196,9 @@ fn indexed_search_and_read_range_use_persisted_snapshot_text() {
     let dot_range = loaded.read_range("./src/auth.rs", 2, 1).unwrap();
     assert_eq!(dot_range.path, "src/auth.rs");
     assert!(dot_range.text.contains("2: impl SessionManager"));
+    let cased_range = loaded.read_range("./SRC/AUTH.RS", 2, 1).unwrap();
+    assert_eq!(cased_range.path, "src/auth.rs");
+    assert!(cased_range.text.contains("2: impl SessionManager"));
     let capped = loaded
         .read_range("src/long.rs", 1, MAX_READ_RANGE_LINES + 10)
         .unwrap();
