@@ -1571,6 +1571,7 @@ fn shard_query_plan_batch_result(
 #[derive(Debug, Clone, Serialize)]
 struct SymbolBatchResult {
     name: String,
+    summary: SymbolBatchSummary,
     #[serde(skip_serializing_if = "Option::is_none")]
     read_batch_request: Option<ResultToolRequest>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1578,14 +1579,29 @@ struct SymbolBatchResult {
     symbols: Vec<SymbolLookupResult>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct SymbolBatchSummary {
+    status: String,
+    symbol_count: usize,
+}
+
 fn symbol_batch_result(
     name: String,
     read_batch_request: Option<ResultToolRequest>,
     symbols: Vec<SymbolLookupResult>,
 ) -> SymbolBatchResult {
+    let summary = SymbolBatchSummary {
+        status: if symbols.is_empty() {
+            "not_found".to_string()
+        } else {
+            "matched".to_string()
+        },
+        symbol_count: symbols.len(),
+    };
     let next_action = read_batch_next_action(&read_batch_request);
     SymbolBatchResult {
         name,
+        summary,
         read_batch_request,
         next_action,
         symbols,

@@ -3467,12 +3467,20 @@ fn runtime_find_symbol_alias_accepts_live_index_and_shard_targets() {
         tool: "find_symbol_batch".to_string(),
         arguments: serde_json::json!({
             "index": repo.path().join(".orient/index"),
-            "names": ["SessionManager", "issue_token"],
+            "names": ["SessionManager", "issue_token", "MissingSymbol"],
             "limit": 5
         }),
     });
     assert!(indexed_batch.error.is_none(), "{:?}", indexed_batch.error);
     let indexed_batch = indexed_batch.result.unwrap();
+    assert_eq!(
+        indexed_batch[0]["summary"]["status"],
+        serde_json::json!("matched")
+    );
+    assert_eq!(
+        indexed_batch[0]["summary"]["symbol_count"],
+        serde_json::json!(1)
+    );
     assert_eq!(
         indexed_batch[0]["read_batch_request"]["tool"],
         "read_ranges"
@@ -3489,6 +3497,15 @@ fn runtime_find_symbol_alias_accepts_live_index_and_shard_targets() {
         indexed_batch[0]["next_action"]["request"],
         indexed_batch[0]["read_batch_request"]
     );
+    assert_eq!(
+        indexed_batch[2]["summary"]["status"],
+        serde_json::json!("not_found")
+    );
+    assert_eq!(
+        indexed_batch[2]["summary"]["symbol_count"],
+        serde_json::json!(0)
+    );
+    assert!(indexed_batch[2]["read_batch_request"].is_null());
 
     let shard_batch = runtime.dispatch(ToolRequest {
         id: serde_json::json!("shard-symbol-batch"),

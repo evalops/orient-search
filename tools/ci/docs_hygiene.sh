@@ -68,6 +68,7 @@ require_doc_string() {
 require_doc_string docs/agent-protocol.md 'query_plan_summary'
 require_doc_string docs/agent-protocol.md 'next_read_batch_request'
 require_doc_string docs/agent-protocol.md 'plan batch items include top-level `summary`'
+require_doc_string docs/agent-protocol.md 'Symbol batch items include `summary`'
 
 while IFS=: read -r file line target; do
   target="${target%% \"*}"

@@ -3562,7 +3562,7 @@ fn cli_builds_and_searches_persistent_index() {
         )));
 
     let mut index_symbol_batch = Command::cargo_bin("orient").unwrap();
-    index_symbol_batch
+    let index_symbol_batch = index_symbol_batch
         .args([
             "index-symbol-batch",
             "--index",
@@ -3574,18 +3574,49 @@ fn cli_builds_and_searches_persistent_index() {
         ])
         .assert()
         .success()
-        .stdout(predicate::str::contains("\"name\":\"SessionManager\""))
-        .stdout(predicate::str::contains("\"symbols\":[]"))
-        .stdout(predicate::str::contains("\"name\":\"issue_token\""))
-        .stdout(predicate::str::contains("\"kind\":\"function\""))
-        .stdout(predicate::str::contains("\"read_request\""))
-        .stdout(predicate::str::contains("\"tool\":\"read_index_range\""))
-        .stdout(predicate::str::contains("\"read_batch_request\""))
-        .stdout(predicate::str::contains("\"next_action\""))
-        .stdout(predicate::str::contains(
-            "\"source\":\"read_batch_request\"",
-        ))
-        .stdout(predicate::str::contains("\"tool\":\"read_index_ranges\""));
+        .get_output()
+        .stdout
+        .clone();
+    let index_symbol_batch: serde_json::Value =
+        serde_json::from_slice(&index_symbol_batch).unwrap();
+    assert_eq!(
+        index_symbol_batch[0]["name"],
+        serde_json::json!("SessionManager")
+    );
+    assert_eq!(
+        index_symbol_batch[0]["summary"]["status"],
+        serde_json::json!("not_found")
+    );
+    assert_eq!(
+        index_symbol_batch[0]["summary"]["symbol_count"],
+        serde_json::json!(0)
+    );
+    assert_eq!(
+        index_symbol_batch[1]["name"],
+        serde_json::json!("issue_token")
+    );
+    assert_eq!(
+        index_symbol_batch[1]["summary"]["status"],
+        serde_json::json!("matched")
+    );
+    assert_eq!(
+        index_symbol_batch[1]["summary"]["symbol_count"],
+        serde_json::json!(index_symbol_batch[1]["symbols"].as_array().unwrap().len())
+    );
+    assert!(
+        index_symbol_batch[1]["summary"]["symbol_count"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
+    assert_eq!(
+        index_symbol_batch[1]["read_batch_request"]["tool"],
+        serde_json::json!("read_index_ranges")
+    );
+    assert_eq!(
+        index_symbol_batch[1]["next_action"]["source"],
+        serde_json::json!("read_batch_request")
+    );
 
     let mut generic_index_symbol_batch = Command::cargo_bin("orient").unwrap();
     generic_index_symbol_batch
