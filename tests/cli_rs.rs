@@ -3455,7 +3455,7 @@ fn cli_indexed_result_query_plan_includes_retry_requests() {
         .stdout(predicate::str::contains("\"next_action\""))
         .stdout(predicate::str::contains("\"tool\":\"indexed_search_code\""))
         .stdout(predicate::str::contains(
-            "\"query\":\"path:src shared cap token\"",
+            "\"query\":\"shared cap token path:src\"",
         ))
         .stdout(predicate::str::contains(&format!(
             "\"index\":\"{}\"",

@@ -7825,7 +7825,7 @@ fn runtime_indexed_result_query_plan_includes_retry_requests() {
     );
     assert_eq!(
         plan["retry_requests"][0]["arguments"]["query"],
-        serde_json::json!("path:src shared cap token")
+        serde_json::json!("shared cap token path:src")
     );
     assert_eq!(
         plan["retry_requests"][0]["arguments"]["index"],
@@ -10725,7 +10725,7 @@ fn indexed_search_result_query_plan_includes_retry_requests() {
             .any(|request| {
                 request["tool"] == serde_json::json!("indexed_search_code")
                     && request["arguments"]["query"]
-                        == serde_json::json!("path:src shared cap token")
+                        == serde_json::json!("shared cap token path:src")
                     && request["arguments"]["explain"] == serde_json::json!(true)
             }),
         "{plan}"

@@ -1,6 +1,9 @@
 //! Persistent local search index for agent-oriented code retrieval.
 
-use crate::query::{merge_filters, normalize_phrase_text, parse_query, query_phrases, query_text};
+use crate::query::{
+    merge_filters, normalize_phrase_text, parse_query, query_phrases, query_text,
+    query_with_filters_text,
+};
 use crate::repo_index::{
     FileRange, GENERATED_PATH_SCORE_MULTIPLIER, MAX_READ_RANGE_LINES, PathFilterMatcher, QueryPlan,
     QueryPlanFilter, QueryPlanPosting, QueryPlanRepairHint, RangeScope, RankSignal, RelatedFile,
@@ -3668,6 +3671,7 @@ fn candidate_facet_repair_hints(
                 count,
                 total,
                 query_tokens,
+                filters,
             ));
         }
     }
@@ -3686,6 +3690,7 @@ fn candidate_facet_repair_hints(
                 count,
                 total,
                 query_tokens,
+                filters,
             ));
         }
     }
@@ -3705,6 +3710,7 @@ fn candidate_facet_repair_hints(
                 count,
                 total,
                 query_tokens,
+                filters,
             ));
         }
     }
@@ -3723,6 +3729,7 @@ fn candidate_facet_repair_hints(
                 count,
                 total,
                 query_tokens,
+                filters,
             ));
         }
     }
@@ -3741,6 +3748,7 @@ fn candidate_facet_repair_hints(
                 count,
                 total,
                 query_tokens,
+                filters,
             ));
         }
     }
@@ -3759,6 +3767,7 @@ fn candidate_facet_repair_hints(
                 count,
                 total,
                 query_tokens,
+                filters,
             ));
         }
     }
@@ -3777,6 +3786,7 @@ fn candidate_facet_repair_hints(
                 count,
                 total,
                 query_tokens,
+                filters,
             ));
         }
     }
@@ -3846,20 +3856,36 @@ fn facet_hint(
     count: usize,
     total: usize,
     query_tokens: &[String],
+    filters: &SearchFilters,
 ) -> QueryPlanRepairHint {
     repair_hint(
         kind,
         format!(
             "Filter `{field}:{value}` narrows the current candidate set from {total} files to {count}."
         ),
-        suggested_faceted_query(field, value, query_tokens),
+        suggested_faceted_query(field, value, query_tokens, filters),
     )
 }
 
-fn suggested_faceted_query(field: &str, value: &str, query_tokens: &[String]) -> Option<String> {
-    let facet = format!("{field}:{value}");
-    let query = suggested_token_query(query_tokens)?;
-    Some(format!("{facet} {query}"))
+fn suggested_faceted_query(
+    field: &str,
+    value: &str,
+    query_tokens: &[String],
+    filters: &SearchFilters,
+) -> Option<String> {
+    let mut narrowed = filters.clone();
+    match field {
+        "path" => narrowed.path = Some(value.to_string()),
+        "ext" => narrowed.extension = Some(value.trim_start_matches('.').to_ascii_lowercase()),
+        "lang" => narrowed.language = Some(value.to_string()),
+        "kind" => narrowed.symbol_kind = Some(value.to_string()),
+        "test" => narrowed.test = Some(value == "true"),
+        "generated" => narrowed.generated = Some(value == "true"),
+        "code" => narrowed.code = Some(value == "true"),
+        _ => {}
+    }
+    let query = query_with_filters_text(query_tokens, &narrowed);
+    (!query.trim().is_empty()).then_some(query)
 }
 
 fn path_prefix_facet(path: &str) -> Option<String> {

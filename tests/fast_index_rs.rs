@@ -513,12 +513,12 @@ fn indexed_search_warns_when_candidate_cap_is_hit() {
     assert!(plan.repair_hints.iter().any(|hint| {
         hint.kind == "narrow_by_path"
             && hint.message.contains("from 1100 files to 700")
-            && hint.suggested_query.as_deref() == Some("path:src shared cap token")
+            && hint.suggested_query.as_deref() == Some("shared cap token path:src")
     }));
     assert!(plan.repair_hints.iter().any(|hint| {
         hint.kind == "narrow_by_test"
             && hint.message.contains("from 1100 files to 400")
-            && hint.suggested_query.as_deref() == Some("test:true shared cap token")
+            && hint.suggested_query.as_deref() == Some("shared cap token test:true")
     }));
 }
 
@@ -1234,7 +1234,7 @@ fn indexed_query_plan_suggests_facets_for_noisy_successful_queries() {
     assert!(plan.repair_hints.iter().any(|hint| {
         hint.kind == "narrow_by_code"
             && hint.action == "narrow"
-            && hint.suggested_query.as_deref() == Some("code:true sharedneedle")
+            && hint.suggested_query.as_deref() == Some("sharedneedle code:true")
             && hint.message.contains("from 22 files to 5")
     }));
 }
@@ -1265,8 +1265,39 @@ fn indexed_query_plan_prefers_nested_path_facets_for_common_roots() {
     assert!(plan.repair_hints.iter().any(|hint| {
         hint.kind == "narrow_by_path"
             && hint.action == "narrow"
-            && hint.suggested_query.as_deref() == Some("path:src/auth sharedneedle")
+            && hint.suggested_query.as_deref() == Some("sharedneedle path:src/auth")
             && hint.message.contains("from 20 files to 12")
+    }));
+}
+
+#[test]
+fn indexed_query_plan_facet_retries_preserve_existing_scope() {
+    let repo = tempfile::tempdir().unwrap();
+    for index in 0..12 {
+        write(
+            &repo.path().join(format!("src/auth/session_{index}.rs")),
+            &format!("pub fn scopedneedle_auth_{index}() {{}}\n"),
+        );
+    }
+    for index in 0..8 {
+        write(
+            &repo.path().join(format!("src/billing/invoice_{index}.rs")),
+            &format!("pub fn scopedneedle_billing_{index}() {{}}\n"),
+        );
+    }
+
+    let index = FastIndex::build(repo.path()).unwrap();
+    let plan = index
+        .query_plan(
+            "mode:any lang:rust -path:legacy scopedneedle",
+            &SearchFilters::default(),
+        )
+        .unwrap();
+
+    assert!(plan.repair_hints.iter().any(|hint| {
+        hint.kind == "narrow_by_path"
+            && hint.suggested_query.as_deref()
+                == Some("mode:any scopedneedle path:src/auth lang:rust -path:legacy")
     }));
 }
 
@@ -1296,7 +1327,7 @@ fn indexed_query_plan_suggests_symbol_kind_facet_for_noisy_definition_searches()
     assert!(plan.repair_hints.iter().any(|hint| {
         hint.kind == "narrow_by_symbol_kind"
             && hint.action == "narrow"
-            && hint.suggested_query.as_deref() == Some("kind:function sharedneedle")
+            && hint.suggested_query.as_deref() == Some("sharedneedle kind:function")
             && hint.message.contains("from 22 files to 5")
     }));
 }

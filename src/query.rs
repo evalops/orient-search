@@ -740,10 +740,16 @@ pub fn query_text(terms: &[String], filters: &SearchFilters) -> String {
 }
 
 pub fn query_with_filters_text(terms: &[String], filters: &SearchFilters) -> String {
-    let mut pieces = terms
-        .iter()
-        .map(|term| query_token_text(term))
-        .collect::<Vec<_>>();
+    let mut pieces = Vec::new();
+    if filters.match_any {
+        pieces.push("mode:any".to_string());
+    }
+    pieces.extend(
+        terms
+            .iter()
+            .map(|term| query_token_text(term))
+            .collect::<Vec<_>>(),
+    );
     push_query_filter(&mut pieces, "file", filters.file.as_deref(), false);
     push_query_filter(&mut pieces, "path", filters.path.as_deref(), false);
     push_query_filter(&mut pieces, "lang", filters.language.as_deref(), false);
@@ -988,11 +994,12 @@ mod tests {
     #[test]
     fn serializes_query_text_with_filters_for_followups() {
         let parsed = parse_query(
-            r#"path:'src auth' line:42 lang:Rust symbol:SessionManager code:true -branch:wip -origin:legacy "issue token""#,
+            r#"mode:any path:'src auth' line:42 lang:Rust symbol:SessionManager code:true -branch:wip -origin:legacy "issue token""#,
         );
 
         let text = query_with_filters_text(&parsed.terms, &parsed.filters);
         let reparsed = parse_query(&text);
+        assert!(reparsed.filters.match_any);
         assert_eq!(reparsed.terms, vec!["issue token"]);
         assert_eq!(reparsed.filters.path.as_deref(), Some("src auth"));
         assert_eq!(reparsed.filters.target_line, Some(42));
