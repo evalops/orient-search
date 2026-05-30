@@ -1346,6 +1346,8 @@ fn agent_instructions_returns_copyable_local_agent_snippet() {
         "orient ensure-shards --discover-root /path/to/workspaces --output-dir /tmp/orient-shards --family-limit 2",
         "orient ensure-index --repo /work/repo --index /tmp/repo.index",
         "search_auto_batch",
+        "search_auto` with `retry_if_empty:true",
+        "search_auto_batch` with `retry_if_empty:true",
         "daemon_status.search_auto_default",
         "`file:`, `path:`, `lang:`, `ext:`, `symbol:`, `type:`, `repo:`, `test:`",
         "Generated paths, including hashed JavaScript bundles, are demoted by default",
