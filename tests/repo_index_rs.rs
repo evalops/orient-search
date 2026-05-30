@@ -932,6 +932,26 @@ rust_binary(
         .unwrap();
     assert_eq!(indexed_results[0].path, "tools/search/BUILD.bazel");
     assert!(indexed_results[0].reason.contains("symbol:orient_cli"));
+
+    let command_label = search_repo_fast_filtered(
+        repo.path(),
+        "bazel test //tools/search:orient_cli",
+        5,
+        &Default::default(),
+    )
+    .unwrap();
+    assert_eq!(command_label[0].path, "tools/search/BUILD.bazel");
+    assert!(command_label[0].reason.contains("symbol:orient_cli"));
+
+    let indexed_command = indexed
+        .search_filtered(
+            "bazel build //tools/search:orient_cli",
+            5,
+            &Default::default(),
+        )
+        .unwrap();
+    assert_eq!(indexed_command[0].path, "tools/search/BUILD.bazel");
+    assert!(indexed_command[0].reason.contains("symbol:orient_cli"));
 }
 
 #[test]

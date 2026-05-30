@@ -45,7 +45,7 @@ pub fn parse_query(input: &str) -> ParsedQuery {
     if terms.len() > 1 && !filters.match_any {
         filters.require_all = true;
     }
-    infer_bazel_label_single_term(&mut terms, &mut filters, explicit_content_terms);
+    infer_bazel_label_term(&mut terms, &mut filters, explicit_content_terms);
     infer_path_like_single_term(&mut terms, &mut filters, explicit_content_terms);
 
     ParsedQuery {
@@ -413,13 +413,13 @@ fn infer_path_like_single_term(
     }
 }
 
-fn infer_bazel_label_single_term(
+fn infer_bazel_label_term(
     terms: &mut Vec<String>,
     filters: &mut SearchFilters,
     explicit_content_terms: bool,
 ) {
     if explicit_content_terms
-        || terms.len() != 1
+        || terms.is_empty()
         || filters.file.is_some()
         || filters.path.is_some()
         || filters.symbol.is_some()
@@ -427,16 +427,60 @@ fn infer_bazel_label_single_term(
         return;
     }
 
-    let Some((package, target)) = bazel_label_parts(&terms[0]) else {
+    let label_terms: Vec<_> = terms
+        .iter()
+        .enumerate()
+        .filter_map(|(index, term)| bazel_label_parts(term).map(|parts| (index, parts)))
+        .collect();
+    let [(label_index, (package, target))] = label_terms.as_slice() else {
         return;
     };
-    if let Some(package) = package {
-        filters.path = Some(package);
+    if terms.len() > 1 && !is_bazel_command_context(terms, *label_index) {
+        return;
     }
-    filters.symbol = Some(target);
+    if let Some(package) = package {
+        filters.path = Some(package.clone());
+    }
+    filters.symbol = Some(target.clone());
     filters.symbol_kind = Some("target".to_string());
     terms.clear();
     filters.require_all = false;
+}
+
+fn is_bazel_command_context(terms: &[String], label_index: usize) -> bool {
+    let mut saw_bazel_binary = false;
+    for (index, term) in terms.iter().enumerate() {
+        if index == label_index {
+            continue;
+        }
+        let term = trim_location_token_wrappers(term).to_ascii_lowercase();
+        if matches!(term.as_str(), "bazel" | "bazelisk") {
+            saw_bazel_binary = true;
+            continue;
+        }
+        if is_bazel_command_word(&term) {
+            continue;
+        }
+        return false;
+    }
+    saw_bazel_binary
+}
+
+fn is_bazel_command_word(value: &str) -> bool {
+    matches!(
+        value,
+        "build"
+            | "test"
+            | "run"
+            | "query"
+            | "cquery"
+            | "aquery"
+            | "coverage"
+            | "clean"
+            | "fetch"
+            | "sync"
+            | "mobile-install"
+    )
 }
 
 fn bazel_label_parts(value: &str) -> Option<(Option<String>, String)> {
@@ -2134,6 +2178,21 @@ mod tests {
         );
         assert_eq!(
             bazel_relative_label.filters.symbol_kind.as_deref(),
+            Some("target")
+        );
+
+        let bazel_command_label = parse_query("bazel test //tools/search:orient_cli");
+        assert!(bazel_command_label.terms.is_empty());
+        assert_eq!(
+            bazel_command_label.filters.path.as_deref(),
+            Some("tools/search")
+        );
+        assert_eq!(
+            bazel_command_label.filters.symbol.as_deref(),
+            Some("orient_cli")
+        );
+        assert_eq!(
+            bazel_command_label.filters.symbol_kind.as_deref(),
             Some("target")
         );
 
