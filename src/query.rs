@@ -54,6 +54,9 @@ pub fn parse_query(input: &str) -> ParsedQuery {
 }
 
 fn split_negated_token(token: String) -> (bool, String) {
+    if token == "-->" {
+        return (false, token);
+    }
     if let Some(value) = token.strip_prefix('-').or_else(|| token.strip_prefix('!'))
         && !value.is_empty()
         && !value.starts_with('=')
@@ -422,9 +425,14 @@ fn infer_leading_location_term(
         return;
     }
 
+    let diagnostic_prefix = terms
+        .first()
+        .map(|term| diagnostic_arrow_prefix(term))
+        .unwrap_or(false);
     let Some((index, path, target_line, trailing_term)) = leading_location_term(terms) else {
         return;
     };
+    let discard_remaining_diagnostic_terms = diagnostic_prefix && index > 0;
     let path = strip_leading_current_dir_segments(path);
     if path.is_empty() || path.starts_with('.') {
         return;
@@ -439,7 +447,9 @@ fn infer_leading_location_term(
     }
     filters.target_line = Some(target_line);
     terms.drain(0..=index);
-    if let Some(trailing_term) = trailing_term {
+    if discard_remaining_diagnostic_terms {
+        terms.clear();
+    } else if let Some(trailing_term) = trailing_term {
         terms.insert(0, trailing_term);
     }
     filters.require_all = false;
@@ -487,12 +497,16 @@ fn stack_location_prefix(terms: &[String]) -> bool {
         return true;
     };
     let first = trim_location_token_wrappers(first).to_ascii_lowercase();
-    matches!(first.as_str(), "at" | "from" | "file" | "-->")
+    (matches!(first.as_str(), "at" | "from" | "file") || diagnostic_arrow_prefix(&first))
         && terms.len() <= 3
         && terms[1..].iter().all(|term| {
             let term = trim_location_token_wrappers(term);
             !term.is_empty() && !term.contains(':') && !looks_like_location_path(term)
         })
+}
+
+fn diagnostic_arrow_prefix(term: &str) -> bool {
+    matches!(trim_location_token_wrappers(term), "-->" | "--")
 }
 
 fn split_leading_location_token(token: &str) -> Option<(String, usize, Option<String>)> {
@@ -1586,6 +1600,14 @@ mod tests {
             Some("src/server.rs")
         );
         assert_eq!(source_location.filters.target_line, Some(42));
+
+        let rust_diagnostic_location = parse_query("--> src/server.rs:42:9: borrowed value");
+        assert_eq!(rust_diagnostic_location.terms, Vec::<String>::new());
+        assert_eq!(
+            rust_diagnostic_location.filters.path.as_deref(),
+            Some("src/server.rs")
+        );
+        assert_eq!(rust_diagnostic_location.filters.target_line, Some(42));
 
         let dot_source_location = parse_query("./src/server.rs:42:9");
         assert!(dot_source_location.terms.is_empty());

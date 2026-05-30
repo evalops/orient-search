@@ -6703,6 +6703,9 @@ fn parse_compact_cli_range(
         .filter(|path| !path.is_empty())
         .ok_or_else(|| "range must be PATH:START:LINES".to_string())?
         .to_string();
+    if path_has_diagnostic_location_prefix(&path) {
+        return Ok(None);
+    }
     if start == 0 || lines == 0 {
         return Err("range start and lines must be positive integers".to_string());
     }
@@ -6712,6 +6715,10 @@ fn parse_compact_cli_range(
         lines,
         scope,
     }))
+}
+
+fn path_has_diagnostic_location_prefix(path: &str) -> bool {
+    path.trim_start().starts_with("-->")
 }
 
 fn parse_copied_location_cli_range(value: &str, scope: Option<RangeScope>) -> Option<CliRangeSpec> {
@@ -7477,6 +7484,21 @@ mod tests {
         assert_eq!(copied_line.path, "src/auth.rs");
         assert_eq!(copied_line.start, 12);
         assert_eq!(copied_line.lines, DEFAULT_CLI_READ_RANGE_LINES);
+
+        let rust_diagnostic =
+            CliRangeSpec::from_str("--> src/auth.rs:12:4: borrowed value").unwrap();
+        assert_eq!(rust_diagnostic.path, "src/auth.rs");
+        assert_eq!(rust_diagnostic.start, 12);
+        assert_eq!(rust_diagnostic.lines, DEFAULT_CLI_READ_RANGE_LINES);
+
+        let rust_diagnostic_without_message =
+            CliRangeSpec::from_str("--> src/auth.rs:12:4").unwrap();
+        assert_eq!(rust_diagnostic_without_message.path, "src/auth.rs");
+        assert_eq!(rust_diagnostic_without_message.start, 12);
+        assert_eq!(
+            rust_diagnostic_without_message.lines,
+            DEFAULT_CLI_READ_RANGE_LINES
+        );
 
         let copied_range = CliRangeSpec::from_str("src/auth.rs:12-15").unwrap();
         assert_eq!(copied_range.path, "src/auth.rs");

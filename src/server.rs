@@ -9400,6 +9400,9 @@ fn parse_compact_range_arg(value: &str, scope: RangeScope) -> Result<Option<Rang
     let Some(path) = parts.next().filter(|path| !path.is_empty()) else {
         return Ok(None);
     };
+    if path_has_diagnostic_location_prefix(path) {
+        return Ok(None);
+    }
     validate_read_window(start, lines)?;
     Ok(Some(RangeArg {
         path: path.to_string(),
@@ -9407,6 +9410,10 @@ fn parse_compact_range_arg(value: &str, scope: RangeScope) -> Result<Option<Rang
         lines,
         scope,
     }))
+}
+
+fn path_has_diagnostic_location_prefix(path: &str) -> bool {
+    path.trim_start().starts_with("-->")
 }
 
 fn parse_copied_location_range(

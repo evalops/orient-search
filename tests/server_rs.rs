@@ -3139,6 +3139,59 @@ fn runtime_read_alias_accepts_live_index_and_shard_targets() {
         serde_json::json!(2)
     );
 
+    let live_rust_diagnostic_range = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("live-rust-diagnostic-range"),
+        tool: "read_range".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "range": "--> src/auth.rs:5:13: borrowed value does not live long enough",
+            "scope": "exact"
+        }),
+    });
+    assert!(
+        live_rust_diagnostic_range.error.is_none(),
+        "{:?}",
+        live_rust_diagnostic_range.error
+    );
+    let live_rust_diagnostic_range = live_rust_diagnostic_range.result.unwrap();
+    assert_eq!(
+        live_rust_diagnostic_range["path"],
+        serde_json::json!("src/auth.rs")
+    );
+    assert!(
+        live_rust_diagnostic_range["text"]
+            .as_str()
+            .unwrap()
+            .contains("issue_token")
+    );
+
+    let live_rust_diagnostic_no_message_range = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("live-rust-diagnostic-no-message-range"),
+        tool: "read_range".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "range": "--> src/auth.rs:5:13",
+            "scope": "exact"
+        }),
+    });
+    assert!(
+        live_rust_diagnostic_no_message_range.error.is_none(),
+        "{:?}",
+        live_rust_diagnostic_no_message_range.error
+    );
+    let live_rust_diagnostic_no_message_range =
+        live_rust_diagnostic_no_message_range.result.unwrap();
+    assert_eq!(
+        live_rust_diagnostic_no_message_range["path"],
+        serde_json::json!("src/auth.rs")
+    );
+    assert!(
+        live_rust_diagnostic_no_message_range["text"]
+            .as_str()
+            .unwrap()
+            .contains("issue_token")
+    );
+
     let indexed_range_string = runtime.dispatch(ToolRequest {
         id: serde_json::json!("indexed-range-string"),
         tool: "read_index_range".to_string(),
