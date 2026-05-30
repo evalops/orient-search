@@ -68,6 +68,7 @@ pub struct ToolResponse {
 #[derive(Debug, Serialize)]
 struct SearchBatchResult {
     query: String,
+    summary: SearchResultSummary,
     query_plan_request: ResultToolRequest,
     repo_map_request: ResultToolRequest,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -75,6 +76,23 @@ struct SearchBatchResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     next_action: Option<Value>,
     results: Vec<SearchResult>,
+}
+
+#[derive(Debug, Serialize)]
+struct SearchResultSummary {
+    status: String,
+    result_count: usize,
+}
+
+fn search_result_summary(result_count: usize) -> SearchResultSummary {
+    SearchResultSummary {
+        status: if result_count == 0 {
+            "not_found".to_string()
+        } else {
+            "matched".to_string()
+        },
+        result_count,
+    }
 }
 
 fn search_batch_result(
@@ -85,8 +103,10 @@ fn search_batch_result(
     results: Vec<SearchResult>,
 ) -> SearchBatchResult {
     let next_action = search_batch_next_action(&read_batch_request, &query_plan_request);
+    let summary = search_result_summary(results.len());
     SearchBatchResult {
         query,
+        summary,
         query_plan_request,
         repo_map_request,
         read_batch_request,

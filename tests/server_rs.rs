@@ -4382,6 +4382,19 @@ fn runtime_batches_searches_and_query_plans_against_repo_index_and_shards() {
         fallback[0]["next_action"]["source"],
         serde_json::json!("read_batch_request")
     );
+    assert_eq!(
+        fallback[0]["summary"]["status"],
+        serde_json::json!("matched")
+    );
+    assert_eq!(
+        fallback[0]["summary"]["result_count"],
+        serde_json::json!(fallback[0]["results"].as_array().unwrap().len())
+    );
+    assert_eq!(
+        fallback[2]["summary"]["status"],
+        serde_json::json!("not_found")
+    );
+    assert_eq!(fallback[2]["summary"]["result_count"], serde_json::json!(0));
     assert_eq!(fallback[2]["read_batch_request"], serde_json::Value::Null);
     assert_eq!(
         fallback[2]["next_action"]["source"],
@@ -4418,6 +4431,14 @@ fn runtime_batches_searches_and_query_plans_against_repo_index_and_shards() {
         "indexed_query_plan"
     );
     assert_eq!(indexed[0]["repo_map_request"]["tool"], "indexed_repo_map");
+    assert_eq!(
+        indexed[0]["summary"]["status"],
+        serde_json::json!("matched")
+    );
+    assert_eq!(
+        indexed[0]["summary"]["result_count"],
+        serde_json::json!(indexed[0]["results"].as_array().unwrap().len())
+    );
     assert_eq!(
         indexed[0]["query_plan_request"]["arguments"]["index"],
         serde_json::json!(&index_path)

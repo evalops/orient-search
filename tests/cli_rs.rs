@@ -2945,6 +2945,9 @@ fn cli_batches_searches_across_fallback_indexed_and_shards() {
         .assert()
         .success()
         .stdout(predicate::str::contains("\"query\":\"SessionManager\""))
+        .stdout(predicate::str::contains("\"summary\""))
+        .stdout(predicate::str::contains("\"status\":\"matched\""))
+        .stdout(predicate::str::contains("\"result_count\""))
         .stdout(predicate::str::contains("src/auth.rs"))
         .stdout(predicate::str::contains("\"query\":\"invoice total\""))
         .stdout(predicate::str::contains("src/billing.rs"))
@@ -2972,6 +2975,14 @@ fn cli_batches_searches_across_fallback_indexed_and_shards() {
         .unwrap();
     assert!(empty_fallback.status.success());
     let empty_fallback: serde_json::Value = serde_json::from_slice(&empty_fallback.stdout).unwrap();
+    assert_eq!(
+        empty_fallback[0]["summary"]["status"],
+        serde_json::json!("not_found")
+    );
+    assert_eq!(
+        empty_fallback[0]["summary"]["result_count"],
+        serde_json::json!(0)
+    );
     assert_eq!(
         empty_fallback[0]["read_batch_request"],
         serde_json::Value::Null
