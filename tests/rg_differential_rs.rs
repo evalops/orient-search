@@ -244,6 +244,7 @@ fn fallback_scoped_search_matches_rg_content_set_for_agent_filters() {
         "codegen/client.ts",
         "tests/auth_test.rs",
         "spec/gateway_spec.rs",
+        "src/vendor_auth.rs",
         "docs/auth.md",
         "scripts/auth.py",
         "README",
@@ -296,6 +297,10 @@ fn fallback_scoped_search_matches_rg_content_set_for_agent_filters() {
         (
             "path:src MAGICNEEDLE -path:generated",
             Box::new(|path| path.contains("src") && !path.contains("generated")),
+        ),
+        (
+            "!vendor MAGICNEEDLE",
+            Box::new(|path| !path.contains("vendor")),
         ),
         (
             "file:auth.rs MAGICNEEDLE",

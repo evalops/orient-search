@@ -299,9 +299,28 @@ fn apply_bare_filter(filters: &mut SearchFilters, token: &str, negated: bool) ->
         (true, "docs" | "documentation" | "prose" | "config" | "configuration") => {
             filters.code = Some(true)
         }
+        (true, path) => match bare_path_exclusion(path) {
+            Some(path) => filters.exclude_path.push(path.to_string()),
+            None => return false,
+        },
         _ => return false,
     }
     true
+}
+
+fn bare_path_exclusion(token: &str) -> Option<&'static str> {
+    match token {
+        "vendor" | "vendors" => Some("vendor"),
+        "node_modules" | "node-modules" => Some("node_modules"),
+        "third_party" | "third-party" => Some("third_party"),
+        "external" | "externals" => Some("external"),
+        "dist" | "distribution" => Some("dist"),
+        "build" | "builds" => Some("build"),
+        "target" | "targets" => Some("target"),
+        "coverage" => Some("coverage"),
+        ".next" | "nextjs" => Some(".next"),
+        _ => None,
+    }
 }
 
 enum IsFilter {
@@ -1109,20 +1128,35 @@ mod tests {
         assert_eq!(parsed.filters.exclude_branch, vec!["wip"]);
         assert_eq!(parsed.filters.exclude_origin, vec!["legacy"]);
 
-        let bang = parse_query("!test !generated !deprecated !path:vendor != operator");
+        let bang = parse_query("!test !generated !vendor !deprecated != operator");
         assert_eq!(bang.terms, vec!["!=", "operator"]);
         assert_eq!(bang.filters.test, Some(false));
         assert_eq!(bang.filters.generated, Some(false));
         assert_eq!(bang.filters.exclude_content, vec!["deprecated"]);
         assert_eq!(bang.filters.exclude_path, vec!["vendor"]);
 
+        let path_negated = parse_query("!path:vendor SessionManager");
+        assert_eq!(path_negated.terms, vec!["SessionManager"]);
+        assert_eq!(path_negated.filters.exclude_path, vec!["vendor"]);
+
         let docs = parse_query("!Docs SessionManager");
         assert_eq!(docs.terms, vec!["SessionManager"]);
         assert_eq!(docs.filters.code, Some(true));
 
+        let noisy_dirs = parse_query("!node-modules !third_party !target SessionManager");
+        assert_eq!(noisy_dirs.terms, vec!["SessionManager"]);
+        assert_eq!(
+            noisy_dirs.filters.exclude_path,
+            vec!["node_modules", "third_party", "target"]
+        );
+
         let positive_docs = parse_query("docs SessionManager");
         assert_eq!(positive_docs.terms, vec!["docs", "SessionManager"]);
         assert_eq!(positive_docs.filters.code, None);
+
+        let positive_vendor = parse_query("vendor SessionManager");
+        assert_eq!(positive_vendor.terms, vec!["vendor", "SessionManager"]);
+        assert!(positive_vendor.filters.exclude_path.is_empty());
     }
 
     #[test]

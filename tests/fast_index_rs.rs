@@ -1828,6 +1828,10 @@ fn query_language_filters_fallback_and_indexed_search() {
         "pub struct SessionManagerGenerated;\npub fn issue_token_generated() {}\n",
     );
     write(
+        &repo.path().join("src/vendor_auth.rs"),
+        "pub struct SessionManager;\n",
+    );
+    write(
         &repo.path().join("src/plain.js"),
         "export const rareagentneedle = 'handwritten';\n",
     );
@@ -1967,6 +1971,36 @@ fn query_language_filters_fallback_and_indexed_search() {
     assert!(indexed_no_docs_paths.contains(&"src/auth.rs".to_string()));
     assert!(!indexed_no_docs_paths.contains(&"docs/auth.md".to_string()));
     assert!(!indexed_no_docs_paths.contains(&"README.md".to_string()));
+
+    let fallback_vendor = search_repo_fast_filtered(
+        repo.path(),
+        "path:vendor SessionManager",
+        10,
+        &Default::default(),
+    )
+    .unwrap();
+    assert_eq!(result_paths(&fallback_vendor), vec!["src/vendor_auth.rs"]);
+    let indexed_vendor = indexed
+        .search_filtered("path:vendor SessionManager", 10, &Default::default())
+        .unwrap();
+    assert_eq!(result_paths(&indexed_vendor), vec!["src/vendor_auth.rs"]);
+
+    let fallback_no_vendor = search_repo_fast_filtered(
+        repo.path(),
+        "!vendor SessionManager",
+        10,
+        &Default::default(),
+    )
+    .unwrap();
+    let fallback_no_vendor_paths = result_paths(&fallback_no_vendor);
+    assert!(fallback_no_vendor_paths.contains(&"src/auth.rs".to_string()));
+    assert!(!fallback_no_vendor_paths.contains(&"src/vendor_auth.rs".to_string()));
+    let indexed_no_vendor = indexed
+        .search_filtered("!vendor SessionManager", 10, &Default::default())
+        .unwrap();
+    let indexed_no_vendor_paths = result_paths(&indexed_no_vendor);
+    assert!(indexed_no_vendor_paths.contains(&"src/auth.rs".to_string()));
+    assert!(!indexed_no_vendor_paths.contains(&"src/vendor_auth.rs".to_string()));
 
     let fallback_docs_wildcard = search_repo_fast_filtered(
         repo.path(),
