@@ -2441,7 +2441,7 @@ fn total_posting_entries(postings: &HashMap<String, Vec<Posting>>) -> usize {
 fn total_compressed_posting_bytes(postings: &HashMap<String, Vec<Posting>>) -> usize {
     postings
         .values()
-        .map(|postings| compress_postings(postings).bytes.len())
+        .map(|postings| compressed_postings_len(postings))
         .sum()
 }
 
@@ -2470,6 +2470,31 @@ fn compress_postings(postings: &[Posting]) -> CompressedPostingList {
     CompressedPostingList {
         postings: postings.len().min(u32::MAX as usize) as u32,
         bytes,
+    }
+}
+
+fn compressed_postings_len(postings: &[Posting]) -> usize {
+    let mut bytes = 0usize;
+    let mut previous_file_id = 0u32;
+    for (index, posting) in postings.iter().enumerate() {
+        let delta = if index == 0 {
+            posting.file_id
+        } else {
+            posting.file_id.saturating_sub(previous_file_id)
+        };
+        bytes += var_u32_len(delta) + var_u32_len(posting.count as u32);
+        previous_file_id = posting.file_id;
+    }
+    bytes
+}
+
+fn var_u32_len(value: u32) -> usize {
+    match value {
+        0..=0x7f => 1,
+        0x80..=0x3fff => 2,
+        0x4000..=0x1f_ffff => 3,
+        0x20_0000..=0xfff_ffff => 4,
+        _ => 5,
     }
 }
 
@@ -2571,6 +2596,55 @@ mod compressed_posting_tests {
         ];
 
         assert_eq!(compress_postings(&postings).decompress().unwrap(), postings);
+    }
+
+    #[test]
+    fn compressed_postings_len_matches_encoded_bytes_without_allocating_payload() {
+        let postings = vec![
+            Posting {
+                file_id: 0,
+                count: 1,
+            },
+            Posting {
+                file_id: 127,
+                count: 127,
+            },
+            Posting {
+                file_id: 128,
+                count: 128,
+            },
+            Posting {
+                file_id: 16_384,
+                count: u16::MAX,
+            },
+            Posting {
+                file_id: u32::MAX,
+                count: 42,
+            },
+        ];
+
+        assert_eq!(
+            compressed_postings_len(&postings),
+            compress_postings(&postings).bytes.len()
+        );
+    }
+
+    #[test]
+    fn var_u32_len_matches_varint_boundaries() {
+        for (value, expected) in [
+            (0, 1),
+            (0x7f, 1),
+            (0x80, 2),
+            (0x3fff, 2),
+            (0x4000, 3),
+            (0x1f_ffff, 3),
+            (0x20_0000, 4),
+            (0xfff_ffff, 4),
+            (0x1000_0000, 5),
+            (u32::MAX, 5),
+        ] {
+            assert_eq!(var_u32_len(value), expected, "{value}");
+        }
     }
 
     #[test]
