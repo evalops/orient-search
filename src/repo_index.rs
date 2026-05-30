@@ -192,6 +192,8 @@ pub struct ResultToolRequest {
     pub read_budget: Option<ReadBatchBudget>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cli: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub open_cli: Option<String>,
     pub jsonl: String,
     pub client_cli: String,
 }
@@ -223,6 +225,7 @@ impl ResultToolRequest {
         let id = id.into();
         let tool = tool.into();
         let cli = cli_command_for_request(&tool, &arguments);
+        let open_cli = open_cli_command_for_request(&tool, &arguments);
         let jsonl = serde_json::json!({
             "id": id.clone(),
             "tool": tool.clone(),
@@ -240,6 +243,7 @@ impl ResultToolRequest {
             summary: None,
             read_budget: None,
             cli,
+            open_cli,
             jsonl,
             client_cli,
         }
@@ -6317,6 +6321,27 @@ fn cli_command_for_request(tool: &str, arguments: &serde_json::Value) -> Option<
                 .or_else(|| search_cli_command_for_request(tool, args));
         }
     };
+    read_cli_command_for_args(read_subcommand, args)
+}
+
+fn open_cli_command_for_request(tool: &str, arguments: &serde_json::Value) -> Option<String> {
+    let args = arguments.as_object()?;
+    let read_subcommand = match tool {
+        "read_range" | "open_range" => "open-range",
+        "read_ranges" | "open_ranges" => "open-ranges",
+        "read_index_range" | "open_index_range" => "open-index-range",
+        "read_index_ranges" | "open_index_ranges" => "open-index-ranges",
+        "read_shard_range" | "open_shard_range" => "open-shard-range",
+        "read_shard_ranges" | "open_shard_ranges" => "open-shard-ranges",
+        _ => return None,
+    };
+    read_cli_command_for_args(read_subcommand, args)
+}
+
+fn read_cli_command_for_args(
+    read_subcommand: &str,
+    args: &serde_json::Map<String, serde_json::Value>,
+) -> Option<String> {
     let mut parts = vec!["orient".to_string(), read_subcommand.to_string()];
     append_target_cli_args(&mut parts, args);
     append_string_cli_arg(&mut parts, args, "scope", "--scope");
@@ -7791,6 +7816,10 @@ mod tests {
             request.cli.as_deref(),
             Some("orient read-range --repo '/tmp/my repo' 'src/it'\\''ll work.rs:3:4'")
         );
+        assert_eq!(
+            request.open_cli.as_deref(),
+            Some("orient open-range --repo '/tmp/my repo' 'src/it'\\''ll work.rs:3:4'")
+        );
         assert_eq!(request.id, "read");
         assert!(
             request.client_cli.contains("| orient client-jsonl"),
@@ -7856,6 +7885,12 @@ mod tests {
             request.cli.as_deref(),
             Some(
                 "orient read-index-ranges --index /tmp/orient.index --summary src/lib.rs:1:80 'tests/auth test.rs:3:4'"
+            )
+        );
+        assert_eq!(
+            request.open_cli.as_deref(),
+            Some(
+                "orient open-index-ranges --index /tmp/orient.index --summary src/lib.rs:1:80 'tests/auth test.rs:3:4'"
             )
         );
     }
