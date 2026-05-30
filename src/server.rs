@@ -3095,10 +3095,7 @@ fn related_lookup_summary(results: &Value) -> Value {
     let mut top_symbols = Vec::new();
     let mut symbol_kinds = Vec::new();
     for item in results {
-        let path = item
-            .get("path")
-            .or_else(|| item.get("symbol").and_then(|symbol| symbol.get("path")))
-            .and_then(Value::as_str);
+        let path = related_lookup_item_path(item);
         if let Some(path) = path
             && top_paths.len() < 5
             && !top_paths.iter().any(|existing| existing == path)
@@ -3162,6 +3159,12 @@ fn related_lookup_summary(results: &Value) -> Value {
         summary["min_score"] = json!(score);
     }
     summary
+}
+
+fn related_lookup_item_path(item: &Value) -> Option<&str> {
+    item.get("path")
+        .or_else(|| item.get("symbol").and_then(|symbol| symbol.get("path")))
+        .and_then(Value::as_str)
 }
 
 fn promoted_next_read_batch_request(

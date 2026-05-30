@@ -2284,6 +2284,10 @@ fn cli_repo_map_detail_controls_import_payload_size() {
 #[test]
 fn cli_searches_symbols_and_related_files() {
     let repo = sample_repo();
+    write(
+        &repo.path().join("tests/auth_test.rs"),
+        "use sample::SessionManager;\n#[test]\nfn session_manager_exists() { let _ = SessionManager; }\n",
+    );
 
     let mut search = Command::cargo_bin("orient").unwrap();
     search
@@ -2388,6 +2392,26 @@ fn cli_searches_symbols_and_related_files() {
         .success()
         .stdout(predicate::str::contains("\"kind\":\"struct\""));
 
+    let related = Command::cargo_bin("orient")
+        .unwrap()
+        .args([
+            "related",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--format",
+            "json",
+            "--include-read-batch",
+            "--path",
+            "src/auth.rs",
+        ])
+        .output()
+        .unwrap();
+    assert!(related.status.success());
+    let related: serde_json::Value = serde_json::from_slice(&related.stdout).unwrap();
+    assert_eq!(related["summary"]["status"], serde_json::json!("matched"));
+    assert_eq!(related["summary"]["top_dirs"], serde_json::json!(["tests"]));
+    assert_eq!(related["summary"]["top_exts"], serde_json::json!(["rs"]));
+
     let related_symbols = Command::cargo_bin("orient")
         .unwrap()
         .args([
@@ -2412,13 +2436,19 @@ fn cli_searches_symbols_and_related_files() {
         serde_json::json!("matched")
     );
     assert!(related_symbols["summary"]["result_count"].is_number());
-    assert_eq!(
-        related_symbols["summary"]["top_paths"],
-        serde_json::json!(["src/auth.rs"])
+    assert!(
+        related_symbols["summary"]["top_paths"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("src/auth.rs")),
+        "{related_symbols:?}"
     );
-    assert_eq!(
-        related_symbols["summary"]["top_dirs"],
-        serde_json::json!(["src"])
+    assert!(
+        related_symbols["summary"]["top_dirs"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("src")),
+        "{related_symbols:?}"
     );
     assert_eq!(
         related_symbols["summary"]["top_exts"],
