@@ -2008,6 +2008,21 @@ fn cli_outputs_repo_map_and_reads_ranges() {
         .stdout(predicate::str::contains("\"start_line\":5"))
         .stdout(predicate::str::contains("\"path\":\"tests/auth_test.rs\""))
         .stdout(predicate::str::contains("\"start_line\":3"));
+
+    let mut copied_colon_range = Command::cargo_bin("orient").unwrap();
+    copied_colon_range
+        .args([
+            "read-range",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "src/auth.rs:5-6",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"path\":\"src/auth.rs\""))
+        .stdout(predicate::str::contains("\"start_line\":5"))
+        .stdout(predicate::str::contains("\"end_line\":6"))
+        .stdout(predicate::str::contains("issue_token"));
 }
 
 #[test]

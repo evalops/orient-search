@@ -5597,9 +5597,30 @@ fn parse_copied_location_cli_range(value: &str, scope: Option<RangeScope>) -> Op
     Some(CliRangeSpec {
         path,
         start,
-        lines: copied_hash_anchor_lines(value).unwrap_or(DEFAULT_CLI_READ_RANGE_LINES),
+        lines: copied_hash_anchor_lines(value)
+            .or_else(|| copied_colon_range_lines(value))
+            .unwrap_or(DEFAULT_CLI_READ_RANGE_LINES),
         scope,
     })
+}
+
+fn copied_colon_range_lines(value: &str) -> Option<usize> {
+    for (colon_index, _) in value.match_indices(':') {
+        let after_colon = &value[colon_index + 1..];
+        let Some((start, after_start)) = split_leading_digits(after_colon) else {
+            continue;
+        };
+        let Some(after_dash) = after_start.trim_start().strip_prefix('-') else {
+            continue;
+        };
+        let Some((end, _)) = split_leading_digits(after_dash.trim_start()) else {
+            continue;
+        };
+        if end >= start {
+            return Some(end - start + 1);
+        }
+    }
+    None
 }
 
 fn copied_hash_anchor_lines(value: &str) -> Option<usize> {
@@ -6239,6 +6260,22 @@ mod tests {
         assert_eq!(copied_line.path, "src/auth.rs");
         assert_eq!(copied_line.start, 12);
         assert_eq!(copied_line.lines, DEFAULT_CLI_READ_RANGE_LINES);
+
+        let copied_range = CliRangeSpec::from_str("src/auth.rs:12-15").unwrap();
+        assert_eq!(copied_range.path, "src/auth.rs");
+        assert_eq!(copied_range.start, 12);
+        assert_eq!(copied_range.lines, 4);
+
+        let copied_range_with_context =
+            CliRangeSpec::from_str("src/auth.rs:12-15: pub fn issue_token").unwrap();
+        assert_eq!(copied_range_with_context.path, "src/auth.rs");
+        assert_eq!(copied_range_with_context.start, 12);
+        assert_eq!(copied_range_with_context.lines, 4);
+
+        let copied_colon_path_range = CliRangeSpec::from_str("src/auth:token.rs:12-15").unwrap();
+        assert_eq!(copied_colon_path_range.path, "src/auth:token.rs");
+        assert_eq!(copied_colon_path_range.start, 12);
+        assert_eq!(copied_colon_path_range.lines, 4);
 
         let hash = CliRangeSpec::from_str("src/auth.rs#L12-L15").unwrap();
         assert_eq!(hash.path, "src/auth.rs");
