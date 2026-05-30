@@ -3395,6 +3395,20 @@ fn runtime_related_alias_accepts_live_index_and_shard_targets() {
             .contains(&serde_json::json!("src/auth.rs")),
         "{indexed_symbol_batch:?}"
     );
+    assert!(
+        indexed_symbol_batch["summary"]["top_symbols"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("SessionManager")),
+        "{indexed_symbol_batch:?}"
+    );
+    assert!(
+        indexed_symbol_batch["summary"]["symbol_kinds"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("struct")),
+        "{indexed_symbol_batch:?}"
+    );
     assert!(indexed_symbol_batch["summary"]["max_score"].is_number());
     assert!(indexed_symbol_batch["summary"]["min_score"].is_number());
     assert!(

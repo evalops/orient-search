@@ -1935,23 +1935,42 @@ fn related_lookup_summary(results: &Value) -> Value {
         "result_count": result_count
     });
     let mut top_paths = Vec::new();
+    let mut top_symbols = Vec::new();
+    let mut symbol_kinds = Vec::new();
     for item in results {
         let path = item
             .get("path")
             .or_else(|| item.get("symbol").and_then(|symbol| symbol.get("path")))
             .and_then(Value::as_str);
-        let Some(path) = path else {
-            continue;
-        };
-        if !top_paths.iter().any(|existing| existing == path) {
+        if let Some(path) = path
+            && top_paths.len() < 5
+            && !top_paths.iter().any(|existing| existing == path)
+        {
             top_paths.push(path.to_string());
-            if top_paths.len() == 5 {
-                break;
+        }
+        if let Some(symbol) = item.get("symbol") {
+            if let Some(name) = symbol.get("name").and_then(Value::as_str)
+                && top_symbols.len() < 5
+                && !top_symbols.iter().any(|existing| existing == name)
+            {
+                top_symbols.push(name.to_string());
+            }
+            if let Some(kind) = symbol.get("kind").and_then(Value::as_str)
+                && symbol_kinds.len() < 5
+                && !symbol_kinds.iter().any(|existing| existing == kind)
+            {
+                symbol_kinds.push(kind.to_string());
             }
         }
     }
     if !top_paths.is_empty() {
         summary["top_paths"] = serde_json::json!(top_paths);
+    }
+    if !top_symbols.is_empty() {
+        summary["top_symbols"] = serde_json::json!(top_symbols);
+    }
+    if !symbol_kinds.is_empty() {
+        summary["symbol_kinds"] = serde_json::json!(symbol_kinds);
     }
     if let Some(score) = results
         .first()

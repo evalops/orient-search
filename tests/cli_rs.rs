@@ -2377,8 +2377,8 @@ fn cli_searches_symbols_and_related_files() {
         .success()
         .stdout(predicate::str::contains("\"kind\":\"struct\""));
 
-    let mut related_symbols = Command::cargo_bin("orient").unwrap();
-    related_symbols
+    let related_symbols = Command::cargo_bin("orient")
+        .unwrap()
         .args([
             "related-symbols",
             "--repo",
@@ -2391,21 +2391,48 @@ fn cli_searches_symbols_and_related_files() {
             "--query",
             "SessionManager",
         ])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("\"summary\""))
-        .stdout(predicate::str::contains("\"status\":\"matched\""))
-        .stdout(predicate::str::contains("\"result_count\""))
-        .stdout(predicate::str::contains("\"top_paths\":[\"src/auth.rs\"]"))
-        .stdout(predicate::str::contains("\"max_score\""))
-        .stdout(predicate::str::contains("\"min_score\""))
-        .stdout(predicate::str::contains("\"results\""))
-        .stdout(predicate::str::contains("\"read_batch_request\""))
-        .stdout(predicate::str::contains("\"next_action\""))
-        .stdout(predicate::str::contains("SessionManager"))
-        .stdout(predicate::str::contains("same file"))
-        .stdout(predicate::str::contains("\"read_request\""))
-        .stdout(predicate::str::contains("\"tool\":\"read_range\""));
+        .output()
+        .unwrap();
+    assert!(related_symbols.status.success());
+    let related_symbols: serde_json::Value =
+        serde_json::from_slice(&related_symbols.stdout).unwrap();
+    assert_eq!(
+        related_symbols["summary"]["status"],
+        serde_json::json!("matched")
+    );
+    assert!(related_symbols["summary"]["result_count"].is_number());
+    assert_eq!(
+        related_symbols["summary"]["top_paths"],
+        serde_json::json!(["src/auth.rs"])
+    );
+    assert!(
+        related_symbols["summary"]["top_symbols"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("SessionManager")),
+        "{related_symbols:?}"
+    );
+    assert!(
+        related_symbols["summary"]["symbol_kinds"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("struct")),
+        "{related_symbols:?}"
+    );
+    assert!(related_symbols["summary"]["max_score"].is_number());
+    assert!(related_symbols["summary"]["min_score"].is_number());
+    assert!(related_symbols["results"].is_array());
+    assert!(related_symbols["read_batch_request"].is_object());
+    assert!(related_symbols["next_action"].is_object());
+    assert!(
+        serde_json::to_string(&related_symbols["results"])
+            .unwrap()
+            .contains("same file")
+    );
+    assert_eq!(
+        related_symbols["results"][0]["read_request"]["tool"],
+        serde_json::json!("read_range")
+    );
 }
 
 #[test]
