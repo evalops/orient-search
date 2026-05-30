@@ -841,7 +841,7 @@ fn infer_cargo_test_command_symbol_term(
 
     let mut saw_cargo = false;
     let mut saw_test = false;
-    let mut targets = Vec::new();
+    let mut args = Vec::new();
     for term in terms.iter() {
         let term = trim_location_token_wrappers(term);
         let lower = term.to_ascii_lowercase();
@@ -853,23 +853,127 @@ fn infer_cargo_test_command_symbol_term(
             saw_test = true;
             continue;
         }
-        let Some(target) = cargo_test_symbol_target(term) else {
-            return;
-        };
-        targets.push(target);
+        args.push(term.to_string());
     }
-
-    let [target] = targets.as_slice() else {
-        return;
-    };
     if !saw_cargo || !saw_test {
         return;
     }
 
-    filters.symbol = Some(target.clone());
+    let Some(flags) = cargo_test_command_flags(&filters.exclude_content) else {
+        return;
+    };
+    let (path, target) = if flags.integration_test {
+        let (integration_target, symbol_target) =
+            match (flags.integration_target.as_deref(), args.as_slice()) {
+                (Some(integration_target), [symbol_target]) => {
+                    (integration_target, symbol_target.as_str())
+                }
+                (None, [integration_target, symbol_target]) => {
+                    (integration_target.as_str(), symbol_target.as_str())
+                }
+                _ => return,
+            };
+        let Some(path) = cargo_integration_test_path(integration_target) else {
+            return;
+        };
+        let Some(target) = cargo_test_symbol_target(symbol_target) else {
+            return;
+        };
+        (Some(path), target)
+    } else {
+        let [symbol_target] = args.as_slice() else {
+            return;
+        };
+        let Some(target) = cargo_test_symbol_target(symbol_target) else {
+            return;
+        };
+        (None, target)
+    };
+
+    filters.path = path;
+    filters.symbol = Some(target);
     filters.symbol_kind = Some("function".to_string());
+    filters.exclude_content.clear();
     terms.clear();
     filters.require_all = false;
+}
+
+#[derive(Debug, Default)]
+struct CargoTestCommandFlags {
+    integration_test: bool,
+    integration_target: Option<String>,
+}
+
+fn cargo_test_command_flags(exclude_content: &[String]) -> Option<CargoTestCommandFlags> {
+    let mut flags = CargoTestCommandFlags::default();
+    for term in exclude_content {
+        let term = trim_location_token_wrappers(term);
+        if let Some(target) = cargo_integration_test_flag_target(term) {
+            flags.integration_test = true;
+            if let Some(target) = target {
+                flags.integration_target = Some(target);
+            }
+            continue;
+        }
+        if is_cargo_test_command_flag_term(term) {
+            continue;
+        }
+        return None;
+    }
+    Some(flags)
+}
+
+fn cargo_integration_test_flag_target(value: &str) -> Option<Option<String>> {
+    let flag = value.trim_start_matches('-');
+    if flag == "test" {
+        return Some(None);
+    }
+    let target = flag.strip_prefix("test=")?;
+    (!target.is_empty()).then_some(Some(target.to_string()))
+}
+
+fn is_cargo_test_command_flag_term(value: &str) -> bool {
+    let flag = value.trim_start_matches('-');
+    flag.is_empty()
+        || matches!(
+            flag,
+            "exact"
+                | "ignored"
+                | "include-ignored"
+                | "nocapture"
+                | "quiet"
+                | "release"
+                | "show-output"
+                | "verbose"
+        )
+        || flag.starts_with("color=")
+        || flag.starts_with("features=")
+        || flag.starts_with("jobs=")
+        || flag.starts_with("manifest-path=")
+        || flag.starts_with("message-format=")
+        || flag.starts_with("package=")
+        || flag.starts_with("target=")
+        || flag.starts_with("test-threads=")
+}
+
+fn cargo_integration_test_path(value: &str) -> Option<String> {
+    let value = value.trim();
+    if value.is_empty()
+        || value.contains(char::is_whitespace)
+        || value.contains("://")
+        || value.starts_with('-')
+    {
+        return None;
+    }
+    let file = value.strip_suffix(".rs").unwrap_or(value);
+    if file
+        .chars()
+        .all(|ch| ch == '_' || ch == '-' || ch.is_ascii_alphanumeric())
+    {
+        Some(format!("tests/{file}.rs"))
+    } else {
+        None
+    }
 }
 
 fn cargo_test_symbol_target(value: &str) -> Option<String> {
@@ -2891,6 +2995,25 @@ mod tests {
         );
         assert_eq!(
             cargo_test_module_path.filters.symbol_kind.as_deref(),
+            Some("function")
+        );
+
+        let cargo_integration_test_command =
+            parse_query("cargo test --test parser_rs parser_accepts_locations");
+        assert!(cargo_integration_test_command.terms.is_empty());
+        assert_eq!(
+            cargo_integration_test_command.filters.path.as_deref(),
+            Some("tests/parser_rs.rs")
+        );
+        assert_eq!(
+            cargo_integration_test_command.filters.symbol.as_deref(),
+            Some("parser_accepts_locations")
+        );
+        assert_eq!(
+            cargo_integration_test_command
+                .filters
+                .symbol_kind
+                .as_deref(),
             Some("function")
         );
 
