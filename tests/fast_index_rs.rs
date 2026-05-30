@@ -3092,7 +3092,7 @@ fn quoted_phrases_match_indexed_paths_without_per_candidate_normalization() {
     let repo = tempfile::tempdir().unwrap();
     write(
         &repo.path().join("src/auth_provider.rs"),
-        "pub fn auth_provider() -> &'static str { \"provider\" }\n",
+        "pub fn build() -> &'static str { \"provider\" }\n",
     );
     write(
         &repo.path().join("src/other.rs"),

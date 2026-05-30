@@ -1449,6 +1449,13 @@ impl FastIndex {
             } else {
                 intersect_planned_postings(&planned_postings, filters.require_all)
             };
+        let candidate_ids = expand_require_all_field_candidates(
+            candidate_ids,
+            filters.require_all && symbol_postings.is_empty(),
+            &query_tokens,
+            &token_postings,
+            &path_postings,
+        );
         let candidate_ids =
             intersect_symbol_kind_postings(candidate_ids, &symbol_kind_postings, &filters);
         let candidate_ids = intersect_attribute_postings(candidate_ids, &attribute_postings);
@@ -1705,6 +1712,13 @@ impl FastIndex {
         } else {
             intersect_planned_postings(&planned_postings, filters.require_all)
         };
+        let candidate_ids = expand_require_all_field_candidates(
+            candidate_ids,
+            filters.require_all && symbol_postings.is_empty(),
+            &query_tokens,
+            &token_postings,
+            &path_postings,
+        );
         let candidate_ids =
             intersect_symbol_kind_postings(candidate_ids, &symbol_kind_postings, &filters);
         let candidate_ids = intersect_attribute_postings(candidate_ids, &attribute_postings);
@@ -2033,6 +2047,13 @@ impl FastIndex {
             } else {
                 intersect_planned_postings(&planned_postings, filters.require_all)
             };
+        let candidate_ids = expand_require_all_field_candidates(
+            candidate_ids,
+            filters.require_all && symbol_postings.is_empty(),
+            &query_tokens,
+            &token_postings,
+            &path_postings,
+        );
         let candidate_ids =
             intersect_symbol_kind_postings(candidate_ids, &symbol_kind_postings, &filters);
         let candidate_ids = intersect_attribute_postings(candidate_ids, &attribute_postings);
@@ -5817,8 +5838,82 @@ fn intersect_planned_postings(planned: &[&Vec<Posting>], require_all: bool) -> V
     candidate_ids
 }
 
+fn expand_require_all_field_candidates(
+    candidate_ids: Vec<u32>,
+    require_all: bool,
+    query_tokens: &[String],
+    token_postings: &[(&String, &Vec<Posting>)],
+    path_postings: &[(&String, &Vec<Posting>)],
+) -> Vec<u32> {
+    if !require_all || query_tokens.is_empty() {
+        return candidate_ids;
+    }
+    let field_candidate_ids =
+        intersect_query_token_field_postings(query_tokens, token_postings, path_postings);
+    if field_candidate_ids.is_empty() {
+        candidate_ids
+    } else {
+        union_candidates(candidate_ids, field_candidate_ids)
+    }
+}
+
+fn intersect_query_token_field_postings(
+    query_tokens: &[String],
+    token_postings: &[(&String, &Vec<Posting>)],
+    path_postings: &[(&String, &Vec<Posting>)],
+) -> Vec<u32> {
+    let mut candidate_ids: Option<Vec<u32>> = None;
+    for token in query_tokens {
+        let mut token_ids = Vec::new();
+        if let Some(postings) = postings_for_token(token_postings, token) {
+            token_ids = union_candidates(token_ids, posting_file_ids(postings));
+        }
+        if let Some(postings) = postings_for_token(path_postings, token) {
+            token_ids = union_candidates(token_ids, posting_file_ids(postings));
+        }
+        if token_ids.is_empty() {
+            return Vec::new();
+        }
+        candidate_ids = Some(match candidate_ids {
+            Some(existing) => intersect_sorted_ids(&existing, &token_ids),
+            None => token_ids,
+        });
+        if candidate_ids.as_ref().is_some_and(Vec::is_empty) {
+            return Vec::new();
+        }
+    }
+    candidate_ids.unwrap_or_default()
+}
+
+fn postings_for_token<'a>(
+    postings_by_token: &'a [(&String, &Vec<Posting>)],
+    token: &str,
+) -> Option<&'a Vec<Posting>> {
+    postings_by_token
+        .iter()
+        .find_map(|(candidate, postings)| (candidate.as_str() == token).then_some(*postings))
+}
+
 fn posting_file_ids(postings: &[Posting]) -> Vec<u32> {
     postings.iter().map(|posting| posting.file_id).collect()
+}
+
+fn intersect_sorted_ids(left: &[u32], right: &[u32]) -> Vec<u32> {
+    let mut intersection = Vec::with_capacity(left.len().min(right.len()));
+    let mut left_index = 0usize;
+    let mut right_index = 0usize;
+    while let (Some(left_id), Some(right_id)) = (left.get(left_index), right.get(right_index)) {
+        match left_id.cmp(right_id) {
+            Ordering::Less => left_index += 1,
+            Ordering::Greater => right_index += 1,
+            Ordering::Equal => {
+                intersection.push(*left_id);
+                left_index += 1;
+                right_index += 1;
+            }
+        }
+    }
+    intersection
 }
 
 fn intersect_sorted_ids_with_postings(left: &[u32], right: &[Posting]) -> Vec<u32> {
