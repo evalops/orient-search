@@ -4562,11 +4562,20 @@ fn runtime_batches_searches_and_query_plans_against_repo_index_and_shards() {
         "{result}"
     );
     assert!(result.contains("\"plans\""), "{result}");
+    assert!(result.contains("\"summary\""), "{result}");
     assert!(result.contains("\"missing_terms\""), "{result}");
     assert!(result.contains("missingterm"), "{result}");
     assert!(result.contains("absentterm"), "{result}");
     assert!(result.contains("drop_missing_terms"), "{result}");
     let shard_plans = shard_plans.result.unwrap();
+    assert_eq!(
+        shard_plans[1]["summary"]["status"],
+        serde_json::json!("missing_terms")
+    );
+    assert_eq!(
+        shard_plans[1]["summary"]["suggested_query"],
+        serde_json::json!("invoice")
+    );
     assert_eq!(
         shard_plans[0]["next_action"],
         shard_plans[0]["plans"][0]["plan"]["next_action"]

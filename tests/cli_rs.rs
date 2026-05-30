@@ -3073,7 +3073,7 @@ fn cli_batches_searches_across_fallback_indexed_and_shards() {
         .stdout(predicate::str::contains("drop_missing_terms"));
 
     let mut shard_plan_batch = Command::cargo_bin("orient").unwrap();
-    shard_plan_batch
+    let shard_plan_output = shard_plan_batch
         .args([
             "shard-plan-batch",
             "--index-dir",
@@ -3084,14 +3084,34 @@ fn cli_batches_searches_across_fallback_indexed_and_shards() {
         ])
         .assert()
         .success()
-        .stdout(predicate::str::contains(
-            "\"query\":\"SessionManager missingterm\"",
-        ))
-        .stdout(predicate::str::contains("\"query\":\"invoice absentterm\""))
-        .stdout(predicate::str::contains("\"plans\""))
-        .stdout(predicate::str::contains("\"missing_terms\""))
-        .stdout(predicate::str::contains("\"next_action\""))
-        .stdout(predicate::str::contains("drop_missing_terms"));
+        .get_output()
+        .stdout
+        .clone();
+    let shard_plan_output: serde_json::Value = serde_json::from_slice(&shard_plan_output).unwrap();
+    assert_eq!(
+        shard_plan_output[0]["query"],
+        serde_json::json!("SessionManager missingterm")
+    );
+    assert_eq!(
+        shard_plan_output[1]["query"],
+        serde_json::json!("invoice absentterm")
+    );
+    assert!(
+        shard_plan_output[0]["plans"].is_array(),
+        "{shard_plan_output}"
+    );
+    assert_eq!(
+        shard_plan_output[1]["summary"]["status"],
+        serde_json::json!("missing_terms")
+    );
+    assert_eq!(
+        shard_plan_output[1]["summary"]["suggested_query"],
+        serde_json::json!("invoice")
+    );
+    assert!(
+        shard_plan_output[1]["next_action"].is_object(),
+        "{shard_plan_output}"
+    );
 
     let mut generic_shard_plan_batch = Command::cargo_bin("orient").unwrap();
     generic_shard_plan_batch
@@ -3110,6 +3130,7 @@ fn cli_batches_searches_across_fallback_indexed_and_shards() {
         ))
         .stdout(predicate::str::contains("\"query\":\"invoice absentterm\""))
         .stdout(predicate::str::contains("\"plans\""))
+        .stdout(predicate::str::contains("\"summary\""))
         .stdout(predicate::str::contains("\"missing_terms\""))
         .stdout(predicate::str::contains("drop_missing_terms"))
         .stdout(predicate::str::contains("\"next_action\""))

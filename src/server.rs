@@ -217,6 +217,7 @@ struct QueryPlanBatchResult {
 #[derive(Debug, Serialize)]
 struct ShardQueryPlanBatchResult {
     query: String,
+    summary: QueryPlanSummary,
     #[serde(skip_serializing_if = "Option::is_none")]
     next_action: Option<QueryPlanNextAction>,
     plans: Vec<ShardQueryPlan>,
@@ -251,8 +252,17 @@ fn shard_query_plan_batch_result(
     let next_action = plans
         .iter()
         .find_map(|shard_plan| shard_plan.plan.next_action.clone());
+    let summary = plans
+        .iter()
+        .find(|shard_plan| {
+            shard_plan.plan.final_match_count > 0 || shard_plan.plan.next_action.is_some()
+        })
+        .or_else(|| plans.first())
+        .map(|shard_plan| shard_plan.plan.compact_summary())
+        .unwrap_or_else(|| QueryPlan::empty("no_shards", true).compact_summary());
     ShardQueryPlanBatchResult {
         query,
+        summary,
         next_action,
         plans,
     }

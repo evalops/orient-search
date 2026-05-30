@@ -453,6 +453,31 @@ pub struct QueryPlanNextAction {
 }
 
 impl QueryPlan {
+    pub fn empty(strategy: impl Into<String>, require_all: bool) -> Self {
+        Self {
+            strategy: strategy.into(),
+            require_all,
+            query_tokens: Vec::new(),
+            query_phrases: Vec::new(),
+            query_trigrams: Vec::new(),
+            active_filters: Vec::new(),
+            planned_postings: Vec::new(),
+            missing_terms: Vec::new(),
+            missing_trigrams: Vec::new(),
+            candidate_count: 0,
+            candidate_cap: 0,
+            candidate_cap_hit: false,
+            filtered_candidate_count: 0,
+            scored_candidate_count: 0,
+            final_match_count: 0,
+            diagnosis: None,
+            repair_hints: Vec::new(),
+            retry_requests: Vec::new(),
+            primary_retry_request: None,
+            next_action: None,
+        }
+    }
+
     pub fn with_diagnosis(mut self) -> Self {
         self.diagnosis = Some(QueryPlanDiagnosis::from_plan(&self));
         self
