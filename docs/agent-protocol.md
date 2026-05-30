@@ -162,7 +162,8 @@ code links, and stack-frame forms such as `at issueToken (src/lib.rs:42:9)`
 strip the line/column prefix for matching and anchor the returned snippet near
 the line. Absolute pasted paths are normalized when they are inside the
 selected repo or index root.
-Hosted links may carry fragment or query-string line anchors.
+Hosted links may carry fragment or query-string line anchors. Raw GitHub links
+under `raw.githubusercontent.com` are treated as hosted code paths too.
 Common slash-delimited branch namespaces such as `feature/search` or
 `release/v1` are handled for hosted code links when a recognizable repo path
 suffix follows them.

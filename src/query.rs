@@ -607,6 +607,9 @@ fn code_hosted_location_path(value: &str) -> Option<String> {
     let (base, suffix) = value.split_at(suffix_start);
     let line_anchor = hosted_line_anchor_suffix(suffix);
     let lower_base = base.to_ascii_lowercase();
+    if let Some(path) = raw_github_location_path(base, &lower_base) {
+        return Some(format!("{path}{line_anchor}"));
+    }
     for marker in ["/-/blob/", "/blob/", "/-/tree/", "/tree/"] {
         let Some(marker_start) = lower_base.find(marker) else {
             continue;
@@ -625,6 +628,15 @@ fn code_hosted_location_path(value: &str) -> Option<String> {
         }
     }
     None
+}
+
+fn raw_github_location_path<'a>(base: &'a str, lower_base: &str) -> Option<&'a str> {
+    let marker = "raw.githubusercontent.com/";
+    let marker_start = lower_base.find(marker)?;
+    let after_host = &base[marker_start + marker.len()..];
+    let (_, after_owner) = after_host.split_once('/')?;
+    let (_, after_repo) = after_owner.split_once('/')?;
+    hosted_repo_path_after_ref(after_repo)
 }
 
 fn hosted_repo_path_after_ref(after_marker: &str) -> Option<&str> {
@@ -1576,6 +1588,48 @@ mod tests {
                 .filters
                 .target_line,
             Some(42)
+        );
+
+        let raw_github_source_location = parse_query(
+            "https://raw.githubusercontent.com/evalops/orient-search/main/src/server.rs",
+        );
+        assert!(raw_github_source_location.terms.is_empty());
+        assert_eq!(
+            raw_github_source_location.filters.path.as_deref(),
+            Some("src/server.rs")
+        );
+        assert_eq!(raw_github_source_location.filters.target_line, None);
+
+        let raw_github_slashy_branch_source_location = parse_query(
+            "https://raw.githubusercontent.com/evalops/orient-search/feature/search/src/server.rs#L42-L45",
+        );
+        assert!(raw_github_slashy_branch_source_location.terms.is_empty());
+        assert_eq!(
+            raw_github_slashy_branch_source_location
+                .filters
+                .path
+                .as_deref(),
+            Some("src/server.rs")
+        );
+        assert_eq!(
+            raw_github_slashy_branch_source_location.filters.target_line,
+            Some(42)
+        );
+
+        let raw_github_nested_path_source_location = parse_query(
+            "https://raw.githubusercontent.com/evalops/orient-search/main/search/src/server.rs",
+        );
+        assert!(raw_github_nested_path_source_location.terms.is_empty());
+        assert_eq!(
+            raw_github_nested_path_source_location
+                .filters
+                .path
+                .as_deref(),
+            Some("search/src/server.rs")
+        );
+        assert_eq!(
+            raw_github_nested_path_source_location.filters.target_line,
+            None
         );
 
         let sourcegraph_source_location = parse_query(
