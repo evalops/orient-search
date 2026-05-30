@@ -1469,7 +1469,20 @@ struct BenchReport {
     runs: usize,
     warmup: usize,
     limit: usize,
+    #[serde(default)]
+    summary: BenchSummary,
     queries: Vec<QueryBench>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct BenchSummary {
+    query_count: usize,
+    sample_count: usize,
+    max_p95_ms: f64,
+    max_p99_ms: f64,
+    max_ms: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    slowest_query: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -6341,13 +6354,13 @@ fn bench_search(config: BenchConfig) -> Result<BenchReport> {
         query_reports.push(summarize_query(query, result_count, samples_ms));
     }
 
-    Ok(BenchReport {
+    Ok(bench_report(
         mode,
         runs,
-        warmup: config.warmup,
-        limit: config.limit,
-        queries: query_reports,
-    })
+        config.warmup,
+        config.limit,
+        query_reports,
+    ))
 }
 
 fn bench_shards(config: ShardBenchConfig) -> Result<BenchReport> {
@@ -6386,17 +6399,34 @@ fn bench_shards(config: ShardBenchConfig) -> Result<BenchReport> {
         query_reports.push(summarize_query(query, result_count, samples_ms));
     }
 
-    Ok(BenchReport {
-        mode: if config.cached {
+    Ok(bench_report(
+        if config.cached {
             "shards_cached".to_string()
         } else {
             "shards".to_string()
         },
         runs,
-        warmup: config.warmup,
-        limit: config.limit,
-        queries: query_reports,
-    })
+        config.warmup,
+        config.limit,
+        query_reports,
+    ))
+}
+
+fn bench_report(
+    mode: String,
+    runs: usize,
+    warmup: usize,
+    limit: usize,
+    queries: Vec<QueryBench>,
+) -> BenchReport {
+    BenchReport {
+        mode,
+        runs,
+        warmup,
+        limit,
+        summary: summarize_bench_report(&queries),
+        queries,
+    }
 }
 
 fn run_shard_search_once(
@@ -6443,6 +6473,32 @@ fn summarize_query(query: &str, result_count: usize, mut samples_ms: Vec<f64>) -
         p99_ms: round_ms(p99_ms),
         max_ms: round_ms(max_ms),
         samples_ms: samples_ms.into_iter().map(round_ms).collect(),
+    }
+}
+
+fn summarize_bench_report(queries: &[QueryBench]) -> BenchSummary {
+    let slowest = queries
+        .iter()
+        .max_by(|left, right| left.p95_ms.total_cmp(&right.p95_ms));
+    BenchSummary {
+        query_count: queries.len(),
+        sample_count: queries.iter().map(|query| query.samples_ms.len()).sum(),
+        max_p95_ms: queries
+            .iter()
+            .map(|query| query.p95_ms)
+            .max_by(f64::total_cmp)
+            .unwrap_or(0.0),
+        max_p99_ms: queries
+            .iter()
+            .map(|query| query.p99_ms)
+            .max_by(f64::total_cmp)
+            .unwrap_or(0.0),
+        max_ms: queries
+            .iter()
+            .map(|query| query.max_ms)
+            .max_by(f64::total_cmp)
+            .unwrap_or(0.0),
+        slowest_query: slowest.map(|query| query.query.clone()),
     }
 }
 

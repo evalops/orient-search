@@ -5208,6 +5208,12 @@ fn cli_reports_search_benchmarks() {
         .assert()
         .success()
         .stdout(predicate::str::contains("\"mode\":\"fallback\""))
+        .stdout(predicate::str::contains("\"summary\""))
+        .stdout(predicate::str::contains("\"query_count\":1"))
+        .stdout(predicate::str::contains("\"sample_count\":2"))
+        .stdout(predicate::str::contains(
+            "\"slowest_query\":\"issue token\"",
+        ))
         .stdout(predicate::str::contains("\"p95_ms\""))
         .stdout(predicate::str::contains("\"p99_ms\""));
     assert!(baseline_path.exists());
@@ -5264,6 +5270,7 @@ fn cli_reports_search_benchmarks() {
         .assert()
         .success()
         .stdout(predicate::str::contains("\"mode\":\"indexed\""))
+        .stdout(predicate::str::contains("\"summary\""))
         .stdout(predicate::str::contains("\"p95_ms\""))
         .stdout(predicate::str::contains("\"p99_ms\""));
 
@@ -5297,6 +5304,7 @@ fn cli_reports_search_benchmarks() {
         .assert()
         .success()
         .stdout(predicate::str::contains("\"mode\":\"shards_cached\""))
+        .stdout(predicate::str::contains("\"summary\""))
         .stdout(predicate::str::contains("\"p95_ms\""))
         .stdout(predicate::str::contains("\"p99_ms\""));
 
