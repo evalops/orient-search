@@ -1003,13 +1003,13 @@ pub fn tool_manifest() -> Value {
             "read_index_range",
             "Read a bounded line range from a persistent index result path.",
             &["index", "path"],
-            &["start", "lines", "scope"],
+            READ_WINDOW_OPTIONAL_ARGS,
         ),
         tool_entry(
             "open_index_range",
             "Alias for read_index_range for agents that phrase context fetches as opening a file range.",
             &["index", "path"],
-            &["start", "lines", "scope"],
+            READ_WINDOW_OPTIONAL_ARGS,
         ),
         tool_entry(
             "read_index_ranges",
@@ -1081,13 +1081,13 @@ pub fn tool_manifest() -> Value {
             "read_shard_range",
             "Read a bounded line range from a shard search result path or unique shard-relative path.",
             &["index_dir", "path"],
-            &["start", "lines", "scope"],
+            READ_WINDOW_OPTIONAL_ARGS,
         ),
         tool_entry(
             "open_shard_range",
             "Alias for read_shard_range for agents that phrase context fetches as opening a file range.",
             &["index_dir", "path"],
-            &["start", "lines", "scope"],
+            READ_WINDOW_OPTIONAL_ARGS,
         ),
         tool_entry(
             "read_shard_ranges",
@@ -1658,7 +1658,10 @@ fn argument_schema(tool_name: &str, name: &str) -> Value {
                 "properties": {
                     "path": {"type": "string", "description": path_description},
                     "start": {"type": "integer", "minimum": 1, "default": 1},
+                    "start_line": {"type": "integer", "minimum": 1, "description": "Alias for start."},
                     "lines": {"type": "integer", "minimum": 1, "maximum": MAX_READ_RANGE_LINES, "default": 80},
+                    "line_count": {"type": "integer", "minimum": 1, "maximum": MAX_READ_RANGE_LINES, "description": "Alias for lines."},
+                    "end_line": {"type": "integer", "minimum": 1, "description": "Inclusive end line; use instead of lines or line_count."},
                     "scope": {
                         "type": "string",
                         "enum": ["exact", "symbol"],
@@ -1708,7 +1711,8 @@ fn argument_schema(tool_name: &str, name: &str) -> Value {
             schema.insert("type".to_string(), json!("boolean"));
         }
         "limit" | "max_depth" | "discover_limit" | "family_limit" | "symbols" | "start"
-        | "lines" | "tests" | "context_lines" | "read_limit" | "line" | "target_line" => {
+        | "start_line" | "end_line" | "lines" | "line_count" | "tests" | "context_lines"
+        | "read_limit" | "line" | "target_line" => {
             schema.insert("type".to_string(), json!("integer"));
             schema.insert(
                 "minimum".to_string(),
@@ -1810,7 +1814,8 @@ fn daemon_default_kind(tool_name: &str) -> Option<DaemonDefaultKind> {
 fn argument_type(name: &str) -> &'static str {
     match name {
         "limit" | "max_depth" | "discover_limit" | "family_limit" | "symbols" | "start"
-        | "lines" | "tests" | "context_lines" | "read_limit" | "line" | "target_line" => "integer",
+        | "start_line" | "end_line" | "lines" | "line_count" | "tests" | "context_lines"
+        | "read_limit" | "line" | "target_line" => "integer",
         "test" | "generated" | "code" | "explain" | "require_all" | "any_terms" | "details"
         | "refresh_if_stale" | "include_read_batch" | "git_metadata" | "tracked_files"
         | "nested_manifests" => "boolean",
@@ -1866,8 +1871,8 @@ fn argument_default(tool_name: &str, name: &str) -> Option<Value> {
         (_, "discover_limit") => Some(json!(500)),
         (_, "symbols" | "tests") => Some(json!(50)),
         (_, "read_limit") => Some(json!(DEFAULT_REPO_MAP_READ_BATCH_RANGES)),
-        (_, "start") => Some(json!(1)),
-        (_, "lines") => Some(json!(80)),
+        (_, "start" | "start_line") => Some(json!(1)),
+        (_, "lines" | "line_count") => Some(json!(80)),
         (_, "scope") => Some(json!("exact")),
         (_, "snippet" | "snippet_mode") => Some(json!("medium")),
         (_, "detail") => Some(json!("compact")),
@@ -1896,7 +1901,7 @@ fn argument_enum(name: &str) -> Option<&'static [&'static str]> {
 
 fn argument_maximum(tool_name: &str, name: &str) -> Option<usize> {
     match name {
-        "lines" => Some(MAX_READ_RANGE_LINES),
+        "lines" | "line_count" => Some(MAX_READ_RANGE_LINES),
         "context_lines" => Some(MAX_ATTACHED_CONTEXT_LINES),
         "read_limit" => Some(MAX_RESULT_READ_BATCH_RANGES),
         "limit" if tool_has_result_limit(tool_name) => Some(MAX_SEARCH_RESULTS),
@@ -2095,7 +2100,10 @@ fn argument_description(tool_name: &str, name: &str) -> &'static str {
             "Maximum ranges to include in a repo-map read_batch_request; raise it when the agent intentionally wants more files opened at once."
         }
         "start" => "One-based start line for range reads.",
+        "start_line" => "Alias for start when passing line_range-shaped data.",
+        "end_line" => "Inclusive end line for range reads; use instead of lines or line_count.",
         "lines" => "Number of lines to read, capped to the maximum bounded range size.",
+        "line_count" => "Alias for lines when passing line_range-shaped data.",
         "scope" => {
             "Range read scope: exact reads the requested line window; symbol starts from the nearest preceding symbol definition and includes enough leading context to keep that symbol visible."
         }
@@ -3161,15 +3169,15 @@ impl ToolRuntime {
             "read_range" | "open_range" => {
                 let tool_name = request.tool.as_str();
                 let path = string_arg(&request.arguments, "path")?;
-                let (start, lines) = read_window_args(&request.arguments)?;
+                let window = read_window_arg(&request.arguments)?;
                 let scope = read_scope_arg(&request.arguments)?;
                 let range = normalize_read_range_arg(
                     path,
-                    start,
-                    lines,
+                    window.start,
+                    window.lines,
                     scope,
-                    request.arguments.get("start").is_some(),
-                    request.arguments.get("lines").is_some(),
+                    window.explicit_start,
+                    window.explicit_lines,
                 )?;
                 if request.arguments.get("index").is_some()
                     && request.arguments.get("index_dir").is_some()
@@ -4344,12 +4352,23 @@ impl ToolRuntime {
             "read_index_range" | "open_index_range" => {
                 let index_path = self.index_path_arg_or_single_cached(&request.arguments)?;
                 let path = string_arg(&request.arguments, "path")?;
-                let (start, lines) = read_window_args(&request.arguments)?;
+                let window = read_window_arg(&request.arguments)?;
                 let scope = read_scope_arg(&request.arguments)?;
+                let range = normalize_read_range_arg(
+                    path,
+                    window.start,
+                    window.lines,
+                    scope,
+                    window.explicit_start,
+                    window.explicit_lines,
+                )?;
                 let index = self.cached_index(index_path)?;
-                Ok(serde_json::to_value(
-                    index.read_range_scoped(&path, start, lines, scope)?,
-                )?)
+                Ok(serde_json::to_value(index.read_range_scoped(
+                    &range.path,
+                    range.start,
+                    range.lines,
+                    range.scope,
+                )?)?)
             }
             "read_index_ranges" | "open_index_ranges" => {
                 let index_path = self.index_path_arg_or_single_cached(&request.arguments)?;
@@ -4530,10 +4549,22 @@ impl ToolRuntime {
             "read_shard_range" | "open_shard_range" => {
                 let index_dir = self.shard_dir_arg_or_single_cached(&request.arguments)?;
                 let path = string_arg(&request.arguments, "path")?;
-                let (start, lines) = read_window_args(&request.arguments)?;
+                let window = read_window_arg(&request.arguments)?;
                 let scope = read_scope_arg(&request.arguments)?;
+                let range = normalize_read_range_arg(
+                    path,
+                    window.start,
+                    window.lines,
+                    scope,
+                    window.explicit_start,
+                    window.explicit_lines,
+                )?;
                 Ok(serde_json::to_value(self.read_shard_range_cached_scoped(
-                    &index_dir, &path, start, lines, scope,
+                    &index_dir,
+                    &range.path,
+                    range.start,
+                    range.lines,
+                    range.scope,
                 )?)?)
             }
             "read_shard_ranges" | "open_shard_ranges" => {
@@ -7311,11 +7342,22 @@ const READ_TARGET_OPTIONAL_ARGS: &[&str] = &[
     "index_dir",
     "cwd",
     "start",
+    "start_line",
     "lines",
+    "line_count",
+    "end_line",
     "scope",
 ];
 
 const READ_BATCH_TARGET_OPTIONAL_ARGS: &[&str] = &["repo", "index", "index_dir", "cwd", "scope"];
+const READ_WINDOW_OPTIONAL_ARGS: &[&str] = &[
+    "start",
+    "start_line",
+    "lines",
+    "line_count",
+    "end_line",
+    "scope",
+];
 
 const REPO_MAP_TARGET_OPTIONAL_ARGS: &[&str] = &[
     "repo",
@@ -8120,11 +8162,59 @@ fn repo_map_detail_arg(arguments: &Value) -> Result<RepoMapDetail> {
     }
 }
 
-fn read_window_args(arguments: &Value) -> Result<(usize, usize)> {
-    let start = positive_usize_arg(arguments, "start", 1)?;
-    let lines = bounded_usize_arg(arguments, "lines", 80, 1, Some(MAX_READ_RANGE_LINES))?;
+#[derive(Debug, Clone, Copy)]
+struct ReadWindowArg {
+    start: usize,
+    lines: usize,
+    explicit_start: bool,
+    explicit_lines: bool,
+}
+
+fn read_window_arg(arguments: &Value) -> Result<ReadWindowArg> {
+    read_window_fields(arguments, "argument")
+}
+
+fn read_window_fields(value: &Value, label: &str) -> Result<ReadWindowArg> {
+    let start = optional_bounded_usize_field_any(
+        value,
+        &["start", "start_line", "line", "target_line"],
+        label,
+        1,
+        None,
+    )?;
+    let lines = optional_bounded_usize_field_any(
+        value,
+        &["lines", "line_count"],
+        label,
+        1,
+        Some(MAX_READ_RANGE_LINES),
+    )?;
+    let end_line = optional_bounded_usize_field_any(value, &["end_line", "end"], label, 1, None)?;
+    if lines.is_some() && end_line.is_some() {
+        return Err(anyhow!(
+            "{label} accepts only one of lines/line_count or end_line/end"
+        ));
+    }
+    let start = start.unwrap_or(1);
+    let (lines, explicit_lines) = if let Some(lines) = lines {
+        (lines, true)
+    } else if let Some(end_line) = end_line {
+        if end_line < start {
+            return Err(anyhow!(
+                "{label} end_line must be greater than or equal to start"
+            ));
+        }
+        (end_line.saturating_sub(start).saturating_add(1), true)
+    } else {
+        (80, false)
+    };
     validate_read_window(start, lines)?;
-    Ok((start, lines))
+    Ok(ReadWindowArg {
+        start,
+        lines,
+        explicit_start: has_any_field(value, &["start", "start_line", "line", "target_line"]),
+        explicit_lines,
+    })
 }
 
 fn read_scope_arg(arguments: &Value) -> Result<RangeScope> {
@@ -8330,16 +8420,15 @@ fn range_arg(value: &Value, default_scope: RangeScope) -> Result<RangeArg> {
         .and_then(Value::as_str)
         .map(String::from)
         .ok_or_else(|| anyhow!("range entry must include string path"))?;
-    let start = bounded_usize_field(value, "start", 1, 1, None)?;
-    let lines = bounded_usize_field(value, "lines", 80, 1, Some(MAX_READ_RANGE_LINES))?;
+    let window = read_window_fields(value, "range")?;
     let scope = optional_read_scope_arg(value, "scope")?.unwrap_or(default_scope);
     normalize_read_range_arg(
         path,
-        start,
-        lines,
+        window.start,
+        window.lines,
         scope,
-        value.get("start").is_some(),
-        value.get("lines").is_some(),
+        window.explicit_start,
+        window.explicit_lines,
     )
 }
 
@@ -8605,17 +8694,28 @@ fn optional_bounded_usize_arg(
     )
 }
 
-fn bounded_usize_field(
+fn optional_bounded_usize_field_any(
     object: &Value,
-    name: &str,
-    default: usize,
+    names: &[&str],
+    label: &str,
     minimum: usize,
     maximum: Option<usize>,
-) -> Result<usize> {
-    Ok(
-        bounded_usize_value(object.get(name), &format!("range {name}"), minimum, maximum)?
-            .unwrap_or(default),
-    )
+) -> Result<Option<usize>> {
+    for name in names {
+        if let Some(value) = bounded_usize_value(
+            object.get(name),
+            &format!("{label} {name}"),
+            minimum,
+            maximum,
+        )? {
+            return Ok(Some(value));
+        }
+    }
+    Ok(None)
+}
+
+fn has_any_field(value: &Value, names: &[&str]) -> bool {
+    names.iter().any(|name| value.get(name).is_some())
 }
 
 fn bounded_usize_value(

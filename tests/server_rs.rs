@@ -558,6 +558,18 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         read_range["input_schema"]["properties"]["scope"]["enum"],
         serde_json::json!(["exact", "symbol"])
     );
+    assert_eq!(
+        read_range["input_schema"]["properties"]["start_line"]["description"],
+        "Alias for start when passing line_range-shaped data."
+    );
+    assert_eq!(
+        read_range["input_schema"]["properties"]["line_count"]["maximum"],
+        serde_json::json!(MAX_READ_RANGE_LINES)
+    );
+    assert_eq!(
+        read_range["input_schema"]["properties"]["end_line"]["type"],
+        "integer"
+    );
     assert_eq!(read_ranges["required"], serde_json::json!(["ranges"]));
     assert_eq!(
         read_ranges["input_schema"]["properties"]["index"]["type"],
@@ -586,6 +598,20 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
     assert_eq!(
         read_ranges["input_schema"]["properties"]["ranges"]["oneOf"][0]["properties"]["lines"]["maximum"],
         serde_json::json!(MAX_READ_RANGE_LINES)
+    );
+    assert_eq!(
+        read_ranges["input_schema"]["properties"]["ranges"]["oneOf"][0]["properties"]["start_line"]
+            ["description"],
+        "Alias for start."
+    );
+    assert_eq!(
+        read_ranges["input_schema"]["properties"]["ranges"]["oneOf"][0]["properties"]["line_count"]
+            ["maximum"],
+        serde_json::json!(MAX_READ_RANGE_LINES)
+    );
+    assert_eq!(
+        read_ranges["input_schema"]["properties"]["ranges"]["oneOf"][0]["properties"]["end_line"]["description"],
+        "Inclusive end line; use instead of lines or line_count."
     );
     assert_eq!(
         read_ranges["input_schema"]["properties"]["ranges"]["oneOf"][1]["type"],
@@ -2580,6 +2606,25 @@ fn runtime_read_alias_accepts_live_index_and_shard_targets() {
             .contains("issue_token")
     );
 
+    let live_line_range = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("live-line-range-read"),
+        tool: "open_range".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "path": "src/auth.rs",
+            "start_line": 1,
+            "end_line": 2
+        }),
+    });
+    assert!(
+        live_line_range.error.is_none(),
+        "{:?}",
+        live_line_range.error
+    );
+    let live_line_range = live_line_range.result.unwrap();
+    assert_eq!(live_line_range["start_line"], serde_json::json!(1));
+    assert_eq!(live_line_range["end_line"], serde_json::json!(2));
+
     let indexed = runtime.dispatch(ToolRequest {
         id: serde_json::json!("indexed-read"),
         tool: "read_range".to_string(),
@@ -2597,6 +2642,30 @@ fn runtime_read_alias_accepts_live_index_and_shard_targets() {
             .as_str()
             .unwrap()
             .contains("SessionManager")
+    );
+
+    let indexed_copied_location = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("indexed-copied-location"),
+        tool: "read_index_range".to_string(),
+        arguments: serde_json::json!({
+            "index": repo.path().join(".orient/index"),
+            "path": "src/auth.rs#L2-L2"
+        }),
+    });
+    assert!(
+        indexed_copied_location.error.is_none(),
+        "{:?}",
+        indexed_copied_location.error
+    );
+    assert_eq!(
+        indexed_copied_location.result.as_ref().unwrap()["start_line"],
+        serde_json::json!(2)
+    );
+    assert!(
+        indexed_copied_location.result.as_ref().unwrap()["text"]
+            .as_str()
+            .unwrap()
+            .contains("issue_token")
     );
 
     let symbol_scoped = runtime.dispatch(ToolRequest {
@@ -2652,14 +2721,15 @@ fn runtime_read_alias_accepts_live_index_and_shard_targets() {
         arguments: serde_json::json!({
             "index": repo.path().join(".orient/index"),
             "ranges": [
-                {"path": "src/auth.rs", "start": 1, "lines": 1},
-                {"path": "src/auth.rs", "start": 2, "lines": 1, "scope": "symbol"}
+                {"path": "Cargo.toml", "start": 1, "lines": 1},
+                {"path": "src/auth.rs", "start": 2, "lines": 1, "scope": "symbol"},
+                {"path": "src/auth.rs", "start_line": 1, "line_count": 2}
             ]
         }),
     });
     assert!(indexed_batch.error.is_none(), "{:?}", indexed_batch.error);
     let indexed_batch = indexed_batch.result.unwrap();
-    assert_eq!(indexed_batch.as_array().unwrap().len(), 2);
+    assert_eq!(indexed_batch.as_array().unwrap().len(), 3);
     assert!(
         indexed_batch[1]["text"]
             .as_str()
@@ -2682,6 +2752,26 @@ fn runtime_read_alias_accepts_live_index_and_shard_targets() {
             .as_str()
             .unwrap()
             .contains("SessionManager")
+    );
+
+    let shard_line_range = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("shard-line-range-read"),
+        tool: "open_shard_range".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": repo.path().join(".orient-shards"),
+            "path": "src/auth.rs",
+            "start_line": 2,
+            "end_line": 2
+        }),
+    });
+    assert!(
+        shard_line_range.error.is_none(),
+        "{:?}",
+        shard_line_range.error
+    );
+    assert_eq!(
+        shard_line_range.result.as_ref().unwrap()["start_line"],
+        serde_json::json!(2)
     );
 
     let conflicted = runtime.dispatch(ToolRequest {
@@ -3617,6 +3707,25 @@ fn runtime_rejects_oversized_batches() {
     });
     let error = response.error.unwrap();
     assert!(error.contains("must not be empty"), "{error}");
+
+    let response = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("conflicting-line-count-and-end-line"),
+        tool: "read_ranges".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "ranges": {
+                "path": "src/auth.rs",
+                "start_line": 1,
+                "line_count": 2,
+                "end_line": 3
+            }
+        }),
+    });
+    let error = response.error.unwrap();
+    assert!(
+        error.contains("accepts only one of lines/line_count or end_line/end"),
+        "{error}"
+    );
 
     let response = runtime.dispatch(ToolRequest {
         id: serde_json::json!("open-range-conflicting-indexes"),
