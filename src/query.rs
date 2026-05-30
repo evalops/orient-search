@@ -15,10 +15,7 @@ pub fn parse_query(input: &str) -> ParsedQuery {
     let mut explicit_content_terms = false;
 
     for token in split_query(input) {
-        let (negated, token) = token
-            .strip_prefix('-')
-            .map(|value| (true, value.to_string()))
-            .unwrap_or((false, token));
+        let (negated, token) = split_negated_token(token);
         if let Some(term) = content_term(&token) {
             if negated {
                 filters.exclude_content.push(term);
@@ -54,6 +51,16 @@ pub fn parse_query(input: &str) -> ParsedQuery {
         filters,
         explicit_content_terms,
     }
+}
+
+fn split_negated_token(token: String) -> (bool, String) {
+    if let Some(value) = token.strip_prefix('-').or_else(|| token.strip_prefix('!'))
+        && !value.is_empty()
+        && !value.starts_with('=')
+    {
+        return (true, value.to_string());
+    }
+    (false, token)
 }
 
 fn content_term(token: &str) -> Option<String> {
@@ -1077,7 +1084,7 @@ mod tests {
     #[test]
     fn parses_aliases_booleans_escapes_and_negatives() {
         let parsed = parse_query(
-            r#"file:'auth service.rs' language:Rust extension:.RS repo:orient branch:main origin:example tests -ext:md -repo:old -branch:wip -origin:legacy "quoted \"token\"""#,
+            r#"file:'auth service.rs' language:Rust extension:.RS repo:orient branch:main origin:example tests !ext:md !repo:old -branch:wip -origin:legacy "quoted \"token\"""#,
         );
 
         assert_eq!(parsed.terms, vec![r#"quoted "token""#]);
@@ -1092,6 +1099,15 @@ mod tests {
         assert_eq!(parsed.filters.exclude_repo, vec!["old"]);
         assert_eq!(parsed.filters.exclude_branch, vec!["wip"]);
         assert_eq!(parsed.filters.exclude_origin, vec!["legacy"]);
+
+        let bang =
+            parse_query("!test !is:generated !code:true !deprecated !path:vendor != operator");
+        assert_eq!(bang.terms, vec!["!=", "operator"]);
+        assert_eq!(bang.filters.test, Some(false));
+        assert_eq!(bang.filters.generated, Some(false));
+        assert_eq!(bang.filters.code, Some(false));
+        assert_eq!(bang.filters.exclude_content, vec!["deprecated"]);
+        assert_eq!(bang.filters.exclude_path, vec!["vendor"]);
     }
 
     #[test]
