@@ -6736,7 +6736,7 @@ fn parse_compact_cli_range(
 }
 
 fn path_has_diagnostic_location_prefix(path: &str) -> bool {
-    path.trim_start().starts_with("-->")
+    path.contains("-->")
 }
 
 fn parse_copied_location_cli_range(value: &str, scope: Option<RangeScope>) -> Option<CliRangeSpec> {

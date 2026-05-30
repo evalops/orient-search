@@ -3265,6 +3265,32 @@ fn runtime_read_alias_accepts_live_index_and_shard_targets() {
             .contains("issue_token")
     );
 
+    let live_rust_diagnostic_block_range = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("live-rust-diagnostic-block-range"),
+        tool: "read_range".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "range": "error[E0505]: borrowed value does not live long enough\n  --> src/auth.rs:5:13\n   |\n5 |     issue_token(user_id)",
+            "scope": "exact"
+        }),
+    });
+    assert!(
+        live_rust_diagnostic_block_range.error.is_none(),
+        "{:?}",
+        live_rust_diagnostic_block_range.error
+    );
+    let live_rust_diagnostic_block_range = live_rust_diagnostic_block_range.result.unwrap();
+    assert_eq!(
+        live_rust_diagnostic_block_range["path"],
+        serde_json::json!("src/auth.rs")
+    );
+    assert!(
+        live_rust_diagnostic_block_range["text"]
+            .as_str()
+            .unwrap()
+            .contains("issue_token")
+    );
+
     let indexed_range_string = runtime.dispatch(ToolRequest {
         id: serde_json::json!("indexed-range-string"),
         tool: "read_index_range".to_string(),

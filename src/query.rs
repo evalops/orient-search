@@ -425,6 +425,11 @@ fn infer_leading_location_term(
         return;
     }
 
+    if let Some((path, target_line)) = diagnostic_block_location_term(terms) {
+        apply_location_filter(path, target_line, terms, filters);
+        return;
+    }
+
     let diagnostic_prefix = terms
         .first()
         .map(|term| diagnostic_arrow_prefix(term))
@@ -433,26 +438,70 @@ fn infer_leading_location_term(
         return;
     };
     let discard_remaining_diagnostic_terms = diagnostic_prefix && index > 0;
+    let Some(path) = location_filter_path(path) else {
+        return;
+    };
+    if apply_location_filter_path(path, target_line, filters) {
+        terms.drain(0..=index);
+        if discard_remaining_diagnostic_terms {
+            terms.clear();
+        } else if let Some(trailing_term) = trailing_term {
+            terms.insert(0, trailing_term);
+        }
+    }
+}
+
+fn apply_location_filter(
+    path: String,
+    target_line: usize,
+    terms: &mut Vec<String>,
+    filters: &mut SearchFilters,
+) {
+    let Some(path) = location_filter_path(path) else {
+        return;
+    };
+    if apply_location_filter_path(path, target_line, filters) {
+        terms.clear();
+    }
+}
+
+fn location_filter_path(path: String) -> Option<String> {
     let path = strip_leading_current_dir_segments(path);
     if path.is_empty() || path.starts_with('.') {
-        return;
+        return None;
     }
+    Some(path)
+}
 
+fn apply_location_filter_path(
+    path: String,
+    target_line: usize,
+    filters: &mut SearchFilters,
+) -> bool {
     if path.contains('/') {
         filters.path = Some(path);
     } else if looks_like_file_name_query(&path) {
         filters.file = Some(path);
     } else {
-        return;
+        return false;
     }
     filters.target_line = Some(target_line);
-    terms.drain(0..=index);
-    if discard_remaining_diagnostic_terms {
-        terms.clear();
-    } else if let Some(trailing_term) = trailing_term {
-        terms.insert(0, trailing_term);
-    }
     filters.require_all = false;
+    true
+}
+
+fn diagnostic_block_location_term(terms: &[String]) -> Option<(String, usize)> {
+    for (index, term) in terms.iter().take(32).enumerate() {
+        if !diagnostic_arrow_prefix(term) {
+            continue;
+        }
+        for location in terms[index + 1..].iter().take(3) {
+            if let Some((path, line, _)) = split_leading_location_token(location) {
+                return Some((path, line));
+            }
+        }
+    }
+    None
 }
 
 fn leading_location_term(terms: &[String]) -> Option<(usize, String, usize, Option<String>)> {
@@ -1608,6 +1657,16 @@ mod tests {
             Some("src/server.rs")
         );
         assert_eq!(rust_diagnostic_location.filters.target_line, Some(42));
+
+        let rust_diagnostic_block = parse_query(
+            "error[E0505]: borrowed value does not live long enough\n  --> src/server.rs:42:9\n   |\n42 |     handle_request();",
+        );
+        assert_eq!(rust_diagnostic_block.terms, Vec::<String>::new());
+        assert_eq!(
+            rust_diagnostic_block.filters.path.as_deref(),
+            Some("src/server.rs")
+        );
+        assert_eq!(rust_diagnostic_block.filters.target_line, Some(42));
 
         let dot_source_location = parse_query("./src/server.rs:42:9");
         assert!(dot_source_location.terms.is_empty());
