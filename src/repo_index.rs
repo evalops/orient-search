@@ -1568,10 +1568,10 @@ fn filter_only_candidates_from_direct_location(
     if Instant::now() >= deadline {
         return Ok(Some(Vec::new()));
     }
-    let Some(path) = normalize_direct_repo_relative_path(&path) else {
+    let Ok(root) = root.canonicalize() else {
         return Ok(Some(Vec::new()));
     };
-    let Ok(root) = root.canonicalize() else {
+    let Some(path) = normalize_direct_repo_relative_path(&root, &path) else {
         return Ok(Some(Vec::new()));
     };
     let Ok(absolute) = root.join(&path).canonicalize() else {
@@ -1619,20 +1619,25 @@ fn exact_direct_path_filter(path: &str) -> bool {
         && !path.contains('*')
         && !path.contains('?')
         && !path.contains('\0')
-        && Path::new(&path).is_relative()
+        && !Path::new(&path)
+            .components()
+            .any(|component| matches!(component, Component::ParentDir))
 }
 
-fn normalize_direct_repo_relative_path(path: &str) -> Option<String> {
+fn normalize_direct_repo_relative_path(root: &Path, path: &str) -> Option<String> {
     let normalized = strip_leading_current_dir_segments(path.trim().replace('\\', "/"));
     let requested = Path::new(&normalized);
-    if !requested.is_relative()
-        || requested.components().any(|component| {
-            matches!(
-                component,
-                Component::ParentDir | Component::RootDir | Component::Prefix(_)
-            )
-        })
-    {
+    if requested.is_absolute() {
+        let absolute = requested.canonicalize().ok()?;
+        let rel = absolute.strip_prefix(root).ok()?;
+        return Some(rel.to_string_lossy().replace('\\', "/"));
+    }
+    if requested.components().any(|component| {
+        matches!(
+            component,
+            Component::ParentDir | Component::RootDir | Component::Prefix(_)
+        )
+    }) {
         return None;
     }
     Some(normalized.trim_start_matches('/').to_string())
@@ -3552,14 +3557,17 @@ pub fn read_file_range_scoped(
     let root = root.as_ref().canonicalize()?;
     let normalized_separators = path.replace('\\', "/");
     let requested = Path::new(&normalized_separators);
-    anyhow::ensure!(
-        requested.is_relative()
-            && !requested
+    let absolute = if requested.is_absolute() {
+        requested.canonicalize()?
+    } else {
+        anyhow::ensure!(
+            !requested
                 .components()
                 .any(|component| matches!(component, std::path::Component::ParentDir)),
-        "path must be repo-relative"
-    );
-    let absolute = root.join(requested).canonicalize()?;
+            "path must be repo-relative"
+        );
+        root.join(requested).canonicalize()?
+    };
     anyhow::ensure!(
         absolute.starts_with(&root),
         "path must stay inside repository"

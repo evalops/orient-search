@@ -3343,6 +3343,36 @@ fn runtime_read_alias_accepts_live_index_and_shard_targets() {
             .contains("issue_token")
     );
 
+    let absolute_auth_path = repo.path().join("src/auth.rs");
+    let live_absolute_traceback_range = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("live-absolute-traceback-range"),
+        tool: "read_range".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "range": format!(
+                "Traceback (most recent call last):\n  File \"{}\", line 5, in issue_token\n    return issue_token(user_id)",
+                absolute_auth_path.display()
+            ),
+            "scope": "exact"
+        }),
+    });
+    assert!(
+        live_absolute_traceback_range.error.is_none(),
+        "{:?}",
+        live_absolute_traceback_range.error
+    );
+    let live_absolute_traceback_range = live_absolute_traceback_range.result.unwrap();
+    assert_eq!(
+        live_absolute_traceback_range["path"],
+        serde_json::json!("src/auth.rs")
+    );
+    assert!(
+        live_absolute_traceback_range["text"]
+            .as_str()
+            .unwrap()
+            .contains("issue_token")
+    );
+
     let indexed_range_string = runtime.dispatch(ToolRequest {
         id: serde_json::json!("indexed-range-string"),
         tool: "read_index_range".to_string(),

@@ -2593,7 +2593,7 @@ fn argument_description(tool_name: &str, name: &str) -> &'static str {
             "Index-relative result path or copied location, such as src/lib.rs or src/lib.rs#L40-L45."
         }
         "path" if is_live_path_tool(tool_name) => {
-            "Repository-relative result path or copied location, such as src/lib.rs or src/lib.rs#L40-L45."
+            "Repository-relative result path, in-repo absolute path, or copied location, such as src/lib.rs, /repo/src/lib.rs, or src/lib.rs#L40-L45."
         }
         "path" => "Path substring filter or result path, depending on the tool.",
         "range" => {
@@ -2742,7 +2742,7 @@ fn range_path_description(tool_name: &str) -> &'static str {
     } else if is_index_range_tool(tool_name) {
         "Index-relative result path or copied location, such as src/lib.rs or src/lib.rs#L40-L45."
     } else {
-        "Repository-relative result path or copied location, such as src/lib.rs or src/lib.rs#L40-L45."
+        "Repository-relative result path, in-repo absolute path, or copied location, such as src/lib.rs, /repo/src/lib.rs, or src/lib.rs#L40-L45."
     }
 }
 

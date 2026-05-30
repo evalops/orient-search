@@ -2253,6 +2253,26 @@ fn cli_outputs_repo_map_and_reads_ranges() {
         .stdout(predicate::str::contains("\"start_line\":5"))
         .stdout(predicate::str::contains("issue_token"));
 
+    let absolute_auth_path = repo.path().join("src/auth.rs");
+    let absolute_python_traceback = format!(
+        "Traceback (most recent call last):\n  File \"{}\", line 5, in issue_token\n    return issue_token(user_id)",
+        absolute_auth_path.display()
+    );
+    let mut absolute_traceback_read_range = Command::cargo_bin("orient").unwrap();
+    absolute_traceback_read_range
+        .args([
+            "read-range",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--",
+            &absolute_python_traceback,
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"path\":\"src/auth.rs\""))
+        .stdout(predicate::str::contains("\"start_line\":5"))
+        .stdout(predicate::str::contains("issue_token"));
+
     let mut oversized_compact_read_range = Command::cargo_bin("orient").unwrap();
     oversized_compact_read_range
         .args([

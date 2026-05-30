@@ -910,6 +910,19 @@ fn read_file_range_rejects_paths_outside_repo() {
     let backslash_range = read_file_range(repo.path(), "src\\auth.rs", 1, 10).unwrap();
     assert_eq!(backslash_range.path, "src/auth.rs");
     assert!(backslash_range.text.contains("issue_token"));
+    let absolute_auth_path = repo.path().join("src/auth.rs");
+    let absolute_range =
+        read_file_range(repo.path(), absolute_auth_path.to_str().unwrap(), 1, 10).unwrap();
+    assert_eq!(absolute_range.path, "src/auth.rs");
+    assert!(absolute_range.text.contains("issue_token"));
+    let absolute_search = search_repo_fast_filtered(
+        repo.path(),
+        &format!("{}:1:1", absolute_auth_path.display()),
+        5,
+        &SearchFilters::default(),
+    )
+    .unwrap();
+    assert_eq!(absolute_search[0].path, "src/auth.rs");
 
     let long_text = (1..=MAX_READ_RANGE_LINES + 10)
         .map(|line| format!("line_{line}\n"))
@@ -941,7 +954,7 @@ fn read_file_range_rejects_paths_outside_repo() {
     )
     .unwrap_err()
     .to_string();
-    assert!(absolute_error.contains("repo-relative"));
+    assert!(absolute_error.contains("inside repository"));
 }
 
 #[cfg(unix)]
