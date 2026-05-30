@@ -4151,6 +4151,53 @@ fn cli_builds_and_searches_shard_directory() {
             "\"path\":\"{billing_name}/src/billing.rs\""
         )));
 
+    let mut shard_map_json = Command::cargo_bin("orient").unwrap();
+    let output = shard_map_json
+        .args([
+            "shard-map",
+            "--index-dir",
+            shard_dir.path().to_str().unwrap(),
+            "--repo",
+            &billing_name.to_ascii_uppercase(),
+            "--symbols",
+            "5",
+            "--tests",
+            "5",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let shard_maps: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let map = &shard_maps.as_array().unwrap()[0]["map"];
+    assert_eq!(
+        map["manifest_files"][0],
+        serde_json::json!(format!("{billing_name}/Cargo.toml"))
+    );
+    assert_eq!(
+        map["important_files"][0],
+        serde_json::json!(format!("{billing_name}/Cargo.toml"))
+    );
+    assert_eq!(
+        map["command_hints"][0]["source"],
+        serde_json::json!(format!("{billing_name}/Cargo.toml"))
+    );
+    assert_eq!(
+        map["summary"]["manifest_count"].as_u64().unwrap(),
+        map["manifest_files"].as_array().unwrap().len() as u64
+    );
+    assert_eq!(
+        map["summary"]["important_file_count"].as_u64().unwrap(),
+        map["important_files"].as_array().unwrap().len() as u64
+    );
+    assert_eq!(
+        map["summary"]["top_symbol_count"].as_u64().unwrap(),
+        map["top_symbols"].as_array().unwrap().len() as u64
+    );
+    assert_eq!(
+        map["summary"]["command_count"].as_u64().unwrap(),
+        map["known_commands"].as_array().unwrap().len() as u64
+    );
+
     let mut generic_shard_map = Command::cargo_bin("orient").unwrap();
     generic_shard_map
         .args([

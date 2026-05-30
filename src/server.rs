@@ -7116,6 +7116,7 @@ impl ToolRuntime {
                     filter_repo_map_by_prefix(&mut map, prefix);
                     map.test_files.truncate(test_limit);
                     map.top_symbols.truncate(symbol_limit);
+                    map.refresh_summary();
                 }
                 prefix_repo_map_paths(&mut map, &scope);
                 attach_repo_map_read_batch_request_with_limit(

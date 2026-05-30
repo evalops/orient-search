@@ -1644,6 +1644,7 @@ pub fn shard_repo_maps(
                 filter_repo_map_by_prefix(&mut map, prefix);
                 map.test_files.truncate(test_limit);
                 map.top_symbols.truncate(symbol_limit);
+                map.refresh_summary();
             }
             prefix_repo_map_paths(&mut map, &scope);
             maps.push(ShardRepoMap {
@@ -2002,6 +2003,21 @@ fn prefix_repo_map_paths(map: &mut RepoMap, scope: &ShardSearchScope) {
     for path in &mut map.brief.important_files {
         *path = scoped_output_path(scope, path);
     }
+    for path in &mut map.manifest_files {
+        *path = scoped_output_path(scope, path);
+    }
+    for path in &mut map.important_files {
+        *path = scoped_output_path(scope, path);
+    }
+    for hint in &mut map.command_hints {
+        hint.source = scoped_output_path(scope, &hint.source);
+    }
+    for hint in &mut map.dependency_hints {
+        hint.source = scoped_output_path(scope, &hint.source);
+    }
+    for hint in &mut map.import_hints {
+        hint.source = scoped_output_path(scope, &hint.source);
+    }
     for path in &mut map.entrypoints {
         *path = scoped_output_path(scope, path);
     }
@@ -2090,6 +2106,8 @@ pub(crate) fn filter_repo_map_by_prefix(map: &mut RepoMap, path_prefix: &str) {
     sort_dedup_command_hints(&mut command_hints);
     map.brief.known_commands = known_commands_from_hints(&command_hints);
     map.brief.command_hints = command_hints;
+    map.sync_orientation_fields_from_brief();
+    map.refresh_summary();
 }
 
 fn language_counts_for_paths(paths: &[String]) -> HashMap<String, usize> {

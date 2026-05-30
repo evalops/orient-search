@@ -1178,6 +1178,30 @@ pub struct RepoMap {
     pub next_action: Option<RepoMapNextAction>,
 }
 
+impl RepoMap {
+    pub(crate) fn sync_orientation_fields_from_brief(&mut self) {
+        self.manifest_files = self.brief.manifest_files.clone();
+        self.important_files = self.brief.important_files.clone();
+        self.known_commands = self.brief.known_commands.clone();
+        self.command_hints = self.brief.command_hints.clone();
+        self.dependency_hints = self.brief.dependency_hints.clone();
+        self.import_hints = self.brief.import_hints.clone();
+    }
+
+    pub(crate) fn refresh_summary(&mut self) {
+        self.summary = RepoMapSummary::from_map_parts(
+            &self.brief,
+            &self.entrypoints,
+            &self.manifest_files,
+            &self.important_files,
+            &self.test_files,
+            &self.top_symbols,
+            &self.related_files,
+            &self.related_symbols,
+        );
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RepoMapSummary {
     pub status: String,
