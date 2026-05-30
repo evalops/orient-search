@@ -5120,6 +5120,18 @@ fn daemon_status_summary(status: &Value) -> Value {
             .cloned()
             .unwrap_or(Value::Null),
         "client_version": env!("CARGO_PKG_VERSION"),
+        "process_id": status
+            .get("process_id")
+            .cloned()
+            .unwrap_or(Value::Null),
+        "started_at_unix_secs": status
+            .get("started_at_unix_secs")
+            .cloned()
+            .unwrap_or(Value::Null),
+        "uptime_secs": status
+            .get("uptime_secs")
+            .cloned()
+            .unwrap_or(Value::Null),
         "search_auto_default": {
             "surface": search_default.get("surface").cloned().unwrap_or(Value::Null),
             "source": search_default.get("source").cloned().unwrap_or(Value::Null),

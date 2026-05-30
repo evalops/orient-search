@@ -6230,6 +6230,9 @@ fn runtime_warms_index_by_tool_request() {
         result["max_cached_indexes"],
         serde_json::json!(DEFAULT_MAX_CACHED_INDEXES)
     );
+    assert_eq!(result["process_id"], serde_json::json!(std::process::id()));
+    assert!(result["started_at_unix_secs"].as_u64().unwrap() > 0);
+    assert!(result["uptime_secs"].as_u64().unwrap() < 60);
     assert_eq!(result["cached_indexes"], serde_json::json!(1));
     assert_eq!(
         result["search_auto_default"]["surface"],
@@ -6347,6 +6350,9 @@ fn daemon_status_suggests_registering_warmed_shard_indexes() {
         status["daemon_version"],
         serde_json::json!(env!("CARGO_PKG_VERSION"))
     );
+    assert_eq!(status["process_id"], serde_json::json!(std::process::id()));
+    assert!(status["started_at_unix_secs"].as_u64().unwrap() > 0);
+    assert!(status["uptime_secs"].as_u64().unwrap() < 60);
     assert_eq!(
         status["search_auto_default"]["surface"],
         serde_json::json!("shards")
@@ -10220,6 +10226,9 @@ fn tcp_daemon_status_cli_reports_runtime_cache() {
         status["client_version"],
         serde_json::json!(env!("CARGO_PKG_VERSION"))
     );
+    assert!(status["process_id"].as_u64().unwrap() > 0);
+    assert!(status["started_at_unix_secs"].as_u64().unwrap() > 0);
+    assert!(status["uptime_secs"].as_u64().unwrap() < 60);
     assert_eq!(status["cached_indexes"], serde_json::json!(0));
     assert_eq!(status["cached_shard_manifests"], serde_json::json!(0));
     assert_eq!(
@@ -10248,6 +10257,9 @@ fn tcp_daemon_status_cli_reports_runtime_cache() {
         status["daemon_version"],
         serde_json::json!(env!("CARGO_PKG_VERSION"))
     );
+    assert!(status["process_id"].as_u64().unwrap() > 0);
+    assert!(status["started_at_unix_secs"].as_u64().unwrap() > 0);
+    assert!(status["uptime_secs"].as_u64().unwrap() < 60);
     assert!(status["search_auto_default"]["target"].as_str().is_some());
     let default_target = status["search_auto_default"]["target"].clone();
     assert!(default_target.as_str().is_some());

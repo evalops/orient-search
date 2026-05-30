@@ -575,6 +575,7 @@ pub struct ToolRuntime {
     shard_manifests: Mutex<HashMap<PathBuf, CachedShardManifest>>,
     next_index_access: AtomicU64,
     cache_policy: IndexCachePolicy,
+    started_at: SystemTime,
 }
 
 #[derive(Clone, Copy)]
@@ -589,6 +590,7 @@ impl Default for ToolRuntime {
             shard_manifests: Mutex::new(HashMap::new()),
             next_index_access: AtomicU64::new(1),
             cache_policy: IndexCachePolicy::default(),
+            started_at: SystemTime::now(),
         }
     }
 }
@@ -828,6 +830,9 @@ impl ToolRuntime {
         );
         let mut status = json!({
             "daemon_version": env!("CARGO_PKG_VERSION"),
+            "process_id": std::process::id(),
+            "started_at_unix_secs": system_time_unix_secs(self.started_at),
+            "uptime_secs": daemon_uptime_secs(self.started_at),
             "search_auto_default": search_auto_default.clone(),
             "default_requests": default_requests,
             "max_cached_indexes": self.max_cached_indexes(),
@@ -886,6 +891,17 @@ impl ToolRuntime {
             },
         }
     }
+}
+
+fn daemon_uptime_secs(started_at: SystemTime) -> u64 {
+    started_at.elapsed().unwrap_or_default().as_secs()
+}
+
+fn system_time_unix_secs(value: SystemTime) -> u64 {
+    value
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
 }
 
 pub fn tool_manifest() -> Value {
