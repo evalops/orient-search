@@ -2785,6 +2785,7 @@ fn path_filter_only_queries_use_path_trigram_prefilter_after_load() {
         &repo.path().join("src/routes/special_path_probe.rs"),
         "pub fn route_probe() {}\n",
     );
+    write(&repo.path().join("x.rs"), "pub fn short_exact_path() {}\n");
 
     let index_path = repo.path().join("repo.orient");
     let index = FastIndex::build(repo.path()).unwrap();
@@ -2820,6 +2821,29 @@ fn path_filter_only_queries_use_path_trigram_prefilter_after_load() {
     assert_eq!(file_plan.strategy, "path_filter_trigram_postings");
     assert_eq!(file_plan.candidate_count, 1);
     assert_eq!(file_plan.final_match_count, 1);
+
+    let short_exact_plan = loaded
+        .query_plan("path:./X.RS", &SearchFilters::default())
+        .unwrap();
+    assert_eq!(short_exact_plan.strategy, "exact_path_filter");
+    assert_eq!(short_exact_plan.candidate_count, 1);
+    assert_eq!(short_exact_plan.final_match_count, 1);
+
+    let short_exact_results = loaded
+        .search_filtered(
+            "path:./X.RS",
+            10,
+            &SearchFilters {
+                explain: true,
+                ..SearchFilters::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(result_paths(&short_exact_results), vec!["x.rs"]);
+    assert_eq!(
+        short_exact_results[0].query_plan.as_ref().unwrap().strategy,
+        "exact_path_filter"
+    );
 }
 
 #[test]

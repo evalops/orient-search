@@ -68,6 +68,8 @@ pub struct FastIndex {
     pub attribute_postings: HashMap<String, Vec<Posting>>,
     #[serde(skip)]
     path_ids: HashMap<String, u32>,
+    #[serde(skip)]
+    path_lower_ids: HashMap<String, u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -361,6 +363,7 @@ impl FastIndex {
         let symbol_kind_postings = rebuild_symbol_kind_postings(&files);
         let attribute_postings = rebuild_attribute_postings(&files);
         let path_ids = rebuild_path_ids(&files);
+        let path_lower_ids = rebuild_path_lower_ids(&files);
         Ok(Self {
             version: INDEX_VERSION,
             root,
@@ -373,6 +376,7 @@ impl FastIndex {
             symbol_kind_postings,
             attribute_postings,
             path_ids,
+            path_lower_ids,
         })
         .map(|index| RefreshOutcome {
             index,
@@ -488,6 +492,7 @@ impl FastIndex {
         self.attribute_postings = rebuild_attribute_postings(&self.files);
         self.path_trigram_postings = rebuild_path_trigram_postings(&self.files);
         self.path_ids = rebuild_path_ids(&self.files);
+        self.path_lower_ids = rebuild_path_lower_ids(&self.files);
     }
 
     pub fn refresh_stats(&self, outcome: &RefreshOutcome) -> RefreshStats {
@@ -1794,12 +1799,22 @@ impl FastIndex {
             planned_symbol_query_name(&parsed.terms, &filters, parsed.explicit_content_terms);
         if query_tokens.is_empty() && query_trigrams.is_empty() {
             if filter_only_query(&filters) {
-                let candidate_ids = filter_only_candidate_ids(
-                    &symbol_kind_postings,
-                    &attribute_postings,
-                    &path_filter_postings,
-                    &filters,
-                );
+                let exact_path_candidate_id = self.indexed_exact_path_filter_id(&filters);
+                let candidate_ids = exact_path_candidate_id
+                    .map(|file_id| vec![file_id])
+                    .or_else(|| {
+                        filter_only_candidate_ids(
+                            &symbol_kind_postings,
+                            &attribute_postings,
+                            &path_filter_postings,
+                            &filters,
+                        )
+                    });
+                let strategy = if exact_path_candidate_id.is_some() {
+                    "exact_path_filter"
+                } else {
+                    filter_only_strategy(&filters, &path_filter_postings)
+                };
                 let path_filters = PathFilterMatcher::from_filters(&filters);
                 let final_match_count = match &candidate_ids {
                     Some(candidate_ids) => candidate_ids
@@ -1822,7 +1837,7 @@ impl FastIndex {
                     .map(Vec::len)
                     .unwrap_or(final_match_count);
                 return Ok(QueryPlan {
-                    strategy: filter_only_strategy(&filters, &path_filter_postings).to_string(),
+                    strategy: strategy.to_string(),
                     require_all: filters.require_all,
                     query_tokens,
                     query_phrases,
@@ -2093,7 +2108,8 @@ impl FastIndex {
         attribute_postings: &AttributeFilterPostings<'_>,
         path_filter_postings: &PathFilterTrigramPostings<'_>,
     ) -> Vec<SearchResult> {
-        let candidate_ids = indexed_exact_path_filter_id(&self.files, filters)
+        let exact_path_candidate_id = self.indexed_exact_path_filter_id(filters);
+        let candidate_ids = exact_path_candidate_id
             .map(|file_id| vec![file_id])
             .or_else(|| {
                 filter_only_candidate_ids(
@@ -2103,6 +2119,11 @@ impl FastIndex {
                     filters,
                 )
             });
+        let strategy = if exact_path_candidate_id.is_some() {
+            "exact_path_filter"
+        } else {
+            filter_only_strategy(filters, path_filter_postings)
+        };
         let mut results = match &candidate_ids {
             Some(candidate_ids) => candidate_ids
                 .iter()
@@ -2122,7 +2143,7 @@ impl FastIndex {
                 .map(Vec::len)
                 .unwrap_or(final_match_count);
             let query_plan = QueryPlan {
-                strategy: filter_only_strategy(filters, path_filter_postings).to_string(),
+                strategy: strategy.to_string(),
                 require_all: filters.require_all,
                 query_tokens: Vec::new(),
                 query_phrases: Vec::new(),
@@ -2340,6 +2361,7 @@ impl FastIndexDisk {
             symbol_kind_postings: decompress_posting_map(self.symbol_kind_postings)?,
             attribute_postings: decompress_posting_map(self.attribute_postings)?,
             path_ids: HashMap::new(),
+            path_lower_ids: HashMap::new(),
         })
     }
 }
@@ -2381,6 +2403,7 @@ impl FastIndexDiskV12 {
             attribute_postings,
             files,
             path_ids: HashMap::new(),
+            path_lower_ids: HashMap::new(),
         })
     }
 }
@@ -3136,12 +3159,11 @@ fn indexed_file_matches_filters(file: &IndexedPath, filters: &SearchFilters) -> 
     indexed_file_matches_filters_compiled(file, filters, &path_filters)
 }
 
-fn indexed_exact_path_filter_id(files: &[IndexedPath], filters: &SearchFilters) -> Option<u32> {
-    let path = normalize_exact_index_path_filter(filters.path.as_deref()?)?;
-    files
-        .iter()
-        .position(|file| file.path_lower == path)
-        .map(|file_id| file_id as u32)
+impl FastIndex {
+    fn indexed_exact_path_filter_id(&self, filters: &SearchFilters) -> Option<u32> {
+        let path = normalize_exact_index_path_filter(filters.path.as_deref()?)?;
+        self.path_lower_ids.get(&path).copied()
+    }
 }
 
 fn normalize_exact_index_path_filter(path: &str) -> Option<String> {
@@ -5403,6 +5425,14 @@ fn rebuild_path_ids(files: &[IndexedPath]) -> HashMap<String, u32> {
         .enumerate()
         .map(|(file_id, file)| (file.path.clone(), file_id as u32))
         .collect()
+}
+
+fn rebuild_path_lower_ids(files: &[IndexedPath]) -> HashMap<String, u32> {
+    let mut ids = HashMap::new();
+    for (file_id, file) in files.iter().enumerate() {
+        ids.entry(file.path_lower.clone()).or_insert(file_id as u32);
+    }
+    ids
 }
 
 fn rebuild_symbol_postings(files: &[IndexedPath]) -> HashMap<String, Vec<Posting>> {
