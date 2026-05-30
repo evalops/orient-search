@@ -244,6 +244,14 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         "Alias for snippet."
     );
     assert_eq!(
+        search["input_schema"]["properties"]["snippet-mode"]["enum"],
+        serde_json::json!(["short", "medium", "block", "symbol"])
+    );
+    assert_eq!(
+        search["input_schema"]["properties"]["snippet-mode"]["description"],
+        "Alias for snippet."
+    );
+    assert_eq!(
         search["input_schema"]["properties"]["lang"]["description"],
         "Alias for language."
     );
@@ -2390,6 +2398,27 @@ fn runtime_search_alias_accepts_live_index_and_shard_targets() {
         serde_json::json!("symbol")
     );
 
+    let hyphen_snippet = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("hyphen-symbol-snippet"),
+        tool: "search".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "query": "SessionManager",
+            "limit": 3,
+            "snippet-mode": "symbol"
+        }),
+    });
+    assert!(hyphen_snippet.error.is_none(), "{:?}", hyphen_snippet.error);
+    let hyphen_snippet = hyphen_snippet.result.unwrap();
+    assert_eq!(
+        hyphen_snippet[0]["read_range"]["scope"],
+        serde_json::json!("symbol")
+    );
+    assert_eq!(
+        hyphen_snippet[0]["read_request"]["arguments"]["range"]["scope"],
+        serde_json::json!("symbol")
+    );
+
     let sharded = runtime.dispatch(ToolRequest {
         id: serde_json::json!("sharded"),
         tool: "search".to_string(),
@@ -3955,6 +3984,21 @@ fn runtime_rejects_oversized_batches() {
     assert!(
         response.result.is_some(),
         "snippet_mode alias search should return a result payload"
+    );
+
+    let response = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("valid-dashed-snippet-mode-alias"),
+        tool: "search_code".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "query": "SessionManager",
+            "snippet-mode": "short"
+        }),
+    });
+    assert!(response.error.is_none(), "{response:?}");
+    assert!(
+        response.result.is_some(),
+        "snippet-mode alias search should return a result payload"
     );
 
     let response = runtime.dispatch(ToolRequest {

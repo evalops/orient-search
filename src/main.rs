@@ -990,13 +990,23 @@ impl From<SnippetModeArg> for SnippetMode {
 
 #[derive(Debug, Clone, Args)]
 struct CommonSearchArgs {
-    #[arg(long, alias = "dir", alias = "directory", alias = "folder")]
+    #[arg(
+        long,
+        visible_alias = "dir",
+        visible_alias = "directory",
+        visible_alias = "folder"
+    )]
     path: Option<String>,
-    #[arg(long, alias = "lang")]
+    #[arg(long, visible_alias = "lang")]
     language: Option<String>,
-    #[arg(long, alias = "ext")]
+    #[arg(long, visible_alias = "ext")]
     extension: Option<String>,
-    #[arg(long, alias = "filename", alias = "file-name", alias = "file_name")]
+    #[arg(
+        long,
+        visible_alias = "filename",
+        visible_alias = "file-name",
+        alias = "file_name"
+    )]
     file: Option<String>,
     #[arg(long, alias = "target-line", alias = "target_line")]
     line: Option<usize>,
@@ -1004,8 +1014,8 @@ struct CommonSearchArgs {
     symbol: Option<String>,
     #[arg(
         long = "kind",
-        alias = "type",
-        alias = "symbol-kind",
+        visible_alias = "type",
+        visible_alias = "symbol-kind",
         alias = "symbol_kind"
     )]
     symbol_kind: Option<String>,
@@ -1018,14 +1028,14 @@ struct CommonSearchArgs {
         alias = "remote_origin"
     )]
     origin: Option<String>,
-    #[arg(long, alias = "dep", alias = "deps")]
+    #[arg(long, visible_alias = "dep", visible_alias = "deps")]
     dependency: Option<String>,
     #[arg(
         long,
-        alias = "imports",
-        alias = "module",
+        visible_alias = "imports",
+        visible_alias = "module",
         alias = "modules",
-        alias = "use",
+        visible_alias = "use",
         alias = "uses"
     )]
     import: Option<String>,
@@ -1058,20 +1068,20 @@ struct CommonSearchArgs {
     exclude_file: Vec<String>,
     #[arg(
         long = "exclude-path",
-        alias = "exclude-dir",
+        visible_alias = "exclude-dir",
         alias = "exclude-directory",
-        alias = "exclude-folder"
+        visible_alias = "exclude-folder"
     )]
     exclude_path: Vec<String>,
     #[arg(
         long = "exclude-language",
-        alias = "exclude-lang",
+        visible_alias = "exclude-lang",
         alias = "exclude_language"
     )]
     exclude_language: Vec<String>,
     #[arg(
         long = "exclude-extension",
-        alias = "exclude-ext",
+        visible_alias = "exclude-ext",
         alias = "exclude_extension"
     )]
     exclude_extension: Vec<String>,
@@ -1079,8 +1089,8 @@ struct CommonSearchArgs {
     exclude_symbol: Vec<String>,
     #[arg(
         long = "exclude-kind",
-        alias = "exclude-type",
-        alias = "exclude-symbol-kind",
+        visible_alias = "exclude-type",
+        visible_alias = "exclude-symbol-kind",
         alias = "exclude_symbol_kind"
     )]
     exclude_symbol_kind: Vec<String>,
@@ -1103,16 +1113,16 @@ struct CommonSearchArgs {
     exclude_origin: Vec<String>,
     #[arg(
         long = "exclude-dependency",
-        alias = "exclude-dep",
-        alias = "exclude-deps"
+        visible_alias = "exclude-dep",
+        visible_alias = "exclude-deps"
     )]
     exclude_dependency: Vec<String>,
     #[arg(
         long = "exclude-import",
-        alias = "exclude-imports",
-        alias = "exclude-module",
+        visible_alias = "exclude-imports",
+        visible_alias = "exclude-module",
         alias = "exclude-modules",
-        alias = "exclude-use",
+        visible_alias = "exclude-use",
         alias = "exclude-uses"
     )]
     exclude_import: Vec<String>,

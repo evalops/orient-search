@@ -129,12 +129,53 @@ fn cli_search_help_lists_snippet_modes() {
     cmd.args(["search", "--help"])
         .assert()
         .success()
+        .stdout(predicate::str::contains(
+            "[aliases: --dir, --directory, --folder]",
+        ))
+        .stdout(predicate::str::contains("[aliases: --lang]"))
+        .stdout(predicate::str::contains("[aliases: --ext]"))
+        .stdout(predicate::str::contains(
+            "[aliases: --filename, --file-name]",
+        ))
+        .stdout(predicate::str::contains("[aliases: --type, --symbol-kind]"))
+        .stdout(predicate::str::contains("[aliases: --exclude-lang]"))
+        .stdout(predicate::str::contains("[aliases: --exclude-ext]"))
+        .stdout(predicate::str::contains(
+            "[aliases: --exclude-type, --exclude-symbol-kind]",
+        ))
         .stdout(predicate::str::contains("--snippet <SNIPPET>"))
         .stdout(predicate::str::contains("--snippet-mode"))
         .stdout(predicate::str::contains("short"))
         .stdout(predicate::str::contains("medium"))
         .stdout(predicate::str::contains("block"))
         .stdout(predicate::str::contains("symbol"));
+}
+
+#[test]
+fn cli_search_accepts_visible_common_aliases() {
+    let repo = sample_repo();
+
+    let mut cmd = Command::cargo_bin("orient").unwrap();
+    cmd.args([
+        "search",
+        "--repo",
+        repo.path().to_str().unwrap(),
+        "--dir",
+        "src",
+        "--lang",
+        "rs",
+        "--ext",
+        "rs",
+        "--filename",
+        "auth.rs",
+        "--type",
+        "function",
+        "issue token",
+    ])
+    .assert()
+    .success()
+    .stdout(predicate::str::contains("src/auth.rs"))
+    .stdout(predicate::str::contains("issue_token"));
 }
 
 #[test]
