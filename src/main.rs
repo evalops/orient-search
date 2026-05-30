@@ -928,6 +928,14 @@ enum ReadScopeArg {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum SnippetModeArg {
+    Short,
+    Medium,
+    Block,
+    Symbol,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum AgentProfileArg {
     Generic,
     Codex,
@@ -951,6 +959,17 @@ impl From<ReadScopeArg> for RangeScope {
         match value {
             ReadScopeArg::Exact => RangeScope::Exact,
             ReadScopeArg::Symbol => RangeScope::Symbol,
+        }
+    }
+}
+
+impl From<SnippetModeArg> for SnippetMode {
+    fn from(value: SnippetModeArg) -> Self {
+        match value {
+            SnippetModeArg::Short => SnippetMode::Short,
+            SnippetModeArg::Medium => SnippetMode::Medium,
+            SnippetModeArg::Block => SnippetMode::Block,
+            SnippetModeArg::Symbol => SnippetMode::Symbol,
         }
     }
 }
@@ -1006,8 +1025,8 @@ struct CommonSearchArgs {
     require_all: bool,
     #[arg(long, conflicts_with = "require_all")]
     any_terms: bool,
-    #[arg(long, default_value = "medium")]
-    snippet: String,
+    #[arg(long, value_enum, default_value = "medium")]
+    snippet: SnippetModeArg,
     #[arg(long)]
     explain: bool,
     #[arg(
@@ -1244,7 +1263,7 @@ fn search_filters_from_args(
         target_line: args.line,
         require_all: args.require_all && !args.any_terms,
         match_any: args.any_terms,
-        snippet: snippet_mode_arg(&args.snippet)?,
+        snippet: args.snippet.into(),
         explain: args.explain,
         exclude_file: args.exclude_file.clone(),
         exclude_path: args.exclude_path.clone(),
@@ -6045,11 +6064,6 @@ fn fail_slow_bench_queries(report: &BenchReport, threshold: f64) -> Result<()> {
         );
     }
     Ok(())
-}
-
-fn snippet_mode_arg(value: &str) -> Result<SnippetMode> {
-    SnippetMode::parse(value)
-        .ok_or_else(|| anyhow::anyhow!("snippet must be one of: short, medium, block, symbol"))
 }
 
 fn normalize_filter(value: &str) -> String {

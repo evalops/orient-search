@@ -124,6 +124,42 @@ fn cli_help_stays_focused_on_local_code_search() {
 }
 
 #[test]
+fn cli_search_help_lists_snippet_modes() {
+    let mut cmd = Command::cargo_bin("orient").unwrap();
+    cmd.args(["search", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--snippet <SNIPPET>"))
+        .stdout(predicate::str::contains("short"))
+        .stdout(predicate::str::contains("medium"))
+        .stdout(predicate::str::contains("block"))
+        .stdout(predicate::str::contains("symbol"));
+}
+
+#[test]
+fn cli_rejects_invalid_snippet_mode_before_searching() {
+    let repo = sample_repo();
+
+    let mut cmd = Command::cargo_bin("orient").unwrap();
+    cmd.args([
+        "search",
+        "--repo",
+        repo.path().to_str().unwrap(),
+        "--snippet",
+        "wide",
+        "issue token",
+    ])
+    .assert()
+    .failure()
+    .stderr(predicate::str::contains("invalid value"))
+    .stderr(predicate::str::contains("wide"))
+    .stderr(predicate::str::contains("short"))
+    .stderr(predicate::str::contains("medium"))
+    .stderr(predicate::str::contains("block"))
+    .stderr(predicate::str::contains("symbol"));
+}
+
+#[test]
 fn cli_search_line_filter_anchors_file_results() {
     let repo = sample_repo();
 
