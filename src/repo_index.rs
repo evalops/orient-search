@@ -4870,6 +4870,12 @@ pub(crate) fn extract_symbols(path: &str, text: &str, language: &str) -> Vec<Sym
     if is_go_mod_path(path) {
         return extract_go_mod_symbols(path, text);
     }
+    if is_maven_pom_path(path) {
+        return extract_maven_pom_symbols(path, text);
+    }
+    if is_gradle_manifest_path(path) {
+        return extract_gradle_manifest_symbols(path, text);
+    }
     if is_package_json_path(path) {
         return extract_package_json_symbols(path, text);
     }
@@ -5512,6 +5518,146 @@ fn go_mod_module_name(line: &str) -> Option<String> {
     } else {
         None
     }
+}
+
+fn is_maven_pom_path(path: &str) -> bool {
+    Path::new(path).file_name().and_then(|value| value.to_str()) == Some("pom.xml")
+}
+
+fn extract_maven_pom_symbols(path: &str, text: &str) -> Vec<Symbol> {
+    let mut symbols = Vec::new();
+    let mut ignored_depth = 0usize;
+    let mut group_id: Option<String> = None;
+    let mut artifact_id: Option<(String, usize)> = None;
+    for (index, line) in text.lines().enumerate() {
+        let line_number = index + 1;
+        let trimmed = line.trim();
+        let line_is_ignored = ignored_depth > 0 || contains_maven_ignored_block(trimmed);
+        if opens_maven_ignored_block(trimmed) {
+            ignored_depth += 1;
+        }
+        if !line_is_ignored {
+            if group_id.is_none()
+                && let Some(value) = xml_text_tag_value(trimmed, "groupId")
+            {
+                group_id = Some(value);
+            }
+            if artifact_id.is_none()
+                && let Some(value) = xml_text_tag_value(trimmed, "artifactId")
+            {
+                artifact_id = Some((value.clone(), line_number));
+                symbols.push(Symbol {
+                    name: value,
+                    kind: "package".to_string(),
+                    path: path.to_string(),
+                    line: line_number,
+                });
+            }
+        }
+        if closes_maven_ignored_block(trimmed) {
+            ignored_depth = ignored_depth.saturating_sub(1);
+        }
+    }
+    if let (Some(group), Some((artifact, line))) = (group_id, artifact_id) {
+        symbols.push(Symbol {
+            name: format!("{group}:{artifact}"),
+            kind: "package".to_string(),
+            path: path.to_string(),
+            line,
+        });
+    }
+    symbols
+}
+
+fn contains_maven_ignored_block(line: &str) -> bool {
+    [
+        "parent",
+        "dependencies",
+        "dependency",
+        "build",
+        "plugins",
+        "plugin",
+    ]
+    .iter()
+    .any(|tag| xml_open_tag(line, tag))
+}
+
+fn opens_maven_ignored_block(line: &str) -> bool {
+    [
+        "parent",
+        "dependencies",
+        "dependency",
+        "build",
+        "plugins",
+        "plugin",
+    ]
+    .iter()
+    .any(|tag| xml_open_tag(line, tag) && !xml_close_tag(line, tag))
+}
+
+fn closes_maven_ignored_block(line: &str) -> bool {
+    [
+        "parent",
+        "dependencies",
+        "dependency",
+        "build",
+        "plugins",
+        "plugin",
+    ]
+    .iter()
+    .any(|tag| xml_close_tag(line, tag) && !xml_open_tag(line, tag))
+}
+
+fn xml_open_tag(line: &str, tag: &str) -> bool {
+    line.contains(&format!("<{tag}>")) || line.contains(&format!("<{tag} "))
+}
+
+fn xml_close_tag(line: &str, tag: &str) -> bool {
+    line.contains(&format!("</{tag}>"))
+}
+
+fn xml_text_tag_value(line: &str, tag: &str) -> Option<String> {
+    let open = format!("<{tag}>");
+    let close = format!("</{tag}>");
+    let value = line.split_once(&open)?.1.split_once(&close)?.0.trim();
+    (!value.is_empty()).then(|| value.to_string())
+}
+
+fn is_gradle_manifest_path(path: &str) -> bool {
+    matches!(
+        Path::new(path).file_name().and_then(|value| value.to_str()),
+        Some("build.gradle" | "build.gradle.kts" | "settings.gradle" | "settings.gradle.kts")
+    )
+}
+
+fn extract_gradle_manifest_symbols(path: &str, text: &str) -> Vec<Symbol> {
+    let mut symbols = Vec::new();
+    for (index, line) in text.lines().enumerate() {
+        let trimmed = line.split("//").next().unwrap_or("").trim();
+        if let Some(name) = gradle_assignment(trimmed, "rootProject.name")
+            .or_else(|| gradle_assignment(trimmed, "group"))
+        {
+            symbols.push(Symbol {
+                name,
+                kind: "package".to_string(),
+                path: path.to_string(),
+                line: index + 1,
+            });
+        }
+    }
+    symbols
+}
+
+fn gradle_assignment(line: &str, key: &str) -> Option<String> {
+    let mut value = line.strip_prefix(key)?.trim_start();
+    if let Some(after_equals) = value.strip_prefix('=') {
+        value = after_equals.trim_start();
+    }
+    parse_gradle_string(value)
+}
+
+fn parse_gradle_string(value: &str) -> Option<String> {
+    parse_toml_string(value.trim_end_matches(';').trim())
 }
 
 fn is_package_json_path(path: &str) -> bool {

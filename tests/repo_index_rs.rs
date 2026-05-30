@@ -987,6 +987,83 @@ require github.com/sourcegraph/zoekt v0.0.0
 }
 
 #[test]
+fn jvm_manifests_work_as_package_symbols_across_live_and_persistent_indexes() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("pom.xml"),
+        r#"
+<project>
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>com.evalops</groupId>
+  <artifactId>auth-service</artifactId>
+  <dependencies>
+    <dependency>
+      <groupId>junit</groupId>
+      <artifactId>junit</artifactId>
+    </dependency>
+  </dependencies>
+</project>
+"#,
+    );
+    write(
+        &repo.path().join("settings.gradle.kts"),
+        r#"
+pluginManagement { repositories { gradlePluginPortal() } }
+rootProject.name = "billing-worker"
+"#,
+    );
+    write(
+        &repo.path().join("build.gradle.kts"),
+        r#"
+plugins { kotlin("jvm") version "2.0.0" }
+group = "com.evalops.gradle"
+"#,
+    );
+
+    let live = RepoIndexer::new(repo.path()).build().unwrap();
+    let live_artifact = &live.find_symbol("auth-service", 10)[0];
+    assert_symbol(live_artifact, "pom.xml", "package");
+    assert_eq!(live_artifact.line, 5);
+    let live_coordinate = &live.find_symbol("com.evalops:auth-service", 10)[0];
+    assert_symbol(live_coordinate, "pom.xml", "package");
+    assert_eq!(live_coordinate.line, 5);
+    assert!(live.find_symbol("junit", 10).is_empty());
+    let live_gradle_root = &live.find_symbol("billing-worker", 10)[0];
+    assert_symbol(live_gradle_root, "settings.gradle.kts", "package");
+    assert_eq!(live_gradle_root.line, 3);
+
+    let fallback = search_repo_fast_filtered(
+        repo.path(),
+        "package:com.evalops:auth-service",
+        5,
+        &Default::default(),
+    )
+    .unwrap();
+    assert_eq!(fallback[0].path, "pom.xml");
+    assert!(
+        fallback[0]
+            .reason
+            .contains("symbol:com.evalops:auth-service")
+    );
+
+    let indexed = FastIndex::build(repo.path()).unwrap();
+    let indexed_artifact = &indexed.find_symbol("auth-service", 10)[0];
+    assert_symbol(indexed_artifact, "pom.xml", "package");
+    assert_eq!(indexed_artifact.line, 5);
+    let indexed_gradle_root = &indexed.find_symbol("billing-worker", 10)[0];
+    assert_symbol(indexed_gradle_root, "settings.gradle.kts", "package");
+    assert_eq!(indexed_gradle_root.line, 3);
+    let indexed_gradle_group = &indexed.find_symbol("com.evalops.gradle", 10)[0];
+    assert_symbol(indexed_gradle_group, "build.gradle.kts", "package");
+    assert_eq!(indexed_gradle_group.line, 3);
+    let indexed_results = indexed
+        .search_filtered("package:billing-worker", 5, &Default::default())
+        .unwrap();
+    assert_eq!(indexed_results[0].path, "settings.gradle.kts");
+    assert!(indexed_results[0].reason.contains("symbol:billing-worker"));
+}
+
+#[test]
 fn package_json_scripts_work_as_symbols_across_live_and_persistent_indexes() {
     let repo = tempfile::tempdir().unwrap();
     write(

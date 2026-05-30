@@ -106,9 +106,10 @@ accepted too. Language filters include common shorthands such as `lang:rs`,
 `lang:justfile`. `kind:target` and `recipe:name` can jump to Makefile targets,
 Justfile targets, and GitHub Actions jobs; `kind:script` and `script:name` can
 jump to package.json and pyproject scripts; `package:name` can jump to
-package.json packages, Cargo packages, pyproject packages, and Go module paths;
-`bin:name`, `example:name`, and `bench:name` can jump to Cargo manifest entries. See
-[Agent protocol](docs/agent-protocol.md) for the full query language.
+package.json packages, Cargo packages, pyproject packages, Go module paths,
+Maven coordinates, and Gradle project names; `bin:name`, `example:name`, and
+`bench:name` can jump to Cargo manifest entries. See [Agent protocol](docs/agent-protocol.md)
+for the full query language.
 
 ## Protocol
 
