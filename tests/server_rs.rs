@@ -1390,6 +1390,8 @@ fn agent_instructions_returns_copyable_local_agent_snippet() {
     for expected in [
         "## Orient Search",
         "Use Orient for local code discovery and bounded file reads",
+        "orient search-auto --retry-if-empty",
+        "before falling back to shell search",
         "orient client-jsonl --require-version --addr 127.0.0.1:9999",
         "selected coding agent",
         "Keep cache paths local",

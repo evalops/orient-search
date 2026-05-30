@@ -1851,6 +1851,7 @@ pub fn agent_instructions(
     format!(
         "## Orient Search\n\
 Use Orient for local code discovery and bounded file reads before `rg`, `find`, `ls`, `grep`, `cat`, or ad hoc filesystem scans.\n\
+For terminal-native work, start with `orient search-auto --retry-if-empty \"<query>\"` and then run the returned `read_*`, `related_*`, or `query_plan_*` request before falling back to shell search.\n\
 Prefer the shared daemon when it is running: `{client_command}`.\n\
 Copy this snippet into {instruction_target}.\n\
 Keep cache paths local to the machine running the agents; do not copy machine-specific layouts into shared docs or reusable instructions.\n\

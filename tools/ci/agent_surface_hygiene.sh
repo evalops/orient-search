@@ -64,6 +64,8 @@ done
 for file in "${scratch}"/agent-instructions-*.txt; do
   grep -q 'has no telemetry' "${file}"
   grep -q 'local code discovery and bounded file reads' "${file}"
+  grep -q 'orient search-auto --retry-if-empty' "${file}"
+  grep -q 'before falling back to shell search' "${file}"
 done
 
 if grep -E -n -- 'AGENTS.md|CLAUDE.md|Amp rules' "${outputs[@]}"; then
