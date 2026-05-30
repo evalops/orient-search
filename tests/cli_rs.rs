@@ -1369,6 +1369,18 @@ fn cli_search_auto_batch_returns_query_surfaces() {
         auto_retry_batch[0]["summary"]["result_count"],
         serde_json::json!(0)
     );
+    assert_eq!(
+        auto_retry_batch[0]["summary"]["primary_retry_status"],
+        serde_json::json!("matched")
+    );
+    assert_eq!(
+        auto_retry_batch[0]["summary"]["primary_retry_result_count"],
+        serde_json::json!(1)
+    );
+    assert_eq!(
+        auto_retry_batch[0]["summary"]["primary_retry_top_paths"],
+        serde_json::json!(["src/auth.rs"])
+    );
 
     let mut diagnosed_batch = Command::cargo_bin("orient").unwrap();
     diagnosed_batch

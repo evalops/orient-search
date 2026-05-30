@@ -84,6 +84,14 @@ struct SearchBatchResult {
 struct SearchResultSummary {
     status: String,
     result_count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    primary_retry_status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    primary_retry_result_count: Option<usize>,
+    #[serde(skip_serializing_if = "is_zero")]
+    primary_retry_grouped_duplicate_count: usize,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    primary_retry_top_paths: Vec<String>,
     #[serde(skip_serializing_if = "is_zero")]
     grouped_duplicate_count: usize,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -125,6 +133,10 @@ fn search_result_summary(results: &[SearchResult]) -> SearchResultSummary {
             "matched".to_string()
         },
         result_count,
+        primary_retry_status: None,
+        primary_retry_result_count: None,
+        primary_retry_grouped_duplicate_count: 0,
+        primary_retry_top_paths: Vec::new(),
         grouped_duplicate_count: grouped_duplicate_count_from_results(results),
         top_paths: search_summary_top_paths(results),
         top_dirs: search_summary_top_dirs(results),
@@ -133,6 +145,44 @@ fn search_result_summary(results: &[SearchResult]) -> SearchResultSummary {
         max_score: results.first().map(|result| result.score),
         min_score: results.last().map(|result| result.score),
     }
+}
+
+fn search_result_summary_with_primary_retry(
+    results: &[SearchResult],
+    primary_retry_result: &Option<Value>,
+) -> SearchResultSummary {
+    let mut summary = search_result_summary(results);
+    let Some(retry_summary) = primary_retry_result
+        .as_ref()
+        .and_then(|result| result.get("summary"))
+    else {
+        return summary;
+    };
+    summary.primary_retry_status = retry_summary
+        .get("status")
+        .and_then(Value::as_str)
+        .map(ToString::to_string);
+    summary.primary_retry_result_count = retry_summary
+        .get("result_count")
+        .and_then(Value::as_u64)
+        .and_then(|count| usize::try_from(count).ok());
+    summary.primary_retry_grouped_duplicate_count = retry_summary
+        .get("grouped_duplicate_count")
+        .and_then(Value::as_u64)
+        .and_then(|count| usize::try_from(count).ok())
+        .unwrap_or(0);
+    summary.primary_retry_top_paths = retry_summary
+        .get("top_paths")
+        .and_then(Value::as_array)
+        .map(|paths| {
+            paths
+                .iter()
+                .filter_map(Value::as_str)
+                .map(ToString::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
+    summary
 }
 
 fn search_summary_top_paths(results: &[SearchResult]) -> Vec<String> {
@@ -6585,7 +6635,7 @@ impl ToolRuntime {
         );
         Ok(SearchAutoResult {
             query: query.to_string(),
-            summary: search_result_summary(&results),
+            summary: search_result_summary_with_primary_retry(&results, &primary_retry_result),
             surface: "fallback".to_string(),
             target: repo.to_string_lossy().to_string(),
             freshness: None,
@@ -6707,7 +6757,7 @@ impl ToolRuntime {
         );
         Ok(SearchAutoResult {
             query: query.to_string(),
-            summary: search_result_summary(&results),
+            summary: search_result_summary_with_primary_retry(&results, &primary_retry_result),
             surface: "shards".to_string(),
             target: index_dir.to_string_lossy().to_string(),
             refresh_request,
@@ -6826,7 +6876,7 @@ impl ToolRuntime {
         );
         Ok(SearchAutoResult {
             query: query.to_string(),
-            summary: search_result_summary(&results),
+            summary: search_result_summary_with_primary_retry(&results, &primary_retry_result),
             surface: "indexed".to_string(),
             target: index_path.to_string_lossy().to_string(),
             refresh_request,
