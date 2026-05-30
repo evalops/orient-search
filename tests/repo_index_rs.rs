@@ -886,6 +886,58 @@ legacy-agent = "agent_tools.legacy:main"
 }
 
 #[test]
+fn go_mod_module_works_as_package_symbol_across_live_and_persistent_indexes() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("go.mod"),
+        r#"
+module github.com/evalops/orient-search
+
+go 1.22
+
+require github.com/sourcegraph/zoekt v0.0.0
+"#,
+    );
+
+    let live = RepoIndexer::new(repo.path()).build().unwrap();
+    let live_package = &live.find_symbol("github.com/evalops/orient-search", 10)[0];
+    assert_symbol(live_package, "go.mod", "package");
+    assert_eq!(live_package.line, 2);
+
+    let fallback = search_repo_fast_filtered(
+        repo.path(),
+        "package:github.com/evalops/orient-search",
+        5,
+        &Default::default(),
+    )
+    .unwrap();
+    assert_eq!(fallback[0].path, "go.mod");
+    assert!(
+        fallback[0]
+            .reason
+            .contains("symbol:github.com/evalops/orient-search")
+    );
+
+    let indexed = FastIndex::build(repo.path()).unwrap();
+    let indexed_package = &indexed.find_symbol("github.com/evalops/orient-search", 10)[0];
+    assert_symbol(indexed_package, "go.mod", "package");
+    assert_eq!(indexed_package.line, 2);
+    let indexed_results = indexed
+        .search_filtered(
+            "package:github.com/evalops/orient-search",
+            5,
+            &Default::default(),
+        )
+        .unwrap();
+    assert_eq!(indexed_results[0].path, "go.mod");
+    assert!(
+        indexed_results[0]
+            .reason
+            .contains("symbol:github.com/evalops/orient-search")
+    );
+}
+
+#[test]
 fn package_json_scripts_work_as_symbols_across_live_and_persistent_indexes() {
     let repo = tempfile::tempdir().unwrap();
     write(

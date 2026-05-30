@@ -4800,6 +4800,9 @@ pub(crate) fn extract_symbols(path: &str, text: &str, language: &str) -> Vec<Sym
     if is_pyproject_toml_path(path) {
         return extract_pyproject_symbols(path, text);
     }
+    if is_go_mod_path(path) {
+        return extract_go_mod_symbols(path, text);
+    }
     if is_package_json_path(path) {
         return extract_package_json_script_symbols(path, text);
     }
@@ -5318,6 +5321,39 @@ fn toml_key_assignment(line: &str) -> Option<String> {
         parse_toml_string(key)
     } else {
         Some(key.to_string())
+    }
+}
+
+fn is_go_mod_path(path: &str) -> bool {
+    Path::new(path).file_name().and_then(|value| value.to_str()) == Some("go.mod")
+}
+
+fn extract_go_mod_symbols(path: &str, text: &str) -> Vec<Symbol> {
+    for (index, line) in text.lines().enumerate() {
+        let Some(module) = go_mod_module_name(line) else {
+            continue;
+        };
+        return vec![Symbol {
+            name: module,
+            kind: "package".to_string(),
+            path: path.to_string(),
+            line: index + 1,
+        }];
+    }
+    Vec::new()
+}
+
+fn go_mod_module_name(line: &str) -> Option<String> {
+    let line = line.split("//").next().unwrap_or("").trim();
+    let module = line
+        .strip_prefix("module ")?
+        .split_whitespace()
+        .next()
+        .unwrap_or_default();
+    if is_dependency_name(module) {
+        Some(module.to_string())
+    } else {
+        None
     }
 }
 
