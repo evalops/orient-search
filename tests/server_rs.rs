@@ -11826,12 +11826,28 @@ fn server_handles_repo_map_and_read_range_requests() {
             "lines": 2
         }
     });
+    let copied_range_request = serde_json::json!({
+        "id": "copied-range",
+        "tool": "open_range",
+        "arguments": {
+            "repo": repo.path(),
+            "path": "src/auth.rs:2-3"
+        }
+    });
     let ranges_request = serde_json::json!({
         "id": "ranges",
         "tool": "open_ranges",
         "arguments": {
             "repo": repo.path(),
             "ranges": {"path": "src/auth.rs", "start": 1, "lines": 1}
+        }
+    });
+    let copied_ranges_request = serde_json::json!({
+        "id": "copied-ranges",
+        "tool": "open_ranges",
+        "arguments": {
+            "repo": repo.path(),
+            "ranges": ["src/auth.rs:2-3"]
         }
     });
     let symbols_request = serde_json::json!({
@@ -11846,7 +11862,9 @@ fn server_handles_repo_map_and_read_range_requests() {
     });
     writeln!(child.stdin.as_mut().unwrap(), "{map_request}").unwrap();
     writeln!(child.stdin.as_mut().unwrap(), "{range_request}").unwrap();
+    writeln!(child.stdin.as_mut().unwrap(), "{copied_range_request}").unwrap();
     writeln!(child.stdin.as_mut().unwrap(), "{ranges_request}").unwrap();
+    writeln!(child.stdin.as_mut().unwrap(), "{copied_ranges_request}").unwrap();
     writeln!(child.stdin.as_mut().unwrap(), "{symbols_request}").unwrap();
     drop(child.stdin.take());
 
@@ -11861,8 +11879,11 @@ fn server_handles_repo_map_and_read_range_requests() {
     assert!(stdout.contains("tests/auth_test.rs"));
     assert!(stdout.contains("\"id\":\"range\""));
     assert!(stdout.contains("\"start_line\":2"));
+    assert!(stdout.contains("\"id\":\"copied-range\""));
+    assert!(stdout.contains("\"end_line\":3"));
     assert!(stdout.contains("issue_token"));
     assert!(stdout.contains("\"id\":\"ranges\""));
+    assert!(stdout.contains("\"id\":\"copied-ranges\""));
     assert!(stdout.contains("\"path\":\"src/auth.rs\""));
     assert!(stdout.contains("\"path\":\"tests/auth_test.rs\""));
     assert!(stdout.contains("\"id\":\"symbols\""));

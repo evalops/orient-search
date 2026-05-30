@@ -1686,7 +1686,7 @@ fn argument_schema(tool_name: &str, name: &str) -> Value {
             });
             let range_string_schema = json!({
                 "type": "string",
-                "description": "Compact PATH:START:LINES[:SCOPE] range or copied location such as path:line, path:line: text, or path#Lstart-Lend."
+                "description": "Compact PATH:START:LINES[:SCOPE] range or copied location such as path:line, path:start-end, path:line: text, path:start-end: text, or path#Lstart-Lend."
             });
             if name == "range" {
                 schema.insert(
@@ -8554,7 +8554,9 @@ fn range_arg_from_string(value: &str, default_scope: RangeScope) -> Result<Range
         return Ok(range);
     }
     parse_copied_location_range(value, 1, 80, scope, false, false).ok_or_else(|| {
-        anyhow!("range string must be PATH:START:LINES[:SCOPE] or a copied PATH:LINE location")
+        anyhow!(
+            "range string must be PATH:START:LINES[:SCOPE] or a copied PATH:LINE/PATH:START-END location"
+        )
     })
 }
 
@@ -8636,10 +8638,14 @@ fn parse_copied_location_range(
         lines: if explicit_lines {
             fallback_lines
         } else {
-            copied_hash_anchor_lines(value).unwrap_or(80)
+            copied_location_lines(value).unwrap_or(80)
         },
         scope,
     })
+}
+
+fn copied_location_lines(value: &str) -> Option<usize> {
+    copied_hash_anchor_lines(value).or_else(|| copied_colon_range_lines(value))
 }
 
 fn copied_hash_anchor_lines(value: &str) -> Option<usize> {
@@ -8655,6 +8661,34 @@ fn copied_hash_anchor_lines(value: &str) -> Option<usize> {
         .unwrap_or(after_dash);
     let (end, _) = split_leading_digits(after_optional_l)?;
     (end >= start).then_some(end - start + 1)
+}
+
+fn copied_colon_range_lines(value: &str) -> Option<usize> {
+    for (colon_index, _) in value.match_indices(':') {
+        let after_colon = &value[colon_index + 1..];
+        let Some((start, after_start)) = split_leading_digits(after_colon) else {
+            continue;
+        };
+        let Some(after_dash) = after_start.trim_start().strip_prefix('-') else {
+            continue;
+        };
+        let Some((end, after_end)) = split_leading_digits(after_dash.trim_start()) else {
+            continue;
+        };
+        if end >= start && colon_range_tail_is_structural(after_end) {
+            return Some(end - start + 1);
+        }
+    }
+    None
+}
+
+fn colon_range_tail_is_structural(value: &str) -> bool {
+    let value = value.trim_start();
+    value.is_empty()
+        || value
+            .chars()
+            .next()
+            .is_some_and(|ch| matches!(ch, ':' | ')' | ']' | '}' | '>' | ',' | ';'))
 }
 
 fn split_leading_digits(value: &str) -> Option<(usize, &str)> {
