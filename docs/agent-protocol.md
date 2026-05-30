@@ -284,7 +284,7 @@ orient open-index-ranges --index "$ORIENT_INDEX" --range src/auth.rs:1:80
 orient open-shard-ranges --index-dir "$ORIENT_SHARDS" --range service/src/auth.rs:40:80
 ```
 
-Range reads follow manifest bounds: `start >= 1`, `1 <= lines <= lines.maximum`, non-empty batch arrays, and `ranges.maxItems`, so a mistaken request cannot dump unbounded file content.
+Range reads include a compact `summary` with `status`, `line_count`, and `total_lines` alongside the line-numbered `text`, so adapters can cheaply confirm how much context was opened before deciding whether to widen or split the follow-up. Range reads follow manifest bounds: `start >= 1`, `1 <= lines <= lines.maximum`, non-empty batch arrays, and `ranges.maxItems`, so a mistaken request cannot dump unbounded file content.
 For CLI adapters, `read-range` / `open-range` and positional `read-ranges` / `open-ranges` entries accept `--format json`, compact `path:start:lines` specs, and copied locations such as `path:line`, `path:start-end`, `path:line: copied text`, `path:start-end: copied text`, and `path#Lstart-Lend`. They also accept `--path`, `--start`, and `--lines`; add a trailing `:symbol` or `:exact` when one range in a batch needs its own scope. Protocol batch strings use the same compact `path:start:lines[:scope]` form. Parsing splits from the right so paths containing `:` still work when the trailing range fields are present.
 
 ## Orientation And Repair

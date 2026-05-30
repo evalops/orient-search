@@ -1272,6 +1272,8 @@ pub struct RepoMapRelatedSymbol {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FileRange {
+    #[serde(default)]
+    pub summary: ReadRangeSummary,
     pub path: String,
     pub start_line: usize,
     pub end_line: usize,
@@ -1279,6 +1281,49 @@ pub struct FileRange {
     pub text: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub symbol: Option<Symbol>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReadRangeSummary {
+    pub status: String,
+    pub line_count: usize,
+    pub total_lines: usize,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub has_symbol: bool,
+}
+
+impl Default for ReadRangeSummary {
+    fn default() -> Self {
+        Self {
+            status: "empty".to_string(),
+            line_count: 0,
+            total_lines: 0,
+            has_symbol: false,
+        }
+    }
+}
+
+pub(crate) fn read_range_summary(
+    start_line: usize,
+    end_line: usize,
+    total_lines: usize,
+    has_symbol: bool,
+) -> ReadRangeSummary {
+    let line_count = if end_line >= start_line {
+        end_line - start_line + 1
+    } else {
+        0
+    };
+    ReadRangeSummary {
+        status: if line_count == 0 {
+            "empty".to_string()
+        } else {
+            "read".to_string()
+        },
+        line_count,
+        total_lines,
+        has_symbol,
+    }
 }
 
 #[derive(Debug, Copy, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -3597,7 +3642,9 @@ fn file_range_from_text_with_symbol(
         format_numbered_lines(&lines, start - 1, end)
     };
 
+    let has_symbol = symbol.is_some();
     FileRange {
+        summary: read_range_summary(start, end, total_lines, has_symbol),
         path: path.into(),
         start_line: start,
         end_line: end,

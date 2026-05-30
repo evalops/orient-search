@@ -16,9 +16,10 @@ use crate::repo_index::{
     is_test_path, known_commands_from_hints, language_for,
     matches_filters_with_compiled_path_metadata, normalize_language_filter,
     normalize_search_filters_for_root, normalize_token, query_plan_repair_action,
-    referenced_symbol_name, regular_file_metadata, related_file_reference_symbol_candidate,
-    related_query_terms_symbol_and_filters, related_stem_terms, repo_map_seed_paths, repo_matches,
-    result_matches_all_tokens, result_matches_symbol_filters, round4, score_filter_only_path_match,
+    read_range_summary, referenced_symbol_name, regular_file_metadata,
+    related_file_reference_symbol_candidate, related_query_terms_symbol_and_filters,
+    related_stem_terms, repo_map_seed_paths, repo_matches, result_matches_all_tokens,
+    result_matches_symbol_filters, round4, score_filter_only_path_match,
     select_repo_brief_import_hints, select_repo_map_top_symbols,
     source_excluded_content_filters_match, source_import_filters_match, symbol_exact_phrase_bonus,
     symbol_filter_matches_name, symbol_for_anchor, symbol_matches_related_filters,
@@ -5509,7 +5510,9 @@ fn indexed_file_range_with_symbol(
 ) -> FileRange {
     let bytes = file.content.as_bytes();
     if bytes.is_empty() || file.line_offsets.is_empty() {
+        let has_symbol = symbol.is_some();
         return FileRange {
+            summary: read_range_summary(1, 0, 0, has_symbol),
             path: file.path.clone(),
             start_line: 1,
             end_line: 0,
@@ -5533,7 +5536,9 @@ fn indexed_file_range_with_symbol(
         rendered.push(format!("{line}: {}", text.trim_end_matches(['\r', '\n'])));
     }
 
+    let has_symbol = symbol.is_some();
     FileRange {
+        summary: read_range_summary(start, end_line, total_lines, has_symbol),
         path: file.path.clone(),
         start_line: start,
         end_line,

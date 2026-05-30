@@ -12215,6 +12215,9 @@ fn server_handles_repo_map_and_read_range_requests() {
     assert!(stdout.contains("\"source\":\"Cargo.toml\""));
     assert!(stdout.contains("tests/auth_test.rs"));
     assert!(stdout.contains("\"id\":\"range\""));
+    assert!(stdout.contains("\"summary\""));
+    assert!(stdout.contains("\"status\":\"read\""));
+    assert!(stdout.contains("\"line_count\":2"));
     assert!(stdout.contains("\"start_line\":2"));
     assert!(stdout.contains("\"id\":\"copied-range\""));
     assert!(stdout.contains("\"end_line\":3"));

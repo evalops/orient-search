@@ -1741,6 +1741,9 @@ fn cli_outputs_repo_map_and_reads_ranges() {
         ])
         .assert()
         .success()
+        .stdout(predicate::str::contains("\"summary\""))
+        .stdout(predicate::str::contains("\"status\":\"read\""))
+        .stdout(predicate::str::contains("\"line_count\":3"))
         .stdout(predicate::str::contains("\"start_line\":3"))
         .stdout(predicate::str::contains("issue_token"));
 
@@ -1756,6 +1759,9 @@ fn cli_outputs_repo_map_and_reads_ranges() {
         ])
         .assert()
         .success()
+        .stdout(predicate::str::contains("\"summary\""))
+        .stdout(predicate::str::contains("\"status\":\"read\""))
+        .stdout(predicate::str::contains("\"line_count\":3"))
         .stdout(predicate::str::contains("\"start_line\":3"))
         .stdout(predicate::str::contains("issue_token"));
 
