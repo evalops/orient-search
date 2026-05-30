@@ -165,8 +165,9 @@ selected repo or index root.
 Hosted links may carry fragment or query-string line anchors. Raw GitHub links
 under `raw.githubusercontent.com` are treated as hosted code paths too.
 Bitbucket `/src/<ref>/<path>` links and `#lines-start:end` anchors are also
-normalized for search and reads. GitLab `/-/blob/<ref>/<path>` links are
-normalized with either `#Lstart-end` or `#Lstart-Lend` anchors.
+normalized for search and reads. GitLab `/-/blob/<ref>/<path>` and
+`/-/raw/<ref>/<path>` links are normalized with either `#Lstart-end` or
+`#Lstart-Lend` anchors.
 Common slash-delimited branch namespaces such as `feature/search` or
 `release/v1` are handled for hosted code links when a recognizable repo path
 suffix follows them.

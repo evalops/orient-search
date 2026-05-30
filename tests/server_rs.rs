@@ -3089,6 +3089,31 @@ fn runtime_read_alias_accepts_live_index_and_shard_targets() {
         serde_json::json!(2)
     );
 
+    let live_gitlab_raw_range = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("live-gitlab-raw-range"),
+        tool: "read_range".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "range": "https://gitlab.com/evalops/orient-search/-/raw/main/Cargo.toml#L1-2"
+        }),
+    });
+    assert!(
+        live_gitlab_raw_range.error.is_none(),
+        "{:?}",
+        live_gitlab_raw_range.error
+    );
+    let live_gitlab_raw_range = live_gitlab_raw_range.result.unwrap();
+    assert_eq!(
+        live_gitlab_raw_range["path"],
+        serde_json::json!("Cargo.toml")
+    );
+    assert_eq!(live_gitlab_raw_range["start_line"], serde_json::json!(1));
+    assert_eq!(live_gitlab_raw_range["end_line"], serde_json::json!(2));
+    assert_eq!(
+        live_gitlab_raw_range["summary"]["line_count"],
+        serde_json::json!(2)
+    );
+
     let indexed_range_string = runtime.dispatch(ToolRequest {
         id: serde_json::json!("indexed-range-string"),
         tool: "read_index_range".to_string(),

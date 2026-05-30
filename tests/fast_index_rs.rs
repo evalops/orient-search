@@ -2760,6 +2760,18 @@ fn bare_path_like_queries_use_filter_only_fast_paths() {
         gitlab_slashy_branch_location_fallback[0].match_lines,
         vec![40]
     );
+    let gitlab_raw_location_fallback = search_repo_fast_filtered(
+        repo.path(),
+        "https://gitlab.com/evalops/orient-search/-/raw/main/src/lib.rs#L40-45",
+        10,
+        &filters,
+    )
+    .unwrap();
+    assert_eq!(
+        result_paths(&gitlab_raw_location_fallback),
+        vec!["src/lib.rs"]
+    );
+    assert_eq!(gitlab_raw_location_fallback[0].match_lines, vec![40]);
     let hosted_query_location_fallback = search_repo_fast_filtered(
         repo.path(),
         "https://github.com/evalops/orient-search/blob/main/src/lib.rs?plain=1#L40-L45",
@@ -3031,6 +3043,18 @@ fn bare_path_like_queries_use_filter_only_fast_paths() {
         gitlab_slashy_branch_location_indexed[0].match_lines,
         vec![40]
     );
+    let gitlab_raw_location_indexed = index
+        .search_filtered(
+            "https://gitlab.com/evalops/orient-search/-/raw/main/src/lib.rs#L40-45",
+            10,
+            &filters,
+        )
+        .unwrap();
+    assert_eq!(
+        result_paths(&gitlab_raw_location_indexed),
+        vec!["src/lib.rs"]
+    );
+    assert_eq!(gitlab_raw_location_indexed[0].match_lines, vec![40]);
     let hosted_query_location_indexed = index
         .search_filtered(
             "https://github.com/evalops/orient-search/blob/main/src/lib.rs?plain=1#L40-L45",

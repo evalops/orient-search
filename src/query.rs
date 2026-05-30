@@ -613,7 +613,9 @@ fn code_hosted_location_path(value: &str) -> Option<String> {
     if let Some(path) = bitbucket_location_path(base, &lower_base) {
         return Some(format!("{path}{line_anchor}"));
     }
-    for marker in ["/-/blob/", "/blob/", "/-/tree/", "/tree/"] {
+    for marker in [
+        "/-/blob/", "/blob/", "/-/raw/", "/raw/", "/-/tree/", "/tree/",
+    ] {
         let Some(marker_start) = lower_base.find(marker) else {
             continue;
         };
@@ -1714,6 +1716,15 @@ mod tests {
             gitlab_slashy_branch_source_location.filters.target_line,
             Some(42)
         );
+
+        let gitlab_raw_source_location =
+            parse_query("https://gitlab.com/evalops/orient-search/-/raw/main/src/server.rs#L42-45");
+        assert!(gitlab_raw_source_location.terms.is_empty());
+        assert_eq!(
+            gitlab_raw_source_location.filters.path.as_deref(),
+            Some("src/server.rs")
+        );
+        assert_eq!(gitlab_raw_source_location.filters.target_line, Some(42));
 
         let sourcegraph_source_location = parse_query(
             "https://sourcegraph.com/github.com/evalops/orient-search/-/blob/src/server.rs?L42:9",
