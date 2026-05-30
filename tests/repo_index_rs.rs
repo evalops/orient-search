@@ -788,6 +788,55 @@ release target='prod':
 }
 
 #[test]
+fn github_actions_jobs_work_as_targets_across_live_and_persistent_indexes() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join(".github/workflows/ci.yml"),
+        r#"
+name: CI
+
+on:
+  pull_request:
+
+jobs:
+  rust-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - run: cargo test
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - run: cargo fmt --check
+"#,
+    );
+
+    let live = RepoIndexer::new(repo.path()).build().unwrap();
+    let live_job = &live.find_symbol("rust-tests", 10)[0];
+    assert_symbol(live_job, ".github/workflows/ci.yml", "target");
+    assert_eq!(live_job.line, 8);
+
+    let fallback = search_repo_fast_filtered(
+        repo.path(),
+        "kind:target symbol:rust-tests",
+        5,
+        &Default::default(),
+    )
+    .unwrap();
+    assert_eq!(fallback[0].path, ".github/workflows/ci.yml");
+    assert!(fallback[0].reason.contains("symbol:rust-tests"));
+
+    let indexed = FastIndex::build(repo.path()).unwrap();
+    let indexed_lint = &indexed.find_symbol("lint", 10)[0];
+    assert_symbol(indexed_lint, ".github/workflows/ci.yml", "target");
+    assert_eq!(indexed_lint.line, 12);
+    let indexed_results = indexed
+        .search_filtered("recipe:lint", 5, &Default::default())
+        .unwrap();
+    assert_eq!(indexed_results[0].path, ".github/workflows/ci.yml");
+    assert!(indexed_results[0].reason.contains("symbol:lint"));
+}
+
+#[test]
 fn cargo_manifest_targets_work_as_symbols_across_live_and_persistent_indexes() {
     let repo = tempfile::tempdir().unwrap();
     write(
