@@ -4,8 +4,11 @@ set -euo pipefail
 docs=(README.md docs)
 
 fixed_patterns=(
+  'analytics'
   'session analytics'
+  'session data'
   'session logs'
+  'transcript analytics'
   'agent transcripts'
   'agent conversations'
   'task outcomes'

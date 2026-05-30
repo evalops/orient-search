@@ -19,8 +19,11 @@ done
 outputs+=("${scratch}/tool-manifest.json" "${scratch}/mcp-manifest.json")
 
 fixed_patterns=(
+  'analytics'
   'session analytics'
+  'session data'
   'session logs'
+  'transcript analytics'
   'agent transcripts'
   'agent conversations'
   'task outcomes'

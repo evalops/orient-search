@@ -29,9 +29,8 @@ structured enough that agents stop spending turns on repeated `rg`, `find`,
   workflows need short, copyable commands and structured follow-up requests.
 
 Orient should borrow the durable search-engine ideas, but keep the product
-local-agent-first: no hosted indexing requirement, no thread or transcript
-analytics, bounded JSON-lines/MCP-style calls, and repo-relative examples in
-public docs.
+local-agent-first: no hosted indexing requirement, no session-data collection,
+bounded JSON-lines/MCP-style calls, and repo-relative examples in public docs.
 
 ## Already In Place
 
