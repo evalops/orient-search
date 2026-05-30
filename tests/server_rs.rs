@@ -210,6 +210,10 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         "string"
     );
     assert_eq!(
+        find_symbol["input_schema"]["properties"]["include_read_batch"]["type"],
+        "boolean"
+    );
+    assert_eq!(
         search_auto_batch["input_schema"]["properties"]["diagnose"]["type"],
         "boolean"
     );
@@ -3439,6 +3443,57 @@ fn runtime_find_symbol_alias_accepts_live_index_and_shard_targets() {
         serde_json::json!(index_path)
     );
 
+    let indexed_wrapped = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("indexed-symbol-wrapped"),
+        tool: "find_symbol".to_string(),
+        arguments: serde_json::json!({
+            "index": repo.path().join(".orient/index"),
+            "name": "SessionManager",
+            "limit": 5,
+            "include_read_batch": true
+        }),
+    });
+    assert!(
+        indexed_wrapped.error.is_none(),
+        "{:?}",
+        indexed_wrapped.error
+    );
+    let indexed_wrapped = indexed_wrapped.result.unwrap();
+    assert_eq!(indexed_wrapped["results"][0]["path"], "src/auth.rs");
+    assert_eq!(
+        indexed_wrapped["read_batch_request"]["tool"],
+        serde_json::json!("read_ranges")
+    );
+    assert_eq!(
+        indexed_wrapped["read_batch_request"]["arguments"]["index"],
+        serde_json::json!(index_path)
+    );
+    assert_eq!(
+        indexed_wrapped["next_action"]["request"],
+        indexed_wrapped["read_batch_request"]
+    );
+
+    let explicit_indexed_wrapped = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("explicit-indexed-symbol-wrapped"),
+        tool: "find_index_symbol".to_string(),
+        arguments: serde_json::json!({
+            "index": repo.path().join(".orient/index"),
+            "name": "SessionManager",
+            "limit": 5,
+            "include_read_batch": true
+        }),
+    });
+    assert!(
+        explicit_indexed_wrapped.error.is_none(),
+        "{:?}",
+        explicit_indexed_wrapped.error
+    );
+    let explicit_indexed_wrapped = explicit_indexed_wrapped.result.unwrap();
+    assert_eq!(
+        explicit_indexed_wrapped["read_batch_request"]["tool"],
+        serde_json::json!("read_index_ranges")
+    );
+
     let sharded = runtime.dispatch(ToolRequest {
         id: serde_json::json!("shard-symbol"),
         tool: "find_symbol".to_string(),
@@ -3460,6 +3515,31 @@ fn runtime_find_symbol_alias_accepts_live_index_and_shard_targets() {
     assert_eq!(
         sharded[0]["read_request"]["arguments"]["index_dir"],
         serde_json::json!(shard_dir)
+    );
+
+    let explicit_sharded_wrapped = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("explicit-shard-symbol-wrapped"),
+        tool: "find_shard_symbol".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": repo.path().join(".orient-shards"),
+            "name": "SessionManager",
+            "limit": 5,
+            "include_read_batch": true
+        }),
+    });
+    assert!(
+        explicit_sharded_wrapped.error.is_none(),
+        "{:?}",
+        explicit_sharded_wrapped.error
+    );
+    let explicit_sharded_wrapped = explicit_sharded_wrapped.result.unwrap();
+    assert_eq!(
+        explicit_sharded_wrapped["read_batch_request"]["tool"],
+        serde_json::json!("read_shard_ranges")
+    );
+    assert_eq!(
+        explicit_sharded_wrapped["next_action"]["request"],
+        explicit_sharded_wrapped["read_batch_request"]
     );
 
     let indexed_batch = runtime.dispatch(ToolRequest {

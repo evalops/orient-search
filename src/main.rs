@@ -632,6 +632,8 @@ enum Commands {
         name: String,
         #[arg(long, default_value_t = 10)]
         limit: usize,
+        #[arg(long)]
+        include_read_batch: bool,
         #[arg(long = "repo-filter")]
         repo_filter: Option<String>,
         #[command(flatten)]
@@ -659,6 +661,8 @@ enum Commands {
         name: String,
         #[arg(long, default_value_t = 10)]
         limit: usize,
+        #[arg(long)]
+        include_read_batch: bool,
         #[arg(long = "repo")]
         repo_filter: Option<String>,
         #[command(flatten)]
@@ -1582,6 +1586,15 @@ struct SymbolBatchResult {
 }
 
 #[derive(Debug, Clone, Serialize)]
+struct SymbolLookupResponse {
+    results: Vec<SymbolLookupResult>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    read_batch_request: Option<ResultToolRequest>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    next_action: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize)]
 struct SymbolBatchSummary {
     status: String,
     symbol_count: usize,
@@ -1608,6 +1621,24 @@ fn symbol_batch_result(
         next_action,
         symbols,
     }
+}
+
+fn symbol_lookup_response(
+    symbols: Vec<SymbolLookupResult>,
+    include_read_batch: bool,
+    batch_tool: &str,
+    base_arguments: Map<String, Value>,
+) -> Result<Value> {
+    if !include_read_batch {
+        return Ok(serde_json::to_value(symbols)?);
+    }
+    let read_batch_request = symbol_lookup_read_batch_request(&symbols, batch_tool, base_arguments);
+    let next_action = read_batch_next_action(&read_batch_request);
+    Ok(serde_json::to_value(SymbolLookupResponse {
+        results: symbols,
+        read_batch_request,
+        next_action,
+    })?)
 }
 
 fn main() {
@@ -4215,6 +4246,7 @@ fn run() -> Result<()> {
             index_dir,
             name,
             limit,
+            include_read_batch,
             repo_filter,
             filters,
         } => {
@@ -4237,10 +4269,10 @@ fn run() -> Result<()> {
                     read_request_args("repo", &repo),
                 )
             };
-            println!(
-                "{}",
-                serde_json::to_string(&symbol_lookup_results(symbols, "read_range", base_args))?
-            );
+            let symbols = symbol_lookup_results(symbols, "read_range", base_args.clone());
+            let response =
+                symbol_lookup_response(symbols, include_read_batch, "read_ranges", base_args)?;
+            println!("{}", serde_json::to_string(&response)?);
         }
         Commands::SymbolBatch {
             repo,
@@ -4313,6 +4345,7 @@ fn run() -> Result<()> {
             index,
             name,
             limit,
+            include_read_batch,
             repo_filter,
             filters,
         } => {
@@ -4320,14 +4353,15 @@ fn run() -> Result<()> {
             let index_path = index;
             let index = FastIndex::load(&index_path)?;
             let symbols = index.find_symbol_filtered(&name, limit, &filters);
-            println!(
-                "{}",
-                serde_json::to_string(&symbol_lookup_results(
-                    symbols,
-                    "read_index_range",
-                    read_request_args("index", &index_path)
-                ))?
-            );
+            let base_args = read_request_args("index", &index_path);
+            let symbols = symbol_lookup_results(symbols, "read_index_range", base_args.clone());
+            let response = symbol_lookup_response(
+                symbols,
+                include_read_batch,
+                "read_index_ranges",
+                base_args,
+            )?;
+            println!("{}", serde_json::to_string(&response)?);
         }
         Commands::IndexSymbolBatch {
             index,

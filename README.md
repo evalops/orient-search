@@ -110,6 +110,9 @@ repo-map, and query-plan follow-ups with `jsonl`, `client_cli`, and compact CLI
 hints. Agents should run those returned requests directly instead of translating
 them back into shell search/read commands.
 
+Symbol lookups include per-hit `read_request`; add `include_read_batch:true` or
+use `find_symbol_batch` when the next step is opening all matching definitions.
+
 `search_auto`, `search_auto_batch`, and plan batch items expose
 `query_plan_summary` or `summary` alongside full plans, plus `next_action` when
 Orient can choose the best immediate follow-up. Use those compact fields first;

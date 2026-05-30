@@ -3562,14 +3562,19 @@ fn cli_builds_and_searches_persistent_index() {
             "index-symbol",
             "--index",
             index_path.to_str().unwrap(),
+            "--include-read-batch",
             "SessionManager",
         ])
         .assert()
         .success()
         .stdout(predicate::str::contains("\"path\":\"src/auth.rs\""))
         .stdout(predicate::str::contains("\"kind\":\"struct\""))
+        .stdout(predicate::str::contains("\"results\""))
+        .stdout(predicate::str::contains("\"read_batch_request\""))
         .stdout(predicate::str::contains("\"read_request\""))
-        .stdout(predicate::str::contains("\"tool\":\"read_index_range\""));
+        .stdout(predicate::str::contains("\"tool\":\"read_index_range\""))
+        .stdout(predicate::str::contains("\"tool\":\"read_index_ranges\""))
+        .stdout(predicate::str::contains("\"next_action\""));
 
     let mut generic_index_symbol = Command::cargo_bin("orient").unwrap();
     generic_index_symbol

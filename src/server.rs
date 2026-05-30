@@ -298,9 +298,36 @@ struct SymbolBatchResult {
 }
 
 #[derive(Debug, Serialize)]
+struct SymbolLookupResponse {
+    results: Vec<SymbolLookupResult>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    read_batch_request: Option<ResultToolRequest>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    next_action: Option<Value>,
+}
+
+#[derive(Debug, Serialize)]
 struct SymbolBatchSummary {
     status: String,
     symbol_count: usize,
+}
+
+fn symbol_lookup_response(
+    symbols: Vec<SymbolLookupResult>,
+    include_read_batch: bool,
+    batch_tool: &str,
+    base_arguments: serde_json::Map<String, serde_json::Value>,
+) -> Result<Value> {
+    if !include_read_batch {
+        return Ok(serde_json::to_value(symbols)?);
+    }
+    let read_batch_request = symbol_lookup_read_batch_request(&symbols, batch_tool, base_arguments);
+    let next_action = read_batch_next_action(&read_batch_request);
+    Ok(serde_json::to_value(SymbolLookupResponse {
+        results: symbols,
+        read_batch_request,
+        next_action,
+    })?)
 }
 
 fn symbol_batch_result(
@@ -4735,17 +4762,16 @@ impl ToolRuntime {
                 let index_dir = self.shard_dir_arg_or_single_cached(&request.arguments)?;
                 let name = string_arg(&request.arguments, "name")?;
                 let limit = positive_usize_arg(&request.arguments, "limit", 10)?;
+                let include_read_batch = bool_arg(&request.arguments, "include_read_batch");
                 let symbols = self.find_shard_symbol_cached(
                     &index_dir,
                     &name,
                     limit,
                     &search_filters(&request.arguments, true)?,
                 )?;
-                Ok(serde_json::to_value(symbol_lookup_results(
-                    symbols,
-                    "read_shard_range",
-                    read_request_args("index_dir", &index_dir),
-                ))?)
+                let base_args = read_request_args("index_dir", &index_dir);
+                let symbols = symbol_lookup_results(symbols, "read_shard_range", base_args.clone());
+                symbol_lookup_response(symbols, include_read_batch, "read_shard_ranges", base_args)
             }
             "find_shard_symbol_batch" => {
                 let index_dir = self.shard_dir_arg_or_single_cached(&request.arguments)?;
@@ -4773,6 +4799,7 @@ impl ToolRuntime {
             "find_symbol" => {
                 let name = string_arg(&request.arguments, "name")?;
                 let limit = positive_usize_arg(&request.arguments, "limit", 10)?;
+                let include_read_batch = bool_arg(&request.arguments, "include_read_batch");
                 if argument_value(&request.arguments, "index").is_some()
                     && argument_value(&request.arguments, "index_dir").is_some()
                 {
@@ -4789,11 +4816,14 @@ impl ToolRuntime {
                         limit,
                         &search_filters(&request.arguments, true)?,
                     )?;
-                    return Ok(serde_json::to_value(symbol_lookup_results(
+                    let base_args = read_request_args("index_dir", &index_dir);
+                    let symbols = symbol_lookup_results(symbols, "read_range", base_args.clone());
+                    return symbol_lookup_response(
                         symbols,
-                        "read_range",
-                        read_request_args("index_dir", &index_dir),
-                    ))?);
+                        include_read_batch,
+                        "read_ranges",
+                        base_args,
+                    );
                 }
                 if let Some(index_path) =
                     optional_string_arg(&request.arguments, "index").map(PathBuf::from)
@@ -4801,11 +4831,14 @@ impl ToolRuntime {
                     let filters = search_filters(&request.arguments, true)?;
                     let index = self.cached_index(index_path.clone())?;
                     let symbols = index.find_symbol_filtered(&name, limit, &filters);
-                    return Ok(serde_json::to_value(symbol_lookup_results(
+                    let base_args = read_request_args("index", &index_path);
+                    let symbols = symbol_lookup_results(symbols, "read_range", base_args.clone());
+                    return symbol_lookup_response(
                         symbols,
-                        "read_range",
-                        read_request_args("index", &index_path),
-                    ))?);
+                        include_read_batch,
+                        "read_ranges",
+                        base_args,
+                    );
                 }
                 if optional_string_arg(&request.arguments, "cwd").is_some() {
                     let scoped_arguments = arguments_scoped_to_client_cwd(&request.arguments)?;
@@ -4816,22 +4849,30 @@ impl ToolRuntime {
                             limit,
                             &search_filters(&scoped_arguments, true)?,
                         )?;
-                        return Ok(serde_json::to_value(symbol_lookup_results(
+                        let base_args = read_request_args("index_dir", &index_dir);
+                        let symbols =
+                            symbol_lookup_results(symbols, "read_range", base_args.clone());
+                        return symbol_lookup_response(
                             symbols,
-                            "read_range",
-                            read_request_args("index_dir", &index_dir),
-                        ))?);
+                            include_read_batch,
+                            "read_ranges",
+                            base_args,
+                        );
                     }
                     if let Ok(index_path) = self.single_cached_index_path() {
                         let index = self.cached_index(index_path.clone())?;
                         if index_matches_client_cwd(&index, &request.arguments)? {
                             let filters = search_filters(&scoped_arguments, true)?;
                             let symbols = index.find_symbol_filtered(&name, limit, &filters);
-                            return Ok(serde_json::to_value(symbol_lookup_results(
+                            let base_args = read_request_args("index", &index_path);
+                            let symbols =
+                                symbol_lookup_results(symbols, "read_range", base_args.clone());
+                            return symbol_lookup_response(
                                 symbols,
-                                "read_range",
-                                read_request_args("index", &index_path),
-                            ))?);
+                                include_read_batch,
+                                "read_ranges",
+                                base_args,
+                            );
                         }
                     }
                 }
@@ -4844,11 +4885,9 @@ impl ToolRuntime {
                 let filters = search_filters(&request.arguments, false)?;
                 let index = RepoIndexer::new(&repo).build()?;
                 let symbols = index.find_symbol_filtered(&name, limit, &filters);
-                Ok(serde_json::to_value(symbol_lookup_results(
-                    symbols,
-                    "read_range",
-                    read_request_args("repo", &repo),
-                ))?)
+                let base_args = read_request_args("repo", &repo);
+                let symbols = symbol_lookup_results(symbols, "read_range", base_args.clone());
+                symbol_lookup_response(symbols, include_read_batch, "read_ranges", base_args)
             }
             "find_symbol_batch" => {
                 let names = string_array_arg(&request.arguments, "names")?;
@@ -4981,14 +5020,13 @@ impl ToolRuntime {
                 let index_path = self.index_path_arg_or_single_cached(&request.arguments)?;
                 let name = string_arg(&request.arguments, "name")?;
                 let limit = positive_usize_arg(&request.arguments, "limit", 10)?;
+                let include_read_batch = bool_arg(&request.arguments, "include_read_batch");
                 let filters = search_filters(&request.arguments, true)?;
                 let index = self.cached_index(index_path.clone())?;
                 let symbols = index.find_symbol_filtered(&name, limit, &filters);
-                Ok(serde_json::to_value(symbol_lookup_results(
-                    symbols,
-                    "read_index_range",
-                    read_request_args("index", &index_path),
-                ))?)
+                let base_args = read_request_args("index", &index_path);
+                let symbols = symbol_lookup_results(symbols, "read_index_range", base_args.clone());
+                symbol_lookup_response(symbols, include_read_batch, "read_index_ranges", base_args)
             }
             "find_index_symbol_batch" => {
                 let index_path = self.index_path_arg_or_single_cached(&request.arguments)?;
@@ -7818,6 +7856,7 @@ const SYMBOL_TARGET_OPTIONAL_ARGS: &[&str] = &[
     "index_dir",
     "cwd",
     "limit",
+    "include_read_batch",
     "path",
     "dir",
     "language",
@@ -7875,6 +7914,7 @@ const SYMBOL_TARGET_OPTIONAL_ARGS: &[&str] = &[
 
 const SYMBOL_INDEX_OPTIONAL_ARGS: &[&str] = &[
     "limit",
+    "include_read_batch",
     "path",
     "dir",
     "language",

@@ -43,6 +43,8 @@ The snippet should tell agents:
 - For JSON-lines or MCP-style clients, include `cwd` on no-target search, map,
   plan, symbol, read, and related-file calls so the shared daemon applies the
   same checkout scope.
+- For direct definition jumps, use `find_symbol` with `include_read_batch:true`
+  or `find_symbol_batch`, then run the returned `read_batch_request`.
 - Include `cwd` on `daemon_status` when asking for copyable default requests;
   the returned map, search, batch, and query-plan calls will keep the active
   checkout scope and set `refresh_if_stale:true`.
