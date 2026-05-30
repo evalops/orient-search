@@ -6,9 +6,9 @@ use crate::fast_index::{FastIndex, IndexFreshness, RefreshStats};
 use crate::query::{merge_filters, normalize_symbol_kind, parse_query, query_text};
 pub use crate::repo_index::MAX_BATCH_READ_LINES;
 use crate::repo_index::{
-    DEFAULT_REPO_MAP_READ_BATCH_RANGES, MAX_ATTACHED_CONTEXT_LINES, MAX_READ_RANGE_LINES,
-    MAX_RESULT_READ_BATCH_RANGES, MAX_SEARCH_RESULTS, QueryPlan, QueryPlanFilter,
-    QueryPlanNextAction, QueryPlanSummary, RangeScope, RepoIndexer, RepoMapDetail,
+    DEFAULT_REPO_MAP_READ_BATCH_RANGES, FileRange, MAX_ATTACHED_CONTEXT_LINES,
+    MAX_READ_RANGE_LINES, MAX_RESULT_READ_BATCH_RANGES, MAX_SEARCH_RESULTS, QueryPlan,
+    QueryPlanFilter, QueryPlanNextAction, QueryPlanSummary, RangeScope, RepoIndexer, RepoMapDetail,
     ResultToolRequest, SearchFilters, SearchResult, SnippetMode, Symbol, SymbolLookupResult,
     attach_repo_map_read_batch_request_with_limit, attach_result_context,
     attach_result_read_requests, attach_result_related_requests,
@@ -88,6 +88,16 @@ struct SearchResultSummary {
     max_score: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     min_score: Option<f64>,
+}
+
+#[derive(Debug, Serialize)]
+struct ReadRangesResponseSummary {
+    status: &'static str,
+    range_count: usize,
+    total_lines: usize,
+    path_count: usize,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    paths: Vec<String>,
 }
 
 fn search_result_summary(results: &[SearchResult]) -> SearchResultSummary {
@@ -1205,13 +1215,13 @@ pub fn tool_manifest() -> Value {
             "read_index_ranges",
             "Read several bounded line ranges from persistent index result paths in one request.",
             &["index", "ranges"],
-            &["scope"],
+            READ_BATCH_INDEX_OPTIONAL_ARGS,
         ),
         tool_entry(
             "open_index_ranges",
             "Alias for read_index_ranges for agents that phrase context fetches as opening file ranges.",
             &["index", "ranges"],
-            &["scope"],
+            READ_BATCH_INDEX_OPTIONAL_ARGS,
         ),
         tool_entry(
             "index_shards",
@@ -1283,13 +1293,13 @@ pub fn tool_manifest() -> Value {
             "read_shard_ranges",
             "Read several bounded line ranges from shard result paths or unique shard-relative paths in one request.",
             &["index_dir", "ranges"],
-            &["scope"],
+            READ_BATCH_INDEX_OPTIONAL_ARGS,
         ),
         tool_entry(
             "open_shard_ranges",
             "Alias for read_shard_ranges for agents that phrase context fetches as opening file ranges.",
             &["index_dir", "ranges"],
-            &["scope"],
+            READ_BATCH_INDEX_OPTIONAL_ARGS,
         ),
         tool_entry(
             "shard_repo_map",
@@ -1922,7 +1932,7 @@ fn argument_schema(tool_name: &str, name: &str) -> Value {
         }
         "test" | "generated" | "code" | "explain" | "require_all" | "any_terms" | "details"
         | "refresh_if_stale" | "diagnose" | "retry_if_empty" | "include_read_batch"
-        | "git_metadata" | "tracked_files" | "nested_manifests" | "force" => {
+        | "include_summary" | "git_metadata" | "tracked_files" | "nested_manifests" | "force" => {
             schema.insert("type".to_string(), json!("boolean"));
         }
         "limit" | "max_depth" | "discover_limit" | "family_limit" | "symbols" | "start"
@@ -2106,8 +2116,8 @@ fn argument_type(name: &str) -> &'static str {
         | "start_line" | "end_line" | "end" | "lines" | "line_count" | "tests"
         | "context_lines" | "read_limit" | "line" | "target_line" => "integer",
         "test" | "generated" | "code" | "explain" | "require_all" | "any_terms" | "details"
-        | "refresh_if_stale" | "include_read_batch" | "git_metadata" | "tracked_files"
-        | "nested_manifests" => "boolean",
+        | "refresh_if_stale" | "include_read_batch" | "include_summary" | "git_metadata"
+        | "tracked_files" | "nested_manifests" => "boolean",
         name if string_list_argument(name) => "string|string[]",
         "range" => "range|string",
         "ranges" => "range|string|range[]",
@@ -2172,8 +2182,8 @@ fn argument_default(tool_name: &str, name: &str) -> Option<Value> {
         (
             _,
             "explain" | "require_all" | "any_terms" | "details" | "refresh_if_stale" | "diagnose"
-            | "retry_if_empty" | "include_read_batch" | "git_metadata" | "tracked_files"
-            | "nested_manifests" | "force",
+            | "retry_if_empty" | "include_read_batch" | "include_summary" | "git_metadata"
+            | "tracked_files" | "nested_manifests" | "force",
         ) => Some(json!(false)),
         _ => None,
     }
@@ -2342,6 +2352,9 @@ fn argument_description(tool_name: &str, name: &str) -> &'static str {
         }
         "include_read_batch" => {
             "When true, related tools return {results, read_batch_request, next_action} instead of a bare result array."
+        }
+        "include_summary" => {
+            "When true, batch read tools return {summary, ranges} instead of a bare range array."
         }
         "force" => {
             "When true for index_shards, replace an existing shard directory even if the rebuild would remove existing shards."
@@ -2893,6 +2906,38 @@ fn primary_retry_read_batch_request(
 ) -> Option<ResultToolRequest> {
     let base_arguments = retry_read_base_arguments(request)?;
     result_value_read_batch_request(result, "read_ranges", base_arguments)
+}
+
+fn read_ranges_response_summary(ranges: &[FileRange]) -> ReadRangesResponseSummary {
+    let mut seen_paths = HashSet::new();
+    let mut paths = Vec::new();
+    let mut total_lines = 0;
+
+    for range in ranges {
+        total_lines += range.summary.line_count;
+        if seen_paths.insert(range.path.clone()) && paths.len() < 5 {
+            paths.push(range.path.clone());
+        }
+    }
+
+    ReadRangesResponseSummary {
+        status: if ranges.is_empty() { "empty" } else { "read" },
+        range_count: ranges.len(),
+        total_lines,
+        path_count: seen_paths.len(),
+        paths,
+    }
+}
+
+fn read_ranges_response_value(ranges: Vec<FileRange>, include_summary: bool) -> Result<Value> {
+    if include_summary {
+        Ok(json!({
+            "summary": read_ranges_response_summary(&ranges),
+            "ranges": ranges,
+        }))
+    } else {
+        Ok(serde_json::to_value(ranges)?)
+    }
 }
 
 fn related_lookup_response<T: Serialize>(
@@ -3611,6 +3656,7 @@ impl ToolRuntime {
             "read_ranges" | "open_ranges" => {
                 let tool_name = request.tool.as_str();
                 let ranges = range_args(&request.arguments, tool_name)?;
+                let include_summary = bool_arg(&request.arguments, "include_summary");
                 if argument_value(&request.arguments, "index").is_some()
                     && argument_value(&request.arguments, "index_dir").is_some()
                 {
@@ -3631,7 +3677,7 @@ impl ToolRuntime {
                             range.scope,
                         )?);
                     }
-                    return Ok(serde_json::to_value(results)?);
+                    return read_ranges_response_value(results, include_summary);
                 }
                 if let Some(index_path) =
                     optional_string_arg(&request.arguments, "index").map(PathBuf::from)
@@ -3646,7 +3692,7 @@ impl ToolRuntime {
                             range.scope,
                         )?);
                     }
-                    return Ok(serde_json::to_value(results)?);
+                    return read_ranges_response_value(results, include_summary);
                 }
                 if optional_string_arg(&request.arguments, "cwd").is_some() {
                     if let Ok(index_dir) = self.single_cached_shard_manifest_path() {
@@ -3669,7 +3715,7 @@ impl ToolRuntime {
                             results.push(result);
                         }
                         if matched && results.len() == ranges.len() {
-                            return Ok(serde_json::to_value(results)?);
+                            return read_ranges_response_value(results, include_summary);
                         }
                     }
                     if let Ok(index_path) = self.single_cached_index_path() {
@@ -3684,7 +3730,7 @@ impl ToolRuntime {
                                     range.scope,
                                 )?);
                             }
-                            return Ok(serde_json::to_value(results)?);
+                            return read_ranges_response_value(results, include_summary);
                         }
                     }
                 }
@@ -3702,7 +3748,7 @@ impl ToolRuntime {
                         range.scope,
                     )?);
                 }
-                Ok(serde_json::to_value(results)?)
+                read_ranges_response_value(results, include_summary)
             }
             "search_code" => {
                 let repo = path_arg(&request.arguments, "repo")?;
@@ -4728,6 +4774,7 @@ impl ToolRuntime {
             "read_index_ranges" | "open_index_ranges" => {
                 let index_path = self.index_path_arg_or_single_cached(&request.arguments)?;
                 let ranges = range_args(&request.arguments, request.tool.as_str())?;
+                let include_summary = bool_arg(&request.arguments, "include_summary");
                 let index = self.cached_index(index_path)?;
                 let mut results = Vec::new();
                 for range in ranges {
@@ -4738,7 +4785,7 @@ impl ToolRuntime {
                         range.scope,
                     )?);
                 }
-                Ok(serde_json::to_value(results)?)
+                read_ranges_response_value(results, include_summary)
             }
             "ensure_index" | "refresh_index" => {
                 let repo = path_arg(&request.arguments, "repo")?;
@@ -4916,6 +4963,7 @@ impl ToolRuntime {
             "read_shard_ranges" | "open_shard_ranges" => {
                 let index_dir = self.shard_dir_arg_or_single_cached(&request.arguments)?;
                 let ranges = range_args(&request.arguments, request.tool.as_str())?;
+                let include_summary = bool_arg(&request.arguments, "include_summary");
                 let mut results = Vec::new();
                 for range in ranges {
                     results.push(self.read_shard_range_cached_scoped(
@@ -4926,7 +4974,7 @@ impl ToolRuntime {
                         range.scope,
                     )?);
                 }
-                Ok(serde_json::to_value(results)?)
+                read_ranges_response_value(results, include_summary)
             }
             "shard_repo_map" => {
                 let index_dir = self.shard_dir_arg_or_single_cached(&request.arguments)?;
@@ -7737,7 +7785,15 @@ const READ_TARGET_OPTIONAL_ARGS: &[&str] = &[
     "scope",
 ];
 
-const READ_BATCH_TARGET_OPTIONAL_ARGS: &[&str] = &["repo", "index", "index_dir", "cwd", "scope"];
+const READ_BATCH_TARGET_OPTIONAL_ARGS: &[&str] = &[
+    "repo",
+    "index",
+    "index_dir",
+    "cwd",
+    "scope",
+    "include_summary",
+];
+const READ_BATCH_INDEX_OPTIONAL_ARGS: &[&str] = &["scope", "include_summary"];
 const READ_WINDOW_OPTIONAL_ARGS: &[&str] = &[
     "path",
     "range",

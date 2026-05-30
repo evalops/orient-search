@@ -130,6 +130,10 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         .iter()
         .find(|tool| tool["name"] == "read_index_range")
         .unwrap();
+    let read_index_ranges = tools
+        .iter()
+        .find(|tool| tool["name"] == "read_index_ranges")
+        .unwrap();
     let agent_guide_tool = tools
         .iter()
         .find(|tool| tool["name"] == "agent_guide")
@@ -669,6 +673,14 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         "exact"
     );
     assert_eq!(
+        read_ranges["input_schema"]["properties"]["include_summary"]["type"],
+        "boolean"
+    );
+    assert_eq!(
+        read_ranges["input_schema"]["properties"]["include_summary"]["default"],
+        false
+    );
+    assert_eq!(
         read_ranges["input_schema"]["properties"]["ranges"]["oneOf"][0]["properties"]["lines"]["default"],
         80
     );
@@ -751,6 +763,10 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         "A compact range string, copied path:start-end string, {path,start,lines} object, or array of them; path may be shard-prefixed or a unique unqualified shard-relative path."
     );
     assert_eq!(
+        read_shard_ranges["input_schema"]["properties"]["include_summary"]["type"],
+        "boolean"
+    );
+    assert_eq!(
         read_shard_ranges["input_schema"]["properties"]["ranges"]["oneOf"][0]["properties"]["path"]
             ["description"],
         "Shard-prefixed result path, unique unqualified shard-relative path, or copied location such as repo/src/lib.rs#L40-L45."
@@ -760,6 +776,10 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         "Index-relative result path or copied location, such as src/lib.rs or src/lib.rs#L40-L45."
     );
     assert_eq!(read_index_range["required"], serde_json::json!(["index"]));
+    assert_eq!(
+        read_index_ranges["input_schema"]["properties"]["include_summary"]["default"],
+        false
+    );
     assert_eq!(related_files["required"], serde_json::json!(["path"]));
     assert_eq!(
         related_files["input_schema"]["properties"]["index"]["type"],
@@ -1083,6 +1103,10 @@ fn mcp_manifest_exposes_input_schema_for_adapter_wrappers() {
     assert_eq!(
         read_ranges["inputSchema"]["properties"]["ranges"]["max_total_lines"],
         serde_json::json!(MAX_BATCH_READ_LINES)
+    );
+    assert_eq!(
+        read_ranges["inputSchema"]["properties"]["include_summary"]["type"],
+        "boolean"
     );
     assert!(
         read_shard_range["description"]
@@ -2998,6 +3022,45 @@ fn runtime_read_alias_accepts_live_index_and_shard_targets() {
             .contains("issue_token")
     );
     assert_eq!(indexed_batch[1]["symbol"]["name"], "issue_token");
+
+    let indexed_batch_summary = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("indexed-read-batch-summary"),
+        tool: "read_ranges".to_string(),
+        arguments: serde_json::json!({
+            "index": repo.path().join(".orient/index"),
+            "include_summary": true,
+            "ranges": [
+                {"path": "Cargo.toml", "start": 1, "lines": 1},
+                {"path": "src/auth.rs", "start": 1, "lines": 2}
+            ]
+        }),
+    });
+    assert!(
+        indexed_batch_summary.error.is_none(),
+        "{:?}",
+        indexed_batch_summary.error
+    );
+    let indexed_batch_summary = indexed_batch_summary.result.unwrap();
+    assert_eq!(
+        indexed_batch_summary["summary"]["status"],
+        serde_json::json!("read")
+    );
+    assert_eq!(
+        indexed_batch_summary["summary"]["range_count"],
+        serde_json::json!(2)
+    );
+    assert_eq!(
+        indexed_batch_summary["summary"]["total_lines"],
+        serde_json::json!(3)
+    );
+    assert_eq!(
+        indexed_batch_summary["summary"]["path_count"],
+        serde_json::json!(2)
+    );
+    assert_eq!(
+        indexed_batch_summary["ranges"][1]["path"],
+        serde_json::json!("src/auth.rs")
+    );
 
     let shard_batch = runtime.dispatch(ToolRequest {
         id: serde_json::json!("shard-read-batch"),

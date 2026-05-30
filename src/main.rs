@@ -7,11 +7,11 @@ use orient::discover::{
 use orient::fast_index::{FastIndex, INDEX_FORMAT_VERSION, RefreshStats};
 use orient::query::{merge_filters, normalize_symbol_kind, parse_query};
 use orient::repo_index::{
-    DEFAULT_REPO_MAP_READ_BATCH_RANGES, MAX_READ_RANGE_LINES, MAX_RESULT_READ_BATCH_RANGES,
-    QueryPlan, QueryPlanFilter, QueryPlanNextAction, QueryPlanSummary, RangeScope, RepoIndexer,
-    RepoMapDetail, ResultToolRequest, SearchFilters, SearchResult, SnippetMode, SymbolLookupResult,
-    attach_repo_map_read_batch_request_with_limit, attach_result_context,
-    attach_result_read_requests, attach_result_related_requests,
+    DEFAULT_REPO_MAP_READ_BATCH_RANGES, FileRange, MAX_READ_RANGE_LINES,
+    MAX_RESULT_READ_BATCH_RANGES, QueryPlan, QueryPlanFilter, QueryPlanNextAction,
+    QueryPlanSummary, RangeScope, RepoIndexer, RepoMapDetail, ResultToolRequest, SearchFilters,
+    SearchResult, SnippetMode, SymbolLookupResult, attach_repo_map_read_batch_request_with_limit,
+    attach_result_context, attach_result_read_requests, attach_result_related_requests,
     attach_result_related_symbol_requests, normalize_language_filter,
     query_plan_filter_field_present, read_batch_action_summary, read_file_range,
     read_file_range_scoped, related_file_lookup_results, related_symbol_lookup_results,
@@ -256,6 +256,8 @@ enum Commands {
         lines: usize,
         #[arg(long, value_enum, default_value_t = ReadScopeArg::Exact)]
         scope: ReadScopeArg,
+        #[arg(long)]
+        summary: bool,
         #[arg(long = "format", default_value = "json", value_parser = ["json"])]
         format: String,
     },
@@ -468,6 +470,8 @@ enum Commands {
         end_line: Option<usize>,
         #[arg(long, value_enum, default_value_t = ReadScopeArg::Exact)]
         scope: ReadScopeArg,
+        #[arg(long)]
+        summary: bool,
         #[arg(long = "format", default_value = "json", value_parser = ["json"])]
         format: String,
     },
@@ -649,6 +653,8 @@ enum Commands {
         end_line: Option<usize>,
         #[arg(long, value_enum, default_value_t = ReadScopeArg::Exact)]
         scope: ReadScopeArg,
+        #[arg(long)]
+        summary: bool,
         #[arg(long = "format", default_value = "json", value_parser = ["json"])]
         format: String,
     },
@@ -1549,6 +1555,48 @@ fn search_summary_top_paths(results: &[SearchResult]) -> Vec<String> {
         }
     }
     paths
+}
+
+#[derive(Debug, Serialize)]
+struct ReadRangesResponseSummary {
+    status: &'static str,
+    range_count: usize,
+    total_lines: usize,
+    path_count: usize,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    paths: Vec<String>,
+}
+
+fn read_ranges_response_summary(ranges: &[FileRange]) -> ReadRangesResponseSummary {
+    let mut seen_paths = HashSet::new();
+    let mut paths = Vec::new();
+    let mut total_lines = 0;
+
+    for range in ranges {
+        total_lines += range.summary.line_count;
+        if seen_paths.insert(range.path.clone()) && paths.len() < 5 {
+            paths.push(range.path.clone());
+        }
+    }
+
+    ReadRangesResponseSummary {
+        status: if ranges.is_empty() { "empty" } else { "read" },
+        range_count: ranges.len(),
+        total_lines,
+        path_count: seen_paths.len(),
+        paths,
+    }
+}
+
+fn read_ranges_response_value(ranges: Vec<FileRange>, include_summary: bool) -> Result<Value> {
+    if include_summary {
+        Ok(serde_json::json!({
+            "summary": read_ranges_response_summary(&ranges),
+            "ranges": ranges,
+        }))
+    } else {
+        Ok(serde_json::to_value(ranges)?)
+    }
 }
 
 fn search_batch_result(
@@ -3015,6 +3063,7 @@ fn run() -> Result<()> {
             start,
             lines,
             scope,
+            summary,
             format: _format,
         } => {
             let mut results = Vec::new();
@@ -3028,7 +3077,10 @@ fn run() -> Result<()> {
                     range.scope.unwrap_or(scope),
                 )?);
             }
-            println!("{}", serde_json::to_string(&results)?);
+            println!(
+                "{}",
+                serde_json::to_string(&read_ranges_response_value(results, summary)?)?
+            );
         }
         Commands::ShardSymbol {
             index_dir,
@@ -3390,6 +3442,7 @@ fn run() -> Result<()> {
             lines,
             end_line,
             scope,
+            summary,
             format: _format,
         } => {
             let mut results = Vec::new();
@@ -3426,7 +3479,10 @@ fn run() -> Result<()> {
                     )?);
                 }
             }
-            println!("{}", serde_json::to_string(&results)?);
+            println!(
+                "{}",
+                serde_json::to_string(&read_ranges_response_value(results, summary)?)?
+            );
         }
         Commands::Search {
             repo,
@@ -4492,6 +4548,7 @@ fn run() -> Result<()> {
             lines,
             end_line,
             scope,
+            summary,
             format: _format,
         } => {
             let index = FastIndex::load(index)?;
@@ -4506,7 +4563,10 @@ fn run() -> Result<()> {
                     range.scope.unwrap_or(scope),
                 )?);
             }
-            println!("{}", serde_json::to_string(&results)?);
+            println!(
+                "{}",
+                serde_json::to_string(&read_ranges_response_value(results, summary)?)?
+            );
         }
         Commands::Symbol {
             repo,

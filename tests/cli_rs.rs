@@ -1201,6 +1201,44 @@ fn cli_rejects_oversized_batches() {
 }
 
 #[test]
+fn cli_read_ranges_can_return_compact_summary() {
+    let repo = sample_repo();
+    let mut default_shape = Command::cargo_bin("orient").unwrap();
+    let default_shape = default_shape
+        .args([
+            "read-ranges",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "src/auth.rs:1:1",
+        ])
+        .output()
+        .unwrap();
+    assert!(default_shape.status.success());
+    let default_shape: serde_json::Value = serde_json::from_slice(&default_shape.stdout).unwrap();
+    assert!(default_shape.as_array().is_some());
+
+    let mut summarized = Command::cargo_bin("orient").unwrap();
+    let summarized = summarized
+        .args([
+            "read-ranges",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--summary",
+            "src/auth.rs:1:2",
+            "Cargo.toml:1:1",
+        ])
+        .output()
+        .unwrap();
+    assert!(summarized.status.success());
+    let summarized: serde_json::Value = serde_json::from_slice(&summarized.stdout).unwrap();
+    assert_eq!(summarized["summary"]["status"], serde_json::json!("read"));
+    assert_eq!(summarized["summary"]["range_count"], serde_json::json!(2));
+    assert_eq!(summarized["summary"]["total_lines"], serde_json::json!(3));
+    assert_eq!(summarized["summary"]["path_count"], serde_json::json!(2));
+    assert_eq!(summarized["ranges"].as_array().unwrap().len(), 2);
+}
+
+#[test]
 fn cli_discovers_repos_for_shard_setup() {
     let root = tempfile::tempdir().unwrap();
     write(
