@@ -3675,8 +3675,9 @@ pub(crate) fn file_range_from_text_scoped(
         let language = language_for(Path::new(&path)).unwrap_or_else(|| "text".to_string());
         let symbols = extract_symbols(&path, text, &language);
         if let Some(symbol) = symbol_for_anchor(&symbols, start_line) {
+            let lines = text.lines().collect::<Vec<_>>();
             let (symbol_start, symbol_lines) =
-                symbol_scoped_window(symbol.line, line_count, DEFAULT_SYMBOL_READ_CONTEXT_BEFORE);
+                symbol_scoped_extent(&lines, &symbols, symbol, DEFAULT_SYMBOL_READ_CONTEXT_BEFORE);
             return file_range_from_text_with_symbol(
                 path,
                 text,
@@ -3689,18 +3690,84 @@ pub(crate) fn file_range_from_text_scoped(
     file_range_from_text_with_symbol(path, text, start_line, line_count, None)
 }
 
-pub(crate) fn symbol_scoped_window(
-    symbol_line: usize,
-    requested_lines: usize,
-    context_before: usize,
+pub(crate) fn symbol_scoped_extent(
+    lines: &[&str],
+    symbols: &[Symbol],
+    anchor: &Symbol,
+    max_lead: usize,
 ) -> (usize, usize) {
-    let start = symbol_line.saturating_sub(context_before).max(1);
-    let prefix_lines = symbol_line.saturating_sub(start);
-    let lines = requested_lines
-        .max(1)
-        .saturating_add(prefix_lines)
+    let total_lines = lines.len();
+    if total_lines == 0 {
+        return (1, 1);
+    }
+
+    let anchor_line = anchor.line.max(1).min(total_lines);
+    let anchor_indent = line_indent(lines, anchor_line);
+    let lead = attached_symbol_lead(lines, anchor_line, max_lead);
+    let start = anchor_line.saturating_sub(lead).max(1);
+    let mut end = symbols
+        .iter()
+        .filter(|symbol| symbol.line > anchor_line)
+        .filter(|symbol| line_indent(lines, symbol.line) <= anchor_indent)
+        .map(|symbol| symbol.line.saturating_sub(1))
+        .min()
+        .unwrap_or(total_lines)
+        .min(total_lines);
+
+    while end > anchor_line && line_at(lines, end).is_some_and(|line| line.trim().is_empty()) {
+        end -= 1;
+    }
+
+    let line_count = end
+        .saturating_sub(start)
+        .saturating_add(1)
         .min(MAX_READ_RANGE_LINES);
-    (start, lines)
+    (start, line_count.max(1))
+}
+
+fn attached_symbol_lead(lines: &[&str], anchor_line: usize, max_lead: usize) -> usize {
+    let mut lead = 0;
+    let mut line_number = anchor_line.saturating_sub(1);
+    while line_number > 0 && lead < max_lead {
+        let Some(line) = line_at(lines, line_number) else {
+            break;
+        };
+        if line.trim().is_empty() || !is_attached_symbol_lead_line(line) {
+            break;
+        }
+        lead += 1;
+        line_number -= 1;
+    }
+    lead
+}
+
+fn is_attached_symbol_lead_line(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    trimmed.starts_with('@')
+        || trimmed.starts_with("#[")
+        || trimmed.starts_with("#!")
+        || trimmed.starts_with("///")
+        || trimmed.starts_with("//!")
+        || trimmed.starts_with("/*")
+        || trimmed.starts_with('*')
+        || trimmed.starts_with("*/")
+        || trimmed.starts_with('#')
+}
+
+fn line_indent(lines: &[&str], line_number: usize) -> usize {
+    line_at(lines, line_number)
+        .map(|line| {
+            line.chars()
+                .take_while(|ch| matches!(ch, ' ' | '\t'))
+                .count()
+        })
+        .unwrap_or(usize::MAX)
+}
+
+fn line_at<'a>(lines: &'a [&str], line_number: usize) -> Option<&'a str> {
+    line_number
+        .checked_sub(1)
+        .and_then(|index| lines.get(index).copied())
 }
 
 pub(crate) fn symbol_for_anchor(symbols: &[Symbol], anchor_line: usize) -> Option<&Symbol> {

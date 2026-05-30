@@ -1372,33 +1372,34 @@ fn fallback_line_range_tracks_displayed_contiguous_snippet_block() {
 #[test]
 fn symbol_scoped_ranges_anchor_live_and_indexed_reads_on_nearest_definition() {
     let repo = tempfile::tempdir().unwrap();
-    let mut source = String::new();
-    for line in 1..=25 {
-        source.push_str(&format!("// filler {line}\n"));
-    }
-    source.push_str("pub fn issue_token() {\n");
-    source.push_str("    let token = 42;\n");
-    source.push_str("}\n");
-    source.push_str("pub fn verify_token() {}\n");
+    let source = r#"#[inline]
+/// Issues a token.
+pub fn issue_token() {
+    let token = 42;
+}
+
+pub fn verify_token() {}
+"#;
     write(&repo.path().join("src/auth.rs"), &source);
 
-    let exact = read_file_range(repo.path(), "src/auth.rs", 27, 3).unwrap();
-    assert_eq!(exact.start_line, 27);
+    let exact = read_file_range(repo.path(), "src/auth.rs", 4, 3).unwrap();
+    assert_eq!(exact.start_line, 4);
     assert_eq!(exact.symbol, None);
 
     let scoped =
-        read_file_range_scoped(repo.path(), "src/auth.rs", 27, 2, RangeScope::Symbol).unwrap();
+        read_file_range_scoped(repo.path(), "src/auth.rs", 4, 2, RangeScope::Symbol).unwrap();
     assert_eq!(scoped.symbol.as_ref().unwrap().name, "issue_token");
-    let symbol_line = scoped.symbol.as_ref().unwrap().line;
-    assert_eq!(scoped.start_line, symbol_line.saturating_sub(20).max(1));
-    assert_eq!(scoped.end_line, symbol_line + 1);
+    assert_eq!(scoped.start_line, 1);
+    assert_eq!(scoped.end_line, 5);
+    assert!(scoped.text.contains("#[inline]"));
+    assert!(scoped.text.contains("/// Issues a token."));
     assert!(scoped.text.contains("pub fn issue_token() {"));
     assert!(scoped.text.contains("let token = 42;"));
     assert!(!scoped.text.contains("verify_token"));
 
     let indexed = FastIndex::build(repo.path()).unwrap();
     let indexed_range = indexed
-        .read_range_scoped("src/auth.rs", 27, 2, RangeScope::Symbol)
+        .read_range_scoped("src/auth.rs", 4, 2, RangeScope::Symbol)
         .unwrap();
     assert_eq!(indexed_range.start_line, scoped.start_line);
     assert_eq!(indexed_range.end_line, scoped.end_line);
@@ -1406,6 +1407,79 @@ fn symbol_scoped_ranges_anchor_live_and_indexed_reads_on_nearest_definition() {
         indexed_range.symbol.as_ref().unwrap().name,
         scoped.symbol.as_ref().unwrap().name
     );
+}
+
+#[test]
+fn symbol_scoped_ranges_use_definition_extent_for_python_containers_and_methods() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/auth.py"),
+        r#"class SessionManager:
+    def issue_token(self):
+        return "issue"
+
+    def verify_token(self):
+        return True
+
+def outside():
+    return False
+"#,
+    );
+
+    let class_range =
+        read_file_range_scoped(repo.path(), "src/auth.py", 1, 2, RangeScope::Symbol).unwrap();
+    assert_eq!(class_range.symbol.as_ref().unwrap().name, "SessionManager");
+    assert_eq!(class_range.start_line, 1);
+    assert_eq!(class_range.end_line, 6);
+    assert!(class_range.text.contains("def issue_token"));
+    assert!(class_range.text.contains("def verify_token"));
+    assert!(!class_range.text.contains("def outside"));
+
+    let method_range =
+        read_file_range_scoped(repo.path(), "src/auth.py", 3, 2, RangeScope::Symbol).unwrap();
+    assert_eq!(method_range.symbol.as_ref().unwrap().name, "issue_token");
+    assert_eq!(method_range.start_line, 2);
+    assert_eq!(method_range.end_line, 3);
+    assert!(!method_range.text.contains("verify_token"));
+
+    let indexed = FastIndex::build(repo.path()).unwrap();
+    let indexed_class = indexed
+        .read_range_scoped("src/auth.py", 1, 2, RangeScope::Symbol)
+        .unwrap();
+    assert_eq!(indexed_class.start_line, class_range.start_line);
+    assert_eq!(indexed_class.end_line, class_range.end_line);
+
+    let indexed_method = indexed
+        .read_range_scoped("src/auth.py", 3, 2, RangeScope::Symbol)
+        .unwrap();
+    assert_eq!(indexed_method.start_line, method_range.start_line);
+    assert_eq!(indexed_method.end_line, method_range.end_line);
+}
+
+#[test]
+fn symbol_scoped_ranges_clamp_large_definitions_without_next_symbol() {
+    let repo = tempfile::tempdir().unwrap();
+    let mut source = String::from("pub fn huge_definition() {\n");
+    for line in 0..(MAX_READ_RANGE_LINES + 50) {
+        source.push_str(&format!("    let value_{line} = {line};\n"));
+    }
+    source.push_str("}\n");
+    write(&repo.path().join("src/huge.rs"), &source);
+
+    let scoped =
+        read_file_range_scoped(repo.path(), "src/huge.rs", 10, 2, RangeScope::Symbol).unwrap();
+    assert_eq!(scoped.start_line, 1);
+    assert_eq!(
+        scoped.end_line - scoped.start_line + 1,
+        MAX_READ_RANGE_LINES
+    );
+
+    let indexed = FastIndex::build(repo.path()).unwrap();
+    let indexed_range = indexed
+        .read_range_scoped("src/huge.rs", 10, 2, RangeScope::Symbol)
+        .unwrap();
+    assert_eq!(indexed_range.start_line, scoped.start_line);
+    assert_eq!(indexed_range.end_line, scoped.end_line);
 }
 
 fn assert_symbol(symbol: &orient::repo_index::Symbol, path: &str, kind: &str) {

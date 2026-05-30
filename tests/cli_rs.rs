@@ -2474,9 +2474,10 @@ fn cli_outputs_repo_map_and_reads_ranges() {
         ])
         .assert()
         .success()
-        .stdout(predicate::str::contains("\"start_line\":1"))
+        .stdout(predicate::str::contains("\"start_line\":5"))
+        .stdout(predicate::str::contains("\"end_line\":8"))
         .stdout(predicate::str::contains("\"name\":\"issue_token\""))
-        .stdout(predicate::str::contains("SessionManager"));
+        .stdout(predicate::str::contains("format!(\\\"token-{user_id}\\\")"));
 
     let mut read_ranges = Command::cargo_bin("orient").unwrap();
     read_ranges
@@ -2602,10 +2603,11 @@ fn cli_outputs_repo_map_and_reads_ranges() {
         ])
         .assert()
         .success()
-        .stdout(predicate::str::contains("\"start_line\":1"))
+        .stdout(predicate::str::contains("\"start_line\":5"))
+        .stdout(predicate::str::contains("\"end_line\":8"))
         .stdout(predicate::str::contains("\"symbol\""))
         .stdout(predicate::str::contains("\"name\":\"issue_token\""))
-        .stdout(predicate::str::contains("SessionManager"));
+        .stdout(predicate::str::contains("format!(\\\"token-{user_id}\\\")"));
 
     let mut copied_location_read_ranges = Command::cargo_bin("orient").unwrap();
     copied_location_read_ranges

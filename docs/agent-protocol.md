@@ -145,7 +145,10 @@ results to the active checkout. Explicit `repo`, `index`, `index_dir`, or
 an explicit target.
 For manual context reads, add `"scope":"symbol"` to `read_range` or to a
 `read_ranges` request or range entry when the agent has a line inside a
-function, class, or type and wants the window anchored at that definition.
+function, class, or type and wants context anchored at that definition.
+Symbol-scoped reads include attached decorators, attributes, or doc comments,
+stop before the next sibling definition, and clamp oversized definitions to the
+read-range line limit.
 The plain CLI `orient search` command also accepts `--index` and `--index-dir`
 as convenience target flags for agents that reach first for `search` and then
 add the available search surface.

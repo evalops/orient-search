@@ -24,7 +24,7 @@ use crate::repo_index::{
     sort_repo_map_related_symbols, source_excluded_content_filters_match,
     source_import_filters_match, symbol_exact_phrase_bonus, symbol_filter_matches_name,
     symbol_for_anchor, symbol_matches_related_filters, symbol_query_match_score,
-    symbol_scoped_window, text_references_symbol_name, token_counts, tokenize, unique_query_tokens,
+    symbol_scoped_extent, text_references_symbol_name, token_counts, tokenize, unique_query_tokens,
 };
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use anyhow::{Context, Result};
@@ -5556,9 +5556,11 @@ fn indexed_file_range_scoped(
             })
             .collect::<Vec<_>>();
         if let Some(symbol) = symbol_for_anchor(&symbols, start_line) {
-            let (symbol_start, symbol_lines) = symbol_scoped_window(
-                symbol.line,
-                line_count,
+            let lines = file.content.lines().collect::<Vec<_>>();
+            let (symbol_start, symbol_lines) = symbol_scoped_extent(
+                &lines,
+                &symbols,
+                symbol,
                 DEFAULT_INDEXED_SYMBOL_READ_CONTEXT_BEFORE,
             );
             return indexed_file_range_with_symbol(

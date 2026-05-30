@@ -3459,14 +3459,14 @@ fn runtime_read_alias_accepts_live_index_and_shard_targets() {
     });
     assert!(symbol_scoped.error.is_none(), "{:?}", symbol_scoped.error);
     let symbol_scoped = symbol_scoped.result.unwrap();
-    assert_eq!(symbol_scoped["start_line"], 1);
+    assert_eq!(symbol_scoped["start_line"], 2);
     assert_eq!(symbol_scoped["end_line"], 2);
     assert_eq!(symbol_scoped["symbol"]["name"], "issue_token");
     assert!(
         symbol_scoped["text"]
             .as_str()
             .unwrap()
-            .contains("SessionManager")
+            .contains("issue_token")
     );
 
     let sharded = runtime.dispatch(ToolRequest {
