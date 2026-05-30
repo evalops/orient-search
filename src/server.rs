@@ -1447,17 +1447,17 @@ fn agent_profile(profile: Option<&str>) -> AgentProfile {
         "codex" => AgentProfile {
             name: "codex",
             instruction_target: "the local instruction file read by the selected coding agent",
-            adapter_note: "Selected profile: codex; place the snippet in that agent's local instruction file for this repo.",
+            adapter_note: "Selected adapter profile; place the snippet in that agent's local instruction file for this repo.",
         },
         "claude" | "claudecode" => AgentProfile {
             name: "claude",
             instruction_target: "the local instruction file read by the selected coding agent",
-            adapter_note: "Selected profile: claude; place the snippet in that agent's local instruction file for this repo.",
+            adapter_note: "Selected adapter profile; place the snippet in that agent's local instruction file for this repo.",
         },
         "amp" => AgentProfile {
             name: "amp",
             instruction_target: "the local instruction file read by the selected coding agent",
-            adapter_note: "Selected profile: amp; place the snippet in that agent's local instruction file for this repo.",
+            adapter_note: "Selected adapter profile; place the snippet in that agent's local instruction file for this repo.",
         },
         _ => AgentProfile {
             name: "generic",

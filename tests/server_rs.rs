@@ -1312,7 +1312,7 @@ fn agent_guide_returns_local_agent_request_templates() {
             .as_array()
             .unwrap()
             .iter()
-            .any(|item| item.as_str().unwrap().contains("Selected profile: codex"))
+            .any(|item| item.as_str().unwrap().contains("Selected adapter profile"))
     );
     assert_eq!(
         guide["hard_limits"]["max_batch_read_lines"],
@@ -1408,7 +1408,7 @@ fn agent_guidance_profiles_keep_instruction_surfaces_neutral() {
             .as_array()
             .unwrap()
             .iter()
-            .any(|item| item.as_str().unwrap().contains("Selected profile: amp"))
+            .any(|item| item.as_str().unwrap().contains("Selected adapter profile"))
     );
 }
 

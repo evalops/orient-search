@@ -33,6 +33,9 @@ regex_patterns=(
   '/var/folders[^[:space:])"]*'
   'Documents/Projects'
   'C:\\Users\\[^[:space:])"]+'
+  '\bCodex\b'
+  '\bClaude( Code)?\b'
+  '\bAmp\b'
 )
 
 for pattern in "${fixed_patterns[@]}"; do

@@ -1,5 +1,8 @@
 target/
 .orient/
+orient.index
+orient-shards/
+.orient-shards/
 bazel-*
 data/
 *.db
