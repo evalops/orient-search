@@ -401,10 +401,17 @@ enum Commands {
         path: Option<String>,
         #[arg(long = "path", value_name = "PATH", conflicts_with = "path")]
         path_arg: Option<String>,
-        #[arg(long, default_value_t = 1)]
-        start: usize,
-        #[arg(long, default_value_t = 80)]
-        lines: usize,
+        #[arg(long, alias = "start-line", alias = "start_line")]
+        start: Option<usize>,
+        #[arg(
+            long,
+            alias = "line-count",
+            alias = "line_count",
+            conflicts_with = "end_line"
+        )]
+        lines: Option<usize>,
+        #[arg(long = "end-line", alias = "end_line", alias = "end")]
+        end_line: Option<usize>,
         #[arg(long, value_enum, default_value_t = ReadScopeArg::Exact)]
         scope: ReadScopeArg,
     },
@@ -419,10 +426,17 @@ enum Commands {
         #[arg(long = "range", value_name = "PATH:START:LINES[:SCOPE]")]
         ranges: Vec<CliRangeSpec>,
         paths: Vec<String>,
-        #[arg(long, default_value_t = 1)]
-        start: usize,
-        #[arg(long, default_value_t = 80)]
-        lines: usize,
+        #[arg(long, alias = "start-line", alias = "start_line")]
+        start: Option<usize>,
+        #[arg(
+            long,
+            alias = "line-count",
+            alias = "line_count",
+            conflicts_with = "end_line"
+        )]
+        lines: Option<usize>,
+        #[arg(long = "end-line", alias = "end_line", alias = "end")]
+        end_line: Option<usize>,
         #[arg(long, value_enum, default_value_t = ReadScopeArg::Exact)]
         scope: ReadScopeArg,
     },
@@ -2911,9 +2925,11 @@ fn run() -> Result<()> {
             path_arg,
             start,
             lines,
+            end_line,
             scope,
         } => {
-            let range_spec = cli_single_range(path, path_arg, start, lines)?;
+            let window = cli_read_window(start, lines, end_line)?;
+            let range_spec = cli_single_range(path, path_arg, window.start, window.lines)?;
             let scope = RangeScope::from(scope);
             let scope = range_spec.scope.unwrap_or(scope);
             let range = if let Some(index_dir) = index_dir {
@@ -2950,12 +2966,14 @@ fn run() -> Result<()> {
             paths,
             start,
             lines,
+            end_line,
             scope,
         } => {
             let mut results = Vec::new();
             let scope = RangeScope::from(scope);
+            let window = cli_read_window(start, lines, end_line)?;
             if let Some(index_dir) = index_dir {
-                for range in cli_ranges(paths, ranges, start, lines, scope)? {
+                for range in cli_ranges(paths, ranges, window.start, window.lines, scope)? {
                     results.push(read_shard_range_scoped(
                         &index_dir,
                         &range.path,
@@ -2966,7 +2984,7 @@ fn run() -> Result<()> {
                 }
             } else if let Some(index_path) = index {
                 let index = FastIndex::load(index_path)?;
-                for range in cli_ranges(paths, ranges, start, lines, scope)? {
+                for range in cli_ranges(paths, ranges, window.start, window.lines, scope)? {
                     results.push(index.read_range_scoped(
                         &range.path,
                         range.start,
@@ -2975,7 +2993,7 @@ fn run() -> Result<()> {
                     )?);
                 }
             } else {
-                for range in cli_ranges(paths, ranges, start, lines, scope)? {
+                for range in cli_ranges(paths, ranges, window.start, window.lines, scope)? {
                     results.push(read_file_range_scoped(
                         &repo,
                         &range.path,
@@ -5396,6 +5414,32 @@ struct CliRangeSpec {
     start: usize,
     lines: usize,
     scope: Option<RangeScope>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct CliReadWindow {
+    start: usize,
+    lines: usize,
+}
+
+fn cli_read_window(
+    start: Option<usize>,
+    lines: Option<usize>,
+    end_line: Option<usize>,
+) -> Result<CliReadWindow> {
+    let start = start.unwrap_or(1);
+    let lines = if let Some(lines) = lines {
+        lines
+    } else if let Some(end_line) = end_line {
+        if end_line < start {
+            bail!("--end-line must be greater than or equal to --start");
+        }
+        end_line.saturating_sub(start).saturating_add(1)
+    } else {
+        DEFAULT_CLI_READ_RANGE_LINES
+    };
+    validate_cli_range_bounds(start, lines)?;
+    Ok(CliReadWindow { start, lines })
 }
 
 impl FromStr for CliRangeSpec {
