@@ -1155,7 +1155,19 @@ pub enum RepoMapDetail {
 pub struct RepoMap {
     pub brief: RepoBrief,
     pub entrypoints: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub manifest_files: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub important_files: Vec<String>,
     pub test_files: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub known_commands: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub command_hints: Vec<CommandHint>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dependency_hints: Vec<DependencyHint>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub import_hints: Vec<ImportHint>,
     pub top_symbols: Vec<Symbol>,
     pub related_files: Vec<RepoMapRelatedFile>,
     pub related_symbols: Vec<RepoMapRelatedSymbol>,
@@ -3241,6 +3253,12 @@ impl RepoIndex {
             self.repo_map_related_symbols(&entrypoints, &test_files, &top_symbols, 12);
 
         RepoMap {
+            manifest_files: brief.manifest_files.clone(),
+            important_files: brief.important_files.clone(),
+            known_commands: brief.known_commands.clone(),
+            command_hints: brief.command_hints.clone(),
+            dependency_hints: brief.dependency_hints.clone(),
+            import_hints: brief.import_hints.clone(),
             brief,
             entrypoints,
             test_files,
@@ -7931,7 +7949,25 @@ mod tests {
                 ],
             },
             entrypoints: vec!["Cargo.toml".to_string(), "src/main.rs".to_string()],
+            manifest_files: vec![
+                "Cargo.toml".to_string(),
+                "package.json".to_string(),
+                "pyproject.toml".to_string(),
+            ],
+            important_files: vec![
+                "Cargo.toml".to_string(),
+                "README.md".to_string(),
+                "package.json".to_string(),
+            ],
             test_files: vec!["tests/auth_test.rs".to_string()],
+            known_commands: vec!["cargo test".to_string()],
+            command_hints: vec![CommandHint {
+                command: "cargo test".to_string(),
+                kind: "test".to_string(),
+                source: "Cargo.toml".to_string(),
+            }],
+            dependency_hints: Vec::new(),
+            import_hints: Vec::new(),
             top_symbols: vec![
                 Symbol {
                     name: "issue_token".to_string(),

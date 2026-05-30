@@ -741,6 +741,12 @@ impl FastIndex {
         };
 
         RepoMap {
+            manifest_files: manifest_files.clone(),
+            important_files: important_files.clone(),
+            known_commands: known_commands.clone(),
+            command_hints: command_hints.clone(),
+            dependency_hints: dependency_hints.clone(),
+            import_hints: import_hints.clone(),
             brief: RepoBrief {
                 root_name: self
                     .root

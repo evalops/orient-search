@@ -7364,6 +7364,21 @@ fn prefix_repo_map_paths(
     for path in &mut map.brief.important_files {
         *path = scoped_output_path(scope, path);
     }
+    for path in &mut map.manifest_files {
+        *path = scoped_output_path(scope, path);
+    }
+    for path in &mut map.important_files {
+        *path = scoped_output_path(scope, path);
+    }
+    for hint in &mut map.command_hints {
+        hint.source = scoped_output_path(scope, &hint.source);
+    }
+    for hint in &mut map.dependency_hints {
+        hint.source = scoped_output_path(scope, &hint.source);
+    }
+    for hint in &mut map.import_hints {
+        hint.source = scoped_output_path(scope, &hint.source);
+    }
     for path in &mut map.entrypoints {
         *path = scoped_output_path(scope, path);
     }

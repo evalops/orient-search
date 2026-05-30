@@ -301,6 +301,12 @@ def test_issue_token_round_trip():
     assert!(brief.important_files.contains(&"Makefile".to_string()));
 
     let map = index.repo_map(10, 10);
+    assert_eq!(map.manifest_files, map.brief.manifest_files);
+    assert_eq!(map.important_files, map.brief.important_files);
+    assert_eq!(map.known_commands, map.brief.known_commands);
+    assert_eq!(map.command_hints, map.brief.command_hints);
+    assert_eq!(map.dependency_hints, map.brief.dependency_hints);
+    assert_eq!(map.import_hints, map.brief.import_hints);
     assert!(
         map.related_files.iter().any(|related| {
             related.source_path == "src/auth.py" && related.path == "tests/test_auth.py"
@@ -743,7 +749,20 @@ fn repo_briefs_keep_import_hints_compact_without_breaking_import_filters() {
     );
 
     let indexed = FastIndex::build(repo.path()).unwrap();
-    let indexed_brief = indexed.repo_map(10, 10).brief;
+    let indexed_map = indexed.repo_map(10, 10);
+    assert_eq!(indexed_map.manifest_files, indexed_map.brief.manifest_files);
+    assert_eq!(
+        indexed_map.important_files,
+        indexed_map.brief.important_files
+    );
+    assert_eq!(indexed_map.known_commands, indexed_map.brief.known_commands);
+    assert_eq!(indexed_map.command_hints, indexed_map.brief.command_hints);
+    assert_eq!(
+        indexed_map.dependency_hints,
+        indexed_map.brief.dependency_hints
+    );
+    assert_eq!(indexed_map.import_hints, indexed_map.brief.import_hints);
+    let indexed_brief = indexed_map.brief;
     assert_eq!(indexed_brief.import_hints.len(), 32);
     let full_indexed_brief = indexed
         .repo_map_with_detail(10, 10, RepoMapDetail::Full)
