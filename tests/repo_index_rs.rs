@@ -878,6 +878,44 @@ volumes:
 }
 
 #[test]
+fn dockerfile_stages_work_as_symbols_across_live_and_persistent_indexes() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("Dockerfile"),
+        r#"
+FROM rust:1.82 AS builder
+WORKDIR /app
+
+FROM debian:bookworm AS runtime
+COPY --from=builder /app/orient /usr/local/bin/orient
+"#,
+    );
+
+    let live = RepoIndexer::new(repo.path()).build().unwrap();
+    let live_builder = &live.find_symbol("builder", 10)[0];
+    assert_symbol(live_builder, "Dockerfile", "stage");
+    assert_eq!(live_builder.line, 2);
+    let live_runtime = &live.find_symbol("runtime", 10)[0];
+    assert_symbol(live_runtime, "Dockerfile", "stage");
+    assert_eq!(live_runtime.line, 5);
+
+    let fallback =
+        search_repo_fast_filtered(repo.path(), "stage:builder", 5, &Default::default()).unwrap();
+    assert_eq!(fallback[0].path, "Dockerfile");
+    assert!(fallback[0].reason.contains("symbol:builder"));
+
+    let indexed = FastIndex::build(repo.path()).unwrap();
+    let indexed_runtime = &indexed.find_symbol("runtime", 10)[0];
+    assert_symbol(indexed_runtime, "Dockerfile", "stage");
+    assert_eq!(indexed_runtime.line, 5);
+    let indexed_results = indexed
+        .search_filtered("kind:stage symbol:runtime", 5, &Default::default())
+        .unwrap();
+    assert_eq!(indexed_results[0].path, "Dockerfile");
+    assert!(indexed_results[0].reason.contains("symbol:runtime"));
+}
+
+#[test]
 fn cargo_manifest_targets_work_as_symbols_across_live_and_persistent_indexes() {
     let repo = tempfile::tempdir().unwrap();
     write(

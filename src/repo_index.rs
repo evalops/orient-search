@@ -4920,6 +4920,9 @@ pub(crate) fn extract_symbols(path: &str, text: &str, language: &str) -> Vec<Sym
     if is_docker_compose_path(path) {
         return extract_docker_compose_service_symbols(path, text);
     }
+    if is_dockerfile_path(path) {
+        return extract_dockerfile_stage_symbols(path, text);
+    }
     if language == "python" {
         return extract_python_symbols(path, text);
     }
@@ -5418,6 +5421,69 @@ fn docker_compose_service_targets(text: &str) -> Vec<(String, usize)> {
         }
     }
     targets
+}
+
+fn is_dockerfile_path(path: &str) -> bool {
+    let Some(file_name) = Path::new(path).file_name().and_then(|value| value.to_str()) else {
+        return false;
+    };
+    file_name == "Dockerfile" || file_name.starts_with("Dockerfile.")
+}
+
+fn extract_dockerfile_stage_symbols(path: &str, text: &str) -> Vec<Symbol> {
+    dockerfile_stage_targets(text)
+        .into_iter()
+        .map(|(name, line)| Symbol {
+            name,
+            kind: "stage".to_string(),
+            path: path.to_string(),
+            line,
+        })
+        .collect()
+}
+
+fn dockerfile_stage_targets(text: &str) -> Vec<(String, usize)> {
+    let mut targets = Vec::new();
+    for (index, line) in text.lines().enumerate() {
+        let line = line.split('#').next().unwrap_or("").trim();
+        if line.is_empty() {
+            continue;
+        }
+        let mut parts = line.split_whitespace();
+        if !parts
+            .next()
+            .is_some_and(|keyword| keyword.eq_ignore_ascii_case("FROM"))
+        {
+            continue;
+        }
+        let mut stage = None;
+        while let Some(part) = parts.next() {
+            if part.eq_ignore_ascii_case("AS") {
+                stage = parts.next();
+                break;
+            }
+        }
+        let Some(stage) = stage.map(|value| value.trim()) else {
+            continue;
+        };
+        if !is_dockerfile_stage_name(stage) {
+            continue;
+        }
+        if !targets
+            .iter()
+            .any(|(seen, _): &(String, usize)| seen == stage)
+        {
+            targets.push((stage.to_string(), index + 1));
+        }
+    }
+    targets
+}
+
+fn is_dockerfile_stage_name(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.'))
 }
 
 fn is_cargo_toml_path(path: &str) -> bool {

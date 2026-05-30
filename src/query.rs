@@ -1469,6 +1469,7 @@ pub fn normalize_symbol_kind(value: &str) -> String {
         "targets" | "recipe" | "recipes" | "task" | "tasks" => "target".to_string(),
         "packages" => "package".to_string(),
         "services" | "compose-service" | "compose-services" => "service".to_string(),
+        "stages" | "docker-stage" | "docker-stages" => "stage".to_string(),
         "binary" | "binaries" | "bins" => "bin".to_string(),
         "examples" => "example".to_string(),
         "benches" | "benchmark" | "benchmarks" => "bench".to_string(),
@@ -1495,6 +1496,7 @@ fn symbol_kind_from_shorthand_key(key: &str) -> Option<String> {
             | "script"
             | "package"
             | "service"
+            | "stage"
             | "bin"
             | "example"
             | "bench"
@@ -2572,6 +2574,14 @@ mod tests {
         assert_eq!(
             service_shorthand.filters.symbol_kind.as_deref(),
             Some("service")
+        );
+
+        let stage_shorthand = parse_query("stage:builder");
+        assert!(stage_shorthand.terms.is_empty());
+        assert_eq!(stage_shorthand.filters.symbol.as_deref(), Some("builder"));
+        assert_eq!(
+            stage_shorthand.filters.symbol_kind.as_deref(),
+            Some("stage")
         );
 
         let bin_shorthand = parse_query("bin:auth-worker");
