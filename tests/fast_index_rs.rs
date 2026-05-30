@@ -1128,10 +1128,11 @@ fn indexed_query_plan_reports_missing_terms_without_results() {
     assert_eq!(bad_file_plan.repair_hints[0].kind, "relax_file_filter");
     assert_eq!(
         bad_file_plan.repair_hints[0].suggested_query.as_deref(),
-        Some("")
+        Some("lang:rust")
     );
     assert!(bad_file_plan.repair_hints.iter().any(|hint| {
-        hint.kind == "relax_language_filter" && hint.suggested_query.as_deref() == Some("")
+        hint.kind == "relax_language_filter"
+            && hint.suggested_query.as_deref() == Some("file:not_real.rs")
     }));
     assert!(
         bad_file_plan
@@ -1145,6 +1146,19 @@ fn indexed_query_plan_reports_missing_terms_without_results() {
         .unwrap();
     assert_eq!(single_filter_plan.repair_hints[0].kind, "relax_file_filter");
     assert!(single_filter_plan.repair_hints[0].suggested_query.is_none());
+
+    let scoped_filter_repair_plan = index
+        .query_plan("issue_token lang:rust path:docs", &SearchFilters::default())
+        .unwrap();
+    let relax_path = scoped_filter_repair_plan
+        .repair_hints
+        .iter()
+        .find(|hint| hint.kind == "relax_path_filter")
+        .expect("expected path-specific repair hint");
+    assert_eq!(
+        relax_path.suggested_query.as_deref(),
+        Some("issue token lang:rust")
+    );
 
     let file_typo_plan = index
         .query_plan("file:athu.rs", &SearchFilters::default())

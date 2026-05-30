@@ -5471,7 +5471,7 @@ fn runtime_batches_searches_and_query_plans_against_repo_index_and_shards() {
     );
     assert_eq!(
         relax_result["retry_requests"][0]["arguments"]["query"],
-        "session manager"
+        "session manager lang:rust"
     );
     assert!(relax_result["retry_requests"][0]["arguments"]["path"].is_null());
     assert_eq!(
@@ -5482,7 +5482,11 @@ fn runtime_batches_searches_and_query_plans_against_repo_index_and_shards() {
         relax_result["repair_hints"][1]["kind"],
         serde_json::json!("relax_language_filter")
     );
-    assert_eq!(relax_result["retry_requests"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        relax_result["retry_requests"][1]["arguments"]["query"],
+        "session manager path:not-real"
+    );
+    assert_eq!(relax_result["retry_requests"].as_array().unwrap().len(), 3);
 
     let filter_only_plan = runtime.dispatch(ToolRequest {
         id: serde_json::json!("filter-only-plan"),
@@ -5504,7 +5508,7 @@ fn runtime_batches_searches_and_query_plans_against_repo_index_and_shards() {
     );
     assert_eq!(
         filter_only_result["retry_requests"][0]["arguments"]["query"],
-        ""
+        "lang:rust"
     );
     assert!(filter_only_result["retry_requests"][0]["arguments"]["file"].is_null());
     assert_eq!(

@@ -980,6 +980,10 @@ fn cli_search_auto_selects_live_indexed_and_shard_surfaces() {
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     let plan = &value["query_plan_result"];
     assert_eq!(plan["repair_hints"][0]["kind"], "relax_path_filter");
+    assert_eq!(
+        plan["retry_requests"][0]["arguments"]["query"],
+        "issue token lang:rust"
+    );
     assert_eq!(plan["retry_requests"][0]["arguments"]["language"], "rust");
     assert!(plan["retry_requests"][0]["arguments"]["path"].is_null());
 
@@ -998,7 +1002,7 @@ fn cli_search_auto_selects_live_indexed_and_shard_surfaces() {
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     let plan = &value["query_plan_result"];
     assert_eq!(plan["repair_hints"][0]["kind"], "relax_file_filter");
-    assert_eq!(plan["retry_requests"][0]["arguments"]["query"], "");
+    assert_eq!(plan["retry_requests"][0]["arguments"]["query"], "lang:rust");
     assert_eq!(plan["retry_requests"][0]["arguments"]["language"], "rust");
     assert!(plan["retry_requests"][0]["arguments"]["file"].is_null());
 

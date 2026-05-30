@@ -3761,7 +3761,11 @@ fn query_plan_repair_hints(
         ));
     }
     if candidate_count == 0 {
-        hints.extend(filter_specific_repair_hints(active_filters, query_tokens));
+        hints.extend(filter_specific_repair_hints(
+            active_filters,
+            query_tokens,
+            filters,
+        ));
     }
     if require_all && query_tokens.len() > 1 && candidate_count == 0 && missing_terms.is_empty() {
         hints.push(repair_hint(
@@ -3771,7 +3775,11 @@ fn query_plan_repair_hints(
         ));
     }
     if candidate_count > 0 && filtered_candidate_count == 0 {
-        hints.extend(filter_specific_repair_hints(active_filters, query_tokens));
+        hints.extend(filter_specific_repair_hints(
+            active_filters,
+            query_tokens,
+            filters,
+        ));
         hints.push(repair_hint(
             "relax_filters",
             "Posting candidates exist, but file/path/language/extension/test/generated/code filters rejected all of them.",
@@ -3809,6 +3817,7 @@ fn query_plan_repair_hints(
 fn filter_specific_repair_hints(
     active_filters: &[QueryPlanFilter],
     query_tokens: &[String],
+    filters: &SearchFilters,
 ) -> Vec<QueryPlanRepairHint> {
     active_filters
         .iter()
@@ -3840,7 +3849,7 @@ fn filter_specific_repair_hints(
                     "The {field_label}:{} filter rejected every posting candidate. Retry without just that filter before dropping the rest of the scope.",
                     filter.value
                 ),
-                suggested_token_query(query_tokens),
+                suggested_query_without_filter(&filter.field, query_tokens, filters),
             )
         })
         .collect()
@@ -4282,10 +4291,43 @@ fn filter_scan_specific_repair_hints(filters: &SearchFilters) -> Vec<QueryPlanRe
                 format!(
                     "No files matched the {label}:{value} filter-only query. Retry without just that filter before dropping the rest of the scope."
                 ),
-                remaining_scope.then(String::new),
+                remaining_scope
+                    .then(|| suggested_query_without_filter(field, &[], filters))
+                    .flatten(),
             )
         })
         .collect()
+}
+
+fn suggested_query_without_filter(
+    field: &str,
+    query_tokens: &[String],
+    filters: &SearchFilters,
+) -> Option<String> {
+    let mut relaxed = filters.clone();
+    clear_positive_filter_field(&mut relaxed, field);
+    suggested_query_from_filters(query_tokens, &relaxed)
+}
+
+fn clear_positive_filter_field(filters: &mut SearchFilters, field: &str) {
+    match field {
+        "file" => filters.file = None,
+        "path" => filters.path = None,
+        "language" => filters.language = None,
+        "extension" => filters.extension = None,
+        "symbol" => filters.symbol = None,
+        "symbol_kind" => filters.symbol_kind = None,
+        "repo" => filters.repo = None,
+        "branch" => filters.branch = None,
+        "origin" => filters.origin = None,
+        "dependency" => filters.dependency = None,
+        "import" => filters.import = None,
+        "test" => filters.test = None,
+        "generated" => filters.generated = None,
+        "code" => filters.code = None,
+        "line" => filters.target_line = None,
+        _ => {}
+    }
 }
 
 fn available_symbol_kinds(symbol_kind_postings: &HashMap<String, Vec<Posting>>) -> Vec<String> {
