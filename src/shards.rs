@@ -904,10 +904,7 @@ fn shard_status_jobs(index_dir: &Path, shards: &[ShardEntry]) -> Result<Vec<Shar
         return Ok(Vec::new());
     }
 
-    let workers = std::thread::available_parallelism()
-        .map(|count| count.get())
-        .unwrap_or(1)
-        .min(shards.len());
+    let workers = bounded_shard_worker_count(shards.len());
     if workers <= 1 {
         return shard_status_job_batch(index_dir, 0, shards)
             .map(|items| ordered_status_items(items, shards.len()));
@@ -1409,10 +1406,7 @@ fn shard_query_plan_jobs(
         return Ok(Vec::new());
     }
 
-    let workers = std::thread::available_parallelism()
-        .map(|count| count.get())
-        .unwrap_or(1)
-        .min(jobs.len());
+    let workers = bounded_shard_worker_count(jobs.len());
     if workers <= 1 {
         return shard_query_plan_job_batch(index_dir, query, filters, &jobs);
     }
@@ -4188,5 +4182,16 @@ mod tests {
         assert_eq!(bounded_shard_worker_count_for(32, 16, 6), 6);
         assert_eq!(bounded_shard_worker_count_for(32, 0, 8), 1);
         assert_eq!(bounded_shard_worker_count_for(32, 16, 0), 1);
+    }
+
+    #[test]
+    fn shard_fanout_paths_share_bounded_worker_helper() {
+        let source = include_str!("shards.rs");
+        let direct_call = concat!("std::thread::", "available_parallelism()");
+        let direct_parallelism_calls = source.matches(direct_call).count();
+        assert_eq!(
+            direct_parallelism_calls, 1,
+            "all shard fanout should route through bounded_shard_worker_count"
+        );
     }
 }
