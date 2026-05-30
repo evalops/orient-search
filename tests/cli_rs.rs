@@ -3571,6 +3571,8 @@ fn cli_builds_and_searches_persistent_index() {
             "--index",
             index_path.to_str().unwrap(),
             "--include-read-batch",
+            "--format",
+            "json",
             "SessionManager",
         ])
         .assert()
@@ -3590,6 +3592,8 @@ fn cli_builds_and_searches_persistent_index() {
             "symbol",
             "--index",
             index_path.to_str().unwrap(),
+            "--format",
+            "json",
             "SessionManager",
         ])
         .assert()
@@ -3609,6 +3613,8 @@ fn cli_builds_and_searches_persistent_index() {
             "index-symbol-batch",
             "--index",
             index_path.to_str().unwrap(),
+            "--format",
+            "json",
             "SessionManager",
             "issue_token",
             "--kind",
@@ -3666,6 +3672,8 @@ fn cli_builds_and_searches_persistent_index() {
             "symbol-batch",
             "--index",
             index_path.to_str().unwrap(),
+            "--format",
+            "json",
             "SessionManager",
             "issue_token",
             "--kind",
