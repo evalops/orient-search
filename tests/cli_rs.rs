@@ -2416,6 +2416,14 @@ fn cli_searches_symbols_and_related_files() {
         related_symbols["summary"]["top_paths"],
         serde_json::json!(["src/auth.rs"])
     );
+    assert_eq!(
+        related_symbols["summary"]["top_dirs"],
+        serde_json::json!(["src"])
+    );
+    assert_eq!(
+        related_symbols["summary"]["top_exts"],
+        serde_json::json!(["rs"])
+    );
     assert!(
         related_symbols["summary"]["top_symbols"]
             .as_array()

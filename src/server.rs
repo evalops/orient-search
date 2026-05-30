@@ -3090,6 +3090,8 @@ fn related_lookup_summary(results: &Value) -> Value {
         "result_count": result_count
     });
     let mut top_paths = Vec::new();
+    let mut top_dirs = Vec::new();
+    let mut top_exts = Vec::new();
     let mut top_symbols = Vec::new();
     let mut symbol_kinds = Vec::new();
     for item in results {
@@ -3102,6 +3104,18 @@ fn related_lookup_summary(results: &Value) -> Value {
             && !top_paths.iter().any(|existing| existing == path)
         {
             top_paths.push(path.to_string());
+        }
+        if let Some(path) = path {
+            let dir = search_summary_dir(path);
+            if top_dirs.len() < 5 && !top_dirs.iter().any(|existing| existing == &dir) {
+                top_dirs.push(dir);
+            }
+            if let Some(ext) = search_summary_ext(path)
+                && top_exts.len() < 5
+                && !top_exts.iter().any(|existing| existing == &ext)
+            {
+                top_exts.push(ext);
+            }
         }
         if let Some(symbol) = item.get("symbol") {
             if let Some(name) = symbol.get("name").and_then(Value::as_str)
@@ -3120,6 +3134,12 @@ fn related_lookup_summary(results: &Value) -> Value {
     }
     if !top_paths.is_empty() {
         summary["top_paths"] = json!(top_paths);
+    }
+    if !top_dirs.is_empty() {
+        summary["top_dirs"] = json!(top_dirs);
+    }
+    if !top_exts.is_empty() {
+        summary["top_exts"] = json!(top_exts);
     }
     if !top_symbols.is_empty() {
         summary["top_symbols"] = json!(top_symbols);
