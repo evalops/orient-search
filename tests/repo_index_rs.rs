@@ -1767,6 +1767,75 @@ func TestLoginFlowHelper() {}
 }
 
 #[test]
+fn jvm_test_commands_search_target_test_methods() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo
+            .path()
+            .join("src/test/java/com/example/GatewayTest.java"),
+        r#"
+package com.example;
+
+public class GatewayTest {
+  public void routesPayment() {
+  }
+}
+"#,
+    );
+    write(
+        &repo
+            .path()
+            .join("src/test/java/com/example/OtherGatewayTest.java"),
+        r#"
+package com.example;
+
+public class OtherGatewayTest {
+  public void routesPayment() {
+  }
+}
+"#,
+    );
+    write(
+        &repo.path().join("src/main/java/com/example/Gateway.java"),
+        r#"
+package com.example;
+
+public class Gateway {
+  public void routesPaymentHelper() {
+  }
+}
+"#,
+    );
+
+    let fallback = search_repo_fast_filtered(
+        repo.path(),
+        "mvn test -Dtest=GatewayTest#routesPayment",
+        5,
+        &Default::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        fallback[0].path,
+        "src/test/java/com/example/GatewayTest.java"
+    );
+    assert!(fallback[0].reason.contains("symbol:routesPayment"));
+
+    let indexed = FastIndex::build(repo.path()).unwrap();
+    let indexed_results = indexed
+        .search_filtered(
+            "./gradlew test --tests com.example.GatewayTest.routesPayment",
+            5,
+            &Default::default(),
+        )
+        .unwrap();
+    assert_eq!(
+        indexed_results[0].path,
+        "src/test/java/com/example/GatewayTest.java"
+    );
+    assert!(indexed_results[0].reason.contains("symbol:routesPayment"));
+}
+
+#[test]
 fn fallback_line_range_tracks_displayed_contiguous_snippet_block() {
     let repo = tempfile::tempdir().unwrap();
     let mut source = String::from("alpha first hit\n");

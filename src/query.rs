@@ -46,6 +46,7 @@ pub fn parse_query(input: &str) -> ParsedQuery {
     infer_js_test_command_path_term(&mut terms, &mut filters, explicit_content_terms);
     infer_cargo_test_command_symbol_term(&mut terms, &mut filters, explicit_content_terms);
     infer_go_test_run_command_symbol_term(&mut terms, &mut filters, explicit_content_terms);
+    infer_jvm_test_command_symbol_term(&mut terms, &mut filters, explicit_content_terms);
     if terms.len() > 1 && !filters.match_any {
         filters.require_all = true;
     }
@@ -900,6 +901,181 @@ fn is_go_test_command_flag_term(value: &str) -> bool {
         || value.starts_with("timeout=")
         || value.starts_with("parallel=")
         || value.starts_with("tags=")
+}
+
+fn infer_jvm_test_command_symbol_term(
+    terms: &mut Vec<String>,
+    filters: &mut SearchFilters,
+    explicit_content_terms: bool,
+) {
+    if explicit_content_terms
+        || terms.len() < 2
+        || filters.file.is_some()
+        || filters.path.is_some()
+        || filters.symbol.is_some()
+    {
+        return;
+    }
+
+    let mut saw_runner = false;
+    let mut saw_test_command = false;
+    let mut saw_selector_flag = false;
+    let mut selectors = Vec::new();
+    for term in filters.exclude_content.iter() {
+        let term = trim_location_token_wrappers(term);
+        let normalized = term.trim_start_matches('-');
+        if matches!(normalized, "Dtest" | "test" | "tests") {
+            saw_selector_flag = true;
+            continue;
+        }
+        if let Some(selector) = normalized
+            .strip_prefix("Dtest=")
+            .or_else(|| normalized.strip_prefix("test="))
+            .or_else(|| normalized.strip_prefix("tests="))
+        {
+            let Some(selector) = jvm_test_selector(selector) else {
+                return;
+            };
+            selectors.push(selector);
+            saw_selector_flag = true;
+            continue;
+        }
+        if is_jvm_test_command_flag_term(normalized) {
+            continue;
+        }
+        return;
+    }
+    for term in terms.iter() {
+        let term = trim_location_token_wrappers(term);
+        let lower = term.to_ascii_lowercase();
+        if is_jvm_test_runner(&lower) {
+            saw_runner = true;
+            continue;
+        }
+        if is_jvm_test_command_word(&lower) {
+            saw_test_command = true;
+            continue;
+        }
+        if saw_selector_flag {
+            let Some(selector) = jvm_test_selector(term) else {
+                return;
+            };
+            selectors.push(selector);
+            continue;
+        }
+        return;
+    }
+
+    let [selector] = selectors.as_slice() else {
+        return;
+    };
+    if !saw_runner || !saw_test_command {
+        return;
+    }
+
+    filters.file = Some(format!("{}.*", selector.class_name));
+    if let Some(method_name) = &selector.method_name {
+        filters.symbol = Some(method_name.clone());
+        filters.symbol_kind = Some("function".to_string());
+    } else {
+        filters.symbol = Some(selector.class_name.clone());
+        filters.symbol_kind = Some("class".to_string());
+    }
+    filters.exclude_content.clear();
+    terms.clear();
+    filters.require_all = false;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct JvmTestSelector {
+    class_name: String,
+    method_name: Option<String>,
+}
+
+fn is_jvm_test_runner(value: &str) -> bool {
+    matches!(
+        value.trim_start_matches("./"),
+        "mvn" | "mvnw" | "mvnd" | "gradle" | "gradlew"
+    )
+}
+
+fn is_jvm_test_command_word(value: &str) -> bool {
+    matches!(value, "test" | "verify" | "check") || value.ends_with(":test")
+}
+
+fn is_jvm_test_command_flag_term(value: &str) -> bool {
+    value == "q"
+        || value == "info"
+        || value == "debug"
+        || value == "stacktrace"
+        || value == "no-daemon"
+        || value == "fail-fast"
+        || value == "rerun-tasks"
+        || value.starts_with("DfailIfNoTests=")
+}
+
+fn jvm_test_selector(value: &str) -> Option<JvmTestSelector> {
+    let value = trim_location_token_wrappers(value);
+    if value.is_empty() || value.contains(char::is_whitespace) || value.contains(',') {
+        return None;
+    }
+    let value = value
+        .trim_matches(|ch| matches!(ch, '\'' | '"' | '`'))
+        .trim_matches('*');
+    if value.is_empty() {
+        return None;
+    }
+
+    let (class_selector, method_name) =
+        if let Some((class_selector, method)) = value.split_once('#') {
+            (class_selector, Some(method))
+        } else if let Some((prefix, method)) = value.rsplit_once('.') {
+            if jvm_test_method_name(method)
+                && prefix.rsplit('.').next().is_some_and(jvm_test_class_name)
+            {
+                (prefix, Some(method))
+            } else {
+                (value, None)
+            }
+        } else {
+            (value, None)
+        };
+
+    let class_name = class_selector.rsplit('.').next()?.trim_matches('*');
+    if !jvm_test_class_name(class_name) {
+        return None;
+    }
+    let method_name = method_name
+        .map(str::trim)
+        .filter(|method| !method.is_empty());
+    if method_name.is_some_and(|method| !jvm_test_method_name(method)) {
+        return None;
+    }
+    Some(JvmTestSelector {
+        class_name: class_name.to_string(),
+        method_name: method_name.map(ToString::to_string),
+    })
+}
+
+fn jvm_test_class_name(value: &str) -> bool {
+    (value.ends_with("Test")
+        || value.ends_with("Tests")
+        || value.ends_with("IT")
+        || value.ends_with("Spec"))
+        && java_identifier(value)
+}
+
+fn jvm_test_method_name(value: &str) -> bool {
+    java_identifier(value)
+}
+
+fn java_identifier(value: &str) -> bool {
+    let mut chars = value.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    (first == '_' || first.is_ascii_alphabetic())
+        && chars.all(|ch| ch == '_' || ch == '$' || ch.is_ascii_alphanumeric())
 }
 
 fn infer_leading_pytest_node_id_term(
@@ -2614,6 +2790,69 @@ mod tests {
             go_test_run_equals_command.filters.symbol_kind.as_deref(),
             Some("function")
         );
+
+        let maven_test_method_command = parse_query("mvn test -Dtest=GatewayTest#routesPayment");
+        assert!(maven_test_method_command.terms.is_empty());
+        assert_eq!(
+            maven_test_method_command.filters.file.as_deref(),
+            Some("GatewayTest.*")
+        );
+        assert_eq!(
+            maven_test_method_command.filters.symbol.as_deref(),
+            Some("routesPayment")
+        );
+        assert_eq!(
+            maven_test_method_command.filters.symbol_kind.as_deref(),
+            Some("function")
+        );
+
+        let gradle_test_method_command =
+            parse_query("./gradlew test --tests com.example.GatewayTest.routesPayment");
+        assert!(gradle_test_method_command.terms.is_empty());
+        assert_eq!(
+            gradle_test_method_command.filters.file.as_deref(),
+            Some("GatewayTest.*")
+        );
+        assert_eq!(
+            gradle_test_method_command.filters.symbol.as_deref(),
+            Some("routesPayment")
+        );
+        assert_eq!(
+            gradle_test_method_command.filters.symbol_kind.as_deref(),
+            Some("function")
+        );
+
+        let maven_test_class_command = parse_query("mvn -Dtest=GatewayTest test");
+        assert!(maven_test_class_command.terms.is_empty());
+        assert_eq!(
+            maven_test_class_command.filters.file.as_deref(),
+            Some("GatewayTest.*")
+        );
+        assert_eq!(
+            maven_test_class_command.filters.symbol.as_deref(),
+            Some("GatewayTest")
+        );
+        assert_eq!(
+            maven_test_class_command.filters.symbol_kind.as_deref(),
+            Some("class")
+        );
+
+        let maven_integration_test_command =
+            parse_query("mvn verify -Dtest=GatewayIT#routesPayment");
+        assert!(maven_integration_test_command.terms.is_empty());
+        assert_eq!(
+            maven_integration_test_command.filters.file.as_deref(),
+            Some("GatewayIT.*")
+        );
+        assert_eq!(
+            maven_integration_test_command.filters.symbol.as_deref(),
+            Some("routesPayment")
+        );
+
+        let maven_install_command = parse_query("mvn install GatewayTest#routesPayment");
+        assert_eq!(maven_install_command.filters.file, None);
+        assert_eq!(maven_install_command.filters.symbol, None);
+        assert!(!maven_install_command.terms.is_empty());
 
         let pytest_failure_line = parse_query("FAILED tests/test_auth.py::test_login - failed");
         assert!(pytest_failure_line.terms.is_empty());
