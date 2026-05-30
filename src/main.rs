@@ -67,6 +67,8 @@ enum Commands {
         format: String,
     },
     DiscoverRepos {
+        #[arg(long = "format", default_value = "json", value_parser = ["json"])]
+        format: String,
         #[arg(long, default_value = ".")]
         root: PathBuf,
         #[arg(long, default_value_t = 4)]
@@ -83,28 +85,38 @@ enum Commands {
         nested_manifests: bool,
     },
     Index {
+        #[arg(long = "format", default_value = "json", value_parser = ["json"])]
+        format: String,
         #[arg(long, default_value = ".")]
         repo: PathBuf,
         #[arg(long)]
         output: PathBuf,
     },
     RefreshIndex {
+        #[arg(long = "format", default_value = "json", value_parser = ["json"])]
+        format: String,
         #[arg(long, default_value = ".")]
         repo: PathBuf,
         #[arg(long)]
         index: PathBuf,
     },
     IndexStatus {
+        #[arg(long = "format", default_value = "json", value_parser = ["json"])]
+        format: String,
         #[arg(long)]
         index: PathBuf,
     },
     EnsureIndex {
+        #[arg(long = "format", default_value = "json", value_parser = ["json"])]
+        format: String,
         #[arg(long, default_value = ".")]
         repo: PathBuf,
         #[arg(long)]
         index: PathBuf,
     },
     IndexShards {
+        #[arg(long = "format", default_value = "json", value_parser = ["json"])]
+        format: String,
         #[arg(long = "repo")]
         repos: Vec<PathBuf>,
         #[arg(long = "discover-root")]
@@ -123,16 +135,22 @@ enum Commands {
         output_dir: PathBuf,
     },
     RefreshShards {
+        #[arg(long = "format", default_value = "json", value_parser = ["json"])]
+        format: String,
         #[arg(long)]
         index_dir: PathBuf,
     },
     ShardStatus {
+        #[arg(long = "format", default_value = "json", value_parser = ["json"])]
+        format: String,
         #[arg(long)]
         index_dir: PathBuf,
         #[arg(long)]
         summary: bool,
     },
     EnsureShards {
+        #[arg(long = "format", default_value = "json", value_parser = ["json"])]
+        format: String,
         #[arg(long = "repo")]
         repos: Vec<PathBuf>,
         #[arg(long = "discover-root")]
@@ -850,9 +868,17 @@ enum Commands {
         #[arg(required_unless_present = "query_args", allow_hyphen_values = true)]
         queries: Vec<String>,
     },
-    ToolManifest,
-    McpManifest,
+    ToolManifest {
+        #[arg(long = "format", default_value = "json", value_parser = ["json"])]
+        format: String,
+    },
+    McpManifest {
+        #[arg(long = "format", default_value = "json", value_parser = ["json"])]
+        format: String,
+    },
     AgentGuide {
+        #[arg(long = "format", default_value = "json", value_parser = ["json"])]
+        format: String,
         #[arg(long)]
         repo: Option<String>,
         #[arg(long)]
@@ -2544,6 +2570,7 @@ fn run() -> Result<()> {
             print_version_report(&format)?;
         }
         Commands::DiscoverRepos {
+            format: _format,
             root,
             max_depth,
             limit,
@@ -2567,18 +2594,34 @@ fn run() -> Result<()> {
                 )?)?
             );
         }
-        Commands::Index { repo, output } => {
+        Commands::Index {
+            format: _format,
+            repo,
+            output,
+        } => {
             let index = FastIndex::build(repo)?;
             index.save(&output)?;
             println!("{}", serde_json::to_string(&index.stats())?);
         }
-        Commands::RefreshIndex { repo, index } | Commands::EnsureIndex { repo, index } => {
+        Commands::RefreshIndex {
+            format: _format,
+            repo,
+            index,
+        }
+        | Commands::EnsureIndex {
+            format: _format,
+            repo,
+            index,
+        } => {
             println!(
                 "{}",
                 serde_json::to_string(&refresh_or_build_index(repo, index)?)?
             );
         }
-        Commands::IndexStatus { index } => {
+        Commands::IndexStatus {
+            format: _format,
+            index,
+        } => {
             let index_path = index;
             let index = FastIndex::load(&index_path)?;
             println!(
@@ -2587,6 +2630,7 @@ fn run() -> Result<()> {
             );
         }
         Commands::IndexShards {
+            format: _format,
             repos,
             discover_roots,
             max_depth,
@@ -2610,10 +2654,17 @@ fn run() -> Result<()> {
                 serde_json::to_string(&shard_bootstrap_output(stats, selection.discovery)?)?
             );
         }
-        Commands::RefreshShards { index_dir } => {
+        Commands::RefreshShards {
+            format: _format,
+            index_dir,
+        } => {
             println!("{}", serde_json::to_string(&refresh_shards(index_dir)?)?);
         }
-        Commands::ShardStatus { index_dir, summary } => {
+        Commands::ShardStatus {
+            format: _format,
+            index_dir,
+            summary,
+        } => {
             let status = shard_status(index_dir)?;
             let output = if summary {
                 shard_status_summary(&status)
@@ -2623,6 +2674,7 @@ fn run() -> Result<()> {
             println!("{}", serde_json::to_string(&output)?);
         }
         Commands::EnsureShards {
+            format: _format,
             repos,
             discover_roots,
             max_depth,
@@ -4726,13 +4778,14 @@ fn run() -> Result<()> {
                 fail_slow_bench_queries(&report, threshold)?;
             }
         }
-        Commands::ToolManifest => {
+        Commands::ToolManifest { format: _format } => {
             println!("{}", serde_json::to_string(&tool_manifest())?);
         }
-        Commands::McpManifest => {
+        Commands::McpManifest { format: _format } => {
             println!("{}", serde_json::to_string(&mcp_tool_manifest())?);
         }
         Commands::AgentGuide {
+            format: _format,
             repo,
             index,
             index_dir,

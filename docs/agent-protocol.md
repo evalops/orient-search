@@ -123,7 +123,11 @@ tools are forgiving targeted entrypoints: pass `repo`, `index`, or `index_dir`
 and they use the matching live, indexed, or shard surface.
 Search-family CLI commands always emit JSON and accept `--format json`, so
 generic wrappers can pass an explicit output contract without special-casing
-Orient.
+Orient. JSON-emitting setup and discovery commands such as `discover-repos`,
+`index`, `refresh-index`, `ensure-index`, `index-status`, `index-shards`,
+`refresh-shards`, `ensure-shards`, `shard-status`, `tool-manifest`,
+`mcp-manifest`, and `agent-guide` accept the same explicit `--format json`
+contract.
 The CLI equivalent for automatic target selection is `orient search-auto`. When
 no target flag is supplied, it first tries the shared TCP daemon at
 `127.0.0.1:8796`, infers the current git checkout as `repo_filter` when

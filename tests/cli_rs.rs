@@ -88,7 +88,7 @@ fn cli_reports_version_for_install_sanity_checks() {
 #[test]
 fn cli_outputs_tool_manifest() {
     let mut cmd = Command::cargo_bin("orient").unwrap();
-    cmd.arg("tool-manifest")
+    cmd.args(["tool-manifest", "--format", "json"])
         .assert()
         .success()
         .stdout(predicate::str::contains("\"name\":\"discover_repos\""))
@@ -340,7 +340,7 @@ fn cli_suppresses_broken_pipe_when_output_consumer_closes() {
 #[test]
 fn cli_outputs_mcp_manifest() {
     let mut cmd = Command::cargo_bin("orient").unwrap();
-    cmd.arg("mcp-manifest")
+    cmd.args(["mcp-manifest", "--format", "json"])
         .assert()
         .success()
         .stdout(predicate::str::contains("\"tools\""))
@@ -456,6 +456,8 @@ fn cli_outputs_agent_guide() {
     let mut cmd = Command::cargo_bin("orient").unwrap();
     cmd.args([
         "agent-guide",
+        "--format",
+        "json",
         "--repo",
         "/work/repo",
         "--index",
@@ -1201,6 +1203,8 @@ fn cli_discovers_repos_for_shard_setup() {
     let mut cmd = Command::cargo_bin("orient").unwrap();
     cmd.args([
         "discover-repos",
+        "--format",
+        "json",
         "--root",
         root.path().to_str().unwrap(),
         "--max-depth",
@@ -3242,7 +3246,13 @@ fn cli_reports_index_and_shard_freshness() {
 
     let mut clean = Command::cargo_bin("orient").unwrap();
     clean
-        .args(["index-status", "--index", index_path.to_str().unwrap()])
+        .args([
+            "index-status",
+            "--format",
+            "json",
+            "--index",
+            index_path.to_str().unwrap(),
+        ])
         .assert()
         .success()
         .stdout(predicate::str::contains("\"stale\":false"))
@@ -3265,7 +3275,13 @@ fn cli_reports_index_and_shard_freshness() {
 
     let mut stale = Command::cargo_bin("orient").unwrap();
     stale
-        .args(["index-status", "--index", index_path.to_str().unwrap()])
+        .args([
+            "index-status",
+            "--format",
+            "json",
+            "--index",
+            index_path.to_str().unwrap(),
+        ])
         .assert()
         .success()
         .stdout(predicate::str::contains("\"stale\":true"))
@@ -3327,6 +3343,8 @@ fn cli_reports_index_and_shard_freshness() {
     shard_status
         .args([
             "shard-status",
+            "--format",
+            "json",
             "--index-dir",
             shard_dir.path().to_str().unwrap(),
         ])
