@@ -2740,9 +2740,11 @@ fn shard_route_postings(
     if start > route.shard_ids.len() {
         return Err(());
     }
-    decode_route_shard_ids(&route.shard_ids[start..], term.len as usize)
-        .map(Some)
-        .ok_or(())
+    let ids = decode_route_shard_ids(&route.shard_ids[start..], term.len as usize).ok_or(())?;
+    if ids.iter().any(|id| *id as usize >= route.shards.len()) {
+        return Err(());
+    }
+    Ok(Some(ids))
 }
 
 fn shard_route_requirements(shard_query: &str, filters: &SearchFilters) -> ShardRouteRequirements {
@@ -4066,6 +4068,44 @@ mod tests {
             trigram_terms: Vec::new(),
             omitted_trigram_hashes: Vec::new(),
             shard_ids: vec![0x80],
+        };
+
+        assert_eq!(
+            shard_route_candidate_ids(&route, &exact_route_requirements(&[42])),
+            ShardRouteLookup::Corrupt
+        );
+    }
+
+    #[test]
+    fn out_of_range_route_shard_ids_mark_lookup_corrupt() {
+        let mut shard_ids = Vec::new();
+        encode_route_shard_ids(&[1], &mut shard_ids);
+        let route = ShardManifestRoute {
+            version: SHARD_MANIFEST_ROUTE_VERSION,
+            json_fingerprint: ManifestFileFingerprint {
+                len: 0,
+                modified_secs: 0,
+                modified_nanos: 0,
+            },
+            shards: vec![ShardRouteEntry {
+                name: "auth".to_string(),
+                root: PathBuf::from("auth"),
+                index: "auth.orient".to_string(),
+                aliases: Vec::new(),
+                git: None,
+                substring_bits: Vec::new(),
+                symbol_kind_bits: Vec::new(),
+                filter_bits: Vec::new(),
+            }],
+            exact_terms: vec![ShardRouteTerm {
+                hash: 42,
+                start: 0,
+                len: 1,
+            }],
+            omitted_hashes: Vec::new(),
+            trigram_terms: Vec::new(),
+            omitted_trigram_hashes: Vec::new(),
+            shard_ids,
         };
 
         assert_eq!(
