@@ -10724,6 +10724,22 @@ fn server_handles_indexed_search_request() {
             "ranges": {"path": "src/auth.rs", "start": 1, "lines": 1}
         }
     });
+    let open_request = serde_json::json!({
+        "id": "open-index-range",
+        "tool": "open_index_range",
+        "arguments": {
+            "index": index_path,
+            "path": "src/auth.rs#L2-L2"
+        }
+    });
+    let open_ranges_request = serde_json::json!({
+        "id": "open-index-ranges",
+        "tool": "open_index_ranges",
+        "arguments": {
+            "index": index_path,
+            "ranges": ["src/auth.rs#L2-L2"]
+        }
+    });
     let symbol_request = serde_json::json!({
         "id": "find-index-symbol",
         "tool": "find_index_symbol",
@@ -10784,6 +10800,8 @@ fn server_handles_indexed_search_request() {
     writeln!(child.stdin.as_mut().unwrap(), "{request}").unwrap();
     writeln!(child.stdin.as_mut().unwrap(), "{read_request}").unwrap();
     writeln!(child.stdin.as_mut().unwrap(), "{read_ranges_request}").unwrap();
+    writeln!(child.stdin.as_mut().unwrap(), "{open_request}").unwrap();
+    writeln!(child.stdin.as_mut().unwrap(), "{open_ranges_request}").unwrap();
     writeln!(child.stdin.as_mut().unwrap(), "{symbol_request}").unwrap();
     writeln!(child.stdin.as_mut().unwrap(), "{symbol_batch_request}").unwrap();
     writeln!(child.stdin.as_mut().unwrap(), "{map_request}").unwrap();
@@ -10811,6 +10829,9 @@ fn server_handles_indexed_search_request() {
     assert!(stdout.contains("issue_token"));
     assert!(stdout.contains("\"id\":\"read-index-ranges\""));
     assert!(stdout.contains("\"path\":\"tests/auth_test.rs\""));
+    assert!(stdout.contains("\"id\":\"open-index-range\""));
+    assert!(stdout.contains("\"start_line\":2"));
+    assert!(stdout.contains("\"id\":\"open-index-ranges\""));
     assert!(stdout.contains("\"id\":\"find-index-symbol\""));
     assert!(stdout.contains("\"kind\":\"struct\""));
     assert!(stdout.contains("\"read_request\""));
@@ -10977,6 +10998,22 @@ fn server_handles_shard_index_search_and_read_requests() {
             "ranges": {"path": "src/billing.rs", "start": 1, "lines": 1}
         }
     });
+    let open_request = serde_json::json!({
+        "id": "open-shard-range",
+        "tool": "open_shard_range",
+        "arguments": {
+            "index_dir": parent.path().join(".orient-shards"),
+            "path": "src/billing.rs#L1-L1"
+        }
+    });
+    let open_ranges_request = serde_json::json!({
+        "id": "open-shard-ranges",
+        "tool": "open_shard_ranges",
+        "arguments": {
+            "index_dir": parent.path().join(".orient-shards"),
+            "ranges": ["src/billing.rs#L1-L1"]
+        }
+    });
     let symbol_request = serde_json::json!({
         "id": "find-shard-symbol",
         "tool": "find_shard_symbol",
@@ -11031,6 +11068,8 @@ fn server_handles_shard_index_search_and_read_requests() {
     writeln!(child.stdin.as_mut().unwrap(), "{map_request}").unwrap();
     writeln!(child.stdin.as_mut().unwrap(), "{read_request}").unwrap();
     writeln!(child.stdin.as_mut().unwrap(), "{read_ranges_request}").unwrap();
+    writeln!(child.stdin.as_mut().unwrap(), "{open_request}").unwrap();
+    writeln!(child.stdin.as_mut().unwrap(), "{open_ranges_request}").unwrap();
     writeln!(child.stdin.as_mut().unwrap(), "{related_request}").unwrap();
     writeln!(child.stdin.as_mut().unwrap(), "{related_symbols_request}").unwrap();
     writeln!(child.stdin.as_mut().unwrap(), "{plan_request}").unwrap();
@@ -11061,6 +11100,8 @@ fn server_handles_shard_index_search_and_read_requests() {
     assert!(stdout.contains("invoice_total"));
     assert!(stdout.contains("\"id\":\"read-shard-ranges\""));
     assert!(stdout.contains("\"path\":\"billing/tests/billing_test.rs\""));
+    assert!(stdout.contains("\"id\":\"open-shard-range\""));
+    assert!(stdout.contains("\"id\":\"open-shard-ranges\""));
     assert!(stdout.contains("\"id\":\"related-shard-files\""));
     assert!(stdout.contains("billing/tests/billing_test.rs"));
     assert!(stdout.contains("\"read_request\""));

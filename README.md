@@ -113,7 +113,7 @@ JSON-lines requests look like this:
 {"id":"guide","tool":"agent_guide","arguments":{"index_dir":"/path/to/local/cache/orient-shards"}}
 {"id":"map","tool":"shard_repo_map","arguments":{"index_dir":"/path/to/local/cache/orient-shards","detail":"compact","read_limit":16}}
 {"id":"search","tool":"search_auto","arguments":{"query":"repo:service branch:main symbol:SessionManager token","limit":10,"explain":true}}
-{"id":"read","tool":"read_ranges","arguments":{"index_dir":"/path/to/local/cache/orient-shards","ranges":[{"path":"service/src/auth.rs","start":40,"lines":80},"service/src/lib.rs#L40-L45"]}}
+{"id":"read","tool":"open_ranges","arguments":{"index_dir":"/path/to/local/cache/orient-shards","ranges":[{"path":"service/src/auth.rs","start":40,"lines":80},"service/src/lib.rs#L40-L45"]}}
 ```
 
 Every search result includes ready-to-send read, related-file, related-symbol,
@@ -137,8 +137,9 @@ range count and total line budget before sending the follow-up.
 For manual context reads, pass `scope:"symbol"` or `orient read-range --scope
 symbol` to anchor the returned window at the nearest function, class, or type
 definition instead of opening an exact line window.
-The `read_range` / `read_ranges` protocol tools and `read-range` /
-`read-ranges` CLIs accept the same copied file locations as search, including
+The `read_range` / `open_range` and `read_ranges` / `open_ranges` protocol
+tools and matching `read-*` / `open-*` CLIs accept the same copied file
+locations as search, including
 `src/lib.rs:42`, copied `src/lib.rs:42: text` lines, `src/lib.rs#L42-L45`,
 Markdown links, and common hosted code links with fragment or query-string line
 anchors. Batch reads are capped by both range count and total requested lines,

@@ -255,8 +255,8 @@ Examples:
 ```json
 {"id":"read-one","tool":"read_ranges","arguments":{"index":"/path/to/local/cache/orient.index","ranges":{"path":"src/auth.rs","start":1,"lines":80}}}
 {"id":"read","tool":"read_ranges","arguments":{"index":"/path/to/local/cache/orient.index","ranges":[{"path":"src/auth.rs","start":1,"lines":80}]}}
-{"id":"read-copied","tool":"read_range","arguments":{"repo":"/path/to/repo","path":"src/auth.rs#L40-L45"}}
-{"id":"read-shards","tool":"read_ranges","arguments":{"index_dir":"/path/to/local/cache/orient-shards","ranges":[{"path":"service/src/auth.rs","start":40,"lines":80},"service/src/lib.rs#L40-L45"]}}
+{"id":"open-copied","tool":"open_range","arguments":{"repo":"/path/to/repo","path":"src/auth.rs#L40-L45"}}
+{"id":"open-shards","tool":"open_ranges","arguments":{"index_dir":"/path/to/local/cache/orient-shards","ranges":[{"path":"service/src/auth.rs","start":40,"lines":80},"service/src/lib.rs#L40-L45"]}}
 ```
 
 CLI equivalents support repeatable `--range path:start:lines`:
@@ -265,12 +265,12 @@ CLI equivalents support repeatable `--range path:start:lines`:
 export ORIENT_INDEX=/path/to/local/cache/orient.index
 export ORIENT_SHARDS=/path/to/local/cache/orient-shards
 
-orient read-index-ranges --index "$ORIENT_INDEX" --range src/auth.rs:1:80
-orient read-shard-ranges --index-dir "$ORIENT_SHARDS" --range service/src/auth.rs:40:80
+orient open-index-ranges --index "$ORIENT_INDEX" --range src/auth.rs:1:80
+orient open-shard-ranges --index-dir "$ORIENT_SHARDS" --range service/src/auth.rs:40:80
 ```
 
 Range reads follow manifest bounds: `start >= 1`, `1 <= lines <= lines.maximum`, non-empty batch arrays, and `ranges.maxItems`, so a mistaken request cannot dump unbounded file content.
-For CLI adapters, `read-range` and positional `read-ranges` entries accept compact `path:start:lines` specs as well as copied locations such as `path:line`, `path:line: copied text`, and `path#Lstart-Lend`. They also accept `--path`, `--start`, and `--lines`; add a trailing `:symbol` or `:exact` when one range in a batch needs its own scope. Protocol batch strings use the same compact `path:start:lines[:scope]` form. Parsing splits from the right so paths containing `:` still work when the trailing range fields are present.
+For CLI adapters, `read-range` / `open-range` and positional `read-ranges` / `open-ranges` entries accept compact `path:start:lines` specs as well as copied locations such as `path:line`, `path:line: copied text`, and `path#Lstart-Lend`. They also accept `--path`, `--start`, and `--lines`; add a trailing `:symbol` or `:exact` when one range in a batch needs its own scope. Protocol batch strings use the same compact `path:start:lines[:scope]` form. Parsing splits from the right so paths containing `:` still work when the trailing range fields are present.
 
 ## Orientation And Repair
 
