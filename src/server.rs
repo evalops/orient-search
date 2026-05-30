@@ -9443,6 +9443,7 @@ fn parse_copied_location_range(
 fn copied_location_lines(value: &str) -> Option<usize> {
     copied_hash_anchor_lines(value)
         .or_else(|| copied_bitbucket_lines_anchor_lines(value))
+        .or_else(|| copied_azure_devops_lines(value))
         .or_else(|| copied_colon_range_lines(value))
 }
 
@@ -9469,6 +9470,31 @@ fn copied_bitbucket_lines_anchor_lines(value: &str) -> Option<usize> {
     let after_colon = after_start.strip_prefix(':')?;
     let (end, _) = split_leading_digits(after_colon)?;
     (end >= start).then_some(end - start + 1)
+}
+
+fn copied_azure_devops_lines(value: &str) -> Option<usize> {
+    let lower = value.to_ascii_lowercase();
+    if !(lower.contains("dev.azure.com/") || lower.contains(".visualstudio.com/"))
+        || !lower.contains("/_git/")
+    {
+        return None;
+    }
+    let query_start = value.find('?')?;
+    let query_end = value.find('#').unwrap_or(value.len());
+    let query = &value[query_start + 1..query_end];
+    let start = query_value(query, "line")
+        .or_else(|| query_value(query, "lineStart"))
+        .and_then(|value| value.parse::<usize>().ok())?;
+    let end = query_value(query, "lineEnd").and_then(|value| value.parse::<usize>().ok())?;
+    (end >= start).then_some(end - start + 1)
+}
+
+fn query_value<'a>(query: &'a str, name: &str) -> Option<&'a str> {
+    query.split('&').find_map(|part| {
+        let part = part.trim_start_matches(|ch| matches!(ch, '?' | '&'));
+        let (key, value) = part.split_once('=')?;
+        key.eq_ignore_ascii_case(name).then_some(value)
+    })
 }
 
 fn strip_hash_anchor_column(value: &str) -> &str {

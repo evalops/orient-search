@@ -3114,6 +3114,31 @@ fn runtime_read_alias_accepts_live_index_and_shard_targets() {
         serde_json::json!(2)
     );
 
+    let live_azure_devops_range = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("live-azure-devops-range"),
+        tool: "read_range".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "range": "https://dev.azure.com/evalops/platform/_git/orient-search?path=/Cargo.toml&version=GBmain&line=1&lineEnd=2"
+        }),
+    });
+    assert!(
+        live_azure_devops_range.error.is_none(),
+        "{:?}",
+        live_azure_devops_range.error
+    );
+    let live_azure_devops_range = live_azure_devops_range.result.unwrap();
+    assert_eq!(
+        live_azure_devops_range["path"],
+        serde_json::json!("Cargo.toml")
+    );
+    assert_eq!(live_azure_devops_range["start_line"], serde_json::json!(1));
+    assert_eq!(live_azure_devops_range["end_line"], serde_json::json!(2));
+    assert_eq!(
+        live_azure_devops_range["summary"]["line_count"],
+        serde_json::json!(2)
+    );
+
     let indexed_range_string = runtime.dispatch(ToolRequest {
         id: serde_json::json!("indexed-range-string"),
         tool: "read_index_range".to_string(),

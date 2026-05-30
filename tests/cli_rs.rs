@@ -2019,6 +2019,20 @@ fn cli_outputs_repo_map_and_reads_ranges() {
         .stdout(predicate::str::contains("\"end_line\":6"))
         .stdout(predicate::str::contains("issue_token"));
 
+    let mut azure_devops_read_range = Command::cargo_bin("orient").unwrap();
+    azure_devops_read_range
+        .args([
+            "read-range",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "https://dev.azure.com/evalops/platform/_git/orient-search?path=/src/auth.rs&version=GBmain&line=5&lineEnd=6",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"start_line\":5"))
+        .stdout(predicate::str::contains("\"end_line\":6"))
+        .stdout(predicate::str::contains("issue_token"));
+
     let mut oversized_compact_read_range = Command::cargo_bin("orient").unwrap();
     oversized_compact_read_range
         .args([

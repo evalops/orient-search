@@ -601,6 +601,9 @@ fn code_hosted_location_path(value: &str) -> Option<String> {
     if !value.contains("://") {
         return None;
     }
+    if let Some(path) = azure_devops_location_path(value) {
+        return Some(path);
+    }
     let query_start = value.find('?').unwrap_or(value.len());
     let anchor_start = value.find('#').unwrap_or(value.len());
     let suffix_start = query_start.min(anchor_start);
@@ -633,6 +636,74 @@ fn code_hosted_location_path(value: &str) -> Option<String> {
         }
     }
     None
+}
+
+fn azure_devops_location_path(value: &str) -> Option<String> {
+    let lower = value.to_ascii_lowercase();
+    if !(lower.contains("dev.azure.com/") || lower.contains(".visualstudio.com/"))
+        || !lower.contains("/_git/")
+    {
+        return None;
+    }
+    let query_start = value.find('?')?;
+    let query_end = value.find('#').unwrap_or(value.len());
+    let query = &value[query_start + 1..query_end];
+    let path = decode_query_component(query_value(query, "path")?)?;
+    let path = path.trim_start_matches('/').to_string();
+    if !looks_like_location_path(&path) {
+        return None;
+    }
+    Some(format!("{path}{}", azure_devops_line_anchor_suffix(query)))
+}
+
+fn azure_devops_line_anchor_suffix(query: &str) -> String {
+    let Some(line) = query_value(query, "line")
+        .or_else(|| query_value(query, "lineStart"))
+        .and_then(|value| value.parse::<usize>().ok())
+    else {
+        return String::new();
+    };
+    if let Some(end) = query_value(query, "lineEnd").and_then(|value| value.parse::<usize>().ok())
+        && end >= line
+    {
+        return format!("#L{line}-L{end}");
+    }
+    format!("#L{line}")
+}
+
+fn query_value<'a>(query: &'a str, name: &str) -> Option<&'a str> {
+    query.split('&').find_map(|part| {
+        let part = part.trim_start_matches(|ch| matches!(ch, '?' | '&'));
+        let (key, value) = part.split_once('=')?;
+        key.eq_ignore_ascii_case(name).then_some(value)
+    })
+}
+
+fn decode_query_component(value: &str) -> Option<String> {
+    let mut decoded = String::with_capacity(value.len());
+    let mut chars = value.as_bytes().iter().copied().peekable();
+    while let Some(byte) = chars.next() {
+        match byte {
+            b'+' => decoded.push(' '),
+            b'%' => {
+                let hi = chars.next()?;
+                let lo = chars.next()?;
+                let value = hex_value(hi)? << 4 | hex_value(lo)?;
+                decoded.push(char::from(value));
+            }
+            _ => decoded.push(char::from(byte)),
+        }
+    }
+    Some(decoded)
+}
+
+fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
 }
 
 fn raw_github_location_path<'a>(base: &'a str, lower_base: &str) -> Option<&'a str> {
@@ -1725,6 +1796,26 @@ mod tests {
             Some("src/server.rs")
         );
         assert_eq!(gitlab_raw_source_location.filters.target_line, Some(42));
+
+        let azure_devops_source_location = parse_query(
+            "https://dev.azure.com/evalops/platform/_git/orient-search?path=/src/server.rs&version=GBmain&line=42&lineEnd=45",
+        );
+        assert!(azure_devops_source_location.terms.is_empty());
+        assert_eq!(
+            azure_devops_source_location.filters.path.as_deref(),
+            Some("src/server.rs")
+        );
+        assert_eq!(azure_devops_source_location.filters.target_line, Some(42));
+
+        let visual_studio_source_location = parse_query(
+            "https://evalops.visualstudio.com/platform/_git/orient-search?path=%2Fsrc%2Fserver.rs&line=42&lineEnd=45",
+        );
+        assert!(visual_studio_source_location.terms.is_empty());
+        assert_eq!(
+            visual_studio_source_location.filters.path.as_deref(),
+            Some("src/server.rs")
+        );
+        assert_eq!(visual_studio_source_location.filters.target_line, Some(42));
 
         let sourcegraph_source_location = parse_query(
             "https://sourcegraph.com/github.com/evalops/orient-search/-/blob/src/server.rs?L42:9",
