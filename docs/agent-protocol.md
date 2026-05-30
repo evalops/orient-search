@@ -81,7 +81,7 @@ pass the target explicitly. `search_auto` and `search_auto_batch` use an
 explicit `index_dir`, `index`, or `repo` first, then one registered shard directory or warmed index,
 then live fallback search from the daemon runtime.
 
-Generated follow-up objects such as `read_request`, `read_batch_request`, `related_request`, `related_symbols_request`, `repo_map_request`, `query_plan_request`, and query-plan `retry_requests` are complete tool requests. They include an `id`, `tool`, `arguments`, raw `jsonl`, a shell-native `client_cli` pipe for `orient client-jsonl`, and, when there is a compact human CLI equivalent, a `cli` hint. Generated batch read requests also include `summary` and `read_budget` with `range_count`, `total_lines`, `max_ranges`, `max_total_lines`, and `max_lines_per_range`, so adapters can inspect, split, or widen reads intentionally.
+Generated follow-up objects such as `read_request`, `read_batch_request`, `related_request`, `related_symbols_request`, `repo_map_request`, `query_plan_request`, and query-plan `retry_requests` are complete tool requests. They include an `id`, `tool`, `arguments`, raw `jsonl`, a shell-native `client_cli` pipe for `orient client-jsonl`, and, when there is a compact human CLI equivalent, a `cli` hint. Generated batch read requests set `include_summary:true` and also include `summary` and `read_budget` with `range_count`, `total_lines`, `max_ranges`, `max_total_lines`, and `max_lines_per_range`, so adapters can inspect, split, or widen reads intentionally.
 
 Use `index_status` or `shard_status` when live files may have changed since
 indexing. They report added, changed, deleted files, and shard git metadata
@@ -235,7 +235,8 @@ shared machine needs more or less concurrency. `daemon_status` reports the activ
 
 Generated follow-ups include `jsonl`, `client_cli`, and compact CLI hints.
 Batch read follow-ups include `read_budget.grouped_duplicate_count` when the
-returned canonical result ranges represent additional duplicate paths.
+returned canonical result ranges represent additional duplicate paths, and ask
+batch read tools for summarized `{summary,ranges}` responses by default.
 Set `retry_if_empty:true` or pass `--retry-if-empty` to run the promoted retry
 once and receive `primary_retry_result`; it includes compact `summary` fields
 with retry hit count, top paths, and score bounds. If that retry returns hits,

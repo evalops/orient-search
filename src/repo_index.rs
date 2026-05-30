@@ -6041,6 +6041,7 @@ fn read_batch_request_from_ranges_with_limit(
             value
         })
         .collect::<Vec<_>>();
+    base_arguments.insert("include_summary".to_string(), serde_json::json!(true));
     base_arguments.insert("ranges".to_string(), serde_json::Value::Array(range_values));
     let request =
         ResultToolRequest::new(tool.to_string(), serde_json::Value::Object(base_arguments))
@@ -6302,6 +6303,7 @@ fn cli_command_for_request(tool: &str, arguments: &serde_json::Value) -> Option<
     let mut parts = vec!["orient".to_string(), read_subcommand.to_string()];
     append_target_cli_args(&mut parts, args);
     append_string_cli_arg(&mut parts, args, "scope", "--scope");
+    append_bool_cli_arg(&mut parts, args, "include_summary", "--summary");
     if let Some(ranges) = args.get("ranges").and_then(|value| value.as_array()) {
         for range in ranges {
             let range = range.as_object()?;
@@ -7825,6 +7827,7 @@ mod tests {
             "read_index_ranges",
             serde_json::json!({
                 "index": "/tmp/orient.index",
+                "include_summary": true,
                 "ranges": [
                     {"path": "src/lib.rs", "start": 1, "lines": 80},
                     {"path": "tests/auth test.rs", "start": 3, "lines": 4}
@@ -7835,7 +7838,7 @@ mod tests {
         assert_eq!(
             request.cli.as_deref(),
             Some(
-                "orient read-index-ranges --index /tmp/orient.index src/lib.rs:1:80 'tests/auth test.rs:3:4'"
+                "orient read-index-ranges --index /tmp/orient.index --summary src/lib.rs:1:80 'tests/auth test.rs:3:4'"
             )
         );
     }
@@ -7921,6 +7924,10 @@ mod tests {
         let request =
             result_read_batch_request(&results, "read_ranges", serde_json::Map::new()).unwrap();
         let ranges = request.arguments["ranges"].as_array().unwrap();
+        assert_eq!(
+            request.arguments["include_summary"],
+            serde_json::json!(true)
+        );
         assert_eq!(ranges.len(), 2);
         assert_eq!(request.read_budget.as_ref().unwrap().range_count, 2);
         assert_eq!(request.read_budget.as_ref().unwrap().total_lines, 220);
@@ -7969,6 +7976,10 @@ mod tests {
         let request_ranges = request.arguments["ranges"].as_array().unwrap();
 
         assert_eq!(
+            request.arguments["include_summary"],
+            serde_json::json!(true)
+        );
+        assert_eq!(
             request_ranges.len(),
             MAX_BATCH_READ_LINES / MAX_READ_RANGE_LINES
         );
@@ -8013,6 +8024,10 @@ mod tests {
         let ranges = request.arguments["ranges"].as_array().unwrap();
         assert_eq!(ranges.len(), 2);
         assert_eq!(request.arguments["scope"], serde_json::json!("symbol"));
+        assert_eq!(
+            request.arguments["include_summary"],
+            serde_json::json!(true)
+        );
         assert_eq!(ranges[0]["start"], serde_json::json!(40));
         assert_eq!(ranges[1]["start"], serde_json::json!(80));
     }
@@ -8023,6 +8038,7 @@ mod tests {
             "read_ranges",
             serde_json::json!({
                 "repo": "/tmp/my repo",
+                "include_summary": true,
                 "ranges": [
                     {"path": "src/lib.rs", "start": 1, "lines": 80},
                     {"path": "src/auth.rs", "start": 26, "lines": 80, "scope": "symbol"}
@@ -8033,7 +8049,7 @@ mod tests {
         assert_eq!(
             request.cli.as_deref(),
             Some(
-                "orient read-ranges --repo '/tmp/my repo' src/lib.rs:1:80 src/auth.rs:26:80:symbol"
+                "orient read-ranges --repo '/tmp/my repo' --summary src/lib.rs:1:80 src/auth.rs:26:80:symbol"
             )
         );
     }
@@ -8070,6 +8086,10 @@ mod tests {
         .unwrap();
 
         assert_eq!(request.arguments["ranges"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            request.arguments["include_summary"],
+            serde_json::json!(true)
+        );
         assert_eq!(request.read_budget.as_ref().unwrap().range_count, 2);
         assert_eq!(request.read_budget.as_ref().unwrap().total_lines, 120);
         assert_eq!(

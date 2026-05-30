@@ -1818,6 +1818,16 @@ fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
         "src/auth.rs"
     );
     assert_eq!(
+        live["read_batch_request"]["arguments"]["include_summary"],
+        serde_json::json!(true)
+    );
+    assert!(
+        live["read_batch_request"]["cli"]
+            .as_str()
+            .unwrap()
+            .contains("--summary")
+    );
+    assert_eq!(
         live["read_batch_request"]["read_budget"]["range_count"],
         serde_json::json!(1)
     );
@@ -1847,8 +1857,13 @@ fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
         "{:?}",
         read_batch_from_jsonl.error
     );
+    let read_batch_from_jsonl = read_batch_from_jsonl.result.unwrap();
+    assert_eq!(
+        read_batch_from_jsonl["summary"]["range_count"],
+        serde_json::json!(1)
+    );
     assert!(
-        read_batch_from_jsonl.result.unwrap()[0]["text"]
+        read_batch_from_jsonl["ranges"][0]["text"]
             .as_str()
             .unwrap()
             .contains("issue_token")
@@ -1894,8 +1909,10 @@ fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
         arguments: live["read_batch_request"]["arguments"].clone(),
     });
     assert!(read_batch.error.is_none(), "{:?}", read_batch.error);
+    let read_batch = read_batch.result.unwrap();
+    assert_eq!(read_batch["summary"]["range_count"], serde_json::json!(1));
     assert!(
-        read_batch.result.unwrap()[0]["text"]
+        read_batch["ranges"][0]["text"]
             .as_str()
             .unwrap()
             .contains("issue_token")
@@ -7873,8 +7890,12 @@ fn runtime_search_auto_scopes_warmed_shards_to_client_cwd() {
         arguments: retry["primary_retry_result"]["read_batch_request"]["arguments"].clone(),
     });
     assert!(retry_read.error.is_none(), "{:?}", retry_read.error);
+    assert_eq!(
+        retry["primary_retry_result"]["read_batch_request"]["arguments"]["include_summary"],
+        serde_json::json!(true)
+    );
     assert!(
-        retry_read.result.unwrap()[0]["text"]
+        retry_read.result.unwrap()["ranges"][0]["text"]
             .as_str()
             .unwrap()
             .contains("shared_lookup_token")
