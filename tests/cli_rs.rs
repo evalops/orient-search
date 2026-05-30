@@ -569,6 +569,7 @@ fn cli_search_auto_selects_live_indexed_and_shard_surfaces() {
     .stdout(predicate::str::contains("\"top_paths\":[\"src/auth.rs\"]"))
     .stdout(predicate::str::contains("\"top_dirs\":[\"src\"]"))
     .stdout(predicate::str::contains("\"top_exts\":[\"rs\"]"))
+    .stdout(predicate::str::contains("\"top_langs\":[\"rust\"]"))
     .stdout(predicate::str::contains("\"max_score\""))
     .stdout(predicate::str::contains(
         "\"summary\":\"Read 1 bounded range",

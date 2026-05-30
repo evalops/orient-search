@@ -4563,7 +4563,7 @@ fn package_json_command_hints(
         .collect()
 }
 
-pub(crate) fn language_for(path: &Path) -> Option<String> {
+pub fn language_for(path: &Path) -> Option<String> {
     let file_name = path.file_name()?.to_string_lossy();
     if let Some(language) = special_file_language(&file_name) {
         return Some(language.to_string());

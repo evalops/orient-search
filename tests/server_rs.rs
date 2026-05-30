@@ -1732,6 +1732,7 @@ fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
     );
     assert_eq!(live["summary"]["top_dirs"], serde_json::json!(["src"]));
     assert_eq!(live["summary"]["top_exts"], serde_json::json!(["rs"]));
+    assert_eq!(live["summary"]["top_langs"], serde_json::json!(["rust"]));
     assert!(
         live["summary"]["max_score"].as_f64().unwrap()
             >= live["summary"]["min_score"].as_f64().unwrap()

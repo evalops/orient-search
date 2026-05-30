@@ -13,7 +13,7 @@ use crate::repo_index::{
     attach_repo_map_read_batch_request_with_limit, attach_result_context,
     attach_result_read_requests, attach_result_related_requests,
     attach_result_related_symbol_requests, finalize_results_for_filters,
-    grouped_duplicate_count_from_results, grouped_duplicate_count_from_value,
+    grouped_duplicate_count_from_results, grouped_duplicate_count_from_value, language_for,
     normalize_language_filter, normalize_token, query_plan_filter_field_present,
     read_batch_action_summary, read_file_range, read_file_range_scoped,
     related_file_lookup_results, related_symbol_lookup_results, result_read_batch_request,
@@ -92,6 +92,8 @@ struct SearchResultSummary {
     top_dirs: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     top_exts: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    top_langs: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     max_score: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -125,6 +127,7 @@ fn search_result_summary(results: &[SearchResult]) -> SearchResultSummary {
         top_paths: search_summary_top_paths(results),
         top_dirs: search_summary_top_dirs(results),
         top_exts: search_summary_top_exts(results),
+        top_langs: search_summary_top_langs(results),
         max_score: results.first().map(|result| result.score),
         min_score: results.last().map(|result| result.score),
     }
@@ -183,6 +186,22 @@ fn search_summary_top_exts(results: &[SearchResult]) -> Vec<String> {
         }
     }
     exts
+}
+
+fn search_summary_top_langs(results: &[SearchResult]) -> Vec<String> {
+    let mut langs = Vec::new();
+    for result in results {
+        let Some(language) = language_for(Path::new(&result.path)) else {
+            continue;
+        };
+        if !langs.iter().any(|existing| existing == &language) {
+            langs.push(language);
+            if langs.len() == 5 {
+                break;
+            }
+        }
+    }
+    langs
 }
 
 fn search_summary_ext(path: &str) -> Option<String> {
