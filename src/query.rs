@@ -425,8 +425,9 @@ fn infer_leading_location_term(
         return;
     }
 
-    if let Some((path, target_line)) =
-        stack_block_location_term(terms).or_else(|| diagnostic_block_location_term(terms))
+    if let Some((path, target_line)) = github_actions_annotation_location_term(terms)
+        .or_else(|| stack_block_location_term(terms))
+        .or_else(|| diagnostic_block_location_term(terms))
     {
         apply_location_filter(path, target_line, terms, filters);
         return;
@@ -526,6 +527,60 @@ fn stack_block_location_term(terms: &[String]) -> Option<(String, usize)> {
         }
     }
     None
+}
+
+fn github_actions_annotation_location_term(terms: &[String]) -> Option<(String, usize)> {
+    for start in 0..terms.len().min(64) {
+        if !trim_location_token_wrappers(&terms[start]).starts_with("::") {
+            continue;
+        }
+        let end = (start + 8).min(terms.len());
+        let text = terms[start..end].join(" ");
+        if let Some(location) = parse_github_actions_annotation_location(&text) {
+            return Some(location);
+        }
+    }
+    None
+}
+
+fn parse_github_actions_annotation_location(value: &str) -> Option<(String, usize)> {
+    let value = trim_location_token_wrappers(value);
+    let rest = value.strip_prefix("::")?;
+    let command_end = rest.find("::")?;
+    let header = rest[..command_end].trim();
+    let props_start = header
+        .char_indices()
+        .find_map(|(index, ch)| ch.is_whitespace().then_some(index))?;
+    let command = &header[..props_start];
+    if !matches!(
+        command.to_ascii_lowercase().as_str(),
+        "error" | "warning" | "notice" | "debug"
+    ) {
+        return None;
+    }
+    let props = header[props_start..].trim();
+    let file = decode_action_property_value(action_property_value(props, "file")?)?;
+    let path = normalize_location_token(&file)?;
+    if !looks_like_location_path(&path) {
+        return None;
+    }
+    let line = action_property_value(props, "line")
+        .or_else(|| action_property_value(props, "startLine"))
+        .and_then(parse_positive_usize)?;
+    Some((path, line))
+}
+
+fn action_property_value<'a>(props: &'a str, name: &str) -> Option<&'a str> {
+    props.split(',').find_map(|part| {
+        let (key, value) = part.split_once('=')?;
+        key.trim()
+            .eq_ignore_ascii_case(name)
+            .then_some(value.trim())
+    })
+}
+
+fn decode_action_property_value(value: &str) -> Option<String> {
+    decode_query_component(value).or_else(|| (!value.trim().is_empty()).then(|| value.to_string()))
 }
 
 fn go_stack_location_context(terms: &[String]) -> bool {
@@ -1724,6 +1779,25 @@ mod tests {
             Some("src/server.rs")
         );
         assert_eq!(rust_diagnostic_block.filters.target_line, Some(42));
+
+        let github_actions_annotation =
+            parse_query("::error file=src/server.rs,line=42,col=9::borrowed value");
+        assert_eq!(github_actions_annotation.terms, Vec::<String>::new());
+        assert_eq!(
+            github_actions_annotation.filters.path.as_deref(),
+            Some("src/server.rs")
+        );
+        assert_eq!(github_actions_annotation.filters.target_line, Some(42));
+
+        let github_actions_block = parse_query(
+            "cargo test failed\n::warning file=src/server.rs,line=42,endLine=45::borrowed value",
+        );
+        assert_eq!(github_actions_block.terms, Vec::<String>::new());
+        assert_eq!(
+            github_actions_block.filters.path.as_deref(),
+            Some("src/server.rs")
+        );
+        assert_eq!(github_actions_block.filters.target_line, Some(42));
 
         let python_traceback_block = parse_query(
             "Traceback (most recent call last):\n  File \"src/server.rs\", line 42, in handle_request\n    issue_token()",

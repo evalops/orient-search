@@ -2888,6 +2888,18 @@ fn bare_path_like_queries_use_filter_only_fast_paths() {
     .unwrap();
     assert_eq!(result_paths(&python_location_fallback), vec!["src/lib.rs"]);
     assert_eq!(python_location_fallback[0].match_lines, vec![40]);
+    let github_actions_location_fallback = search_repo_fast_filtered(
+        repo.path(),
+        "::error file=src/lib.rs,line=40,col=9::target_entrypoint failed",
+        10,
+        &filters,
+    )
+    .unwrap();
+    assert_eq!(
+        result_paths(&github_actions_location_fallback),
+        vec!["src/lib.rs"]
+    );
+    assert_eq!(github_actions_location_fallback[0].match_lines, vec![40]);
     assert!(
         search_repo_fast_filtered(repo.path(), "missing/src/lib.rs:40:9", 10, &filters)
             .unwrap()
@@ -3129,6 +3141,18 @@ fn bare_path_like_queries_use_filter_only_fast_paths() {
         vec!["src/lib.rs"]
     );
     assert_eq!(sourcegraph_location_indexed[0].match_lines, vec![40]);
+    let github_actions_location_indexed = index
+        .search_filtered(
+            "::warning file=src/lib.rs,line=40,endLine=45::target_entrypoint failed",
+            10,
+            &filters,
+        )
+        .unwrap();
+    assert_eq!(
+        result_paths(&github_actions_location_indexed),
+        vec!["src/lib.rs"]
+    );
+    assert_eq!(github_actions_location_indexed[0].match_lines, vec![40]);
     let copied_line_indexed = index
         .search_filtered("src/lib.rs:40: pub fn target_entrypoint", 10, &filters)
         .unwrap();

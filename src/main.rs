@@ -7580,6 +7580,16 @@ mod tests {
             DEFAULT_CLI_READ_RANGE_LINES
         );
 
+        let github_actions_annotation =
+            CliRangeSpec::from_str("::error file=src/auth.rs,line=12,col=4::borrowed value")
+                .unwrap();
+        assert_eq!(github_actions_annotation.path, "src/auth.rs");
+        assert_eq!(github_actions_annotation.start, 12);
+        assert_eq!(
+            github_actions_annotation.lines,
+            DEFAULT_CLI_READ_RANGE_LINES
+        );
+
         let copied_range = CliRangeSpec::from_str("src/auth.rs:12-15").unwrap();
         assert_eq!(copied_range.path, "src/auth.rs");
         assert_eq!(copied_range.start, 12);
