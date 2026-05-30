@@ -610,6 +610,9 @@ fn code_hosted_location_path(value: &str) -> Option<String> {
     if let Some(path) = raw_github_location_path(base, &lower_base) {
         return Some(format!("{path}{line_anchor}"));
     }
+    if let Some(path) = bitbucket_location_path(base, &lower_base) {
+        return Some(format!("{path}{line_anchor}"));
+    }
     for marker in ["/-/blob/", "/blob/", "/-/tree/", "/tree/"] {
         let Some(marker_start) = lower_base.find(marker) else {
             continue;
@@ -637,6 +640,16 @@ fn raw_github_location_path<'a>(base: &'a str, lower_base: &str) -> Option<&'a s
     let (_, after_owner) = after_host.split_once('/')?;
     let (_, after_repo) = after_owner.split_once('/')?;
     hosted_repo_path_after_ref(after_repo)
+}
+
+fn bitbucket_location_path<'a>(base: &'a str, lower_base: &str) -> Option<&'a str> {
+    let marker = "bitbucket.org/";
+    let marker_start = lower_base.find(marker)?;
+    let after_host = &base[marker_start + marker.len()..];
+    let (_, after_owner) = after_host.split_once('/')?;
+    let (_, after_repo) = after_owner.split_once('/')?;
+    let after_src = after_repo.strip_prefix("src/")?;
+    hosted_repo_path_after_ref(after_src)
 }
 
 fn hosted_repo_path_after_ref(after_marker: &str) -> Option<&str> {
@@ -755,8 +768,16 @@ fn hosted_line_anchor_suffix(suffix: &str) -> String {
     }
     if let Some(anchor_start) = suffix.find('#') {
         let anchor = &suffix[anchor_start..];
-        if anchor.to_ascii_lowercase().starts_with("#l") {
+        if anchor
+            .strip_prefix("#L")
+            .or_else(|| anchor.strip_prefix("#l"))
+            .and_then(split_leading_positive_number)
+            .is_some()
+        {
             return anchor.to_string();
+        }
+        if let Some(line_anchor) = bitbucket_lines_anchor_suffix(anchor) {
+            return line_anchor;
         }
     }
     let Some(query_start) = suffix.find('?') else {
@@ -784,6 +805,19 @@ fn hosted_line_anchor_suffix(suffix: &str) -> String {
         return format!("#L{line}");
     }
     String::new()
+}
+
+fn bitbucket_lines_anchor_suffix(anchor: &str) -> Option<String> {
+    let line_spec = anchor
+        .strip_prefix("#lines-")
+        .or_else(|| anchor.strip_prefix("#LINES-"))?;
+    let (line, rest) = split_leading_positive_number(line_spec)?;
+    if let Some(range) = rest.strip_prefix(':')
+        && let Some((end, _)) = split_leading_positive_number(range)
+    {
+        return Some(format!("#L{line}-L{end}"));
+    }
+    Some(format!("#L{line}"))
 }
 
 fn trim_location_token_wrappers(token: &str) -> &str {
@@ -1629,6 +1663,32 @@ mod tests {
         );
         assert_eq!(
             raw_github_nested_path_source_location.filters.target_line,
+            None
+        );
+
+        let bitbucket_source_location = parse_query(
+            "https://bitbucket.org/evalops/orient-search/src/main/src/server.rs#lines-42:45",
+        );
+        assert!(bitbucket_source_location.terms.is_empty());
+        assert_eq!(
+            bitbucket_source_location.filters.path.as_deref(),
+            Some("src/server.rs")
+        );
+        assert_eq!(bitbucket_source_location.filters.target_line, Some(42));
+
+        let bitbucket_nested_path_source_location = parse_query(
+            "https://bitbucket.org/evalops/orient-search/src/main/search/src/server.rs",
+        );
+        assert!(bitbucket_nested_path_source_location.terms.is_empty());
+        assert_eq!(
+            bitbucket_nested_path_source_location
+                .filters
+                .path
+                .as_deref(),
+            Some("search/src/server.rs")
+        );
+        assert_eq!(
+            bitbucket_nested_path_source_location.filters.target_line,
             None
         );
 

@@ -164,6 +164,8 @@ the line. Absolute pasted paths are normalized when they are inside the
 selected repo or index root.
 Hosted links may carry fragment or query-string line anchors. Raw GitHub links
 under `raw.githubusercontent.com` are treated as hosted code paths too.
+Bitbucket `/src/<ref>/<path>` links and `#lines-start:end` anchors are also
+normalized for search and reads.
 Common slash-delimited branch namespaces such as `feature/search` or
 `release/v1` are handled for hosted code links when a recognizable repo path
 suffix follows them.
