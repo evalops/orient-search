@@ -1953,6 +1953,21 @@ fn query_language_filters_fallback_and_indexed_search() {
     assert!(indexed_markdown_paths.contains(&"docs/auth.md".to_string()));
     assert!(indexed_markdown_paths.contains(&"README.md".to_string()));
 
+    let fallback_no_docs =
+        search_repo_fast_filtered(repo.path(), "!docs SessionManager", 10, &Default::default())
+            .unwrap();
+    let fallback_no_docs_paths = result_paths(&fallback_no_docs);
+    assert!(fallback_no_docs_paths.contains(&"src/auth.rs".to_string()));
+    assert!(!fallback_no_docs_paths.contains(&"docs/auth.md".to_string()));
+    assert!(!fallback_no_docs_paths.contains(&"README.md".to_string()));
+    let indexed_no_docs = indexed
+        .search_filtered("!docs SessionManager", 10, &Default::default())
+        .unwrap();
+    let indexed_no_docs_paths = result_paths(&indexed_no_docs);
+    assert!(indexed_no_docs_paths.contains(&"src/auth.rs".to_string()));
+    assert!(!indexed_no_docs_paths.contains(&"docs/auth.md".to_string()));
+    assert!(!indexed_no_docs_paths.contains(&"README.md".to_string()));
+
     let fallback_docs_wildcard = search_repo_fast_filtered(
         repo.path(),
         "path:docs/*.md SessionManager",

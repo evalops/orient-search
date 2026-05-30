@@ -274,11 +274,19 @@ fn fallback_scoped_search_matches_rg_content_set_for_agent_filters() {
             Box::new(|path| !is_generated_path(path)),
         ),
         (
+            "!generated MAGICNEEDLE",
+            Box::new(|path| !is_generated_path(path)),
+        ),
+        (
             "generated:true MAGICNEEDLE",
             Box::new(|path| is_generated_path(path)),
         ),
         (
             "code:true MAGICNEEDLE",
+            Box::new(|path| is_source_code_language(path)),
+        ),
+        (
+            "!docs MAGICNEEDLE",
             Box::new(|path| is_source_code_language(path)),
         ),
         (

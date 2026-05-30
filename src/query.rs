@@ -108,11 +108,7 @@ fn apply_match_mode(filters: &mut SearchFilters, token: &str, negated: bool) -> 
 
 fn apply_filter(filters: &mut SearchFilters, token: &str, negated: bool) -> bool {
     let Some((key, value)) = token.split_once(':') else {
-        if token == "test" || token == "tests" {
-            filters.test = Some(!negated);
-            return true;
-        }
-        return false;
+        return apply_bare_filter(filters, token, negated);
     };
     let key = key.to_ascii_lowercase();
     let value = value.trim().to_string();
@@ -290,6 +286,19 @@ fn apply_filter(filters: &mut SearchFilters, token: &str, negated: bool) -> bool
             filters.generated = Some(false)
         }
         (true, "code" | "source_code" | "source-code") => filters.code = Some(false),
+        _ => return false,
+    }
+    true
+}
+
+fn apply_bare_filter(filters: &mut SearchFilters, token: &str, negated: bool) -> bool {
+    let token = token.to_ascii_lowercase();
+    match (negated, token.as_str()) {
+        (_, "test" | "tests") => filters.test = Some(!negated),
+        (true, "generated" | "gen" | "codegen" | "autogen") => filters.generated = Some(false),
+        (true, "docs" | "documentation" | "prose" | "config" | "configuration") => {
+            filters.code = Some(true)
+        }
         _ => return false,
     }
     true
@@ -1100,14 +1109,20 @@ mod tests {
         assert_eq!(parsed.filters.exclude_branch, vec!["wip"]);
         assert_eq!(parsed.filters.exclude_origin, vec!["legacy"]);
 
-        let bang =
-            parse_query("!test !is:generated !code:true !deprecated !path:vendor != operator");
+        let bang = parse_query("!test !generated !deprecated !path:vendor != operator");
         assert_eq!(bang.terms, vec!["!=", "operator"]);
         assert_eq!(bang.filters.test, Some(false));
         assert_eq!(bang.filters.generated, Some(false));
-        assert_eq!(bang.filters.code, Some(false));
         assert_eq!(bang.filters.exclude_content, vec!["deprecated"]);
         assert_eq!(bang.filters.exclude_path, vec!["vendor"]);
+
+        let docs = parse_query("!Docs SessionManager");
+        assert_eq!(docs.terms, vec!["SessionManager"]);
+        assert_eq!(docs.filters.code, Some(true));
+
+        let positive_docs = parse_query("docs SessionManager");
+        assert_eq!(positive_docs.terms, vec!["docs", "SessionManager"]);
+        assert_eq!(positive_docs.filters.code, None);
     }
 
     #[test]
