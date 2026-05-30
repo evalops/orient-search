@@ -1153,6 +1153,7 @@ pub enum RepoMapDetail {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RepoMap {
+    pub summary: RepoMapSummary,
     pub brief: RepoBrief,
     pub entrypoints: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1175,6 +1176,50 @@ pub struct RepoMap {
     pub read_batch_request: Option<ResultToolRequest>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub next_action: Option<RepoMapNextAction>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RepoMapSummary {
+    pub status: String,
+    pub file_count: usize,
+    pub entrypoint_count: usize,
+    pub manifest_count: usize,
+    pub important_file_count: usize,
+    pub test_file_count: usize,
+    pub top_symbol_count: usize,
+    pub related_file_count: usize,
+    pub related_symbol_count: usize,
+    pub command_count: usize,
+    pub dependency_count: usize,
+    pub import_count: usize,
+}
+
+impl RepoMapSummary {
+    pub(crate) fn from_map_parts(
+        brief: &RepoBrief,
+        entrypoints: &[String],
+        manifest_files: &[String],
+        important_files: &[String],
+        test_files: &[String],
+        top_symbols: &[Symbol],
+        related_files: &[RepoMapRelatedFile],
+        related_symbols: &[RepoMapRelatedSymbol],
+    ) -> Self {
+        Self {
+            status: "mapped".to_string(),
+            file_count: brief.file_count,
+            entrypoint_count: entrypoints.len(),
+            manifest_count: manifest_files.len(),
+            important_file_count: important_files.len(),
+            test_file_count: test_files.len(),
+            top_symbol_count: top_symbols.len(),
+            related_file_count: related_files.len(),
+            related_symbol_count: related_symbols.len(),
+            command_count: brief.known_commands.len(),
+            dependency_count: brief.dependency_hints.len(),
+            import_count: brief.import_hints.len(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -3253,6 +3298,16 @@ impl RepoIndex {
             self.repo_map_related_symbols(&entrypoints, &test_files, &top_symbols, 12);
 
         RepoMap {
+            summary: RepoMapSummary::from_map_parts(
+                &brief,
+                &entrypoints,
+                &brief.manifest_files,
+                &brief.important_files,
+                &test_files,
+                &top_symbols,
+                &related_files,
+                &related_symbols,
+            ),
             manifest_files: brief.manifest_files.clone(),
             important_files: brief.important_files.clone(),
             known_commands: brief.known_commands.clone(),
@@ -7924,31 +7979,18 @@ mod tests {
 
     #[test]
     fn repo_map_read_batches_prioritize_code_context_before_manifests() {
-        let mut map = RepoMap {
-            brief: RepoBrief {
-                root_name: "sample".to_string(),
-                file_count: 8,
-                language_counts: HashMap::new(),
-                known_commands: vec!["cargo test".to_string()],
-                command_hints: vec![CommandHint {
-                    command: "cargo test".to_string(),
-                    kind: "test".to_string(),
-                    source: "Cargo.toml".to_string(),
-                }],
-                dependency_hints: Vec::new(),
-                import_hints: Vec::new(),
-                manifest_files: vec![
-                    "Cargo.toml".to_string(),
-                    "package.json".to_string(),
-                    "pyproject.toml".to_string(),
-                ],
-                important_files: vec![
-                    "Cargo.toml".to_string(),
-                    "README.md".to_string(),
-                    "package.json".to_string(),
-                ],
-            },
-            entrypoints: vec!["Cargo.toml".to_string(), "src/main.rs".to_string()],
+        let brief = RepoBrief {
+            root_name: "sample".to_string(),
+            file_count: 8,
+            language_counts: HashMap::new(),
+            known_commands: vec!["cargo test".to_string()],
+            command_hints: vec![CommandHint {
+                command: "cargo test".to_string(),
+                kind: "test".to_string(),
+                source: "Cargo.toml".to_string(),
+            }],
+            dependency_hints: Vec::new(),
+            import_hints: Vec::new(),
             manifest_files: vec![
                 "Cargo.toml".to_string(),
                 "package.json".to_string(),
@@ -7959,35 +8001,54 @@ mod tests {
                 "README.md".to_string(),
                 "package.json".to_string(),
             ],
-            test_files: vec!["tests/auth_test.rs".to_string()],
-            known_commands: vec!["cargo test".to_string()],
-            command_hints: vec![CommandHint {
-                command: "cargo test".to_string(),
-                kind: "test".to_string(),
-                source: "Cargo.toml".to_string(),
-            }],
+        };
+        let entrypoints = vec!["Cargo.toml".to_string(), "src/main.rs".to_string()];
+        let manifest_files = brief.manifest_files.clone();
+        let important_files = brief.important_files.clone();
+        let test_files = vec!["tests/auth_test.rs".to_string()];
+        let known_commands = brief.known_commands.clone();
+        let command_hints = brief.command_hints.clone();
+        let top_symbols = vec![
+            Symbol {
+                name: "issue_token".to_string(),
+                kind: "function".to_string(),
+                path: "src/auth.rs".to_string(),
+                line: 42,
+            },
+            Symbol {
+                name: "verify_token".to_string(),
+                kind: "function".to_string(),
+                path: "src/auth.rs".to_string(),
+                line: 80,
+            },
+            Symbol {
+                name: "invoice_total".to_string(),
+                kind: "function".to_string(),
+                path: "src/billing.rs".to_string(),
+                line: 12,
+            },
+        ];
+        let mut map = RepoMap {
+            summary: RepoMapSummary::from_map_parts(
+                &brief,
+                &entrypoints,
+                &manifest_files,
+                &important_files,
+                &test_files,
+                &top_symbols,
+                &[],
+                &[],
+            ),
+            brief,
+            entrypoints,
+            manifest_files,
+            important_files,
+            test_files,
+            known_commands,
+            command_hints,
             dependency_hints: Vec::new(),
             import_hints: Vec::new(),
-            top_symbols: vec![
-                Symbol {
-                    name: "issue_token".to_string(),
-                    kind: "function".to_string(),
-                    path: "src/auth.rs".to_string(),
-                    line: 42,
-                },
-                Symbol {
-                    name: "verify_token".to_string(),
-                    kind: "function".to_string(),
-                    path: "src/auth.rs".to_string(),
-                    line: 80,
-                },
-                Symbol {
-                    name: "invoice_total".to_string(),
-                    kind: "function".to_string(),
-                    path: "src/billing.rs".to_string(),
-                    line: 12,
-                },
-            ],
+            top_symbols,
             related_files: Vec::new(),
             related_symbols: Vec::new(),
             read_batch_request: None,

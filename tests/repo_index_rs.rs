@@ -307,6 +307,18 @@ def test_issue_token_round_trip():
     assert_eq!(map.command_hints, map.brief.command_hints);
     assert_eq!(map.dependency_hints, map.brief.dependency_hints);
     assert_eq!(map.import_hints, map.brief.import_hints);
+    assert_eq!(map.summary.status, "mapped");
+    assert_eq!(map.summary.file_count, map.brief.file_count);
+    assert_eq!(map.summary.entrypoint_count, map.entrypoints.len());
+    assert_eq!(map.summary.manifest_count, map.manifest_files.len());
+    assert_eq!(map.summary.important_file_count, map.important_files.len());
+    assert_eq!(map.summary.test_file_count, map.test_files.len());
+    assert_eq!(map.summary.top_symbol_count, map.top_symbols.len());
+    assert_eq!(map.summary.related_file_count, map.related_files.len());
+    assert_eq!(map.summary.related_symbol_count, map.related_symbols.len());
+    assert_eq!(map.summary.command_count, map.known_commands.len());
+    assert_eq!(map.summary.dependency_count, map.dependency_hints.len());
+    assert_eq!(map.summary.import_count, map.import_hints.len());
     assert!(
         map.related_files.iter().any(|related| {
             related.source_path == "src/auth.py" && related.path == "tests/test_auth.py"
@@ -762,6 +774,32 @@ fn repo_briefs_keep_import_hints_compact_without_breaking_import_filters() {
         indexed_map.brief.dependency_hints
     );
     assert_eq!(indexed_map.import_hints, indexed_map.brief.import_hints);
+    assert_eq!(indexed_map.summary.status, "mapped");
+    assert_eq!(indexed_map.summary.file_count, indexed_map.brief.file_count);
+    assert_eq!(
+        indexed_map.summary.entrypoint_count,
+        indexed_map.entrypoints.len()
+    );
+    assert_eq!(
+        indexed_map.summary.manifest_count,
+        indexed_map.manifest_files.len()
+    );
+    assert_eq!(
+        indexed_map.summary.important_file_count,
+        indexed_map.important_files.len()
+    );
+    assert_eq!(
+        indexed_map.summary.test_file_count,
+        indexed_map.test_files.len()
+    );
+    assert_eq!(
+        indexed_map.summary.top_symbol_count,
+        indexed_map.top_symbols.len()
+    );
+    assert_eq!(
+        indexed_map.summary.command_count,
+        indexed_map.known_commands.len()
+    );
     let indexed_brief = indexed_map.brief;
     assert_eq!(indexed_brief.import_hints.len(), 32);
     let full_indexed_brief = indexed

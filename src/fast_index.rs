@@ -739,29 +739,40 @@ impl FastIndex {
             }
             RepoMapDetail::Full => import_hints_from_indexed_files(&self.files),
         };
+        let brief = RepoBrief {
+            root_name: self
+                .root
+                .file_name()
+                .map(|value| value.to_string_lossy().to_string())
+                .unwrap_or_else(|| self.root.display().to_string()),
+            file_count: self.files.len(),
+            language_counts,
+            known_commands: known_commands.clone(),
+            command_hints: command_hints.clone(),
+            dependency_hints: dependency_hints.clone(),
+            import_hints: import_hints.clone(),
+            manifest_files: manifest_files.clone(),
+            important_files: important_files.clone(),
+        };
 
         RepoMap {
+            summary: crate::repo_index::RepoMapSummary::from_map_parts(
+                &brief,
+                &entrypoints,
+                &manifest_files,
+                &important_files,
+                &test_files,
+                &top_symbols,
+                &related_files,
+                &related_symbols,
+            ),
             manifest_files: manifest_files.clone(),
             important_files: important_files.clone(),
             known_commands: known_commands.clone(),
             command_hints: command_hints.clone(),
             dependency_hints: dependency_hints.clone(),
             import_hints: import_hints.clone(),
-            brief: RepoBrief {
-                root_name: self
-                    .root
-                    .file_name()
-                    .map(|value| value.to_string_lossy().to_string())
-                    .unwrap_or_else(|| self.root.display().to_string()),
-                file_count: self.files.len(),
-                language_counts,
-                known_commands,
-                command_hints,
-                dependency_hints,
-                import_hints,
-                manifest_files,
-                important_files,
-            },
+            brief,
             entrypoints,
             test_files,
             top_symbols,
