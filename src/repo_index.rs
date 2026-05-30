@@ -89,6 +89,11 @@ const CODE_FILE_GLOBS: &[&str] = &[
     "**/*.hpp",
     "**/*.hxx",
     "**/*.cs",
+    "**/*.sh",
+    "**/*.bash",
+    "**/*.zsh",
+    "**/*.fish",
+    "**/*.bats",
     "**/*.py",
     "**/*.rs",
     "**/*.js",
@@ -109,8 +114,7 @@ const PROSE_FILE_NAME_GLOBS: &[&str] = &[
     "**/bun.lock",
     "**/bun.lockb",
 ];
-const FD_CODE_FILE_PATTERN: &str =
-    r"\.(c|h|cc|cpp|cxx|hh|hpp|hxx|cs|py|rs|js|jsx|ts|tsx|go|rb|java|kt|swift)$";
+const FD_CODE_FILE_PATTERN: &str = r"\.(c|h|cc|cpp|cxx|hh|hpp|hxx|cs|sh|bash|zsh|fish|bats|py|rs|js|jsx|ts|tsx|go|rb|java|kt|swift)$";
 const FD_PROSE_FILE_PATTERN: &str =
     r"^(README|Makefile|yarn\.lock|bun\.lock|bun\.lockb)$|\.(md|toml|json|ya?ml)$";
 static TOKEN_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[A-Za-z][A-Za-z0-9_]*").unwrap());
@@ -154,6 +158,9 @@ static CSHARP_TYPE_SYMBOL_RE: LazyLock<Regex> = LazyLock::new(|| {
 });
 static CSHARP_METHOD_SYMBOL_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^\s*(?:(?:public|private|protected|internal|static|virtual|override|async|sealed|abstract|extern|unsafe|new|partial)\s+)+[A-Za-z_][A-Za-z0-9_<>,?\[\]. ]*\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(").unwrap()
+});
+static SHELL_FUNCTION_SYMBOL_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^\s*(?:function\s+)?([A-Za-z_][A-Za-z0-9_-]*)\s*(?:\(\s*\))?\s*\{").unwrap()
 });
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -4610,6 +4617,7 @@ pub fn language_for(path: &Path) -> Option<String> {
         "c" | "h" => "c",
         "cc" | "cpp" | "cxx" | "hh" | "hpp" | "hxx" => "cpp",
         "cs" => "csharp",
+        "sh" | "bash" | "zsh" | "fish" | "bats" => "shell",
         "py" => "python",
         "rs" => "rust",
         "js" | "jsx" => "javascript",
@@ -4658,6 +4666,7 @@ pub(crate) fn is_source_code_language(language: &str) -> bool {
             | "c"
             | "cpp"
             | "csharp"
+            | "shell"
             | "rust"
             | "javascript"
             | "typescript"
@@ -4674,6 +4683,7 @@ pub fn normalize_language_filter(value: &str) -> String {
         "c" | "h" => "c".to_string(),
         "cc" | "cpp" | "c++" | "cxx" | "hh" | "hpp" | "hxx" => "cpp".to_string(),
         "cs" | "csharp" | "c#" => "csharp".to_string(),
+        "sh" | "shell" | "bash" | "zsh" | "fish" | "bats" => "shell".to_string(),
         "py" | "python" => "python".to_string(),
         "rs" | "rust" => "rust".to_string(),
         "js" | "jsx" | "javascript" => "javascript".to_string(),
@@ -4717,6 +4727,9 @@ pub(crate) fn extract_symbols(path: &str, text: &str, language: &str) -> Vec<Sym
     }
     if language == "csharp" {
         return extract_csharp_symbols(path, text);
+    }
+    if language == "shell" {
+        return extract_shell_symbols(path, text);
     }
     if !language_supports_generic_symbols(language) {
         return Vec::new();
@@ -4971,6 +4984,21 @@ fn extract_csharp_symbols(path: &str, text: &str) -> Vec<Symbol> {
         }
     }
     symbols
+}
+
+fn extract_shell_symbols(path: &str, text: &str) -> Vec<Symbol> {
+    text.lines()
+        .enumerate()
+        .filter_map(|(index, line)| {
+            let capture = SHELL_FUNCTION_SYMBOL_RE.captures(line)?;
+            Some(Symbol {
+                name: capture.get(1)?.as_str().to_string(),
+                kind: "function".to_string(),
+                path: path.to_string(),
+                line: index + 1,
+            })
+        })
+        .collect()
 }
 
 fn extract_go_symbols(path: &str, text: &str) -> Vec<Symbol> {

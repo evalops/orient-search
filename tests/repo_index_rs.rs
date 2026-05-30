@@ -649,6 +649,71 @@ public class SearchController {
 }
 
 #[test]
+fn shell_symbols_work_across_live_and_persistent_indexes() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("scripts/bootstrap.sh"),
+        r#"
+#!/usr/bin/env bash
+
+install_deps() {
+    echo installing
+}
+
+function refresh_cache {
+    echo refreshing
+}
+"#,
+    );
+    write(
+        &repo.path().join("tests/bootstrap.bats"),
+        r#"
+@test "bootstrap installs deps" {
+    run install_deps
+}
+"#,
+    );
+
+    let live = RepoIndexer::new(repo.path()).build().unwrap();
+    assert_symbol(
+        &live.find_symbol("install_deps", 10)[0],
+        "scripts/bootstrap.sh",
+        "function",
+    );
+    assert_symbol(
+        &live.find_symbol("refresh_cache", 10)[0],
+        "scripts/bootstrap.sh",
+        "function",
+    );
+
+    let fallback = search_repo_fast_filtered(
+        repo.path(),
+        "lang:shell symbol:install_deps",
+        5,
+        &Default::default(),
+    )
+    .unwrap();
+    assert_eq!(fallback[0].path, "scripts/bootstrap.sh");
+    assert!(fallback[0].reason.contains("symbol:install_deps"));
+
+    let indexed = FastIndex::build(repo.path()).unwrap();
+    assert_symbol(
+        &indexed.find_symbol("refresh_cache", 10)[0],
+        "scripts/bootstrap.sh",
+        "function",
+    );
+    let indexed_results = indexed
+        .search_filtered(
+            "lang:bash symbol:install_deps test:false",
+            5,
+            &Default::default(),
+        )
+        .unwrap();
+    assert_eq!(indexed_results[0].path, "scripts/bootstrap.sh");
+    assert!(indexed_results[0].reason.contains("symbol:install_deps"));
+}
+
+#[test]
 fn generic_extractor_indexes_traits_types_and_exported_symbols() {
     let repo = tempfile::tempdir().unwrap();
     write(
