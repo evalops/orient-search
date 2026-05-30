@@ -3136,6 +3136,14 @@ fn runtime_read_alias_accepts_live_index_and_shard_targets() {
         serde_json::json!(2)
     );
     assert_eq!(
+        indexed_batch_summary["summary"]["top_dirs"],
+        serde_json::json!([".", "src"])
+    );
+    assert_eq!(
+        indexed_batch_summary["summary"]["top_exts"],
+        serde_json::json!(["toml", "rs"])
+    );
+    assert_eq!(
         indexed_batch_summary["ranges"][1]["path"],
         serde_json::json!("src/auth.rs")
     );

@@ -1270,6 +1270,14 @@ fn cli_read_ranges_can_return_compact_summary() {
     assert_eq!(summarized["summary"]["range_count"], serde_json::json!(2));
     assert_eq!(summarized["summary"]["total_lines"], serde_json::json!(3));
     assert_eq!(summarized["summary"]["path_count"], serde_json::json!(2));
+    assert_eq!(
+        summarized["summary"]["top_dirs"],
+        serde_json::json!(["src", "."])
+    );
+    assert_eq!(
+        summarized["summary"]["top_exts"],
+        serde_json::json!(["rs", "toml"])
+    );
     assert_eq!(summarized["ranges"].as_array().unwrap().len(), 2);
 }
 

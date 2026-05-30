@@ -106,6 +106,10 @@ struct ReadRangesResponseSummary {
     path_count: usize,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     paths: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    top_dirs: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    top_exts: Vec<String>,
 }
 
 fn search_result_summary(results: &[SearchResult]) -> SearchResultSummary {
@@ -3025,10 +3029,22 @@ fn primary_retry_read_batch_request(
 fn read_ranges_response_summary(ranges: &[FileRange]) -> ReadRangesResponseSummary {
     let mut seen_paths = HashSet::new();
     let mut paths = Vec::new();
+    let mut top_dirs = Vec::new();
+    let mut top_exts = Vec::new();
     let mut total_lines = 0;
 
     for range in ranges {
         total_lines += range.summary.line_count;
+        let dir = search_summary_dir(&range.path);
+        if top_dirs.len() < 5 && !top_dirs.iter().any(|existing| existing == &dir) {
+            top_dirs.push(dir);
+        }
+        if let Some(ext) = search_summary_ext(&range.path)
+            && top_exts.len() < 5
+            && !top_exts.iter().any(|existing| existing == &ext)
+        {
+            top_exts.push(ext);
+        }
         if seen_paths.insert(range.path.clone()) && paths.len() < 5 {
             paths.push(range.path.clone());
         }
@@ -3040,6 +3056,8 @@ fn read_ranges_response_summary(ranges: &[FileRange]) -> ReadRangesResponseSumma
         total_lines,
         path_count: seen_paths.len(),
         paths,
+        top_dirs,
+        top_exts,
     }
 }
 
