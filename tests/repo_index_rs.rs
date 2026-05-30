@@ -1709,6 +1709,64 @@ pub fn cargo_test_helper() {}
 }
 
 #[test]
+fn go_test_run_commands_search_target_test_functions() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("pkg/auth/auth_test.go"),
+        r#"
+package auth
+
+import "testing"
+
+func TestLoginFlow(t *testing.T) {
+    t.Helper()
+}
+"#,
+    );
+    write(
+        &repo.path().join("pkg/billing/auth_test.go"),
+        r#"
+package billing
+
+import "testing"
+
+func TestLoginFlow(t *testing.T) {
+    t.Helper()
+}
+"#,
+    );
+    write(
+        &repo.path().join("pkg/auth/helper.go"),
+        r#"
+package auth
+
+func TestLoginFlowHelper() {}
+"#,
+    );
+
+    let fallback = search_repo_fast_filtered(
+        repo.path(),
+        "go test ./pkg/auth -run TestLoginFlow",
+        5,
+        &Default::default(),
+    )
+    .unwrap();
+    assert_eq!(fallback[0].path, "pkg/auth/auth_test.go");
+    assert!(fallback[0].reason.contains("symbol:TestLoginFlow"));
+
+    let indexed = FastIndex::build(repo.path()).unwrap();
+    let indexed_results = indexed
+        .search_filtered(
+            "go test ./pkg/auth -run=TestLoginFlow",
+            5,
+            &Default::default(),
+        )
+        .unwrap();
+    assert_eq!(indexed_results[0].path, "pkg/auth/auth_test.go");
+    assert!(indexed_results[0].reason.contains("symbol:TestLoginFlow"));
+}
+
+#[test]
 fn fallback_line_range_tracks_displayed_contiguous_snippet_block() {
     let repo = tempfile::tempdir().unwrap();
     let mut source = String::from("alpha first hit\n");

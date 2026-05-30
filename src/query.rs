@@ -44,6 +44,7 @@ pub fn parse_query(input: &str) -> ParsedQuery {
     infer_pytest_command_node_id_term(&mut terms, &mut filters, explicit_content_terms);
     infer_leading_pytest_node_id_term(&mut terms, &mut filters, explicit_content_terms);
     infer_cargo_test_command_symbol_term(&mut terms, &mut filters, explicit_content_terms);
+    infer_go_test_run_command_symbol_term(&mut terms, &mut filters, explicit_content_terms);
     if terms.len() > 1 && !filters.match_any {
         filters.require_all = true;
     }
@@ -656,6 +657,122 @@ fn is_rust_test_symbol_name(value: &str) -> bool {
     };
     (first == '_' || first.is_ascii_alphabetic())
         && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+}
+
+fn infer_go_test_run_command_symbol_term(
+    terms: &mut Vec<String>,
+    filters: &mut SearchFilters,
+    explicit_content_terms: bool,
+) {
+    if explicit_content_terms
+        || terms.len() < 2
+        || filters.file.is_some()
+        || filters.path.is_some()
+        || filters.symbol.is_some()
+    {
+        return;
+    }
+
+    let mut saw_go = false;
+    let mut saw_test = false;
+    let mut path = None;
+    let mut targets = Vec::new();
+    for term in terms.iter() {
+        let term = trim_location_token_wrappers(term);
+        let lower = term.to_ascii_lowercase();
+        if lower == "go" {
+            saw_go = true;
+            continue;
+        }
+        if lower == "test" {
+            saw_test = true;
+            continue;
+        }
+        if let Some(package_path) = go_test_package_path(term) {
+            if let Some(package_path) = package_path {
+                path = Some(package_path);
+            }
+            continue;
+        }
+        if is_go_test_symbol_name(term) {
+            targets.push(term.to_string());
+            continue;
+        }
+        return;
+    }
+
+    for term in filters.exclude_content.iter() {
+        let term = trim_location_token_wrappers(term);
+        if let Some(target) = term.strip_prefix("run=") {
+            if !is_go_test_symbol_name(target) {
+                return;
+            }
+            targets.push(target.to_string());
+            continue;
+        }
+        if is_go_test_command_flag_term(term) {
+            continue;
+        }
+        return;
+    }
+
+    let [target] = targets.as_slice() else {
+        return;
+    };
+    if !saw_go || !saw_test {
+        return;
+    }
+
+    filters.path = path;
+    filters.symbol = Some(target.clone());
+    filters.symbol_kind = Some("function".to_string());
+    filters.exclude_content.clear();
+    terms.clear();
+    filters.require_all = false;
+}
+
+fn go_test_package_path(value: &str) -> Option<Option<String>> {
+    let value = value.trim();
+    if matches!(value, "." | "./..." | "...") {
+        return Some(None);
+    }
+    let path = value
+        .strip_prefix("./")
+        .or_else(|| value.strip_prefix("../"))
+        .unwrap_or(value);
+    let path = path.strip_suffix("/...").unwrap_or(path);
+    if path != value || path.contains('/') {
+        let path = strip_leading_current_dir_segments(path.to_string());
+        return (!path.is_empty()).then_some(Some(path));
+    }
+    None
+}
+
+fn is_go_test_symbol_name(value: &str) -> bool {
+    if !["Test", "Benchmark", "Fuzz", "Example"]
+        .iter()
+        .any(|prefix| value.starts_with(prefix))
+    {
+        return false;
+    }
+    let mut chars = value.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    (first == '_' || first.is_ascii_alphabetic())
+        && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+}
+
+fn is_go_test_command_flag_term(value: &str) -> bool {
+    value == "run"
+        || value == "v"
+        || value == "race"
+        || value == "short"
+        || value == "count"
+        || value.starts_with("count=")
+        || value.starts_with("timeout=")
+        || value.starts_with("parallel=")
+        || value.starts_with("tags=")
 }
 
 fn infer_leading_pytest_node_id_term(
@@ -2303,6 +2420,36 @@ mod tests {
         );
         assert_eq!(
             cargo_test_module_path.filters.symbol_kind.as_deref(),
+            Some("function")
+        );
+
+        let go_test_run_command = parse_query("go test ./pkg/auth -run TestLoginFlow");
+        assert!(go_test_run_command.terms.is_empty());
+        assert_eq!(
+            go_test_run_command.filters.path.as_deref(),
+            Some("pkg/auth")
+        );
+        assert_eq!(
+            go_test_run_command.filters.symbol.as_deref(),
+            Some("TestLoginFlow")
+        );
+        assert_eq!(
+            go_test_run_command.filters.symbol_kind.as_deref(),
+            Some("function")
+        );
+
+        let go_test_run_equals_command = parse_query("go test ./pkg/auth -run=TestLoginFlow");
+        assert!(go_test_run_equals_command.terms.is_empty());
+        assert_eq!(
+            go_test_run_equals_command.filters.path.as_deref(),
+            Some("pkg/auth")
+        );
+        assert_eq!(
+            go_test_run_equals_command.filters.symbol.as_deref(),
+            Some("TestLoginFlow")
+        );
+        assert_eq!(
+            go_test_run_equals_command.filters.symbol_kind.as_deref(),
             Some("function")
         );
 
