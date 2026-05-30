@@ -104,7 +104,8 @@ The generated snippet should keep agents on this loop. See
 - When Orient returns a usable follow-up request, run that request directly
   instead of translating it into shell search/read commands.
 - Read compact `query_plan_summary`, plan `summary`, and `next_action` fields
-  before opening full nested plan diagnostics.
+  before opening full nested plan diagnostics. Use `summary:true` on
+  `search_auto` / `search_auto_batch` when compact diagnostics are enough.
 - Fall back to shell search only when Orient is unavailable or its query plan is
   not useful for the task.
 

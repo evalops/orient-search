@@ -371,6 +371,10 @@ struct SearchAutoResult {
     results: Vec<SearchResult>,
 }
 
+fn compact_optional_query_plan_result(summary: bool, result: Option<Value>) -> Option<Value> {
+    if summary { None } else { result }
+}
+
 #[derive(Debug, Serialize)]
 struct SearchFreshness {
     stale: bool,
@@ -1811,12 +1815,12 @@ pub fn agent_guide(
             "auto_search": {
                 "id": "search",
                 "tool": "search_auto",
-                "arguments": {"query": "symbol:SessionManager token", "limit": 10, "explain": true, "retry_if_empty": true}
+                "arguments": {"query": "symbol:SessionManager token", "limit": 10, "explain": true, "retry_if_empty": true, "summary": true}
             },
             "auto_search_batch": {
                 "id": "searches",
                 "tool": "search_auto_batch",
-                "arguments": {"queries": ["symbol:SessionManager token", "path:src token"], "limit": 10, "explain": true, "retry_if_empty": true}
+                "arguments": {"queries": ["symbol:SessionManager token", "path:src token"], "limit": 10, "explain": true, "retry_if_empty": true, "summary": true}
             },
             "indexed_repo_map": {
                 "id": "map",
@@ -1855,8 +1859,8 @@ pub fn agent_guide(
             }
         },
         "result_followups": [
-            "Use compact query_plan_summary fields first; open full query_plan_result details only when diagnostics are needed.",
-            "Use search_auto.query_plan_result or a search_auto_batch item query_plan_result immediately when an automatic search is empty.",
+            "Use compact query_plan_summary fields first; pass summary:true on search_auto/search_auto_batch to omit full query_plan_result details until diagnostics are needed.",
+            "Use primary_retry_request, query_plan_summary, or query_plan_request first when an automatic search is empty; request full query_plan_result only when compact diagnostics are not enough.",
             "Set retry_if_empty:true on search_auto or search_auto_batch to run primary_retry_request once and receive primary_retry_result in the same call.",
             "Use search_auto.query_plan_request, a search_auto_batch item query_plan_request, or a search batch item query_plan_request when results are empty or noisy.",
             "Use search_auto.repo_map_request, a search_auto_batch item repo_map_request, or a search batch item repo_map_request when the agent needs entrypoints, tests, commands, or top symbols for the chosen surface.",
@@ -1908,7 +1912,7 @@ Keep cache paths local to the machine running the agents; do not copy machine-sp
 Orient shares code-search artifacts only and has no telemetry.\n\
 For many local repos, bootstrap it with `orient ensure-shards --discover-root /path/to/workspaces --output-dir {index_dir} --family-limit 2` and `{multi_repo_serve}`.\n\
 For one repo, bootstrap it with `orient ensure-index --repo {repo} --index {index}` and `{single_repo_serve}`.\n\
-At the start of a task, call `daemon_status` or `agent_guide`, then use `search_auto` with `retry_if_empty:true` for normal lookup and `search_auto_batch` with `retry_if_empty:true` for alternate query phrasings.\n\
+At the start of a task, call `daemon_status` or `agent_guide`, then use `search_auto` with `retry_if_empty:true` and `summary:true` for normal lookup and `search_auto_batch` with `retry_if_empty:true` and `summary:true` for alternate query phrasings.\n\
 Trust `daemon_status.search_auto_default` to see whether no-target `search_auto` will use a registered shard directory, warmed index, or the daemon current directory; run any `daemon_status.repair_requests`, then use `daemon_status.default_requests` for copyable first repo-map/search/query-plan calls.\n\
 When calling `search`, `search_batch`, `search_auto`, `search_auto_batch`, `repo_map`, `search_plan`, `find_symbol`, `read_range`, `read_ranges`, `related_files`, or `related_symbols` through JSON-lines/MCP without an explicit target, pass `cwd` so shared shard daemons scope results to the current git checkout.\n\
 Use query filters directly: `file:`, `path:`, `lang:`, `ext:`, `symbol:`, `type:`, `repo:`, `test:`, `generated:`, `code:`, `is:code`, `is:docs`, quoted literals, bare negative content terms like `-deprecated`, and negative filters like `-path:vendor` or `-is:generated`.\n\
@@ -2479,7 +2483,7 @@ fn argument_type(name: &str) -> &'static str {
         | "context_lines" | "read_limit" | "line" | "target_line" => "integer",
         "test" | "generated" | "code" | "explain" | "require_all" | "any_terms" | "details"
         | "refresh_if_stale" | "include_read_batch" | "include_summary" | "git_metadata"
-        | "tracked_files" | "nested_manifests" => "boolean",
+        | "tracked_files" | "nested_manifests" | "summary" => "boolean",
         name if string_list_argument(name) => "string|string[]",
         "range" => "range|string",
         "ranges" => "range|string|range[]",
@@ -2719,7 +2723,7 @@ fn argument_description(tool_name: &str, name: &str) -> &'static str {
             "When true, batch read tools return {summary, ranges} instead of a bare range array."
         }
         "summary" => {
-            "When true for query-plan tools, return only compact summaries, retry requests, and next_action instead of full nested plan payloads."
+            "When true for query-plan and search_auto tools, return compact query-plan summaries, retry requests, and next_action instead of full nested plan payloads."
         }
         "force" => {
             "When true for index_shards, replace an existing shard directory even if the rebuild would remove existing shards."
@@ -4493,6 +4497,7 @@ impl ToolRuntime {
                 let refresh_if_stale = bool_arg(&request.arguments, "refresh_if_stale");
                 let diagnose = bool_arg(&request.arguments, "diagnose");
                 let retry_if_empty = bool_arg(&request.arguments, "retry_if_empty");
+                let summary = bool_arg(&request.arguments, "summary");
                 let result = self.search_auto(
                     &request.arguments,
                     &query,
@@ -4501,6 +4506,7 @@ impl ToolRuntime {
                     refresh_if_stale,
                     diagnose,
                     retry_if_empty,
+                    summary,
                 )?;
                 Ok(serde_json::to_value(result)?)
             }
@@ -4511,6 +4517,7 @@ impl ToolRuntime {
                 let mut refresh_if_stale = bool_arg(&request.arguments, "refresh_if_stale");
                 let diagnose = bool_arg(&request.arguments, "diagnose");
                 let retry_if_empty = bool_arg(&request.arguments, "retry_if_empty");
+                let summary = bool_arg(&request.arguments, "summary");
                 let refreshed_shard_dir = if refresh_if_stale {
                     self.refresh_search_auto_batch_shards_if_stale(&request.arguments, &queries)?
                 } else {
@@ -4538,6 +4545,7 @@ impl ToolRuntime {
                             false,
                             diagnose,
                             retry_if_empty,
+                            summary,
                         )?);
                     }
                 } else {
@@ -4550,6 +4558,7 @@ impl ToolRuntime {
                             refresh_if_stale,
                             diagnose,
                             retry_if_empty,
+                            summary,
                         )?);
                     }
                 }
@@ -6389,6 +6398,7 @@ impl ToolRuntime {
         refresh_if_stale: bool,
         diagnose: bool,
         retry_if_empty: bool,
+        summary: bool,
     ) -> Result<SearchAutoResult> {
         if let Some(index_dir) = optional_string_arg(arguments, "index_dir").map(PathBuf::from) {
             return self.search_auto_shards(
@@ -6400,6 +6410,7 @@ impl ToolRuntime {
                 refresh_if_stale,
                 diagnose,
                 retry_if_empty,
+                summary,
             );
         }
         if let Some(index_path) = optional_string_arg(arguments, "index").map(PathBuf::from) {
@@ -6412,6 +6423,7 @@ impl ToolRuntime {
                 refresh_if_stale,
                 diagnose,
                 retry_if_empty,
+                summary,
             );
         }
         if let Some(repo) = optional_string_arg(arguments, "repo").map(PathBuf::from) {
@@ -6423,6 +6435,7 @@ impl ToolRuntime {
                 context_lines,
                 diagnose,
                 retry_if_empty,
+                summary,
             );
         }
         let scoped_arguments = arguments_scoped_to_client_cwd_for_query(arguments, query)?;
@@ -6442,6 +6455,7 @@ impl ToolRuntime {
                     refresh_if_stale,
                     diagnose,
                     retry_if_empty,
+                    summary,
                 );
             }
         }
@@ -6461,6 +6475,7 @@ impl ToolRuntime {
                     refresh_if_stale,
                     diagnose,
                     retry_if_empty,
+                    summary,
                 );
             }
         }
@@ -6474,6 +6489,7 @@ impl ToolRuntime {
                 refresh_if_stale,
                 diagnose,
                 retry_if_empty,
+                summary,
             );
         }
         let repo = live_repo_from_client_cwd(arguments, "search_auto")?;
@@ -6485,6 +6501,7 @@ impl ToolRuntime {
             context_lines,
             diagnose,
             retry_if_empty,
+            summary,
         )
     }
 
@@ -6573,6 +6590,7 @@ impl ToolRuntime {
         context_lines: usize,
         diagnose: bool,
         retry_if_empty: bool,
+        summary: bool,
     ) -> Result<SearchAutoResult> {
         let filters = search_filters(arguments, false)?;
         let mut results = search_repo_fast_filtered(&repo, query, limit, &filters)?;
@@ -6647,7 +6665,7 @@ impl ToolRuntime {
                 arguments,
                 query,
             ),
-            query_plan_result,
+            query_plan_result: compact_optional_query_plan_result(summary, query_plan_result),
             query_plan_summary,
             primary_diagnosis,
             primary_retry_request,
@@ -6670,6 +6688,7 @@ impl ToolRuntime {
         refresh_if_stale: bool,
         diagnose: bool,
         retry_if_empty: bool,
+        summary: bool,
     ) -> Result<SearchAutoResult> {
         let filters = search_filters(arguments, true)?;
         let shard_scope_filters = merge_filters(filters.clone(), parse_query(query).filters);
@@ -6769,7 +6788,7 @@ impl ToolRuntime {
                 arguments,
                 query,
             ),
-            query_plan_result,
+            query_plan_result: compact_optional_query_plan_result(summary, query_plan_result),
             query_plan_summary,
             primary_diagnosis,
             primary_retry_request,
@@ -6792,6 +6811,7 @@ impl ToolRuntime {
         refresh_if_stale: bool,
         diagnose: bool,
         retry_if_empty: bool,
+        summary: bool,
     ) -> Result<SearchAutoResult> {
         let index = self.cached_index_maybe_refresh(index_path.clone(), refresh_if_stale)?;
         let filters = search_filters(arguments, true)?;
@@ -6888,7 +6908,7 @@ impl ToolRuntime {
                 arguments,
                 query,
             ),
-            query_plan_result,
+            query_plan_result: compact_optional_query_plan_result(summary, query_plan_result),
             query_plan_summary,
             primary_diagnosis,
             primary_retry_request,
@@ -8828,6 +8848,7 @@ const SEARCH_AUTO_OPTIONAL_ARGS: &[&str] = &[
     "refresh_if_stale",
     "diagnose",
     "retry_if_empty",
+    "summary",
     "exclude_file",
     "exclude_path",
     "exclude_language",

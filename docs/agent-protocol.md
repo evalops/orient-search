@@ -108,7 +108,7 @@ Use `ensure_shards` for shard directories shared by several local agents. The lo
 
 Use the fastest surface that matches your setup:
 
-- `search_auto` when a daemon has exactly one registered shard directory or warmed index, when the request supplies `index_dir`, `index`, or a live `repo`, or when the daemon was started from the desired repo directory. It returns `{query,summary,surface,target,query_plan_request,query_plan_summary,repo_map_request,read_batch_request,next_read_batch_request,next_action,results}` and keeps result follow-up requests aligned with the chosen surface. `summary` carries `status`, `result_count`, grouped duplicate count when exact-content worktree/copy hits were collapsed, top paths, top directories, top extensions, top languages, and score bounds; when `retry_if_empty:true` runs a promoted repair, it also carries compact `primary_retry_status`, `primary_retry_result_count`, and `primary_retry_top_paths` fields. `query_plan_summary` is present when automatic diagnosis or retry planning ran, so wrappers can inspect status, retry intent, and a bounded `top_repair_hints` list without parsing the full plan. Shard `query_plan_summary` entries include each shard item's compact `summary` and promoted `next_action` when a retry is available.
+- `search_auto` when a daemon has exactly one registered shard directory or warmed index, when the request supplies `index_dir`, `index`, or a live `repo`, or when the daemon was started from the desired repo directory. It returns `{query,summary,surface,target,query_plan_request,query_plan_summary,repo_map_request,read_batch_request,next_read_batch_request,next_action,results}` and keeps result follow-up requests aligned with the chosen surface. `summary` carries `status`, `result_count`, grouped duplicate count when exact-content worktree/copy hits were collapsed, top paths, top directories, top extensions, top languages, and score bounds; when `retry_if_empty:true` runs a promoted repair, it also carries compact `primary_retry_status`, `primary_retry_result_count`, and `primary_retry_top_paths` fields. `query_plan_summary` is present when automatic diagnosis or retry planning ran, so wrappers can inspect status, retry intent, and a bounded `top_repair_hints` list without parsing the full plan. Pass `summary:true` or CLI `--summary` to omit the heavier inline `query_plan_result` while keeping compact diagnostics and follow-up requests. Shard `query_plan_summary` entries include each shard item's compact `summary` and promoted `next_action` when a retry is available.
 - `search_code` for a live repo without a prebuilt index.
 - `indexed_search_code` for one persistent repo index.
 - `search_shards` for a multi-repo shard directory.
@@ -134,7 +134,8 @@ no target flag is supplied, it first tries the shared TCP daemon at
 available, then searches the current directory as a live repo if no daemon is
 reachable. Use `--daemon-addr` for another TCP daemon or `--no-daemon` to force
 current-directory fallback. `orient search-auto-batch` follows the same
-daemon-first behavior. Use `--retry-if-empty` or JSON-lines
+daemon-first behavior. Use `--summary` / JSON-lines `summary:true` for compact
+diagnostics, and use `--retry-if-empty` or JSON-lines
 `retry_if_empty:true` for first-pass agent searches where one promoted repaired
 retry is preferable to manually parsing an empty result.
 `orient client-jsonl` automatically adds the shell's current working directory

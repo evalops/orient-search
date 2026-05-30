@@ -59,7 +59,7 @@ state layer.
 ## Search
 
 ```bash
-orient search-auto --retry-if-empty "symbol:SessionManager token"
+orient search-auto --retry-if-empty --summary "symbol:SessionManager token"
 orient search-auto --no-daemon "symbol:SessionManager token"
 orient search --repo . "issue token"
 orient search --index "$ORIENT_INDEX" "issue token"
@@ -120,7 +120,7 @@ JSON-lines requests look like this:
 {"id":"tools","tool":"tool_manifest","arguments":{}}
 {"id":"guide","tool":"agent_guide","arguments":{"index_dir":"/path/to/local/cache/orient-shards"}}
 {"id":"map","tool":"shard_repo_map","arguments":{"index_dir":"/path/to/local/cache/orient-shards","detail":"compact","read_limit":16}}
-{"id":"search","tool":"search_auto","arguments":{"query":"repo:service branch:main symbol:SessionManager token","limit":10,"explain":true}}
+{"id":"search","tool":"search_auto","arguments":{"query":"repo:service branch:main symbol:SessionManager token","limit":10,"explain":true,"summary":true}}
 {"id":"read","tool":"open_ranges","arguments":{"index_dir":"/path/to/local/cache/orient-shards","ranges":[{"path":"service/src/auth.rs","start":40,"lines":80},"service/src/lib.rs#L40-L45"]}}
 ```
 
@@ -133,13 +133,13 @@ Symbol lookups include per-hit `read_request`; add `include_read_batch:true` or
 use `find_symbol_batch` when the next step is opening all matching definitions.
 
 `search_auto`, `search_auto_batch`, and plan batch items expose
-`query_plan_summary` or `summary` alongside full plans, plus `next_action` when
+`query_plan_summary` or `summary` alongside optional full plans, plus `next_action` when
 Orient can choose the best immediate follow-up. Search summaries also surface
 grouped duplicate counts when repeated worktree or copied files collapse into a
 canonical result. Use those compact fields first; open the full plan only when a
 wrapper needs detailed diagnostics. For direct diagnostics, pass JSON-lines
-`summary:true` or add `--summary` to `search-plan`, `search-plan-batch`,
-`index-plan`, or `index-plan-batch`.
+`summary:true` or add `--summary` to `search-auto`, `search-auto-batch`,
+`search-plan`, `search-plan-batch`, `index-plan`, or `index-plan-batch`.
 
 Batch read follow-ups include `read_budget` so wrappers can split large reads
 before hitting range or line caps. Manual reads accept copied file locations such

@@ -34,7 +34,8 @@ The snippet should tell agents:
   scans for code discovery and bounded context reads.
 - Start with `daemon_status` or `agent_guide`.
 - Use `search_auto` for normal lookup and `search_auto_batch` for alternate
-  query phrasings.
+  query phrasings. Pass `summary:true` when the agent wants compact query-plan
+  diagnostics without full nested plan payloads.
 - For CLI use, prefer bare `orient search-auto ...`; it uses the shared TCP
   daemon first when no explicit target is supplied and falls back locally when
   no daemon is reachable. From inside a git checkout, bare CLI searches are
@@ -86,13 +87,13 @@ or per-target runtime details.
 
 ```bash
 printf '%s\n' \
-  '{"id":"search","tool":"search_auto","arguments":{"query":"repo:service branch:main symbol:SessionManager token","limit":10,"explain":true,"refresh_if_stale":true,"retry_if_empty":true}}' \
+  '{"id":"search","tool":"search_auto","arguments":{"query":"repo:service branch:main symbol:SessionManager token","limit":10,"explain":true,"refresh_if_stale":true,"retry_if_empty":true,"summary":true}}' \
   | orient client-jsonl --require-version
 ```
 
 ```bash
 printf '%s\n' \
-  '{"id":"searches","tool":"search_auto_batch","arguments":{"queries":["repo:service symbol:SessionManager token","origin:example/service path:auth token","repo:service mode:any SessionManager token"],"limit":10,"explain":true,"refresh_if_stale":true,"retry_if_empty":true}}' \
+  '{"id":"searches","tool":"search_auto_batch","arguments":{"queries":["repo:service symbol:SessionManager token","origin:example/service path:auth token","repo:service mode:any SessionManager token"],"limit":10,"explain":true,"refresh_if_stale":true,"retry_if_empty":true,"summary":true}}' \
   | orient client-jsonl --require-version
 ```
 

@@ -553,7 +553,7 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
     );
     assert_eq!(
         search_plan_batch_alias["input_schema"]["properties"]["summary"]["description"],
-        "When true for query-plan tools, return only compact summaries, retry requests, and next_action instead of full nested plan payloads."
+        "When true for query-plan and search_auto tools, return compact query-plan summaries, retry requests, and next_action instead of full nested plan payloads."
     );
     assert_eq!(
         search_plan_batch["input_schema"]["properties"]["queries"]["maxItems"],
@@ -1563,7 +1563,7 @@ fn runtime_serves_agent_guide_for_json_lines_wrappers() {
     assert_eq!(guide["profile"], "codex");
     let followups = guide["result_followups"].as_array().unwrap();
     for expected in [
-        "Use search_auto.query_plan_result or a search_auto_batch item query_plan_result immediately when an automatic search is empty.",
+        "Use primary_retry_request, query_plan_summary, or query_plan_request first when an automatic search is empty; request full query_plan_result only when compact diagnostics are not enough.",
         "Use search_auto.query_plan_request, a search_auto_batch item query_plan_request, or a search batch item query_plan_request when results are empty or noisy.",
         "Use search_auto.repo_map_request, a search_auto_batch item repo_map_request, or a search batch item repo_map_request when the agent needs entrypoints, tests, commands, or top symbols for the chosen surface.",
         "Use search_auto.next_action or a search batch item next_action when the wrapper wants one prioritized follow-up request; empty search batch items point at query_plan_request.",
@@ -9004,6 +9004,26 @@ fn runtime_search_auto_reports_stale_shard_refresh_request_on_empty_results() {
     let runtime = ToolRuntime::default();
     runtime.warm_shards(shard_dir.clone()).unwrap();
 
+    let compact = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("compact-auto-shard"),
+        tool: "search_auto".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": shard_dir.clone(),
+            "query": "baseline_current_token missing_compact_term",
+            "limit": 5,
+            "require_all": true,
+            "diagnose": true,
+            "summary": true
+        }),
+    });
+    assert!(compact.error.is_none(), "{:?}", compact.error);
+    let compact = compact.result.unwrap();
+    assert_eq!(compact["surface"], serde_json::json!("shards"));
+    assert_eq!(compact["query_plan_result"], serde_json::Value::Null);
+    assert!(compact["query_plan_summary"].is_array(), "{compact}");
+    assert!(compact["primary_diagnosis"].is_object(), "{compact}");
+    assert!(compact["primary_retry_request"].is_object(), "{compact}");
+
     let stale = runtime.dispatch(ToolRequest {
         id: serde_json::json!("stale-auto-shard"),
         tool: "search_auto".to_string(),
@@ -10431,11 +10451,35 @@ fn runtime_search_auto_diagnose_prefers_retry_next_action_for_noisy_hits() {
         value["query_plan_summary"]["suggested_query"],
         value["primary_diagnosis"]["suggested_query"]
     );
+    assert!(!value["query_plan_result"].is_null());
     assert_eq!(
         value["query_plan_summary"]["primary_retry_request"],
         value["primary_retry_request"]
     );
     assert!(value["primary_diagnosis"]["suggested_query"].is_string());
+
+    let compact = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("diagnosed-compact"),
+        tool: "search_auto".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "query": "needle",
+            "limit": 3,
+            "diagnose": true,
+            "summary": true
+        }),
+    });
+    assert!(compact.error.is_none(), "{:?}", compact.error);
+    let compact = compact.result.unwrap();
+    assert!(compact["query_plan_result"].is_null());
+    assert_eq!(
+        compact["query_plan_summary"]["suggested_query"],
+        compact["primary_diagnosis"]["suggested_query"]
+    );
+    assert_eq!(
+        compact["next_action"]["request"],
+        compact["primary_retry_request"]
+    );
 }
 
 #[test]

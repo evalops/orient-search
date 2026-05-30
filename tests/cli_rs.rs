@@ -1076,6 +1076,7 @@ fn cli_search_auto_diagnose_prefers_retry_next_action_for_noisy_hits() {
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert!(!value["results"].as_array().unwrap().is_empty());
     assert_eq!(value["summary"]["status"], serde_json::json!("matched"));
+    assert!(!value["query_plan_result"].is_null());
     assert_eq!(
         value["summary"]["result_count"],
         serde_json::json!(value["results"].as_array().unwrap().len())
@@ -1098,6 +1099,32 @@ fn cli_search_auto_diagnose_prefers_retry_next_action_for_noisy_hits() {
         value["primary_retry_request"]
     );
     assert!(value["primary_diagnosis"]["suggested_query"].is_string());
+
+    let compact_output = Command::cargo_bin("orient")
+        .unwrap()
+        .args([
+            "search-auto",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--diagnose",
+            "--summary",
+            "--limit",
+            "3",
+            "needle",
+        ])
+        .output()
+        .unwrap();
+    assert!(compact_output.status.success());
+    let compact: serde_json::Value = serde_json::from_slice(&compact_output.stdout).unwrap();
+    assert!(compact["query_plan_result"].is_null());
+    assert_eq!(
+        compact["query_plan_summary"]["suggested_query"],
+        compact["primary_diagnosis"]["suggested_query"]
+    );
+    assert_eq!(
+        compact["next_action"]["request"],
+        compact["primary_retry_request"]
+    );
 }
 
 #[test]
@@ -1334,6 +1361,25 @@ fn cli_search_auto_batch_returns_query_surfaces() {
         .stdout(predicate::str::contains("\"primary_diagnosis\""))
         .stdout(predicate::str::contains("\"primary_retry_request\""))
         .stdout(predicate::str::contains("\"tool\":\"indexed_search_code\""));
+
+    let mut compact_empty_batch = Command::cargo_bin("orient").unwrap();
+    let compact_empty_batch = compact_empty_batch
+        .args([
+            "search-auto-batch",
+            "--index",
+            index_path.to_str().unwrap(),
+            "--summary",
+            "issue_token definitely_missing",
+        ])
+        .output()
+        .unwrap();
+    assert!(compact_empty_batch.status.success());
+    let compact_empty_batch: serde_json::Value =
+        serde_json::from_slice(&compact_empty_batch.stdout).unwrap();
+    assert!(compact_empty_batch[0]["query_plan_result"].is_null());
+    assert!(!compact_empty_batch[0]["query_plan_summary"].is_null());
+    assert!(!compact_empty_batch[0]["primary_diagnosis"].is_null());
+    assert!(!compact_empty_batch[0]["primary_retry_request"].is_null());
 
     let mut auto_retry_batch = Command::cargo_bin("orient").unwrap();
     let auto_retry_batch = auto_retry_batch

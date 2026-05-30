@@ -554,6 +554,8 @@ enum Commands {
         diagnose: bool,
         #[arg(long)]
         retry_if_empty: bool,
+        #[arg(long)]
+        summary: bool,
         #[arg(
             long = "daemon-addr",
             visible_alias = "addr",
@@ -586,6 +588,8 @@ enum Commands {
         diagnose: bool,
         #[arg(long)]
         retry_if_empty: bool,
+        #[arg(long)]
+        summary: bool,
         #[arg(
             long = "daemon-addr",
             visible_alias = "addr",
@@ -3067,6 +3071,7 @@ fn daemon_search_auto_arguments(
     refresh_if_stale: bool,
     diagnose: bool,
     retry_if_empty: bool,
+    summary: bool,
 ) -> Value {
     let mut arguments = search_filter_arguments(filters);
     arguments.insert("query".to_string(), Value::String(query.to_string()));
@@ -3084,6 +3089,7 @@ fn daemon_search_auto_arguments(
         "retry_if_empty".to_string(),
         serde_json::json!(retry_if_empty),
     );
+    arguments.insert("summary".to_string(), serde_json::json!(summary));
     Value::Object(arguments)
 }
 
@@ -3095,6 +3101,7 @@ fn daemon_search_auto_batch_arguments(
     refresh_if_stale: bool,
     diagnose: bool,
     retry_if_empty: bool,
+    summary: bool,
 ) -> Value {
     let mut arguments = search_filter_arguments(filters);
     arguments.insert("queries".to_string(), serde_json::json!(queries));
@@ -3112,6 +3119,7 @@ fn daemon_search_auto_batch_arguments(
         "retry_if_empty".to_string(),
         serde_json::json!(retry_if_empty),
     );
+    arguments.insert("summary".to_string(), serde_json::json!(summary));
     Value::Object(arguments)
 }
 
@@ -4151,6 +4159,7 @@ fn run() -> Result<()> {
             refresh_if_stale,
             diagnose,
             retry_if_empty,
+            summary,
             daemon_addr,
             no_daemon,
         } => {
@@ -4168,6 +4177,7 @@ fn run() -> Result<()> {
                     refresh_if_stale,
                     diagnose,
                     retry_if_empty,
+                    summary,
                 );
                 if let Some(mut result) =
                     try_daemon_tool_request(&daemon_target, "search_auto", arguments)?
@@ -4247,7 +4257,9 @@ fn run() -> Result<()> {
                     "read_batch_request": read_batch_request,
                     "results": results
                 });
-                insert_optional_json_field(&mut output, "query_plan_result", query_plan_result);
+                if !summary {
+                    insert_optional_json_field(&mut output, "query_plan_result", query_plan_result);
+                }
                 insert_optional_json_field(&mut output, "query_plan_summary", query_plan_summary);
                 insert_optional_json_field(&mut output, "primary_diagnosis", primary_diagnosis);
                 insert_optional_json_field(
@@ -4349,7 +4361,9 @@ fn run() -> Result<()> {
                     "read_batch_request": read_batch_request,
                     "results": results
                 });
-                insert_optional_json_field(&mut output, "query_plan_result", query_plan_result);
+                if !summary {
+                    insert_optional_json_field(&mut output, "query_plan_result", query_plan_result);
+                }
                 insert_optional_json_field(&mut output, "query_plan_summary", query_plan_summary);
                 insert_optional_json_field(&mut output, "primary_diagnosis", primary_diagnosis);
                 insert_optional_json_field(
@@ -4445,7 +4459,9 @@ fn run() -> Result<()> {
                     "read_batch_request": read_batch_request,
                     "results": results
                 });
-                insert_optional_json_field(&mut output, "query_plan_result", query_plan_result);
+                if !summary {
+                    insert_optional_json_field(&mut output, "query_plan_result", query_plan_result);
+                }
                 insert_optional_json_field(&mut output, "query_plan_summary", query_plan_summary);
                 insert_optional_json_field(&mut output, "primary_diagnosis", primary_diagnosis);
                 insert_optional_json_field(
@@ -4479,6 +4495,7 @@ fn run() -> Result<()> {
             refresh_if_stale,
             diagnose,
             retry_if_empty,
+            summary,
             daemon_addr,
             no_daemon,
         } => {
@@ -4495,6 +4512,7 @@ fn run() -> Result<()> {
                     refresh_if_stale,
                     diagnose,
                     retry_if_empty,
+                    summary,
                 );
                 if let Some(mut result) =
                     try_daemon_tool_request(&daemon_target, "search_auto_batch", arguments)?
@@ -4577,7 +4595,13 @@ fn run() -> Result<()> {
                         "read_batch_request": read_batch_request,
                         "results": results
                     });
-                    insert_optional_json_field(&mut item, "query_plan_result", query_plan_result);
+                    if !summary {
+                        insert_optional_json_field(
+                            &mut item,
+                            "query_plan_result",
+                            query_plan_result,
+                        );
+                    }
                     insert_optional_json_field(&mut item, "query_plan_summary", query_plan_summary);
                     insert_optional_json_field(&mut item, "primary_diagnosis", primary_diagnosis);
                     insert_optional_json_field(
@@ -4682,7 +4706,13 @@ fn run() -> Result<()> {
                         "read_batch_request": read_batch_request,
                         "results": results
                     });
-                    insert_optional_json_field(&mut item, "query_plan_result", query_plan_result);
+                    if !summary {
+                        insert_optional_json_field(
+                            &mut item,
+                            "query_plan_result",
+                            query_plan_result,
+                        );
+                    }
                     insert_optional_json_field(&mut item, "query_plan_summary", query_plan_summary);
                     insert_optional_json_field(&mut item, "primary_diagnosis", primary_diagnosis);
                     insert_optional_json_field(
@@ -4781,7 +4811,13 @@ fn run() -> Result<()> {
                         "read_batch_request": read_batch_request,
                         "results": results
                     });
-                    insert_optional_json_field(&mut item, "query_plan_result", query_plan_result);
+                    if !summary {
+                        insert_optional_json_field(
+                            &mut item,
+                            "query_plan_result",
+                            query_plan_result,
+                        );
+                    }
                     insert_optional_json_field(&mut item, "query_plan_summary", query_plan_summary);
                     insert_optional_json_field(&mut item, "primary_diagnosis", primary_diagnosis);
                     insert_optional_json_field(
