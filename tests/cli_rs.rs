@@ -2806,15 +2806,40 @@ fn cli_search_surfaces_accept_structured_filters() {
     assert!(plan_text.contains("missing"));
     assert!(plan_text.contains("drop_missing_terms"));
 
+    let mut search_plan_summary = Command::cargo_bin("orient").unwrap();
+    let summary_output = search_plan_summary
+        .args([
+            "search-plan",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "SessionManager definitely_missing",
+            "--dir",
+            "src",
+            "--summary",
+        ])
+        .output()
+        .unwrap();
+    assert!(summary_output.status.success());
+    let summary_plan: serde_json::Value = serde_json::from_slice(&summary_output.stdout).unwrap();
+    assert_eq!(summary_plan["status"], serde_json::json!("missing_terms"));
+    assert_eq!(
+        summary_plan["primary_hint_kind"],
+        serde_json::json!("drop_missing_terms")
+    );
+    assert!(summary_plan["primary_retry_request"].is_object());
+    assert!(summary_plan.get("planned_postings").is_none());
+    assert!(summary_plan.get("retry_requests").is_none());
+    assert!(summary_plan.get("query_tokens").is_none());
+
     let mut search_plan_batch = Command::cargo_bin("orient").unwrap();
     search_plan_batch
         .args([
             "search-plan-batch",
             "--repo",
             repo.path().to_str().unwrap(),
+            "--require-all",
             "SessionManager definitely_missing",
             "issue absentterm",
-            "--require-all",
         ])
         .assert()
         .success()
@@ -2826,6 +2851,35 @@ fn cli_search_surfaces_accept_structured_filters() {
         .stdout(predicate::str::contains("absentterm"))
         .stdout(predicate::str::contains("\"next_action\""))
         .stdout(predicate::str::contains("drop_missing_terms"));
+
+    let mut search_plan_batch_summary = Command::cargo_bin("orient").unwrap();
+    let batch_summary_output = search_plan_batch_summary
+        .args([
+            "search-plan-batch",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--require-all",
+            "--summary",
+            "SessionManager definitely_missing",
+            "issue absentterm",
+        ])
+        .output()
+        .unwrap();
+    assert!(batch_summary_output.status.success());
+    let batch_summary: serde_json::Value =
+        serde_json::from_slice(&batch_summary_output.stdout).unwrap();
+    let batch_items = batch_summary.as_array().unwrap();
+    assert_eq!(batch_items.len(), 2);
+    assert_eq!(
+        batch_items[0]["query"],
+        serde_json::json!("SessionManager definitely_missing")
+    );
+    assert_eq!(
+        batch_items[0]["summary"]["primary_hint_kind"],
+        serde_json::json!("drop_missing_terms")
+    );
+    assert!(batch_items[0].get("plan").is_none());
+    assert!(batch_items[0].get("plans").is_none());
 
     let mut index_plan = Command::cargo_bin("orient").unwrap();
     index_plan
@@ -2855,6 +2909,28 @@ fn cli_search_surfaces_accept_structured_filters() {
         .stdout(predicate::str::contains("\"tool\":\"indexed_search_code\""))
         .stdout(predicate::str::contains("\"query\":\"session manager\""))
         .stdout(predicate::str::contains("\"path\":\"src\""));
+
+    let mut index_plan_summary = Command::cargo_bin("orient").unwrap();
+    let index_summary_output = index_plan_summary
+        .args([
+            "index-plan",
+            "--index",
+            index_path.to_str().unwrap(),
+            "SessionManager definitely_missing",
+            "--dir",
+            "src",
+            "--summary",
+        ])
+        .output()
+        .unwrap();
+    assert!(index_summary_output.status.success());
+    let index_summary: serde_json::Value =
+        serde_json::from_slice(&index_summary_output.stdout).unwrap();
+    assert_eq!(
+        index_summary["primary_retry_request"]["tool"],
+        serde_json::json!("indexed_search_code")
+    );
+    assert!(index_summary.get("planned_postings").is_none());
 
     let mut generic_index_plan = Command::cargo_bin("orient").unwrap();
     generic_index_plan
