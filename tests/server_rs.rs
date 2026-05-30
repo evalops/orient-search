@@ -3141,6 +3141,12 @@ fn runtime_related_alias_accepts_live_index_and_shard_targets() {
         live_batch["summary"]["result_count"],
         serde_json::json!(live_batch["results"].as_array().unwrap().len())
     );
+    assert_eq!(
+        live_batch["summary"]["top_paths"],
+        serde_json::json!(["tests/auth_test.rs"])
+    );
+    assert!(live_batch["summary"]["max_score"].is_number());
+    assert!(live_batch["summary"]["min_score"].is_number());
     assert!(
         live_batch["results"]
             .as_array()
@@ -3251,6 +3257,15 @@ fn runtime_related_alias_accepts_live_index_and_shard_targets() {
         indexed_symbol_batch["summary"]["result_count"],
         serde_json::json!(indexed_symbol_batch["results"].as_array().unwrap().len())
     );
+    assert!(
+        indexed_symbol_batch["summary"]["top_paths"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("src/auth.rs")),
+        "{indexed_symbol_batch:?}"
+    );
+    assert!(indexed_symbol_batch["summary"]["max_score"].is_number());
+    assert!(indexed_symbol_batch["summary"]["min_score"].is_number());
     assert!(
         indexed_symbol_batch["results"].as_array().unwrap().len() >= 1,
         "{indexed_symbol_batch:?}"

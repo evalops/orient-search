@@ -1793,7 +1793,6 @@ fn print_related_response<T: Serialize>(
     base_arguments: Map<String, Value>,
     summary: &str,
 ) -> Result<()> {
-    let result_count = results.len();
     let results = serde_json::to_value(results)?;
     if !include_read_batch {
         println!("{}", serde_json::to_string(&results)?);
@@ -1811,7 +1810,7 @@ fn print_related_response<T: Serialize>(
     println!(
         "{}",
         serde_json::to_string(&serde_json::json!({
-            "summary": related_lookup_summary(result_count),
+            "summary": related_lookup_summary(&results),
             "results": results,
             "read_batch_request": read_batch_request,
             "next_action": next_action
@@ -1820,11 +1819,47 @@ fn print_related_response<T: Serialize>(
     Ok(())
 }
 
-fn related_lookup_summary(result_count: usize) -> Value {
-    serde_json::json!({
+fn related_lookup_summary(results: &Value) -> Value {
+    let results = results.as_array().map(Vec::as_slice).unwrap_or(&[]);
+    let result_count = results.len();
+    let mut summary = serde_json::json!({
         "status": if result_count == 0 { "not_found" } else { "matched" },
         "result_count": result_count
-    })
+    });
+    let mut top_paths = Vec::new();
+    for item in results {
+        let path = item
+            .get("path")
+            .or_else(|| item.get("symbol").and_then(|symbol| symbol.get("path")))
+            .and_then(Value::as_str);
+        let Some(path) = path else {
+            continue;
+        };
+        if !top_paths.iter().any(|existing| existing == path) {
+            top_paths.push(path.to_string());
+            if top_paths.len() == 5 {
+                break;
+            }
+        }
+    }
+    if !top_paths.is_empty() {
+        summary["top_paths"] = serde_json::json!(top_paths);
+    }
+    if let Some(score) = results
+        .first()
+        .and_then(|item| item.get("score"))
+        .and_then(Value::as_f64)
+    {
+        summary["max_score"] = serde_json::json!(score);
+    }
+    if let Some(score) = results
+        .last()
+        .and_then(|item| item.get("score"))
+        .and_then(Value::as_f64)
+    {
+        summary["min_score"] = serde_json::json!(score);
+    }
+    summary
 }
 
 fn repo_map_detail_from_cli(value: &str) -> Result<RepoMapDetail> {
