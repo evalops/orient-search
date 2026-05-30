@@ -1164,6 +1164,9 @@ pub fn normalize_symbol_kind(value: &str) -> String {
         "traits" => "trait".to_string(),
         "types" => "type".to_string(),
         "targets" | "recipe" | "recipes" | "task" | "tasks" => "target".to_string(),
+        "scripts" | "npm-script" | "npm-scripts" | "package-script" | "package-scripts" => {
+            "script".to_string()
+        }
         other => other.to_string(),
     }
 }
@@ -1181,6 +1184,7 @@ fn symbol_kind_from_shorthand_key(key: &str) -> Option<String> {
             | "const"
             | "var"
             | "target"
+            | "script"
     )
     .then_some(kind)
 }
@@ -1200,6 +1204,7 @@ fn symbol_kind_from_type_value(value: &str) -> Option<String> {
             | "let"
             | "var"
             | "target"
+            | "script"
     )
     .then_some(kind)
 }
@@ -2138,6 +2143,17 @@ mod tests {
         assert_eq!(
             recipe_shorthand.filters.symbol_kind.as_deref(),
             Some("target")
+        );
+
+        let script_shorthand = parse_query("script:typecheck");
+        assert!(script_shorthand.terms.is_empty());
+        assert_eq!(
+            script_shorthand.filters.symbol.as_deref(),
+            Some("typecheck")
+        );
+        assert_eq!(
+            script_shorthand.filters.symbol_kind.as_deref(),
+            Some("script")
         );
 
         let unknown = parse_query("type:file gateway");

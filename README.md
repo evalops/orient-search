@@ -104,7 +104,8 @@ code links resolve to anchored file searches. Go panic stack locations are
 accepted too. Language filters include common shorthands such as `lang:rs`,
 `lang:ts`, `lang:cpp`, `lang:csharp`, `lang:shell`, `lang:makefile`, and
 `lang:justfile`. `kind:target` and `recipe:name` can jump to Makefile and
-Justfile targets. See
+Justfile targets; `kind:script` and `script:name` can jump to package.json
+scripts. See
 [Agent protocol](docs/agent-protocol.md) for the full query language.
 
 ## Protocol

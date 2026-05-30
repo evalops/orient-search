@@ -770,6 +770,60 @@ release target='prod':
 }
 
 #[test]
+fn package_json_scripts_work_as_symbols_across_live_and_persistent_indexes() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("package.json"),
+        r#"
+{
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "build:prod": "vite build"
+  },
+  "dependencies": {
+    "react": "latest"
+  }
+}
+"#,
+    );
+
+    let live = RepoIndexer::new(repo.path()).build().unwrap();
+    assert_symbol(
+        &live.find_symbol("typecheck", 10)[0],
+        "package.json",
+        "script",
+    );
+    assert_symbol(
+        &live.find_symbol("build:prod", 10)[0],
+        "package.json",
+        "script",
+    );
+
+    let fallback = search_repo_fast_filtered(
+        repo.path(),
+        "kind:script symbol:typecheck",
+        5,
+        &Default::default(),
+    )
+    .unwrap();
+    assert_eq!(fallback[0].path, "package.json");
+    assert!(fallback[0].reason.contains("symbol:typecheck"));
+
+    let indexed = FastIndex::build(repo.path()).unwrap();
+    assert_symbol(
+        &indexed.find_symbol("build:prod", 10)[0],
+        "package.json",
+        "script",
+    );
+    let indexed_results = indexed
+        .search_filtered("script:build:prod", 5, &Default::default())
+        .unwrap();
+    assert_eq!(indexed_results[0].path, "package.json");
+    assert!(indexed_results[0].reason.contains("symbol:build:prod"));
+}
+
+#[test]
 fn generic_extractor_indexes_traits_types_and_exported_symbols() {
     let repo = tempfile::tempdir().unwrap();
     write(

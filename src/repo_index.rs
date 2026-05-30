@@ -4736,6 +4736,9 @@ pub fn normalize_language_filter(value: &str) -> String {
 }
 
 pub(crate) fn extract_symbols(path: &str, text: &str, language: &str) -> Vec<Symbol> {
+    if is_package_json_path(path) {
+        return extract_package_json_script_symbols(path, text);
+    }
     if language == "python" {
         return extract_python_symbols(path, text);
     }
@@ -5080,6 +5083,55 @@ fn task_file_symbol_targets(text: &str) -> Vec<(String, usize)> {
         }
     }
     targets
+}
+
+fn is_package_json_path(path: &str) -> bool {
+    Path::new(path).file_name().and_then(|value| value.to_str()) == Some("package.json")
+}
+
+fn extract_package_json_script_symbols(path: &str, text: &str) -> Vec<Symbol> {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(text) else {
+        return Vec::new();
+    };
+    let Some(scripts) = value.get("scripts").and_then(|value| value.as_object()) else {
+        return Vec::new();
+    };
+    scripts
+        .keys()
+        .map(|name| Symbol {
+            name: name.clone(),
+            kind: "script".to_string(),
+            path: path.to_string(),
+            line: package_json_script_line(text, name).unwrap_or(1),
+        })
+        .collect()
+}
+
+fn package_json_script_line(text: &str, script: &str) -> Option<usize> {
+    let needle = format!("\"{script}\"");
+    let mut in_scripts = false;
+    let mut depth = 0usize;
+    for (index, line) in text.lines().enumerate() {
+        if !in_scripts {
+            if line.contains("\"scripts\"") && line.contains('{') {
+                in_scripts = true;
+                depth = line
+                    .matches('{')
+                    .count()
+                    .saturating_sub(line.matches('}').count());
+            }
+            continue;
+        }
+        if depth <= 1 && line.contains(&needle) {
+            return Some(index + 1);
+        }
+        depth = depth.saturating_add(line.matches('{').count());
+        depth = depth.saturating_sub(line.matches('}').count());
+        if depth == 0 {
+            break;
+        }
+    }
+    None
 }
 
 fn extract_go_symbols(path: &str, text: &str) -> Vec<Symbol> {
