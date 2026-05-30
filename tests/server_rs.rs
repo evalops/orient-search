@@ -1359,7 +1359,7 @@ fn agent_instructions_returns_copyable_local_agent_snippet() {
         "run that request instead of translating it into a shell search/read command",
         "query_plan_summary",
         "Fall back to shell search only when Orient is unavailable",
-        "does not collect telemetry",
+        "agent activity logs",
     ] {
         assert!(
             instructions.contains(expected),
@@ -1394,7 +1394,7 @@ fn agent_guidance_defaults_use_neutral_cache_placeholders() {
     assert!(!instructions.contains("/tmp/orient"));
     assert!(!instructions.contains("/tmp/repo"));
     assert!(instructions.contains("machine-specific layouts"));
-    assert!(instructions.contains("prompts, transcripts, memories, or tool history"));
+    assert!(instructions.contains("agent activity logs"));
     assert!(instructions.contains("the local agent instruction file for this repo"));
     assert!(!instructions.contains("AGENTS.md"));
     assert!(!instructions.contains("CLAUDE.md"));
@@ -1499,7 +1499,7 @@ fn runtime_serves_agent_instructions_for_local_instruction_files() {
     assert!(instructions.contains("selected coding agent"));
     assert!(!instructions.contains("AGENTS.md"));
     assert!(!instructions.contains("CLAUDE.md"));
-    assert!(instructions.contains("does not collect telemetry"));
+    assert!(instructions.contains("agent activity logs"));
 }
 
 #[test]

@@ -3,8 +3,7 @@
 Orient adoption should be boring: start one shared daemon, give each local agent
 a small instruction snippet, and let returned follow-up requests drive search,
 reads, and query-plan recovery. Keep the guidance local and code-search focused;
-do not put machine-specific layouts, prompts, transcripts, memories, or tool
-history into shared docs.
+do not put machine-specific layouts or agent activity details into shared docs.
 
 For setup and shared-runtime operations, use [Shared Daemon](shared-daemon.md).
 For transport details and tool schemas, use [Agent Protocol](agent-protocol.md).
