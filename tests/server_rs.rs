@@ -3568,6 +3568,14 @@ fn runtime_find_symbol_alias_accepts_live_index_and_shard_targets() {
         indexed_wrapped["summary"]["symbol_count"],
         serde_json::json!(indexed_wrapped["results"].as_array().unwrap().len())
     );
+    assert_eq!(
+        indexed_wrapped["summary"]["top_paths"],
+        serde_json::json!(["src/auth.rs"])
+    );
+    assert_eq!(
+        indexed_wrapped["summary"]["kinds"],
+        serde_json::json!(["struct"])
+    );
     assert_eq!(indexed_wrapped["results"][0]["path"], "src/auth.rs");
     assert_eq!(
         indexed_wrapped["read_batch_request"]["tool"],
@@ -3705,6 +3713,14 @@ fn runtime_find_symbol_alias_accepts_live_index_and_shard_targets() {
     assert_eq!(
         indexed_batch[0]["summary"]["symbol_count"],
         serde_json::json!(1)
+    );
+    assert_eq!(
+        indexed_batch[0]["summary"]["top_paths"],
+        serde_json::json!(["src/auth.rs"])
+    );
+    assert_eq!(
+        indexed_batch[0]["summary"]["kinds"],
+        serde_json::json!(["struct"])
     );
     assert_eq!(
         indexed_batch[0]["read_batch_request"]["tool"],

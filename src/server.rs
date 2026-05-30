@@ -364,9 +364,14 @@ struct SymbolLookupResponse {
 struct SymbolBatchSummary {
     status: String,
     symbol_count: usize,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    top_paths: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    kinds: Vec<String>,
 }
 
-fn symbol_batch_summary(symbol_count: usize) -> SymbolBatchSummary {
+fn symbol_batch_summary(symbols: &[SymbolLookupResult]) -> SymbolBatchSummary {
+    let symbol_count = symbols.len();
     SymbolBatchSummary {
         status: if symbol_count == 0 {
             "not_found".to_string()
@@ -374,7 +379,35 @@ fn symbol_batch_summary(symbol_count: usize) -> SymbolBatchSummary {
             "matched".to_string()
         },
         symbol_count,
+        top_paths: symbol_summary_top_paths(symbols),
+        kinds: symbol_summary_kinds(symbols),
     }
+}
+
+fn symbol_summary_top_paths(symbols: &[SymbolLookupResult]) -> Vec<String> {
+    let mut paths = Vec::new();
+    for symbol in symbols {
+        if !paths.iter().any(|path| path == &symbol.symbol.path) {
+            paths.push(symbol.symbol.path.clone());
+            if paths.len() == 5 {
+                break;
+            }
+        }
+    }
+    paths
+}
+
+fn symbol_summary_kinds(symbols: &[SymbolLookupResult]) -> Vec<String> {
+    let mut kinds = Vec::new();
+    for symbol in symbols {
+        if !kinds.iter().any(|kind| kind == &symbol.symbol.kind) {
+            kinds.push(symbol.symbol.kind.clone());
+            if kinds.len() == 5 {
+                break;
+            }
+        }
+    }
+    kinds
 }
 
 fn symbol_lookup_response(
@@ -388,7 +421,7 @@ fn symbol_lookup_response(
     }
     let read_batch_request = symbol_lookup_read_batch_request(&symbols, batch_tool, base_arguments);
     let next_action = read_batch_next_action(&read_batch_request);
-    let summary = symbol_batch_summary(symbols.len());
+    let summary = symbol_batch_summary(&symbols);
     Ok(serde_json::to_value(SymbolLookupResponse {
         summary,
         results: symbols,
@@ -402,7 +435,7 @@ fn symbol_batch_result(
     read_batch_request: Option<ResultToolRequest>,
     symbols: Vec<SymbolLookupResult>,
 ) -> SymbolBatchResult {
-    let summary = symbol_batch_summary(symbols.len());
+    let summary = symbol_batch_summary(&symbols);
     let next_action = read_batch_next_action(&read_batch_request);
     SymbolBatchResult {
         name,
