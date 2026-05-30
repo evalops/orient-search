@@ -8900,6 +8900,14 @@ fn runtime_indexed_result_query_plan_includes_retry_requests() {
         plan["retry_requests"][0]["arguments"]["index"],
         serde_json::json!(index_path)
     );
+    assert_eq!(
+        plan["summary"]["top_repair_hints"][0]["kind"],
+        serde_json::json!("narrow_query")
+    );
+    assert_eq!(
+        plan["summary"]["top_repair_hints"][1]["suggested_query"],
+        serde_json::json!("shared cap token path:src")
+    );
 }
 
 #[test]

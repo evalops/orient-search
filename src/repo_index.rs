@@ -27,6 +27,7 @@ const READ_BATCH_MERGE_GAP_LINES: usize = 8;
 const MAX_REPO_BRIEF_IMPORT_HINTS: usize = 32;
 const FALLBACK_STREAMING_MIN_CANDIDATES: usize = 500;
 const FALLBACK_STREAMING_MAX_CANDIDATES: usize = 5_000;
+const MAX_QUERY_PLAN_SUMMARY_REPAIR_HINTS: usize = 4;
 const DEFAULT_RESULT_READ_LINES: usize = 80;
 const DEFAULT_RELATED_FILE_READ_LINES: usize = 80;
 pub(crate) const DEFAULT_SYMBOL_READ_CONTEXT_BEFORE: usize = 20;
@@ -448,6 +449,8 @@ pub struct QueryPlanSummary {
     pub active_filters: Vec<QueryPlanFilter>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rarest_posting: Option<QueryPlanPosting>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub top_repair_hints: Vec<QueryPlanRepairHint>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub primary_hint_kind: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -539,6 +542,12 @@ impl QueryPlanSummary {
             missing_trigrams: plan.missing_trigrams.clone(),
             active_filters: plan.active_filters.clone(),
             rarest_posting: plan.planned_postings.first().cloned(),
+            top_repair_hints: plan
+                .repair_hints
+                .iter()
+                .take(MAX_QUERY_PLAN_SUMMARY_REPAIR_HINTS)
+                .cloned()
+                .collect(),
             primary_hint_kind: diagnosis.primary_hint_kind,
             primary_hint_action: diagnosis.primary_hint_action,
             suggested_query: diagnosis.suggested_query,

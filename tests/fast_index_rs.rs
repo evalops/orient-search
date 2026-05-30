@@ -525,6 +525,19 @@ fn indexed_search_warns_when_candidate_cap_is_hit() {
             && hint.message.contains("from 1100 files to 400")
             && hint.suggested_query.as_deref() == Some("shared cap token test:true")
     }));
+    let summary = plan.summary.as_ref().unwrap();
+    assert_eq!(
+        summary
+            .top_repair_hints
+            .iter()
+            .map(|hint| hint.kind.as_str())
+            .collect::<Vec<_>>(),
+        vec!["narrow_query", "narrow_by_path", "narrow_by_test"]
+    );
+    assert_eq!(
+        summary.top_repair_hints[1].suggested_query.as_deref(),
+        Some("shared cap token path:src")
+    );
 }
 
 #[test]
