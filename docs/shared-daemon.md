@@ -2,7 +2,8 @@
 
 Run one shared Orient daemon for the repos agents are actively editing. Local
 agents share repo maps, indexes, query plans, and bounded reads without each one
-rescanning the same files. The daemon stays local and does not collect telemetry.
+rescanning the same files. The daemon stays local and does not collect
+telemetry or agent runtime state.
 
 In this doc, "shared" means shared by local clients on the same machine. Orient
 is a local code-search service and does not collect telemetry.
@@ -91,6 +92,8 @@ The generated snippet should keep agents on this loop. See
   use `generated:true` only when intentionally inspecting generated files.
 - When Orient returns a usable follow-up request, run that request directly
   instead of translating it into shell search/read commands.
+- Read compact `query_plan_summary`, plan `summary`, and `next_action` fields
+  before opening full nested plan diagnostics.
 - Fall back to shell search only when Orient is unavailable or its query plan is
   not useful for the task.
 

@@ -1343,6 +1343,7 @@ fn agent_instructions_returns_copyable_local_agent_snippet() {
         "orient client-jsonl --addr 127.0.0.1:9999",
         "selected coding agent",
         "Keep cache paths local",
+        "Orient shares code-search artifacts only",
         "orient ensure-shards --discover-root /path/to/workspaces --output-dir /tmp/orient-shards --family-limit 2",
         "orient ensure-index --repo /work/repo --index /tmp/repo.index",
         "search_auto_batch",
@@ -1352,6 +1353,7 @@ fn agent_instructions_returns_copyable_local_agent_snippet() {
         "`file:`, `path:`, `lang:`, `ext:`, `symbol:`, `type:`, `repo:`, `test:`",
         "Generated paths, including hashed JavaScript bundles, are demoted by default",
         "run that request instead of translating it into a shell search/read command",
+        "query_plan_summary",
         "Fall back to shell search only when Orient is unavailable",
         "does not collect telemetry",
     ] {

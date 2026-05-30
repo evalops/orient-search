@@ -3,7 +3,7 @@
 Orient optimizes for local agent latency. Persisted indexes store source
 snapshots and line metadata so snippets and bounded reads do not need to reopen
 live files. This makes reads fast and makes index files larger than source.
-Indexes stay local; Orient does not collect telemetry.
+Indexes stay local; Orient does not collect telemetry or agent runtime state.
 
 ## What Gets Stored
 

@@ -2,7 +2,8 @@
 
 Orient Search is a local code-search daemon for coding agents. It provides repo
 maps, indexed search, query plans, and bounded file reads so agents can inspect
-code quickly without repeated filesystem scans.
+code quickly without repeated filesystem scans. It stores local code-search
+artifacts only: no telemetry and no agent runtime state.
 
 ## Shared Daemon
 
@@ -47,8 +48,9 @@ restart the shared daemon. The JSON-lines `daemon_status` tool is compact by
 default; pass `details:true` only when you need cached paths and per-target
 details.
 
-The daemon shares local search state only: indexes, shard manifests, repo maps,
-and cached file metadata. It does not collect telemetry.
+The daemon shares local search artifacts only: indexes, shard manifests, repo
+maps, and cached file metadata. It is not a remote service or a general agent
+state store.
 
 ## Search
 
@@ -84,30 +86,12 @@ batch, and query-plan calls stay scoped to the active checkout. Those scoped
 defaults also set `refresh_if_stale:true`, so they refresh only that checkout's
 shard before use.
 
-Useful filters: `repo:`, `path:`/`dir:`, `file:`, `lang:`, `ext:`, `symbol:`,
-`kind:`/`type:`, shorthand symbol-kind filters such as `fn:issue_token` or
-`class:SessionManager`, `line:`, `dep:`, `import:`, `test:`, `generated:`,
-`code:`, `is:test`, `is:source`, `is:code`, `is:docs`, `is:generated`,
-`content:`, quoted phrases, negative filters like `-path:vendor`, bare
-negative terms like `-deprecated`, explicit `exclude-*:` facets such as
-`exclude-path:vendor`, and `mode:any` for broad orientation.
-Bare filename and path-like queries such as `Cargo.toml` or `src/lib.rs` use the
-same fast path filters. Use `content:Cargo.toml` when you want references to the
-string instead of the file itself. Pasted locations such as `src/lib.rs:42`,
-`src/lib.rs:42:9`, `src/lib.rs#L42-L45`, copied `src/lib.rs:42: text` lines,
-Markdown-style file links, common hosted code links, and stack-frame forms like
-`at fn (src/lib.rs:42:9)` resolve to the file and anchor snippets near that
-line. Absolute pasted paths are normalized when they are inside the selected
-repo or index root. Hosted links may carry fragment or query-string line
-anchors.
-`symbol:` accepts exact names plus strong multi-token identifier fragments, so
-`symbol:retry_result` can match `search_auto_retry_result`; single generic tokens
-stay exact to avoid broad matches such as `symbol:path` hitting every
-`*_path` helper.
-
-Generated paths, including hashed JavaScript bundles, are demoted by default.
-Use `generated:true` / `is:generated` when you intentionally want generated
-output, or `generated:false` / `-is:generated` to exclude it entirely.
+Useful filters include `repo:`, `path:`/`dir:`, `file:`, `lang:`, `ext:`,
+`symbol:`, `kind:`/`type:`, `line:`, `test:`, `generated:`, `code:`,
+`content:`, quoted phrases, negative filters like `-path:vendor`, and `mode:any`
+for broad orientation. Bare filenames, pasted file locations, Markdown links,
+and hosted code links resolve to anchored file searches. See
+[Agent protocol](docs/agent-protocol.md) for the full query language.
 
 ## Protocol
 
@@ -121,52 +105,27 @@ JSON-lines requests look like this:
 {"id":"read","tool":"open_ranges","arguments":{"index_dir":"/path/to/local/cache/orient-shards","ranges":[{"path":"service/src/auth.rs","start":40,"lines":80},"service/src/lib.rs#L40-L45"]}}
 ```
 
-Every search result includes ready-to-send read, related-file, related-symbol,
-and query-plan follow-ups with `jsonl`, `client_cli`, and compact CLI hints.
-Agents should run those returned requests directly instead of translating them
-back into shell search/read commands.
-Exact-content duplicate hits from repeated worktrees or copied files are
-collapsed into one canonical result with `duplicate_group`; generated batch
-read follow-ups include `read_budget.grouped_duplicate_count` when duplicates
-were represented this way.
-Generated related-file and related-symbol follow-ups set
-`include_read_batch:true`, so their responses include one batch read follow-up
-for all returned context.
-`search_auto`, `search_auto_batch`, and search batch items expose ready
-query-plan and repo-map requests, so agents can diagnose weak hits or orient
-around nearby entrypoints without inventing a second call shape. Automatic
-searches also expose `next_read_batch_request`, which points to the best
-immediate batch read after normal results or an automatic retry. Their
-`next_action` field wraps the best immediate follow-up request with a compact
-`kind`, `source`, and `summary`; empty search batch items point it at
-`query_plan_request`.
-Plan batch responses also promote each repaired item's `next_action`, so
-wrappers can retry from `item.next_action` without digging through nested plan
-objects.
-Generated batch read requests include `read_budget` so wrappers can see the
-range count and total line budget before sending the follow-up.
-For manual context reads, pass `scope:"symbol"` or `orient read-range --scope
-symbol` to anchor the returned window at the nearest function, class, or type
-definition instead of opening an exact line window.
-The `read_range` / `open_range` and `read_ranges` / `open_ranges` protocol
-tools and matching `read-*` / `open-*` CLIs accept the same copied file
-locations as search, including
-`src/lib.rs:42`, `src/lib.rs:42-45`, copied `src/lib.rs:42: text` lines,
-`src/lib.rs#L42-L45`, Markdown links, and common hosted code links with
-fragment or query-string line anchors. JSON range objects may use
-`start`/`lines` or the line-range aliases `start_line`, `end_line`, and
-`line_count`. Single reads may pass either `path` plus window fields or a
-`range` object/string with the same shape as a search result's `read_range`.
-Batch reads are capped by both range count and total requested lines, so large
-inspections should be split into smaller
-follow-up reads. Identical entries and overlapping exact ranges are compacted
-before the line-budget check.
+Search results include ready-to-send read, related-file, related-symbol,
+repo-map, and query-plan follow-ups with `jsonl`, `client_cli`, and compact CLI
+hints. Agents should run those returned requests directly instead of translating
+them back into shell search/read commands.
+
+`search_auto`, `search_auto_batch`, and plan batch items expose
+`query_plan_summary` or `summary` alongside full plans, plus `next_action` when
+Orient can choose the best immediate follow-up. Use those compact fields first;
+open the full plan only when a wrapper needs detailed diagnostics.
+
+Batch read follow-ups include `read_budget` so wrappers can split large reads
+before hitting range or line caps. Manual reads accept copied file locations such
+as `src/lib.rs:42-45` and can use `scope:symbol` to anchor at the nearest
+definition.
 
 ## Footprint
 
 Orient stores source snapshots and line offsets in persisted indexes so bounded
 reads stay fast even when served by a shared daemon. Keep indexes in a local
-cache and out of source control. Orient does not collect telemetry.
+cache and out of source control. Indexes contain source text, not agent runtime
+state.
 
 Use:
 

@@ -1,8 +1,9 @@
 # Agent Adoption
 
-Orient adoption should be boring: start one shared daemon, give each local
-agent a small instruction snippet, and let returned follow-up requests drive
-search, reads, and query-plan recovery.
+Orient adoption should be boring: start one shared daemon, give each local agent
+a small instruction snippet, and let returned follow-up requests drive search,
+reads, and query-plan recovery. Keep the guidance local and code-search focused;
+do not put private workspace layouts or agent runtime state into shared docs.
 
 For setup and shared-runtime operations, use [Shared Daemon](shared-daemon.md).
 For transport details and tool schemas, use [Agent Protocol](agent-protocol.md).
@@ -55,6 +56,8 @@ The snippet should tell agents:
   it points at normal hits when present and retry hits after automatic repair.
 - When `next_action` is present, run `next_action.request` first; it chooses
   between refresh, read, retry, map, and empty-result query-plan follow-ups.
+- Use `query_plan_summary` on `search_auto` / `search_auto_batch` and `summary`
+  on plan batch items before parsing full nested query plans.
 - When opening context manually from a line inside a definition, pass
   `scope:"symbol"` on `read_range` or `read_ranges` so the returned window
   starts from the nearest enclosing function, class, or type definition.
@@ -99,9 +102,11 @@ try alternate phrasings without paying repeated freshness scans.
 1. Call `agent_guide` or `tool_manifest`.
 2. Search with `search_auto` or `search_auto_batch`.
 3. Read top hits with returned bounded range requests.
-4. Use related-file and related-symbol requests before opening neighboring
+4. Use compact `next_action` and query-plan summary fields before digging into
+   full diagnostic plans.
+5. Use related-file and related-symbol requests before opening neighboring
    files manually.
-5. Use the query plan for empty or noisy results; safe retry requests are
+6. Use the query plan for empty or noisy results; safe retry requests are
    included when Orient can suggest one.
-6. Use repo maps when the agent needs entrypoints, tests, commands, or top
+7. Use repo maps when the agent needs entrypoints, tests, commands, or top
    symbols for the selected surface.
