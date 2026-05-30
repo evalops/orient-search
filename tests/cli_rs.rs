@@ -1977,6 +1977,20 @@ fn cli_outputs_repo_map_and_reads_ranges() {
         .stdout(predicate::str::contains("\"start_line\":5"))
         .stdout(predicate::str::contains("issue_token"));
 
+    let mut bitbucket_read_range = Command::cargo_bin("orient").unwrap();
+    bitbucket_read_range
+        .args([
+            "read-range",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "https://bitbucket.org/evalops/orient-search/src/main/src/auth.rs#lines-5:6",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"start_line\":5"))
+        .stdout(predicate::str::contains("\"end_line\":6"))
+        .stdout(predicate::str::contains("issue_token"));
+
     let mut oversized_compact_read_range = Command::cargo_bin("orient").unwrap();
     oversized_compact_read_range
         .args([

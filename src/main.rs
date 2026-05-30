@@ -6599,6 +6599,7 @@ fn parse_copied_location_cli_range(value: &str, scope: Option<RangeScope>) -> Op
         path,
         start,
         lines: copied_hash_anchor_lines(value)
+            .or_else(|| copied_bitbucket_lines_anchor_lines(value))
             .or_else(|| copied_colon_range_lines(value))
             .unwrap_or(DEFAULT_CLI_READ_RANGE_LINES),
         scope,
@@ -6636,6 +6637,16 @@ fn copied_hash_anchor_lines(value: &str) -> Option<usize> {
         .or_else(|| after_dash.strip_prefix('l'))
         .unwrap_or(after_dash);
     let (end, _) = split_leading_digits(after_optional_l)?;
+    (end >= start).then_some(end - start + 1)
+}
+
+fn copied_bitbucket_lines_anchor_lines(value: &str) -> Option<usize> {
+    let lower = value.to_ascii_lowercase();
+    let marker = lower.find("#lines-")?;
+    let after_marker = &value[marker + "#lines-".len()..];
+    let (start, after_start) = split_leading_digits(after_marker)?;
+    let after_colon = after_start.strip_prefix(':')?;
+    let (end, _) = split_leading_digits(after_colon)?;
     (end >= start).then_some(end - start + 1)
 }
 
@@ -7377,6 +7388,14 @@ mod tests {
         assert_eq!(sourcegraph.path, "src/auth.rs");
         assert_eq!(sourcegraph.start, 12);
         assert_eq!(sourcegraph.lines, DEFAULT_CLI_READ_RANGE_LINES);
+
+        let bitbucket = CliRangeSpec::from_str(
+            "https://bitbucket.org/evalops/orient-search/src/main/src/auth.rs#lines-12:15",
+        )
+        .unwrap();
+        assert_eq!(bitbucket.path, "src/auth.rs");
+        assert_eq!(bitbucket.start, 12);
+        assert_eq!(bitbucket.lines, 4);
 
         let wrapped =
             CliRangeSpec::from_str("at Object.handle (src/auth.rs#L12-L15):symbol").unwrap();
