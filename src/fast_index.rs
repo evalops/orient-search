@@ -116,6 +116,8 @@ pub struct IndexedPath {
     #[serde(default)]
     pub path_lower: String,
     #[serde(skip)]
+    pub path_phrase_text: String,
+    #[serde(skip)]
     pub file_name_lower: String,
     #[serde(skip)]
     pub extension_lower: Option<String>,
@@ -3148,10 +3150,9 @@ fn indexed_apply_phrase_matches(
         return true;
     }
 
-    let path_phrase_text = normalize_phrase_text(&file.path_lower);
     let mut matches = Vec::with_capacity(query_phrases.len());
     for phrase in query_phrases {
-        let path_match = path_phrase_text.contains(phrase);
+        let path_match = file.path_phrase_text.contains(phrase);
         let content_match = indexed_content_contains_phrase(file, phrase);
         if !path_match && !content_match {
             return false;
@@ -5024,6 +5025,7 @@ fn index_file(
     Some(IndexedPath {
         path: rel.to_string(),
         path_lower: rel.to_ascii_lowercase(),
+        path_phrase_text: normalize_phrase_text(rel),
         file_name_lower: indexed_file_name_lower(rel),
         extension_lower: indexed_extension_lower(rel),
         language,
@@ -5048,6 +5050,7 @@ fn retarget_indexed_file(
 ) -> IndexedPath {
     previous.path = candidate.rel.clone();
     previous.path_lower = candidate.rel.to_ascii_lowercase();
+    previous.path_phrase_text = normalize_phrase_text(&candidate.rel);
     previous.file_name_lower = indexed_file_name_lower(&candidate.rel);
     previous.extension_lower = indexed_extension_lower(&candidate.rel);
     previous.language = candidate.language.clone();
@@ -5064,6 +5067,7 @@ fn retarget_indexed_file(
 
 fn refresh_indexed_path_metadata(file: &mut IndexedPath) {
     file.path_lower = file.path.to_ascii_lowercase();
+    file.path_phrase_text = normalize_phrase_text(&file.path);
     file.file_name_lower = indexed_file_name_lower(&file.path);
     file.extension_lower = indexed_extension_lower(&file.path);
     for symbol in &mut file.symbols {

@@ -238,6 +238,7 @@ fn saved_indexes_have_versioned_header_and_legacy_indexes_still_load() {
     assert_eq!(version, index.version);
     let loaded = FastIndex::load(&index_path).unwrap();
     assert_eq!(loaded.version, index.version);
+    assert_eq!(loaded.files[0].path_phrase_text, "src auth rs");
     assert_eq!(loaded.files[0].file_name_lower, "auth.rs");
     assert_eq!(loaded.files[0].extension_lower.as_deref(), Some("rs"));
     assert_eq!(loaded.files[0].symbols[0].name_lower, "sessionmanager");
@@ -256,6 +257,7 @@ fn saved_indexes_have_versioned_header_and_legacy_indexes_still_load() {
     fs::write(&legacy_path, bincode::serialize(&legacy_raw_index).unwrap()).unwrap();
     let legacy = FastIndex::load(&legacy_path).unwrap();
     assert_eq!(legacy.version, index.version);
+    assert_eq!(legacy.files[0].path_phrase_text, "src auth rs");
     assert_eq!(legacy.files[0].file_name_lower, "auth.rs");
     assert_eq!(legacy.files[0].extension_lower.as_deref(), Some("rs"));
     assert_eq!(legacy.files[0].symbols[0].name_lower, "sessionmanager");
@@ -3082,6 +3084,41 @@ fn quoted_phrases_match_acronym_identifier_boundaries() {
         !indexed
             .iter()
             .any(|result| result.path == "src/scattered.ts")
+    );
+}
+
+#[test]
+fn quoted_phrases_match_indexed_paths_without_per_candidate_normalization() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("src/auth_provider.rs"),
+        "pub fn auth_provider() -> &'static str { \"provider\" }\n",
+    );
+    write(
+        &repo.path().join("src/other.rs"),
+        "pub fn auth() -> &'static str { \"provider\" }\n",
+    );
+
+    let index = FastIndex::build(repo.path()).unwrap();
+    let results = index
+        .search_filtered(
+            "\"auth provider\"",
+            10,
+            &SearchFilters {
+                explain: true,
+                ..SearchFilters::default()
+            },
+        )
+        .unwrap();
+
+    assert_eq!(result_paths(&results), vec!["src/auth_provider.rs"]);
+    assert!(
+        results[0]
+            .explanation
+            .as_ref()
+            .unwrap()
+            .iter()
+            .any(|signal| signal.kind == "path_phrase")
     );
 }
 
