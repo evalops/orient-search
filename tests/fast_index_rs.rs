@@ -2002,6 +2002,40 @@ fn query_language_filters_fallback_and_indexed_search() {
     assert!(indexed_no_vendor_paths.contains(&"src/auth.rs".to_string()));
     assert!(!indexed_no_vendor_paths.contains(&"src/vendor_auth.rs".to_string()));
 
+    let fallback_without_vendor = search_repo_fast_filtered(
+        repo.path(),
+        "without:path:vendor SessionManager",
+        10,
+        &Default::default(),
+    )
+    .unwrap();
+    assert!(result_paths(&fallback_without_vendor).contains(&"src/auth.rs".to_string()));
+    assert!(!result_paths(&fallback_without_vendor).contains(&"src/vendor_auth.rs".to_string()));
+    let indexed_without_vendor = indexed
+        .search_filtered(
+            "without:path:vendor SessionManager",
+            10,
+            &Default::default(),
+        )
+        .unwrap();
+    assert!(result_paths(&indexed_without_vendor).contains(&"src/auth.rs".to_string()));
+    assert!(!result_paths(&indexed_without_vendor).contains(&"src/vendor_auth.rs".to_string()));
+
+    let fallback_not_docs = search_repo_fast_filtered(
+        repo.path(),
+        "not:docs SessionManager",
+        10,
+        &Default::default(),
+    )
+    .unwrap();
+    assert!(result_paths(&fallback_not_docs).contains(&"src/auth.rs".to_string()));
+    assert!(!result_paths(&fallback_not_docs).contains(&"docs/auth.md".to_string()));
+    let indexed_not_docs = indexed
+        .search_filtered("not:docs SessionManager", 10, &Default::default())
+        .unwrap();
+    assert!(result_paths(&indexed_not_docs).contains(&"src/auth.rs".to_string()));
+    assert!(!result_paths(&indexed_not_docs).contains(&"docs/auth.md".to_string()));
+
     let fallback_docs_wildcard = search_repo_fast_filtered(
         repo.path(),
         "path:docs/*.md SessionManager",

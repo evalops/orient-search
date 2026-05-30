@@ -116,6 +116,10 @@ fn apply_filter(filters: &mut SearchFilters, token: &str, negated: bool) -> bool
         return false;
     }
 
+    if !negated && matches!(key.as_str(), "not" | "without" | "exclude") {
+        return apply_negative_alias(filters, &value);
+    }
+
     if !negated && let Some(kind) = symbol_kind_from_shorthand_key(&key) {
         filters.symbol_kind = Some(kind);
         filters.symbol = Some(value);
@@ -288,6 +292,18 @@ fn apply_filter(filters: &mut SearchFilters, token: &str, negated: bool) -> bool
         (true, "code" | "source_code" | "source-code") => filters.code = Some(false),
         _ => return false,
     }
+    true
+}
+
+fn apply_negative_alias(filters: &mut SearchFilters, value: &str) -> bool {
+    if let Some(term) = content_term(value) {
+        filters.exclude_content.push(term);
+        return true;
+    }
+    if apply_filter(filters, value, true) {
+        return true;
+    }
+    filters.exclude_content.push(value.to_string());
     true
 }
 
@@ -1148,6 +1164,18 @@ mod tests {
         assert_eq!(
             noisy_dirs.filters.exclude_path,
             vec!["node_modules", "third_party", "target"]
+        );
+
+        let negative_aliases = parse_query(
+            "not:docs without:path:vendor exclude:generated exclude:deprecated not:content:legacy",
+        );
+        assert!(negative_aliases.terms.is_empty());
+        assert_eq!(negative_aliases.filters.code, Some(true));
+        assert_eq!(negative_aliases.filters.generated, Some(false));
+        assert_eq!(negative_aliases.filters.exclude_path, vec!["vendor"]);
+        assert_eq!(
+            negative_aliases.filters.exclude_content,
+            vec!["deprecated", "legacy"]
         );
 
         let positive_docs = parse_query("docs SessionManager");

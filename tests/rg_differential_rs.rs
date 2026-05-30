@@ -279,6 +279,10 @@ fn fallback_scoped_search_matches_rg_content_set_for_agent_filters() {
             Box::new(|path| !is_generated_path(path)),
         ),
         (
+            "exclude:generated MAGICNEEDLE",
+            Box::new(|path| !is_generated_path(path)),
+        ),
+        (
             "generated:true MAGICNEEDLE",
             Box::new(|path| is_generated_path(path)),
         ),
@@ -291,6 +295,10 @@ fn fallback_scoped_search_matches_rg_content_set_for_agent_filters() {
             Box::new(|path| is_source_code_language(path)),
         ),
         (
+            "not:docs MAGICNEEDLE",
+            Box::new(|path| is_source_code_language(path)),
+        ),
+        (
             "code:false MAGICNEEDLE",
             Box::new(|path| !is_source_code_language(path)),
         ),
@@ -300,6 +308,10 @@ fn fallback_scoped_search_matches_rg_content_set_for_agent_filters() {
         ),
         (
             "!vendor MAGICNEEDLE",
+            Box::new(|path| !path.contains("vendor")),
+        ),
+        (
+            "without:path:vendor MAGICNEEDLE",
             Box::new(|path| !path.contains("vendor")),
         ),
         (
