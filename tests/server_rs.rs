@@ -19,7 +19,7 @@ use orient::server::{
     ToolRequest, ToolRuntime, agent_guide, agent_instructions, mcp_dispatch_value,
     mcp_tool_manifest, serve_mcp_with_runtime, tool_manifest,
 };
-use orient::shards::{build_shards, refresh_shards, shard_status};
+use orient::shards::{DEFAULT_MAX_SHARD_WORKERS, build_shards, refresh_shards, shard_status};
 
 fn write(path: &Path, text: &str) {
     fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -6245,6 +6245,10 @@ fn runtime_warms_index_by_tool_request() {
     assert_eq!(result["process_id"], serde_json::json!(std::process::id()));
     assert!(result["started_at_unix_secs"].as_u64().unwrap() > 0);
     assert!(result["uptime_secs"].as_u64().unwrap() < 60);
+    assert_eq!(
+        result["max_shard_workers"],
+        serde_json::json!(DEFAULT_MAX_SHARD_WORKERS)
+    );
     assert_eq!(result["cached_indexes"], serde_json::json!(1));
     assert_eq!(
         result["search_auto_default"]["surface"],
@@ -6365,6 +6369,10 @@ fn daemon_status_suggests_registering_warmed_shard_indexes() {
     assert_eq!(status["process_id"], serde_json::json!(std::process::id()));
     assert!(status["started_at_unix_secs"].as_u64().unwrap() > 0);
     assert!(status["uptime_secs"].as_u64().unwrap() < 60);
+    assert_eq!(
+        status["max_shard_workers"],
+        serde_json::json!(DEFAULT_MAX_SHARD_WORKERS)
+    );
     assert_eq!(
         status["search_auto_default"]["surface"],
         serde_json::json!("shards")
@@ -10241,6 +10249,10 @@ fn tcp_daemon_status_cli_reports_runtime_cache() {
     assert!(status["process_id"].as_u64().unwrap() > 0);
     assert!(status["started_at_unix_secs"].as_u64().unwrap() > 0);
     assert!(status["uptime_secs"].as_u64().unwrap() < 60);
+    assert_eq!(
+        status["max_shard_workers"],
+        serde_json::json!(DEFAULT_MAX_SHARD_WORKERS)
+    );
     assert_eq!(status["cached_indexes"], serde_json::json!(0));
     assert_eq!(status["cached_shard_manifests"], serde_json::json!(0));
     assert_eq!(
@@ -10272,6 +10284,10 @@ fn tcp_daemon_status_cli_reports_runtime_cache() {
     assert!(status["process_id"].as_u64().unwrap() > 0);
     assert!(status["started_at_unix_secs"].as_u64().unwrap() > 0);
     assert!(status["uptime_secs"].as_u64().unwrap() < 60);
+    assert_eq!(
+        status["max_shard_workers"],
+        serde_json::json!(DEFAULT_MAX_SHARD_WORKERS)
+    );
     assert!(status["search_auto_default"]["target"].as_str().is_some());
     let default_target = status["search_auto_default"]["target"].clone();
     assert!(default_target.as_str().is_some());
@@ -10793,6 +10809,10 @@ fn unix_daemon_status_cli_reports_runtime_cache() {
     assert_eq!(
         status["client_version"],
         serde_json::json!(env!("CARGO_PKG_VERSION"))
+    );
+    assert_eq!(
+        status["max_shard_workers"],
+        serde_json::json!(DEFAULT_MAX_SHARD_WORKERS)
     );
     assert_eq!(status["cached_indexes"], serde_json::json!(0));
     assert_eq!(status["cached_shard_manifests"], serde_json::json!(0));

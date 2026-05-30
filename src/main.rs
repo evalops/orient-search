@@ -5133,6 +5133,10 @@ fn daemon_status_summary(status: &Value) -> Value {
             .get("uptime_secs")
             .cloned()
             .unwrap_or(Value::Null),
+        "max_shard_workers": status
+            .get("max_shard_workers")
+            .cloned()
+            .unwrap_or(Value::Null),
         "search_auto_default": {
             "surface": search_default.get("surface").cloned().unwrap_or(Value::Null),
             "source": search_default.get("source").cloned().unwrap_or(Value::Null),

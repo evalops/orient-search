@@ -20,13 +20,13 @@ use crate::repo_index::{
 };
 use crate::shards::{
     ShardEntry, ShardFreshness, ShardManifest, ShardQueryPlan, ShardRepoMap, ShardSearchScope,
-    append_shard_facet_repair_hints, build_shards_with_force, ensure_shards,
-    filter_repo_map_by_prefix, filters_for_shard_scope, load_manifest, refresh_shards,
-    refresh_shards_by_root, related_query_without_shard_selectors,
-    resolve_shard_path_from_manifest, shard_prefilter_query_impossible, shard_route_entries,
-    shard_route_selection, shard_search_scopes, shard_selection_miss_plan,
-    shard_sketch_may_diagnose_query, shard_sketch_may_match_query, shard_status,
-    shard_status_by_root,
+    append_shard_facet_repair_hints, bounded_shard_worker_count, build_shards_with_force,
+    configured_max_shard_workers, ensure_shards, filter_repo_map_by_prefix,
+    filters_for_shard_scope, load_manifest, refresh_shards, refresh_shards_by_root,
+    related_query_without_shard_selectors, resolve_shard_path_from_manifest,
+    shard_prefilter_query_impossible, shard_route_entries, shard_route_selection,
+    shard_search_scopes, shard_selection_miss_plan, shard_sketch_may_diagnose_query,
+    shard_sketch_may_match_query, shard_status, shard_status_by_root,
 };
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use anyhow::{Context, Result, anyhow};
@@ -833,6 +833,7 @@ impl ToolRuntime {
             "process_id": std::process::id(),
             "started_at_unix_secs": system_time_unix_secs(self.started_at),
             "uptime_secs": daemon_uptime_secs(self.started_at),
+            "max_shard_workers": configured_max_shard_workers(),
             "search_auto_default": search_auto_default.clone(),
             "default_requests": default_requests,
             "max_cached_indexes": self.max_cached_indexes(),
@@ -6720,10 +6721,7 @@ impl ToolRuntime {
             return Ok(Vec::new());
         }
 
-        let workers = std::thread::available_parallelism()
-            .map(|count| count.get())
-            .unwrap_or(1)
-            .min(jobs.len());
+        let workers = bounded_shard_worker_count(jobs.len());
         if workers <= 1 {
             return self.search_shard_job_batch_cached(index_dir, query, limit, filters, &jobs);
         }
@@ -6825,10 +6823,7 @@ impl ToolRuntime {
             return Ok(Vec::new());
         }
 
-        let workers = std::thread::available_parallelism()
-            .map(|count| count.get())
-            .unwrap_or(1)
-            .min(jobs.len());
+        let workers = bounded_shard_worker_count(jobs.len());
         if workers <= 1 {
             return self.shard_query_plan_job_batch_cached(index_dir, query, filters, &jobs);
         }

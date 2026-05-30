@@ -228,6 +228,11 @@ include follow-ups for the chosen live, indexed, or shard surface:
 - `primary_retry_request`: the promoted repaired search when diagnostics find a
   concrete retry.
 
+Shard searches use bounded parallel fanout. The default cap is 8 shard workers
+per query; set `ORIENT_MAX_SHARD_WORKERS=N` on the daemon or CLI process when a
+shared machine needs more or less concurrency. `daemon_status` reports the active
+`max_shard_workers` value so wrappers can see the local budget without probing.
+
 Generated follow-ups include `jsonl`, `client_cli`, and compact CLI hints.
 Batch read follow-ups include `read_budget.grouped_duplicate_count` when the
 returned canonical result ranges represent additional duplicate paths.

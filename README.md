@@ -28,8 +28,9 @@ orient serve-tcp \
 ```
 
 `--index-dir` registers the shard manifest and lazily loads individual repo
-indexes on first use. The daemon keeps at most 64 ready indexes by default; use
-`--max-cached-indexes N` to tune that for shared multi-agent runs. Use
+indexes on first use. The daemon keeps at most 64 ready indexes and uses at most
+8 shard workers per query by default; set `--max-cached-indexes N` and
+`ORIENT_MAX_SHARD_WORKERS=N` to tune shared multi-agent runs. Use
 `--warm-index-dir "$ORIENT_SHARDS"` only when you intentionally want to load
 shard indexes at startup.
 
@@ -42,11 +43,11 @@ orient daemon-status
 orient daemon-status --format json
 ```
 
-`daemon-status` reports the daemon version, process id, uptime, registered
-shard directories, and warmed indexes. If the version is missing or differs from
-`orient --version`, restart the shared daemon. The JSON-lines `daemon_status`
-tool is compact by default; pass `details:true` only when you need cached paths
-and per-target details.
+`daemon-status` reports the daemon version, process id, uptime, shard worker cap,
+registered shard directories, and warmed indexes. If the version is missing or
+differs from `orient --version`, restart the shared daemon. The JSON-lines
+`daemon_status` tool is compact by default; pass `details:true` only when you
+need cached paths and per-target details.
 
 The daemon shares local search artifacts only: indexes, shard manifests, repo
 maps, and cached file metadata. It is not a remote service, session memory, or

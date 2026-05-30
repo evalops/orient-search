@@ -41,6 +41,8 @@ const SHARD_KIND_SKETCH_WORDS: usize = 16;
 const SHARD_FILTER_SKETCH_WORDS: usize = 64;
 const SHARD_SUBSTRING_PREFILTER_MAX_TOKEN_CHARS: usize = 20;
 const SHARD_ROUTE_SUBSTRING_GRAM_CHARS: usize = 6;
+pub const DEFAULT_MAX_SHARD_WORKERS: usize = 8;
+pub const MAX_SHARD_WORKERS_ENV: &str = "ORIENT_MAX_SHARD_WORKERS";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ShardManifest {
@@ -1163,10 +1165,7 @@ fn search_shard_jobs(
         return Ok(Vec::new());
     }
 
-    let workers = std::thread::available_parallelism()
-        .map(|count| count.get())
-        .unwrap_or(1)
-        .min(jobs.len());
+    let workers = bounded_shard_worker_count(jobs.len());
     if workers <= 1 {
         return search_shard_job_batch(index_dir, query, limit, filters, &jobs);
     }
@@ -1190,6 +1189,37 @@ fn search_shard_jobs(
         Ok::<(), anyhow::Error>(())
     })?;
     Ok(results)
+}
+
+pub(crate) fn bounded_shard_worker_count(job_count: usize) -> usize {
+    bounded_shard_worker_count_for(
+        job_count,
+        std::thread::available_parallelism()
+            .map(|count| count.get())
+            .unwrap_or(1),
+        configured_max_shard_workers(),
+    )
+}
+
+pub(crate) fn configured_max_shard_workers() -> usize {
+    std::env::var(MAX_SHARD_WORKERS_ENV)
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(DEFAULT_MAX_SHARD_WORKERS)
+}
+
+pub(crate) fn bounded_shard_worker_count_for(
+    job_count: usize,
+    available_parallelism: usize,
+    configured_max_workers: usize,
+) -> usize {
+    if job_count == 0 {
+        return 0;
+    }
+    job_count
+        .min(available_parallelism.max(1))
+        .min(configured_max_workers.max(1))
 }
 
 fn search_shard_job_batch(
@@ -4148,5 +4178,15 @@ mod tests {
             shard_route_candidate_ids(&route, &exact_route_requirements(&[42])),
             ShardRouteLookup::Corrupt
         );
+    }
+
+    #[test]
+    fn shard_worker_count_respects_jobs_available_cpus_and_configured_cap() {
+        assert_eq!(bounded_shard_worker_count_for(0, 16, 8), 0);
+        assert_eq!(bounded_shard_worker_count_for(3, 16, 8), 3);
+        assert_eq!(bounded_shard_worker_count_for(32, 4, 8), 4);
+        assert_eq!(bounded_shard_worker_count_for(32, 16, 6), 6);
+        assert_eq!(bounded_shard_worker_count_for(32, 0, 8), 1);
+        assert_eq!(bounded_shard_worker_count_for(32, 16, 0), 1);
     }
 }
