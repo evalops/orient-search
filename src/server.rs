@@ -82,9 +82,16 @@ struct SearchBatchResult {
 struct SearchResultSummary {
     status: String,
     result_count: usize,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    top_paths: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_score: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    min_score: Option<f64>,
 }
 
-fn search_result_summary(result_count: usize) -> SearchResultSummary {
+fn search_result_summary(results: &[SearchResult]) -> SearchResultSummary {
+    let result_count = results.len();
     SearchResultSummary {
         status: if result_count == 0 {
             "not_found".to_string()
@@ -92,7 +99,23 @@ fn search_result_summary(result_count: usize) -> SearchResultSummary {
             "matched".to_string()
         },
         result_count,
+        top_paths: search_summary_top_paths(results),
+        max_score: results.first().map(|result| result.score),
+        min_score: results.last().map(|result| result.score),
     }
+}
+
+fn search_summary_top_paths(results: &[SearchResult]) -> Vec<String> {
+    let mut paths = Vec::new();
+    for result in results {
+        if !paths.iter().any(|path| path == &result.path) {
+            paths.push(result.path.clone());
+            if paths.len() == 5 {
+                break;
+            }
+        }
+    }
+    paths
 }
 
 fn search_batch_result(
@@ -103,7 +126,7 @@ fn search_batch_result(
     results: Vec<SearchResult>,
 ) -> SearchBatchResult {
     let next_action = search_batch_next_action(&read_batch_request, &query_plan_request);
-    let summary = search_result_summary(results.len());
+    let summary = search_result_summary(&results);
     SearchBatchResult {
         query,
         summary,
@@ -5905,7 +5928,7 @@ impl ToolRuntime {
         );
         Ok(SearchAutoResult {
             query: query.to_string(),
-            summary: search_result_summary(results.len()),
+            summary: search_result_summary(&results),
             surface: "fallback".to_string(),
             target: repo.to_string_lossy().to_string(),
             freshness: None,
@@ -6027,7 +6050,7 @@ impl ToolRuntime {
         );
         Ok(SearchAutoResult {
             query: query.to_string(),
-            summary: search_result_summary(results.len()),
+            summary: search_result_summary(&results),
             surface: "shards".to_string(),
             target: index_dir.to_string_lossy().to_string(),
             refresh_request,
@@ -6146,7 +6169,7 @@ impl ToolRuntime {
         );
         Ok(SearchAutoResult {
             query: query.to_string(),
-            summary: search_result_summary(results.len()),
+            summary: search_result_summary(&results),
             surface: "indexed".to_string(),
             target: index_path.to_string_lossy().to_string(),
             refresh_request,

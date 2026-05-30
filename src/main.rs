@@ -1515,9 +1515,16 @@ struct SearchBatchResult {
 struct SearchResultSummary {
     status: String,
     result_count: usize,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    top_paths: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_score: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    min_score: Option<f64>,
 }
 
-fn search_result_summary(result_count: usize) -> SearchResultSummary {
+fn search_result_summary(results: &[SearchResult]) -> SearchResultSummary {
+    let result_count = results.len();
     SearchResultSummary {
         status: if result_count == 0 {
             "not_found".to_string()
@@ -1525,7 +1532,23 @@ fn search_result_summary(result_count: usize) -> SearchResultSummary {
             "matched".to_string()
         },
         result_count,
+        top_paths: search_summary_top_paths(results),
+        max_score: results.first().map(|result| result.score),
+        min_score: results.last().map(|result| result.score),
     }
+}
+
+fn search_summary_top_paths(results: &[SearchResult]) -> Vec<String> {
+    let mut paths = Vec::new();
+    for result in results {
+        if !paths.iter().any(|path| path == &result.path) {
+            paths.push(result.path.clone());
+            if paths.len() == 5 {
+                break;
+            }
+        }
+    }
+    paths
 }
 
 fn search_batch_result(
@@ -1536,7 +1559,7 @@ fn search_batch_result(
     results: Vec<SearchResult>,
 ) -> SearchBatchResult {
     let next_action = search_batch_next_action(&read_batch_request, &query_plan_request);
-    let summary = search_result_summary(results.len());
+    let summary = search_result_summary(&results);
     SearchBatchResult {
         query,
         summary,
@@ -3491,7 +3514,7 @@ fn run() -> Result<()> {
                 );
                 let mut output = serde_json::json!({
                     "query": query,
-                    "summary": search_result_summary(results.len()),
+                    "summary": search_result_summary(&results),
                     "surface": "shards",
                     "target": index_dir,
                     "query_plan_request": {
@@ -3590,7 +3613,7 @@ fn run() -> Result<()> {
                 );
                 let mut output = serde_json::json!({
                     "query": query,
-                    "summary": search_result_summary(results.len()),
+                    "summary": search_result_summary(&results),
                     "surface": "indexed",
                     "target": index_path,
                     "query_plan_request": {
@@ -3686,7 +3709,7 @@ fn run() -> Result<()> {
                 );
                 let mut output = serde_json::json!({
                     "query": query,
-                    "summary": search_result_summary(results.len()),
+                    "summary": search_result_summary(&results),
                     "surface": "fallback",
                     "target": repo,
                     "query_plan_request": {
@@ -3820,7 +3843,7 @@ fn run() -> Result<()> {
                     );
                     let mut item = serde_json::json!({
                         "query": query,
-                        "summary": search_result_summary(results.len()),
+                        "summary": search_result_summary(&results),
                         "surface": "shards",
                         "target": index_dir,
                         "query_plan_request": {
@@ -3922,7 +3945,7 @@ fn run() -> Result<()> {
                     );
                     let mut item = serde_json::json!({
                         "query": query,
-                        "summary": search_result_summary(results.len()),
+                        "summary": search_result_summary(&results),
                         "surface": "indexed",
                         "target": index_path,
                         "query_plan_request": {
@@ -4021,7 +4044,7 @@ fn run() -> Result<()> {
                     );
                     let mut item = serde_json::json!({
                         "query": query,
-                        "summary": search_result_summary(results.len()),
+                        "summary": search_result_summary(&results),
                         "surface": "fallback",
                         "target": repo,
                         "query_plan_request": {

@@ -1702,6 +1702,14 @@ fn runtime_search_auto_uses_live_repo_and_single_warmed_index() {
     assert_eq!(live["surface"], "fallback");
     assert_eq!(live["summary"]["status"], serde_json::json!("matched"));
     assert_eq!(live["summary"]["result_count"], serde_json::json!(1));
+    assert_eq!(
+        live["summary"]["top_paths"],
+        serde_json::json!(["src/auth.rs"])
+    );
+    assert!(
+        live["summary"]["max_score"].as_f64().unwrap()
+            >= live["summary"]["min_score"].as_f64().unwrap()
+    );
     assert_eq!(live["query_plan_request"]["tool"], "search_query_plan");
     assert_eq!(live["repo_map_request"]["tool"], "repo_map");
     assert_eq!(
@@ -3900,6 +3908,10 @@ fn runtime_search_auto_batch_uses_single_warmed_index() {
     assert_eq!(batch.as_array().unwrap().len(), 2);
     assert_eq!(batch[0]["query"], "issue_token");
     assert_eq!(batch[0]["surface"], "indexed");
+    assert_eq!(
+        batch[0]["summary"]["top_paths"],
+        serde_json::json!(["src/auth.rs"])
+    );
     assert_eq!(batch[0]["query_plan_request"]["tool"], "indexed_query_plan");
     assert_eq!(batch[0]["repo_map_request"]["tool"], "repo_map");
     assert_eq!(
