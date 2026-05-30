@@ -7412,6 +7412,18 @@ fn runtime_search_auto_scopes_warmed_shards_to_client_cwd() {
         serde_json::json!("current-app/src/lib.rs")
     );
     assert_eq!(
+        retry["query_plan_summary"][0]["name"],
+        serde_json::json!("current-app")
+    );
+    assert_eq!(
+        retry["query_plan_summary"][0]["summary"]["status"],
+        serde_json::json!("missing_terms")
+    );
+    assert_eq!(
+        retry["query_plan_summary"][0]["summary"]["primary_retry_request"],
+        retry["primary_retry_request"]
+    );
+    assert_eq!(
         retry["next_read_batch_request"],
         retry["primary_retry_result"]["read_batch_request"]
     );
@@ -9284,6 +9296,14 @@ fn runtime_search_auto_diagnose_prefers_retry_next_action_for_noisy_hits() {
     );
     assert_eq!(
         value["next_action"]["request"],
+        value["primary_retry_request"]
+    );
+    assert_eq!(
+        value["query_plan_summary"]["suggested_query"],
+        value["primary_diagnosis"]["suggested_query"]
+    );
+    assert_eq!(
+        value["query_plan_summary"]["primary_retry_request"],
         value["primary_retry_request"]
     );
     assert!(value["primary_diagnosis"]["suggested_query"].is_string());

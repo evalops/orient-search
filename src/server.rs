@@ -162,6 +162,8 @@ struct SearchAutoResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     query_plan_result: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    query_plan_summary: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     primary_diagnosis: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     primary_retry_request: Option<ResultToolRequest>,
@@ -266,6 +268,22 @@ fn shard_query_plan_batch_result(
         next_action,
         plans,
     }
+}
+
+fn shard_query_plan_summary_value(plans: &[ShardQueryPlan]) -> Value {
+    Value::Array(
+        plans
+            .iter()
+            .map(|shard_plan| {
+                json!({
+                    "name": shard_plan.name,
+                    "root": shard_plan.root,
+                    "aliases": shard_plan.aliases,
+                    "summary": shard_plan.plan.compact_summary()
+                })
+            })
+            .collect(),
+    )
 }
 
 #[derive(Debug, Serialize)]
@@ -5723,7 +5741,7 @@ impl ToolRuntime {
             Some(query),
             read_request_args("repo", &repo),
         );
-        let (query_plan_result, primary_diagnosis, primary_retry_request) =
+        let (query_plan_result, query_plan_summary, primary_diagnosis, primary_retry_request) =
             if diagnose || results.is_empty() {
                 let index = FastIndex::build(&repo)?;
                 let plan = attach_retry_requests(
@@ -5735,11 +5753,12 @@ impl ToolRuntime {
                 );
                 (
                     Some(serde_json::to_value(&plan)?),
+                    Some(serde_json::to_value(plan.compact_summary())?),
                     primary_diagnosis_from_plan(&plan),
                     primary_retry_request_from_plan(&plan),
                 )
             } else {
-                (None, None, None)
+                (None, None, None, None)
             };
         let primary_retry_result = self.search_auto_primary_retry_result(
             retry_if_empty,
@@ -5777,6 +5796,7 @@ impl ToolRuntime {
                 query,
             ),
             query_plan_result,
+            query_plan_summary,
             primary_diagnosis,
             primary_retry_request,
             primary_retry_result,
@@ -5832,15 +5852,19 @@ impl ToolRuntime {
             attach_shard_retry_requests(&mut plans, &index_dir, arguments);
             Some((
                 serde_json::to_value(&plans)?,
+                shard_query_plan_summary_value(&plans),
                 primary_diagnosis_from_shard_plans(&plans, results.is_empty()),
                 primary_retry_request_from_shard_plans(&plans),
             ))
         } else {
             None
         };
-        let (query_plan_result, primary_diagnosis, primary_retry_request) = query_plan_result
-            .map(|(result, diagnosis, primary)| (Some(result), diagnosis, primary))
-            .unwrap_or((None, None, None));
+        let (query_plan_result, query_plan_summary, primary_diagnosis, primary_retry_request) =
+            query_plan_result
+                .map(|(result, summary, diagnosis, primary)| {
+                    (Some(result), Some(summary), diagnosis, primary)
+                })
+                .unwrap_or((None, None, None, None));
         let primary_retry_result = self.search_auto_primary_retry_result(
             retry_if_empty,
             results.is_empty(),
@@ -5893,6 +5917,7 @@ impl ToolRuntime {
                 query,
             ),
             query_plan_result,
+            query_plan_summary,
             primary_diagnosis,
             primary_retry_request,
             primary_retry_result,
@@ -5945,7 +5970,7 @@ impl ToolRuntime {
             Some(query),
             read_request_args("index", &index_path),
         );
-        let (query_plan_result, primary_diagnosis, primary_retry_request) =
+        let (query_plan_result, query_plan_summary, primary_diagnosis, primary_retry_request) =
             if diagnose || results.is_empty() {
                 let plan = attach_retry_requests(
                     index.query_plan(query, &filters)?,
@@ -5956,11 +5981,12 @@ impl ToolRuntime {
                 );
                 (
                     Some(serde_json::to_value(&plan)?),
+                    Some(serde_json::to_value(plan.compact_summary())?),
                     primary_diagnosis_from_plan(&plan),
                     primary_retry_request_from_plan(&plan),
                 )
             } else {
-                (None, None, None)
+                (None, None, None, None)
             };
         let primary_retry_result = self.search_auto_primary_retry_result(
             retry_if_empty,
@@ -6009,6 +6035,7 @@ impl ToolRuntime {
                 query,
             ),
             query_plan_result,
+            query_plan_summary,
             primary_diagnosis,
             primary_retry_request,
             primary_retry_result,

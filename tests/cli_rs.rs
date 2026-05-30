@@ -866,6 +866,14 @@ fn cli_search_auto_diagnose_prefers_retry_next_action_for_noisy_hits() {
         value["next_action"]["request"],
         value["primary_retry_request"]
     );
+    assert_eq!(
+        value["query_plan_summary"]["suggested_query"],
+        value["primary_diagnosis"]["suggested_query"]
+    );
+    assert_eq!(
+        value["query_plan_summary"]["primary_retry_request"],
+        value["primary_retry_request"]
+    );
     assert!(value["primary_diagnosis"]["suggested_query"].is_string());
 }
 
@@ -1016,6 +1024,7 @@ fn cli_search_auto_batch_returns_query_surfaces() {
         .assert()
         .success()
         .stdout(predicate::str::contains("\"query_plan_result\""))
+        .stdout(predicate::str::contains("\"query_plan_summary\""))
         .stdout(predicate::str::contains("\"primary_diagnosis\""))
         .stdout(predicate::str::contains("\"primary_retry_request\""))
         .stdout(predicate::str::contains("\"tool\":\"indexed_search_code\""));
@@ -1059,6 +1068,7 @@ fn cli_search_auto_batch_returns_query_surfaces() {
         .assert()
         .success()
         .stdout(predicate::str::contains("\"query_plan_result\""))
+        .stdout(predicate::str::contains("\"query_plan_summary\""))
         .stdout(predicate::str::contains("\"primary_diagnosis\""))
         .stdout(predicate::str::contains("\"final_match_count\":1"));
 
