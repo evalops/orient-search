@@ -143,10 +143,12 @@ locations as search, including
 `src/lib.rs:42`, copied `src/lib.rs:42: text` lines, `src/lib.rs#L42-L45`,
 Markdown links, and common hosted code links with fragment or query-string line
 anchors. JSON range objects may use `start`/`lines` or the line-range aliases
-`start_line`, `end_line`, and `line_count`. Batch reads are capped by both range
-count and total requested lines, so large inspections should be split into
-smaller follow-up reads. Identical entries and overlapping exact ranges are
-compacted before the line-budget check.
+`start_line`, `end_line`, and `line_count`. Single reads may pass either
+`path` plus window fields or a `range` object/string with the same shape as a
+search result's `read_range`. Batch reads are capped by both range count and
+total requested lines, so large inspections should be split into smaller
+follow-up reads. Identical entries and overlapping exact ranges are compacted
+before the line-budget check.
 
 ## Footprint
 

@@ -541,7 +541,7 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
     );
     assert_eq!(index_status["required"], serde_json::json!(["index"]));
     assert_eq!(shard_status["required"], serde_json::json!(["index_dir"]));
-    assert_eq!(read_range["required"], serde_json::json!(["path"]));
+    assert_eq!(read_range["required"], serde_json::json!([]));
     assert_eq!(
         read_range["input_schema"]["properties"]["index"]["type"],
         "string"
@@ -557,6 +557,14 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
     assert_eq!(
         read_range["input_schema"]["properties"]["scope"]["enum"],
         serde_json::json!(["exact", "symbol"])
+    );
+    assert_eq!(
+        read_range["input_schema"]["properties"]["range"]["oneOf"][0]["properties"]["path"]["description"],
+        "Result path or copied location for the selected target; use repo/index-relative paths for repo or index targets, and shard-prefixed or unique shard-relative paths for index_dir targets."
+    );
+    assert_eq!(
+        read_range["input_schema"]["properties"]["range"]["oneOf"][1]["type"],
+        "string"
     );
     assert_eq!(
         read_range["input_schema"]["properties"]["start_line"]["description"],
@@ -658,6 +666,10 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         "Shard-prefixed result path, unique unqualified shard-relative path, or copied location such as repo/src/lib.rs#L40-L45."
     );
     assert_eq!(
+        read_shard_range["required"],
+        serde_json::json!(["index_dir"])
+    );
+    assert_eq!(
         read_shard_range["arguments"][1]["description"],
         "Shard-prefixed result path, unique unqualified shard-relative path, or copied location such as repo/src/lib.rs#L40-L45."
     );
@@ -674,6 +686,7 @@ fn tool_manifest_exposes_typed_defaults_and_input_schemas() {
         read_index_range["input_schema"]["properties"]["path"]["description"],
         "Index-relative result path or copied location, such as src/lib.rs or src/lib.rs#L40-L45."
     );
+    assert_eq!(read_index_range["required"], serde_json::json!(["index"]));
     assert_eq!(related_files["required"], serde_json::json!(["path"]));
     assert_eq!(
         related_files["input_schema"]["properties"]["index"]["type"],
@@ -2625,6 +2638,28 @@ fn runtime_read_alias_accepts_live_index_and_shard_targets() {
     assert_eq!(live_line_range["start_line"], serde_json::json!(1));
     assert_eq!(live_line_range["end_line"], serde_json::json!(2));
 
+    let live_range_object = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("live-single-range-object"),
+        tool: "open_range".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "range": {
+                "path": "src/auth.rs",
+                "start_line": 2,
+                "end_line": 2
+            }
+        }),
+    });
+    assert!(
+        live_range_object.error.is_none(),
+        "{:?}",
+        live_range_object.error
+    );
+    assert_eq!(
+        live_range_object.result.as_ref().unwrap()["start_line"],
+        serde_json::json!(2)
+    );
+
     let indexed = runtime.dispatch(ToolRequest {
         id: serde_json::json!("indexed-read"),
         tool: "read_range".to_string(),
@@ -2666,6 +2701,24 @@ fn runtime_read_alias_accepts_live_index_and_shard_targets() {
             .as_str()
             .unwrap()
             .contains("issue_token")
+    );
+
+    let indexed_range_string = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("indexed-range-string"),
+        tool: "read_index_range".to_string(),
+        arguments: serde_json::json!({
+            "index": repo.path().join(".orient/index"),
+            "range": "src/auth.rs:2:1"
+        }),
+    });
+    assert!(
+        indexed_range_string.error.is_none(),
+        "{:?}",
+        indexed_range_string.error
+    );
+    assert_eq!(
+        indexed_range_string.result.as_ref().unwrap()["start_line"],
+        serde_json::json!(2)
     );
 
     let symbol_scoped = runtime.dispatch(ToolRequest {
@@ -2772,6 +2825,28 @@ fn runtime_read_alias_accepts_live_index_and_shard_targets() {
     assert_eq!(
         shard_line_range.result.as_ref().unwrap()["start_line"],
         serde_json::json!(2)
+    );
+
+    let shard_range_object = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("shard-single-range-object"),
+        tool: "read_shard_range".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": repo.path().join(".orient-shards"),
+            "range": {
+                "path": "src/auth.rs",
+                "start": 1,
+                "lines": 1
+            }
+        }),
+    });
+    assert!(
+        shard_range_object.error.is_none(),
+        "{:?}",
+        shard_range_object.error
+    );
+    assert_eq!(
+        shard_range_object.result.as_ref().unwrap()["start_line"],
+        serde_json::json!(1)
     );
 
     let conflicted = runtime.dispatch(ToolRequest {
@@ -3726,6 +3801,35 @@ fn runtime_rejects_oversized_batches() {
         error.contains("accepts only one of lines/line_count or end_line/end"),
         "{error}"
     );
+
+    let response = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("conflicting-path-and-range"),
+        tool: "open_range".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "path": "src/auth.rs",
+            "range": {"path": "src/auth.rs", "start": 1, "lines": 1}
+        }),
+    });
+    let error = response.error.unwrap();
+    assert!(
+        error.contains("accepts one of path/start/lines, range, or ranges"),
+        "{error}"
+    );
+
+    let response = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("too-many-single-ranges"),
+        tool: "open_range".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "ranges": [
+                {"path": "src/auth.rs", "start": 1, "lines": 1},
+                {"path": "src/auth.rs", "start": 2, "lines": 1}
+            ]
+        }),
+    });
+    let error = response.error.unwrap();
+    assert!(error.contains("accepts exactly one range"), "{error}");
 
     let response = runtime.dispatch(ToolRequest {
         id: serde_json::json!("open-range-conflicting-indexes"),

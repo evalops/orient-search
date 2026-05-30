@@ -887,14 +887,14 @@ pub fn tool_manifest() -> Value {
         ),
         tool_entry(
             "read_range",
-            "Read a bounded line range from a live repo, persistent index, or shard directory.",
-            &["path"],
+            "Read one bounded line range from a live repo, persistent index, or shard directory.",
+            &[],
             READ_TARGET_OPTIONAL_ARGS,
         ),
         tool_entry(
             "open_range",
             "Alias for read_range for agents that phrase context fetches as opening a file range.",
-            &["path"],
+            &[],
             READ_TARGET_OPTIONAL_ARGS,
         ),
         tool_entry(
@@ -1002,13 +1002,13 @@ pub fn tool_manifest() -> Value {
         tool_entry(
             "read_index_range",
             "Read a bounded line range from a persistent index result path.",
-            &["index", "path"],
+            &["index"],
             READ_WINDOW_OPTIONAL_ARGS,
         ),
         tool_entry(
             "open_index_range",
             "Alias for read_index_range for agents that phrase context fetches as opening a file range.",
-            &["index", "path"],
+            &["index"],
             READ_WINDOW_OPTIONAL_ARGS,
         ),
         tool_entry(
@@ -1080,13 +1080,13 @@ pub fn tool_manifest() -> Value {
         tool_entry(
             "read_shard_range",
             "Read a bounded line range from a shard search result path or unique shard-relative path.",
-            &["index_dir", "path"],
+            &["index_dir"],
             READ_WINDOW_OPTIONAL_ARGS,
         ),
         tool_entry(
             "open_shard_range",
             "Alias for read_shard_range for agents that phrase context fetches as opening a file range.",
-            &["index_dir", "path"],
+            &["index_dir"],
             READ_WINDOW_OPTIONAL_ARGS,
         ),
         tool_entry(
@@ -1650,7 +1650,7 @@ fn argument_schema(tool_name: &str, name: &str) -> Value {
                 ]),
             );
         }
-        "ranges" => {
+        "range" | "ranges" => {
             let path_description = range_path_description(tool_name);
             let range_schema = json!({
                 "type": "object",
@@ -1674,22 +1674,29 @@ fn argument_schema(tool_name: &str, name: &str) -> Value {
                 "type": "string",
                 "description": "Compact PATH:START:LINES[:SCOPE] range or copied location such as path:line, path:line: text, or path#Lstart-Lend."
             });
-            schema.insert(
-                "oneOf".to_string(),
-                json!([
-                    range_schema.clone(),
-                    range_string_schema.clone(),
-                    {
-                        "type": "array",
-                        "minItems": 1,
-                        "maxItems": MAX_BATCH_RANGES,
-                        "items": {
-                            "oneOf": [range_schema, range_string_schema]
+            if name == "range" {
+                schema.insert(
+                    "oneOf".to_string(),
+                    json!([range_schema, range_string_schema]),
+                );
+            } else {
+                schema.insert(
+                    "oneOf".to_string(),
+                    json!([
+                        range_schema.clone(),
+                        range_string_schema.clone(),
+                        {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": MAX_BATCH_RANGES,
+                            "items": {
+                                "oneOf": [range_schema, range_string_schema]
+                            }
                         }
-                    }
-                ]),
-            );
-            schema.insert("max_total_lines".to_string(), json!(MAX_BATCH_READ_LINES));
+                    ]),
+                );
+                schema.insert("max_total_lines".to_string(), json!(MAX_BATCH_READ_LINES));
+            }
             schema.insert(
                 "description".to_string(),
                 json!(argument_description(tool_name, name)),
@@ -1820,6 +1827,7 @@ fn argument_type(name: &str) -> &'static str {
         | "refresh_if_stale" | "include_read_batch" | "git_metadata" | "tracked_files"
         | "nested_manifests" => "boolean",
         name if string_list_argument(name) => "string|string[]",
+        "range" => "range|string",
         "ranges" => "range|string|range[]",
         "repos" | "discover_roots" | "queries" => "string[]",
         _ => "string",
@@ -1983,6 +1991,9 @@ fn argument_description(tool_name: &str, name: &str) -> &'static str {
             "Repository-relative result path or copied location, such as src/lib.rs or src/lib.rs#L40-L45."
         }
         "path" => "Path substring filter or result path, depending on the tool.",
+        "range" => {
+            "Single range object or copied location for read_range/open_range; accepts the same shape as a search result read_range."
+        }
         "dir" | "directory" | "folder" => {
             "Alias for path when filtering search results to a directory or path substring."
         }
@@ -3168,17 +3179,7 @@ impl ToolRuntime {
             }
             "read_range" | "open_range" => {
                 let tool_name = request.tool.as_str();
-                let path = string_arg(&request.arguments, "path")?;
-                let window = read_window_arg(&request.arguments)?;
-                let scope = read_scope_arg(&request.arguments)?;
-                let range = normalize_read_range_arg(
-                    path,
-                    window.start,
-                    window.lines,
-                    scope,
-                    window.explicit_start,
-                    window.explicit_lines,
-                )?;
+                let range = single_range_arg(&request.arguments, tool_name)?;
                 if request.arguments.get("index").is_some()
                     && request.arguments.get("index_dir").is_some()
                 {
@@ -4350,18 +4351,9 @@ impl ToolRuntime {
                 Ok(serde_json::to_value(index.freshness_at(index_path)?)?)
             }
             "read_index_range" | "open_index_range" => {
+                let tool_name = request.tool.as_str();
                 let index_path = self.index_path_arg_or_single_cached(&request.arguments)?;
-                let path = string_arg(&request.arguments, "path")?;
-                let window = read_window_arg(&request.arguments)?;
-                let scope = read_scope_arg(&request.arguments)?;
-                let range = normalize_read_range_arg(
-                    path,
-                    window.start,
-                    window.lines,
-                    scope,
-                    window.explicit_start,
-                    window.explicit_lines,
-                )?;
+                let range = single_range_arg(&request.arguments, tool_name)?;
                 let index = self.cached_index(index_path)?;
                 Ok(serde_json::to_value(index.read_range_scoped(
                     &range.path,
@@ -4547,18 +4539,9 @@ impl ToolRuntime {
                 Ok(serde_json::to_value(batch)?)
             }
             "read_shard_range" | "open_shard_range" => {
+                let tool_name = request.tool.as_str();
                 let index_dir = self.shard_dir_arg_or_single_cached(&request.arguments)?;
-                let path = string_arg(&request.arguments, "path")?;
-                let window = read_window_arg(&request.arguments)?;
-                let scope = read_scope_arg(&request.arguments)?;
-                let range = normalize_read_range_arg(
-                    path,
-                    window.start,
-                    window.lines,
-                    scope,
-                    window.explicit_start,
-                    window.explicit_lines,
-                )?;
+                let range = single_range_arg(&request.arguments, tool_name)?;
                 Ok(serde_json::to_value(self.read_shard_range_cached_scoped(
                     &index_dir,
                     &range.path,
@@ -7341,6 +7324,8 @@ const READ_TARGET_OPTIONAL_ARGS: &[&str] = &[
     "index",
     "index_dir",
     "cwd",
+    "path",
+    "range",
     "start",
     "start_line",
     "lines",
@@ -7351,6 +7336,8 @@ const READ_TARGET_OPTIONAL_ARGS: &[&str] = &[
 
 const READ_BATCH_TARGET_OPTIONAL_ARGS: &[&str] = &["repo", "index", "index_dir", "cwd", "scope"];
 const READ_WINDOW_OPTIONAL_ARGS: &[&str] = &[
+    "path",
+    "range",
     "start",
     "start_line",
     "lines",
@@ -8334,6 +8321,44 @@ fn range_args(arguments: &Value, tool_name: &str) -> Result<Vec<RangeArg>> {
     let ranges = compact_range_args(ranges);
     validate_batch_read_line_budget(&ranges, tool_name)?;
     Ok(ranges)
+}
+
+fn single_range_arg(arguments: &Value, tool_name: &str) -> Result<RangeArg> {
+    let has_path = arguments.get("path").is_some();
+    let has_range = arguments.get("range").is_some();
+    let has_ranges = arguments.get("ranges").is_some();
+    if (has_path && (has_range || has_ranges)) || (has_range && has_ranges) {
+        return Err(anyhow!(
+            "{tool_name} accepts one of path/start/lines, range, or ranges"
+        ));
+    }
+    let default_scope = read_scope_arg(arguments)?;
+    if let Some(value) = arguments.get("range") {
+        return range_arg(value, default_scope);
+    }
+    if let Some(value) = arguments.get("ranges") {
+        let value = if let Some(values) = value.as_array() {
+            if values.len() != 1 {
+                return Err(anyhow!(
+                    "{tool_name} accepts exactly one range; use {tool_name}s for batches"
+                ));
+            }
+            &values[0]
+        } else {
+            value
+        };
+        return range_arg(value, default_scope);
+    }
+    let path = string_arg(arguments, "path")?;
+    let window = read_window_arg(arguments)?;
+    normalize_read_range_arg(
+        path,
+        window.start,
+        window.lines,
+        default_scope,
+        window.explicit_start,
+        window.explicit_lines,
+    )
 }
 
 fn compact_range_args(ranges: Vec<RangeArg>) -> Vec<RangeArg> {
