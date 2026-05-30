@@ -23,7 +23,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 const SHARD_MANIFEST_VERSION: u32 = 1;
 const SHARD_MANIFEST_SIDECAR_VERSION: u32 = 2;
 const SHARD_MANIFEST_PREFILTER_VERSION: u32 = 1;
-const SHARD_MANIFEST_ROUTE_VERSION: u32 = 6;
+const SHARD_MANIFEST_ROUTE_VERSION: u32 = 7;
 const SHARD_MANIFEST_FILE: &str = "manifest.json";
 const SHARD_MANIFEST_SIDECAR_FILE: &str = "manifest.bin";
 const SHARD_MANIFEST_PREFILTER_FILE: &str = "manifest.prefilter.bin";
@@ -96,6 +96,8 @@ struct ShardRouteEntry {
     aliases: Vec<ShardRouteAlias>,
     git: Option<ShardRouteGitMetadata>,
     substring_bits: Vec<u64>,
+    symbol_kind_bits: Vec<u64>,
+    filter_bits: Vec<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -205,6 +207,16 @@ impl ShardRouteEntry {
                 .sketch
                 .as_ref()
                 .map(|sketch| sketch.substring_bits.clone())
+                .unwrap_or_default(),
+            symbol_kind_bits: shard
+                .sketch
+                .as_ref()
+                .map(|sketch| sketch.symbol_kind_bits.clone())
+                .unwrap_or_default(),
+            filter_bits: shard
+                .sketch
+                .as_ref()
+                .map(|sketch| sketch.filter_bits.clone())
                 .unwrap_or_default(),
         }
     }
@@ -1102,7 +1114,7 @@ pub fn search_shards(
         return Ok(Vec::new());
     }
     let jobs = if let Some(shards) = shard_route_entries(index_dir, &shard_query, &filters)? {
-        shard_entries_to_jobs(shards, &filters)
+        shard_entries_to_jobs(shards, &shard_query, &filters, true)
     } else {
         let manifest = load_manifest(index_dir)?;
         manifest
@@ -1208,7 +1220,7 @@ pub fn shard_query_plans(
     let (jobs, shard_count, shard_names) =
         if let Some(selection) = route_selection.filter(|selection| !selection.shards.is_empty()) {
             (
-                shard_entries_to_jobs(selection.shards, &filters),
+                shard_entries_to_jobs(selection.shards, &shard_query, &filters, false),
                 selection.shard_count,
                 selection.shard_names,
             )
@@ -2426,8 +2438,16 @@ fn shard_sketch_trigram_may_contain(sketch: &ShardQuerySketch, trigram: &str) ->
 }
 
 fn shard_sketch_filters_may_match(sketch: &ShardQuerySketch, filters: &SearchFilters) -> bool {
+    shard_filter_bits_may_match(&sketch.symbol_kind_bits, &sketch.filter_bits, filters)
+}
+
+fn shard_filter_bits_may_match(
+    symbol_kind_bits: &[u64],
+    filter_bits: &[u64],
+    filters: &SearchFilters,
+) -> bool {
     if let Some(kind) = &filters.symbol_kind {
-        if !sketch_contains(&sketch.symbol_kind_bits, kind) {
+        if !sketch_contains(symbol_kind_bits, kind) {
             return false;
         }
     }
@@ -2436,7 +2456,7 @@ fn shard_sketch_filters_may_match(sketch: &ShardQuerySketch, filters: &SearchFil
         ("extension", filters.extension.as_deref()),
     ] {
         if let Some(value) = value {
-            if !sketch_contains(&sketch.filter_bits, &format!("{field}:{value}")) {
+            if !sketch_contains(filter_bits, &format!("{field}:{value}")) {
                 return false;
             }
         }
@@ -2447,7 +2467,7 @@ fn shard_sketch_filters_may_match(sketch: &ShardQuerySketch, filters: &SearchFil
         ("code", filters.code),
     ] {
         if let Some(value) = value {
-            if !sketch_contains(&sketch.filter_bits, &format!("{field}:{value}")) {
+            if !sketch_contains(filter_bits, &format!("{field}:{value}")) {
                 return false;
             }
         }
@@ -2579,6 +2599,7 @@ pub(crate) fn shard_route_selection(
     let shards = candidate_ids
         .into_iter()
         .filter_map(|id| route.shards.get(id as usize).cloned())
+        .filter(|shard| shard_route_filters_may_match(shard, filters))
         .map(ShardRouteEntry::into_shard)
         .collect::<Vec<_>>();
     Ok(Some(ShardRouteSelection {
@@ -2588,10 +2609,18 @@ pub(crate) fn shard_route_selection(
     }))
 }
 
-fn shard_entries_to_jobs(shards: Vec<ShardEntry>, filters: &SearchFilters) -> Vec<ShardJob> {
+fn shard_entries_to_jobs(
+    shards: Vec<ShardEntry>,
+    shard_query: &str,
+    filters: &SearchFilters,
+    check_sketch: bool,
+) -> Vec<ShardJob> {
     shards
         .into_iter()
         .filter_map(|shard| {
+            if check_sketch && !shard_sketch_may_match_query(&shard, shard_query, filters) {
+                return None;
+            }
             let scopes = shard_search_scopes(&shard, filters);
             (!scopes.is_empty()).then_some(ShardJob { shard, scopes })
         })
@@ -2669,6 +2698,13 @@ fn shard_route_substrings_may_match(
             .substring_grams
             .iter()
             .all(|gram| sketch_contains(&shard.substring_bits, gram))
+}
+
+fn shard_route_filters_may_match(shard: &ShardRouteEntry, filters: &SearchFilters) -> bool {
+    if shard.symbol_kind_bits.is_empty() && shard.filter_bits.is_empty() {
+        return true;
+    }
+    shard_filter_bits_may_match(&shard.symbol_kind_bits, &shard.filter_bits, filters)
 }
 
 fn shard_route_postings(
@@ -3719,26 +3755,34 @@ mod tests {
         fs::create_dir_all(&billing).unwrap();
 
         let mut manifest = test_manifest(&auth, Some(&billing));
+        let mut rust_filter_bits = vec![0; SHARD_FILTER_SKETCH_WORDS];
+        sketch_insert(&mut rust_filter_bits, "language:rust");
+        let mut python_filter_bits = vec![0; SHARD_FILTER_SKETCH_WORDS];
+        sketch_insert(&mut python_filter_bits, "language:python");
         manifest.shards[0].sketch = Some(ShardQuerySketch {
             exact_hashes: vec![
                 sketch_fingerprint("routeprobe"),
                 sketch_fingerprint("sharedrouteprobe"),
+                sketch_fingerprint("sharedrouteprobelongsymbol"),
             ],
             trigram_hashes: Vec::new(),
             exact_bits: Vec::new(),
             trigram_bits: Vec::new(),
             substring_bits: Vec::new(),
             symbol_kind_bits: Vec::new(),
-            filter_bits: Vec::new(),
+            filter_bits: rust_filter_bits,
         });
         manifest.shards[1].sketch = Some(ShardQuerySketch {
-            exact_hashes: vec![sketch_fingerprint("sharedrouteprobe")],
+            exact_hashes: vec![
+                sketch_fingerprint("sharedrouteprobe"),
+                sketch_fingerprint("sharedrouteprobelongsymbol"),
+            ],
             trigram_hashes: Vec::new(),
             exact_bits: Vec::new(),
             trigram_bits: Vec::new(),
             substring_bits: Vec::new(),
             symbol_kind_bits: Vec::new(),
-            filter_bits: Vec::new(),
+            filter_bits: python_filter_bits,
         });
         save_manifest(dir.path(), &manifest).unwrap();
 
@@ -3758,7 +3802,25 @@ mod tests {
             ),
             ShardRouteLookup::Candidates(vec![0, 1])
         );
-        assert!(route.shard_ids.len() < 4);
+        let rust_selection = shard_route_selection(
+            dir.path(),
+            "shared_route_probe_long_symbol",
+            &SearchFilters {
+                language: Some("rust".to_string()),
+                ..SearchFilters::default()
+            },
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            rust_selection
+                .shards
+                .iter()
+                .map(|shard| shard.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["auth"]
+        );
+        assert!(route.shard_ids.len() < 8);
 
         let missing = shard_route_candidate_ids(
             &route,

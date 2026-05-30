@@ -6412,7 +6412,7 @@ impl ToolRuntime {
                 true,
             )
         } else if let Some(shards) = shard_route_entries(index_dir, &shard_query, &filters)? {
-            shard_jobs_from_entries(shards, &shard_query, &filters, false)
+            shard_jobs_from_entries(shards, &shard_query, &filters, true)
         } else {
             let manifest = self.cached_shard_manifest(index_dir)?;
             shard_jobs_from_entries(
