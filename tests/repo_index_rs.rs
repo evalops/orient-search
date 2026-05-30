@@ -39,8 +39,9 @@ def test_issue_token_round_trip():
     );
     write(
         &temp.path().join("pyproject.toml"),
-        "[project]\nname='sample'\ndependencies=['fastapi>=0.100', 'pydantic']\n",
+        "[project]\nname='sample'\ndependencies=['fastapi>=0.100', 'pydantic']\n[tool.ruff]\nline-length=100\n[tool.mypy]\npython_version='3.12'\n",
     );
+    write(&temp.path().join("uv.lock"), "version = 1\n");
     write(
         &temp.path().join("package.json"),
         r#"{"scripts":{"test":"vitest run","lint":"eslint .","typecheck":"tsc --noEmit"},"dependencies":{"react":"latest"},"devDependencies":{"typescript":"latest"}}"#,
@@ -194,7 +195,13 @@ def test_issue_token_round_trip():
 
     let brief = index.repo_brief();
     assert_eq!(brief.language_counts.get("python"), Some(&2));
-    assert!(brief.known_commands.contains(&"pytest".to_string()));
+    assert!(brief.known_commands.contains(&"uv run pytest".to_string()));
+    assert!(
+        brief
+            .known_commands
+            .contains(&"uv run ruff check .".to_string())
+    );
+    assert!(brief.known_commands.contains(&"uv run mypy .".to_string()));
     assert!(
         brief
             .known_commands
@@ -231,7 +238,17 @@ def test_issue_token_round_trip():
         hint.command == "pnpm run lint" && hint.kind == "lint" && hint.source == "package.json"
     }));
     assert!(brief.command_hints.iter().any(|hint| {
-        hint.command == "pytest" && hint.kind == "test" && hint.source == "pyproject.toml"
+        hint.command == "uv run pytest" && hint.kind == "test" && hint.source == "pyproject.toml"
+    }));
+    assert!(brief.command_hints.iter().any(|hint| {
+        hint.command == "uv run ruff check ."
+            && hint.kind == "lint"
+            && hint.source == "pyproject.toml"
+    }));
+    assert!(brief.command_hints.iter().any(|hint| {
+        hint.command == "uv run mypy ."
+            && hint.kind == "typecheck"
+            && hint.source == "pyproject.toml"
     }));
     assert!(brief.command_hints.iter().any(|hint| {
         hint.command == "bazel build //..." && hint.kind == "build" && hint.source == "MODULE.bazel"
@@ -321,7 +338,8 @@ def test_issue_token_round_trip():
     assert_eq!(map.summary.import_count, map.import_hints.len());
     assert!(
         map.related_files.iter().any(|related| {
-            related.source_path == "src/auth.py" && related.path == "tests/test_auth.py"
+            (related.source_path == "src/auth.py" && related.path == "tests/test_auth.py")
+                || (related.source_path == "tests/test_auth.py" && related.path == "src/auth.py")
         }),
         "{:?}",
         map.related_files

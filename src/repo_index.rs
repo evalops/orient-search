@@ -3800,7 +3800,17 @@ pub(crate) fn command_hints_from_manifest_texts<'a>(
         hints.push(command_hint("bazel test //...", "test", source));
     }
     if let Some(source) = manifest_path("pyproject.toml") {
-        hints.push(command_hint("pytest", "test", source));
+        let pyproject = files
+            .iter()
+            .find(|(path, _)| *path == source)
+            .map(|(_, text)| *text);
+        hints.extend(pyproject_command_hints(pyproject, &has_file, &source));
+    }
+    if let Some(source) = manifest_path("tox.ini") {
+        hints.push(command_hint("tox", "test", source));
+    }
+    if let Some(source) = manifest_path("noxfile.py") {
+        hints.push(command_hint("nox", "test", source));
     }
     if let Some(source) = manifest_path("pom.xml") {
         hints.push(command_hint("mvn test", "test", source.clone()));
@@ -4588,6 +4598,51 @@ fn command_hint(
     }
 }
 
+fn pyproject_command_hints(
+    pyproject: Option<&str>,
+    has_file: &impl Fn(&str) -> bool,
+    source: &str,
+) -> Vec<CommandHint> {
+    let mut hints = vec![command_hint(
+        python_tool_command("pytest", has_file),
+        "test",
+        source,
+    )];
+    let Some(pyproject) = pyproject else {
+        return hints;
+    };
+    let pyproject = pyproject.to_ascii_lowercase();
+    if pyproject.contains("[tool.ruff") {
+        hints.push(command_hint(
+            python_tool_command("ruff check .", has_file),
+            "lint",
+            source,
+        ));
+    }
+    if pyproject.contains("[tool.mypy") {
+        hints.push(command_hint(
+            python_tool_command("mypy .", has_file),
+            "typecheck",
+            source,
+        ));
+    }
+    hints
+}
+
+pub(crate) fn python_tool_command(tool: &str, has_file: &impl Fn(&str) -> bool) -> String {
+    if has_file("uv.lock") {
+        format!("uv run {tool}")
+    } else if has_file("poetry.lock") {
+        format!("poetry run {tool}")
+    } else if has_file("pdm.lock") {
+        format!("pdm run {tool}")
+    } else if has_file("Pipfile") || has_file("Pipfile.lock") {
+        format!("pipenv run {tool}")
+    } else {
+        tool.to_string()
+    }
+}
+
 fn package_manager_command(has_file: &impl Fn(&str) -> bool) -> &'static str {
     if has_file("pnpm-lock.yaml") {
         "pnpm"
@@ -4685,6 +4740,9 @@ fn special_file_language(file_name: &str) -> Option<&'static str> {
             Some("gradle")
         }
         "MODULE.bazel" | "WORKSPACE.bazel" | "WORKSPACE" | "BUILD.bazel" | "BUILD" => Some("bazel"),
+        "uv.lock" | "poetry.lock" | "pdm.lock" | "Pipfile" | "Pipfile.lock" | "tox.ini" => {
+            Some("toml")
+        }
         "yarn.lock" | "bun.lock" | "bun.lockb" | "gradlew" | "gradlew.bat" => Some("text"),
         _ => None,
     }
@@ -6025,6 +6083,13 @@ pub(crate) fn is_manifest_file(path: &str) -> bool {
         "Cargo.toml"
             | "Cargo.lock"
             | "pyproject.toml"
+            | "uv.lock"
+            | "poetry.lock"
+            | "pdm.lock"
+            | "Pipfile"
+            | "Pipfile.lock"
+            | "tox.ini"
+            | "noxfile.py"
             | "package.json"
             | "package-lock.json"
             | "pnpm-lock.yaml"

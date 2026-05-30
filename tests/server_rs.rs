@@ -6390,6 +6390,12 @@ fn runtime_shard_repo_map_reports_git_metadata() {
         "module(name = \"shard_project\")\n",
     );
     write(&repo.path().join("Justfile"), "test:\n    cargo test\n");
+    write(
+        &repo.path().join("pyproject.toml"),
+        "[project]\nname='shard-project'\n[tool.ruff]\n",
+    );
+    write(&repo.path().join("uv.lock"), "version = 1\n");
+    write(&repo.path().join("tox.ini"), "[tox]\nenv_list = py312\n");
     git(repo.path(), &["init", "-b", "shard-feature-branch"]);
     git(
         repo.path(),
@@ -6561,6 +6567,8 @@ fn runtime_shard_repo_map_reports_git_metadata() {
     assert!(result.contains("MODULE.bazel"), "{result}");
     assert!(result.contains("just test"), "{result}");
     assert!(result.contains("Justfile"), "{result}");
+    assert!(result.contains("uv run pytest"), "{result}");
+    assert!(result.contains("tox"), "{result}");
 }
 
 #[test]

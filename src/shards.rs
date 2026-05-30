@@ -7,8 +7,8 @@ use crate::repo_index::{
     CommandHint, FileRange, QueryPlan, QueryPlanFilter, QueryPlanNextAction, QueryPlanRepairHint,
     QueryPlanSummary, RangeScope, RelatedFile, RelatedSymbol, RepoMap, RepoMapDetail,
     SearchFilters, SearchResult, Symbol, finalize_results_for_filters, is_manifest_file,
-    known_commands_from_hints, language_for, normalize_token, query_plan_repair_action,
-    unique_query_tokens,
+    known_commands_from_hints, language_for, normalize_token, python_tool_command,
+    query_plan_repair_action, unique_query_tokens,
 };
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use anyhow::{Context, Result};
@@ -2181,7 +2181,17 @@ fn command_hints_for_manifest_paths(paths: &[String]) -> Vec<CommandHint> {
         hints.push(command_hint("bazel test //...", "test", source));
     }
     if let Some(source) = manifest_path("pyproject.toml") {
-        hints.push(command_hint("pytest", "test", source));
+        hints.push(command_hint(
+            python_tool_command("pytest", &has_manifest),
+            "test",
+            source,
+        ));
+    }
+    if let Some(source) = manifest_path("tox.ini") {
+        hints.push(command_hint("tox", "test", source));
+    }
+    if let Some(source) = manifest_path("noxfile.py") {
+        hints.push(command_hint("nox", "test", source));
     }
     if let Some(source) = manifest_path("package.json") {
         let package_manager = if has_manifest("pnpm-lock.yaml") {
