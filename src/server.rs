@@ -9441,7 +9441,9 @@ fn parse_copied_location_range(
 }
 
 fn copied_location_lines(value: &str) -> Option<usize> {
-    copied_hash_anchor_lines(value).or_else(|| copied_colon_range_lines(value))
+    copied_hash_anchor_lines(value)
+        .or_else(|| copied_bitbucket_lines_anchor_lines(value))
+        .or_else(|| copied_colon_range_lines(value))
 }
 
 fn copied_hash_anchor_lines(value: &str) -> Option<usize> {
@@ -9456,6 +9458,16 @@ fn copied_hash_anchor_lines(value: &str) -> Option<usize> {
         .or_else(|| after_dash.strip_prefix('l'))
         .unwrap_or(after_dash);
     let (end, _) = split_leading_digits(after_optional_l)?;
+    (end >= start).then_some(end - start + 1)
+}
+
+fn copied_bitbucket_lines_anchor_lines(value: &str) -> Option<usize> {
+    let lower = value.to_ascii_lowercase();
+    let marker = lower.find("#lines-")?;
+    let after_marker = &value[marker + "#lines-".len()..];
+    let (start, after_start) = split_leading_digits(after_marker)?;
+    let after_colon = after_start.strip_prefix(':')?;
+    let (end, _) = split_leading_digits(after_colon)?;
     (end >= start).then_some(end - start + 1)
 }
 
