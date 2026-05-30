@@ -447,6 +447,8 @@ pub struct QueryPlanSummary {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub active_filters: Vec<QueryPlanFilter>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rarest_posting: Option<QueryPlanPosting>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub primary_hint_kind: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub primary_hint_action: Option<String>,
@@ -536,6 +538,7 @@ impl QueryPlanSummary {
             missing_terms: plan.missing_terms.clone(),
             missing_trigrams: plan.missing_trigrams.clone(),
             active_filters: plan.active_filters.clone(),
+            rarest_posting: plan.planned_postings.first().cloned(),
             primary_hint_kind: diagnosis.primary_hint_kind,
             primary_hint_action: diagnosis.primary_hint_action,
             suggested_query: diagnosis.suggested_query,

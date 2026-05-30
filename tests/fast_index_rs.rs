@@ -966,6 +966,10 @@ fn indexed_query_plan_reports_missing_terms_without_results() {
             .iter()
             .any(|posting| posting.kind == "content" && posting.value == "session")
     );
+    assert_eq!(
+        plan.compact_summary().rarest_posting,
+        plan.planned_postings.first().cloned()
+    );
 
     let symbol_typo_plan = index
         .query_plan("symbol:SessionManger", &SearchFilters::default())

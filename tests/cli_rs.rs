@@ -2622,6 +2622,10 @@ fn cli_search_surfaces_accept_structured_filters() {
         plan["summary"]["primary_retry_request"],
         plan["primary_retry_request"]
     );
+    assert_eq!(
+        plan["summary"]["rarest_posting"],
+        plan["planned_postings"][0]
+    );
     assert_eq!(plan["summary"]["promoted_next_action"], plan["next_action"]);
     let plan_text = String::from_utf8(output.stdout).unwrap();
     assert!(plan_text.contains("definitely"));
