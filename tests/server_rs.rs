@@ -2365,7 +2365,7 @@ fn runtime_search_alias_accepts_live_index_and_shard_targets() {
         serde_json::json!("symbol")
     );
     assert_eq!(
-        indexed_symbol_query[0]["read_request"]["arguments"]["scope"],
+        indexed_symbol_query[0]["read_request"]["arguments"]["range"]["scope"],
         serde_json::json!("symbol")
     );
 
@@ -2386,7 +2386,7 @@ fn runtime_search_alias_accepts_live_index_and_shard_targets() {
         serde_json::json!("symbol")
     );
     assert_eq!(
-        symbol_snippet[0]["read_request"]["arguments"]["scope"],
+        symbol_snippet[0]["read_request"]["arguments"]["range"]["scope"],
         serde_json::json!("symbol")
     );
 
@@ -9285,7 +9285,7 @@ fn runtime_filters_shard_search_by_nested_repo_alias() {
         serde_json::json!("read_shard_range")
     );
     assert_eq!(
-        search_result[0]["read_request"]["arguments"]["path"],
+        search_result[0]["read_request"]["arguments"]["range"]["path"],
         serde_json::json!("billing/src/billing.rs")
     );
     assert_eq!(

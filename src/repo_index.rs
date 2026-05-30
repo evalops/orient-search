@@ -1081,6 +1081,9 @@ impl RangeScope {
 #[derive(Debug, Clone)]
 struct IndexedFile {
     path: String,
+    path_lower: String,
+    file_name_lower: String,
+    extension_lower: Option<String>,
     language: String,
     text: String,
     tokens: HashMap<String, usize>,
@@ -2581,12 +2584,16 @@ impl RepoIndexer {
                 .strip_prefix(&root)?
                 .to_string_lossy()
                 .replace('\\', "/");
+            let (path_lower, file_name_lower, extension_lower) = indexed_file_path_metadata(&rel);
             let symbols = extract_symbols(&rel, &text, &language);
             let tokens = token_counts(&format!("{rel}\n{text}"));
             files.insert(
                 rel.clone(),
                 IndexedFile {
                     path: rel,
+                    path_lower,
+                    file_name_lower,
+                    extension_lower,
                     language,
                     text,
                     tokens,
@@ -2748,20 +2755,16 @@ impl RepoIndex {
             .parent()
             .map(|value| value.to_string_lossy().to_string())
             .unwrap_or_default();
-        let source_is_test = is_test_path(&normalized.to_ascii_lowercase());
-        let source_symbols = self
-            .files
-            .get(&normalized)
-            .map(|file| {
-                file.symbols
-                    .iter()
-                    .filter(|symbol| {
-                        related_file_reference_symbol_candidate(&symbol.name, &symbol.kind)
-                    })
-                    .map(|symbol| (symbol.name.clone(), symbol.name.to_ascii_lowercase()))
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
+        let Some(source_file) = self.files.get(&normalized) else {
+            return Vec::new();
+        };
+        let source_is_test = is_test_path(&source_file.path_lower);
+        let source_symbols = source_file
+            .symbols
+            .iter()
+            .filter(|symbol| related_file_reference_symbol_candidate(&symbol.name, &symbol.kind))
+            .map(|symbol| (symbol.name.clone(), symbol.name.to_ascii_lowercase()))
+            .collect::<Vec<_>>();
         let mut related = Vec::new();
         for (file_path, file) in &self.files {
             if file_path == &normalized {
@@ -2770,7 +2773,7 @@ impl RepoIndex {
             if !Self::related_file_matches_filters(file_path, file, filters) {
                 continue;
             }
-            let lower = file_path.to_ascii_lowercase();
+            let lower = &file.path_lower;
             let mut score = 0.0;
             let mut reasons = Vec::new();
             if !stem_lower.is_empty() && lower.contains(&stem_lower) {
@@ -2962,18 +2965,10 @@ impl RepoIndex {
         let Some(file) = self.files.get(&symbol.path) else {
             return false;
         };
-        let path_lower = symbol.path.to_ascii_lowercase();
-        let file_name_lower = Path::new(&symbol.path)
-            .file_name()
-            .map(|value| value.to_string_lossy().to_ascii_lowercase())
-            .unwrap_or_default();
-        let extension_lower = Path::new(&symbol.path)
-            .extension()
-            .map(|value| value.to_string_lossy().to_lowercase());
         matches_filters_with_path_metadata(
-            &path_lower,
-            &file_name_lower,
-            extension_lower.as_deref(),
+            &file.path_lower,
+            &file.file_name_lower,
+            file.extension_lower.as_deref(),
             Some(&file.language),
             filters,
         ) && source_import_filters_match(&symbol.path, &file.text, filters)
@@ -2986,18 +2981,10 @@ impl RepoIndex {
         file: &IndexedFile,
         filters: &SearchFilters,
     ) -> bool {
-        let path_lower = path.to_ascii_lowercase();
-        let file_name_lower = Path::new(path)
-            .file_name()
-            .map(|value| value.to_string_lossy().to_ascii_lowercase())
-            .unwrap_or_default();
-        let extension_lower = Path::new(path)
-            .extension()
-            .map(|value| value.to_string_lossy().to_lowercase());
         matches_filters_with_path_metadata(
-            &path_lower,
-            &file_name_lower,
-            extension_lower.as_deref(),
+            &file.path_lower,
+            &file.file_name_lower,
+            file.extension_lower.as_deref(),
             Some(&file.language),
             filters,
         ) && source_import_filters_match(path, &file.text, filters)
@@ -4566,6 +4553,19 @@ fn build_doc_freq(files: &HashMap<String, IndexedFile>) -> HashMap<String, usize
     doc_freq
 }
 
+fn indexed_file_path_metadata(path: &str) -> (String, String, Option<String>) {
+    let path = Path::new(path);
+    let path_lower = path.to_string_lossy().to_ascii_lowercase();
+    let file_name_lower = path
+        .file_name()
+        .map(|value| value.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
+    let extension_lower = path
+        .extension()
+        .map(|value| value.to_string_lossy().to_ascii_lowercase());
+    (path_lower, file_name_lower, extension_lower)
+}
+
 pub(crate) fn token_counts(text: &str) -> HashMap<String, usize> {
     let mut counts = HashMap::new();
     for token in tokenize(text) {
@@ -5624,16 +5624,20 @@ fn read_request_from_range(
     read_range: &ResultReadRange,
 ) -> ResultToolRequest {
     let mut arguments = base_arguments.clone();
-    arguments.insert(
-        "path".to_string(),
-        serde_json::json!(read_range.path.clone()),
-    );
-    arguments.insert("start".to_string(), serde_json::json!(read_range.start));
-    arguments.insert("lines".to_string(), serde_json::json!(read_range.lines));
-    if let Some(scope) = read_range.scope {
-        arguments.insert("scope".to_string(), serde_json::json!(scope));
-    }
+    arguments.insert("range".to_string(), read_range_value(read_range));
     ResultReadRequest::new(tool.to_string(), serde_json::Value::Object(arguments))
+}
+
+fn read_range_value(read_range: &ResultReadRange) -> serde_json::Value {
+    let mut value = serde_json::json!({
+        "path": read_range.path.clone(),
+        "start": read_range.start,
+        "lines": read_range.lines
+    });
+    if let Some(scope) = read_range.scope {
+        value["scope"] = serde_json::json!(scope);
+    }
+    value
 }
 
 fn read_batch_request_from_ranges(
@@ -5946,6 +5950,13 @@ fn cli_command_for_request(tool: &str, arguments: &serde_json::Value) -> Option<
     append_string_cli_arg(&mut parts, args, "scope", "--scope");
     if let Some(ranges) = args.get("ranges").and_then(|value| value.as_array()) {
         for range in ranges {
+            let range = range.as_object()?;
+            parts.push(compact_range_arg(range)?);
+        }
+    } else if let Some(range) = args.get("range") {
+        if let Some(range) = range.as_str() {
+            parts.push(shell_quote(range));
+        } else {
             let range = range.as_object()?;
             parts.push(compact_range_arg(range)?);
         }
@@ -7710,8 +7721,12 @@ mod tests {
         assert_eq!(read_range.scope, Some(RangeScope::Symbol));
         assert_eq!(read_range.start, 26);
         assert_eq!(
-            finalized[0].read_request.as_ref().unwrap().arguments["scope"],
+            finalized[0].read_request.as_ref().unwrap().arguments["range"]["scope"],
             serde_json::json!("symbol")
+        );
+        assert_eq!(
+            finalized[0].read_request.as_ref().unwrap().arguments["range"]["path"],
+            serde_json::json!("src/auth.rs")
         );
     }
 
@@ -7728,7 +7743,7 @@ mod tests {
         assert_eq!(results[0].read_range.scope, Some(RangeScope::Symbol));
         assert_eq!(results[0].read_range.start, 26);
         assert_eq!(
-            results[0].read_request.arguments["scope"],
+            results[0].read_request.arguments["range"]["scope"],
             serde_json::json!("symbol")
         );
 
