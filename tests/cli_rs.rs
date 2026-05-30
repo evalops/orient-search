@@ -4721,7 +4721,7 @@ fn cli_filters_shard_search_by_nested_repo_alias() {
         .stdout(predicate::str::contains("auth.rs").not());
 
     let mut shard_plan = Command::cargo_bin("orient").unwrap();
-    shard_plan
+    let output = shard_plan
         .args([
             "shard-plan",
             "--index-dir",
@@ -4729,21 +4729,37 @@ fn cli_filters_shard_search_by_nested_repo_alias() {
             "repo:billing invoice missingterm",
             "--require-all",
         ])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("\"name\":\"billing\""))
-        .stdout(predicate::str::contains("\"missing_terms\""))
-        .stdout(predicate::str::contains("missingterm"))
-        .stdout(predicate::str::contains("\"candidate_count\":0"))
-        .stdout(predicate::str::contains("\"filtered_candidate_count\":0"))
-        .stdout(predicate::str::contains("\"final_match_count\":0"))
-        .stdout(predicate::str::contains("\"repair_hints\""))
-        .stdout(predicate::str::contains("drop_missing_terms"))
-        .stdout(predicate::str::contains("\"retry_requests\""))
-        .stdout(predicate::str::contains("\"tool\":\"search_shards\""))
-        .stdout(predicate::str::contains("\"query\":\"invoice\""))
-        .stdout(predicate::str::contains("\"path\":\"billing\""))
-        .stdout(predicate::str::contains("\"name\":\"auth\"").not());
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let shard_plans: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let billing_plan = &shard_plans[0];
+    assert_eq!(billing_plan["name"], serde_json::json!("billing"));
+    assert_eq!(
+        billing_plan["summary"]["status"],
+        serde_json::json!("missing_terms")
+    );
+    assert_eq!(
+        billing_plan["summary"]["primary_retry_request"],
+        billing_plan["plan"]["primary_retry_request"]
+    );
+    assert_eq!(
+        billing_plan["next_action"],
+        billing_plan["plan"]["next_action"]
+    );
+    let shard_plan_text = String::from_utf8(output.stdout).unwrap();
+    assert!(shard_plan_text.contains("\"missing_terms\""));
+    assert!(shard_plan_text.contains("missingterm"));
+    assert!(shard_plan_text.contains("\"candidate_count\":0"));
+    assert!(shard_plan_text.contains("\"filtered_candidate_count\":0"));
+    assert!(shard_plan_text.contains("\"final_match_count\":0"));
+    assert!(shard_plan_text.contains("\"repair_hints\""));
+    assert!(shard_plan_text.contains("drop_missing_terms"));
+    assert!(shard_plan_text.contains("\"retry_requests\""));
+    assert!(shard_plan_text.contains("\"tool\":\"search_shards\""));
+    assert!(shard_plan_text.contains("\"query\":\"invoice\""));
+    assert!(shard_plan_text.contains("\"path\":\"billing\""));
+    assert!(!shard_plan_text.contains("\"name\":\"auth\""));
 
     let mut generic_shard_plan = Command::cargo_bin("orient").unwrap();
     generic_shard_plan

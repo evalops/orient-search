@@ -3234,6 +3234,7 @@ fn attach_shard_retry_requests_with_tool(
             index_dir,
             source_arguments,
         );
+        shard_plan.refresh_summary();
     }
 }
 
@@ -6877,6 +6878,8 @@ impl ToolRuntime {
                     git: job.shard.git.clone(),
                     name: scope.output_prefix.clone(),
                     root: job.shard.root.clone(),
+                    summary: None,
+                    next_action: None,
                     plan: index.query_plan(query, &scoped_filters)?,
                 });
             }

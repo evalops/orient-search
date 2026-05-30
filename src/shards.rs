@@ -4,10 +4,11 @@ use crate::discover::{RepoGitMetadata, git_metadata_for_repo};
 use crate::fast_index::{FastIndex, IndexFreshness, IndexStats};
 use crate::query::{merge_filters, parse_query, query_text, query_with_filters_text};
 use crate::repo_index::{
-    CommandHint, FileRange, QueryPlan, QueryPlanFilter, QueryPlanRepairHint, RangeScope,
-    RelatedFile, RelatedSymbol, RepoMap, RepoMapDetail, SearchFilters, SearchResult, Symbol,
-    finalize_results_for_filters, is_manifest_file, known_commands_from_hints, language_for,
-    normalize_token, query_plan_repair_action, unique_query_tokens,
+    CommandHint, FileRange, QueryPlan, QueryPlanFilter, QueryPlanNextAction, QueryPlanRepairHint,
+    QueryPlanSummary, RangeScope, RelatedFile, RelatedSymbol, RepoMap, RepoMapDetail,
+    SearchFilters, SearchResult, Symbol, finalize_results_for_filters, is_manifest_file,
+    known_commands_from_hints, language_for, normalize_token, query_plan_repair_action,
+    unique_query_tokens,
 };
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use anyhow::{Context, Result};
@@ -405,7 +406,18 @@ pub struct ShardQueryPlan {
     pub aliases: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub git: Option<RepoGitMetadata>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<QueryPlanSummary>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_action: Option<QueryPlanNextAction>,
     pub plan: QueryPlan,
+}
+
+impl ShardQueryPlan {
+    pub fn refresh_summary(&mut self) {
+        self.summary = Some(self.plan.compact_summary());
+        self.next_action = self.plan.next_action.clone();
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1319,6 +1331,8 @@ pub(crate) fn shard_selection_miss_plan(
             next_action: None,
         }
         .with_diagnosis(),
+        summary: None,
+        next_action: None,
     }
 }
 
@@ -1416,6 +1430,8 @@ fn shard_query_plan_job_batch(
                 git: job.shard.git.clone(),
                 name: scope.output_prefix.clone(),
                 root: job.shard.root.clone(),
+                summary: None,
+                next_action: None,
                 plan: index.query_plan(query, &scoped_filters)?,
             });
         }

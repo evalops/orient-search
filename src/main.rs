@@ -2184,6 +2184,7 @@ fn attach_cli_shard_retry_requests_with_tool(
             index_dir,
             filters,
         );
+        shard_plan.refresh_summary();
     }
 }
 
