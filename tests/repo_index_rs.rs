@@ -837,6 +837,47 @@ jobs:
 }
 
 #[test]
+fn docker_compose_services_work_as_symbols_across_live_and_persistent_indexes() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("compose.yaml"),
+        r#"
+services:
+  api:
+    build: .
+  worker-queue:
+    image: example/worker
+volumes:
+  data:
+"#,
+    );
+
+    let live = RepoIndexer::new(repo.path()).build().unwrap();
+    let live_api = &live.find_symbol("api", 10)[0];
+    assert_symbol(live_api, "compose.yaml", "service");
+    assert_eq!(live_api.line, 3);
+    let live_worker = &live.find_symbol("worker-queue", 10)[0];
+    assert_symbol(live_worker, "compose.yaml", "service");
+    assert_eq!(live_worker.line, 5);
+    assert!(live.find_symbol("data", 10).is_empty());
+
+    let fallback =
+        search_repo_fast_filtered(repo.path(), "service:api", 5, &Default::default()).unwrap();
+    assert_eq!(fallback[0].path, "compose.yaml");
+    assert!(fallback[0].reason.contains("symbol:api"));
+
+    let indexed = FastIndex::build(repo.path()).unwrap();
+    let indexed_worker = &indexed.find_symbol("worker-queue", 10)[0];
+    assert_symbol(indexed_worker, "compose.yaml", "service");
+    assert_eq!(indexed_worker.line, 5);
+    let indexed_results = indexed
+        .search_filtered("kind:service symbol:worker-queue", 5, &Default::default())
+        .unwrap();
+    assert_eq!(indexed_results[0].path, "compose.yaml");
+    assert!(indexed_results[0].reason.contains("symbol:worker-queue"));
+}
+
+#[test]
 fn cargo_manifest_targets_work_as_symbols_across_live_and_persistent_indexes() {
     let repo = tempfile::tempdir().unwrap();
     write(

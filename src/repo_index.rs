@@ -4917,6 +4917,9 @@ pub(crate) fn extract_symbols(path: &str, text: &str, language: &str) -> Vec<Sym
     if is_github_actions_workflow_path(path) {
         return extract_github_actions_job_symbols(path, text);
     }
+    if is_docker_compose_path(path) {
+        return extract_docker_compose_service_symbols(path, text);
+    }
     if language == "python" {
         return extract_python_symbols(path, text);
     }
@@ -5348,6 +5351,73 @@ fn yaml_mapping_key(line: &str) -> Option<String> {
         return None;
     }
     Some(key.trim_matches('"').trim_matches('\'').to_string())
+}
+
+fn is_docker_compose_path(path: &str) -> bool {
+    matches!(
+        Path::new(path).file_name().and_then(|value| value.to_str()),
+        Some("compose.yml" | "compose.yaml" | "docker-compose.yml" | "docker-compose.yaml")
+    )
+}
+
+fn extract_docker_compose_service_symbols(path: &str, text: &str) -> Vec<Symbol> {
+    docker_compose_service_targets(text)
+        .into_iter()
+        .map(|(name, line)| Symbol {
+            name,
+            kind: "service".to_string(),
+            path: path.to_string(),
+            line,
+        })
+        .collect()
+}
+
+fn docker_compose_service_targets(text: &str) -> Vec<(String, usize)> {
+    let mut targets = Vec::new();
+    let mut services_indent: Option<usize> = None;
+    let mut service_indent: Option<usize> = None;
+
+    for (index, line) in text.lines().enumerate() {
+        let without_comment = line.split('#').next().unwrap_or("");
+        let trimmed = without_comment.trim_end();
+        if trimmed.trim().is_empty() {
+            continue;
+        }
+        let indent = line.len() - line.trim_start_matches(' ').len();
+        let content = trimmed.trim_start();
+
+        if services_indent.is_none() {
+            if content == "services:" {
+                services_indent = Some(indent);
+            }
+            continue;
+        }
+
+        let services = services_indent.unwrap_or(0);
+        if indent <= services && content.ends_with(':') {
+            break;
+        }
+        if indent <= services {
+            continue;
+        }
+
+        if service_indent.is_none() {
+            service_indent = Some(indent);
+        }
+        if Some(indent) != service_indent {
+            continue;
+        }
+        let Some(name) = yaml_mapping_key(content) else {
+            continue;
+        };
+        if !targets
+            .iter()
+            .any(|(seen, _): &(String, usize)| seen == &name)
+        {
+            targets.push((name, index + 1));
+        }
+    }
+    targets
 }
 
 fn is_cargo_toml_path(path: &str) -> bool {
@@ -6687,6 +6757,10 @@ pub(crate) fn is_manifest_file(path: &str) -> bool {
             | "settings.gradle.kts"
             | "gradlew"
             | "gradlew.bat"
+            | "compose.yml"
+            | "compose.yaml"
+            | "docker-compose.yml"
+            | "docker-compose.yaml"
             | "deno.json"
             | "composer.json"
     )

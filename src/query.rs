@@ -1468,6 +1468,7 @@ pub fn normalize_symbol_kind(value: &str) -> String {
         "types" => "type".to_string(),
         "targets" | "recipe" | "recipes" | "task" | "tasks" => "target".to_string(),
         "packages" => "package".to_string(),
+        "services" | "compose-service" | "compose-services" => "service".to_string(),
         "binary" | "binaries" | "bins" => "bin".to_string(),
         "examples" => "example".to_string(),
         "benches" | "benchmark" | "benchmarks" => "bench".to_string(),
@@ -1493,6 +1494,7 @@ fn symbol_kind_from_shorthand_key(key: &str) -> Option<String> {
             | "target"
             | "script"
             | "package"
+            | "service"
             | "bin"
             | "example"
             | "bench"
@@ -2562,6 +2564,14 @@ mod tests {
         assert_eq!(
             package_shorthand.filters.symbol_kind.as_deref(),
             Some("package")
+        );
+
+        let service_shorthand = parse_query("service:api");
+        assert!(service_shorthand.terms.is_empty());
+        assert_eq!(service_shorthand.filters.symbol.as_deref(), Some("api"));
+        assert_eq!(
+            service_shorthand.filters.symbol_kind.as_deref(),
+            Some("service")
         );
 
         let bin_shorthand = parse_query("bin:auth-worker");

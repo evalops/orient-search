@@ -108,8 +108,9 @@ Justfile targets, and GitHub Actions jobs; `kind:script` and `script:name` can
 jump to package.json and pyproject scripts; `package:name` can jump to
 package.json packages, Cargo packages, pyproject packages, Go module paths,
 Maven coordinates, and Gradle project names; `bin:name`, `example:name`, and
-`bench:name` can jump to Cargo manifest entries. See [Agent protocol](docs/agent-protocol.md)
-for the full query language.
+`bench:name` can jump to Cargo manifest entries; `service:name` can jump to
+Docker Compose services. See [Agent protocol](docs/agent-protocol.md) for the
+full query language.
 
 ## Protocol
 
