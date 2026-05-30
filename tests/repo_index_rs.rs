@@ -944,6 +944,7 @@ fn package_json_scripts_work_as_symbols_across_live_and_persistent_indexes() {
         &repo.path().join("package.json"),
         r#"
 {
+  "name": "@evalops/orient-web",
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
@@ -959,12 +960,16 @@ fn package_json_scripts_work_as_symbols_across_live_and_persistent_indexes() {
         &repo.path().join("compact/package.json"),
         r#"
 {
+  "name": "@evalops/compact",
   "scripts": {"compact-build": "vite build", "compact:test": "vitest"}
 }
 "#,
     );
 
     let live = RepoIndexer::new(repo.path()).build().unwrap();
+    let live_package = &live.find_symbol("@evalops/orient-web", 10)[0];
+    assert_symbol(live_package, "package.json", "package");
+    assert_eq!(live_package.line, 3);
     assert_symbol(
         &live.find_symbol("typecheck", 10)[0],
         "package.json",
@@ -977,7 +982,7 @@ fn package_json_scripts_work_as_symbols_across_live_and_persistent_indexes() {
     );
     let live_compact = &live.find_symbol("compact-build", 10)[0];
     assert_symbol(live_compact, "compact/package.json", "script");
-    assert_eq!(live_compact.line, 3);
+    assert_eq!(live_compact.line, 4);
 
     let fallback = search_repo_fast_filtered(
         repo.path(),
@@ -989,15 +994,35 @@ fn package_json_scripts_work_as_symbols_across_live_and_persistent_indexes() {
     assert_eq!(fallback[0].path, "package.json");
     assert!(fallback[0].reason.contains("symbol:typecheck"));
 
+    let package_fallback = search_repo_fast_filtered(
+        repo.path(),
+        "package:@evalops/orient-web",
+        5,
+        &Default::default(),
+    )
+    .unwrap();
+    assert_eq!(package_fallback[0].path, "package.json");
+    assert!(
+        package_fallback[0]
+            .reason
+            .contains("symbol:@evalops/orient-web")
+    );
+
     let indexed = FastIndex::build(repo.path()).unwrap();
+    let indexed_package = &indexed.find_symbol("@evalops/orient-web", 10)[0];
+    assert_symbol(indexed_package, "package.json", "package");
+    assert_eq!(indexed_package.line, 3);
     assert_symbol(
         &indexed.find_symbol("build:prod", 10)[0],
         "package.json",
         "script",
     );
+    let indexed_compact_package = &indexed.find_symbol("@evalops/compact", 10)[0];
+    assert_symbol(indexed_compact_package, "compact/package.json", "package");
+    assert_eq!(indexed_compact_package.line, 3);
     let indexed_compact = &indexed.find_symbol("compact-build", 10)[0];
     assert_symbol(indexed_compact, "compact/package.json", "script");
-    assert_eq!(indexed_compact.line, 3);
+    assert_eq!(indexed_compact.line, 4);
     let indexed_results = indexed
         .search_filtered("script:build:prod", 5, &Default::default())
         .unwrap();

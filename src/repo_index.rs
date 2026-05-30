@@ -4804,7 +4804,7 @@ pub(crate) fn extract_symbols(path: &str, text: &str, language: &str) -> Vec<Sym
         return extract_go_mod_symbols(path, text);
     }
     if is_package_json_path(path) {
-        return extract_package_json_script_symbols(path, text);
+        return extract_package_json_symbols(path, text);
     }
     if language == "python" {
         return extract_python_symbols(path, text);
@@ -5361,22 +5361,43 @@ fn is_package_json_path(path: &str) -> bool {
     Path::new(path).file_name().and_then(|value| value.to_str()) == Some("package.json")
 }
 
-fn extract_package_json_script_symbols(path: &str, text: &str) -> Vec<Symbol> {
+fn extract_package_json_symbols(path: &str, text: &str) -> Vec<Symbol> {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(text) else {
         return Vec::new();
     };
-    let Some(scripts) = value.get("scripts").and_then(|value| value.as_object()) else {
-        return Vec::new();
-    };
-    scripts
-        .keys()
-        .map(|name| Symbol {
+    let mut symbols = Vec::new();
+    if let Some(name) = value.get("name").and_then(|value| value.as_str()) {
+        symbols.push(Symbol {
+            name: name.to_string(),
+            kind: "package".to_string(),
+            path: path.to_string(),
+            line: package_json_top_level_property_line(text, "name").unwrap_or(1),
+        });
+    }
+    if let Some(scripts) = value.get("scripts").and_then(|value| value.as_object()) {
+        symbols.extend(scripts.keys().map(|name| Symbol {
             name: name.clone(),
             kind: "script".to_string(),
             path: path.to_string(),
             line: package_json_script_line(text, name).unwrap_or(1),
-        })
-        .collect()
+        }));
+    }
+    symbols
+}
+
+fn package_json_top_level_property_line(text: &str, key: &str) -> Option<usize> {
+    let needle = serde_json::to_string(key).ok()?;
+    let mut depth = 0usize;
+    for (index, line) in text.lines().enumerate() {
+        let candidate =
+            line.contains(&needle) && (depth == 1 || (depth == 0 && line.contains('{')));
+        if candidate {
+            return Some(index + 1);
+        }
+        depth = depth.saturating_add(line.matches('{').count());
+        depth = depth.saturating_sub(line.matches('}').count());
+    }
+    None
 }
 
 fn package_json_script_line(text: &str, script: &str) -> Option<usize> {
