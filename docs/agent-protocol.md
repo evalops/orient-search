@@ -163,6 +163,9 @@ strip the line/column prefix for matching and anchor the returned snippet near
 the line. Absolute pasted paths are normalized when they are inside the
 selected repo or index root.
 Hosted links may carry fragment or query-string line anchors.
+Common slash-delimited branch namespaces such as `feature/search` or
+`release/v1` are handled for hosted code links when a recognizable repo path
+suffix follows them.
 Use `content:` / `text:` / `term:` when an identifier-shaped string should stay a content lookup instead of narrowing indexed search through implicit symbol postings.
 Positive non-code language scopes such as `lang:md` keep identifier-shaped terms as content searches instead of requiring symbol postings, so docs/prose lookups stay consistent with live fallback search.
 The same applies when positive `file:`, `path:`, or `ext:` scopes clearly target non-code files, such as `path:docs/*.md SessionManager` or `ext:md agent_instructions`.

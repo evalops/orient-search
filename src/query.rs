@@ -615,16 +615,126 @@ fn code_hosted_location_path(value: &str) -> Option<String> {
         let path = if lower_base.contains("sourcegraph.com/") && marker.starts_with("/-/") {
             after_marker
         } else {
-            let Some(path_start) = after_marker.find('/') else {
+            let Some(path) = hosted_repo_path_after_ref(after_marker) else {
                 continue;
             };
-            &after_marker[path_start + 1..]
+            path
         };
         if looks_like_location_path(path) {
             return Some(format!("{path}{line_anchor}"));
         }
     }
     None
+}
+
+fn hosted_repo_path_after_ref(after_marker: &str) -> Option<&str> {
+    let (ref_prefix, default_path) = after_marker.split_once('/')?;
+    if !looks_like_location_path(default_path) {
+        return None;
+    }
+    if !hosted_slashy_branch_namespace(ref_prefix) {
+        return Some(default_path);
+    }
+
+    let mut best: Option<(&str, usize)> = None;
+    for (slash_index, _) in after_marker.match_indices('/') {
+        let candidate = &after_marker[slash_index + 1..];
+        if !looks_like_location_path(candidate) {
+            continue;
+        }
+        let score = hosted_repo_path_score(candidate);
+        let replace = best
+            .map(|(best_path, best_score)| {
+                score > best_score || (score == best_score && candidate.len() > best_path.len())
+            })
+            .unwrap_or(true);
+        if replace {
+            best = Some((candidate, score));
+        }
+    }
+    best.map(|(path, _)| path).or(Some(default_path))
+}
+
+fn hosted_slashy_branch_namespace(segment: &str) -> bool {
+    matches!(
+        segment.to_ascii_lowercase().as_str(),
+        "bug"
+            | "bugfix"
+            | "chore"
+            | "dependabot"
+            | "dev"
+            | "feature"
+            | "feat"
+            | "fix"
+            | "hotfix"
+            | "renovate"
+            | "release"
+            | "revert"
+            | "topic"
+            | "user"
+            | "users"
+    )
+}
+
+fn hosted_repo_path_score(path: &str) -> usize {
+    let lower = path.to_ascii_lowercase();
+    if hosted_manifest_path(&lower) {
+        return 120;
+    }
+    let root = lower.split('/').next().unwrap_or_default();
+    if hosted_repo_root_segment(root) {
+        return 100;
+    }
+    1
+}
+
+fn hosted_manifest_path(path: &str) -> bool {
+    matches!(
+        path,
+        "agents.md"
+            | "build.bazel"
+            | "cargo.lock"
+            | "cargo.toml"
+            | "dockerfile"
+            | "go.mod"
+            | "go.sum"
+            | "justfile"
+            | "makefile"
+            | "module.bazel"
+            | "package.json"
+            | "pnpm-lock.yaml"
+            | "pom.xml"
+            | "pyproject.toml"
+            | "requirements.txt"
+            | "yarn.lock"
+    ) || path.starts_with("readme.")
+}
+
+fn hosted_repo_root_segment(segment: &str) -> bool {
+    matches!(
+        segment,
+        ".github"
+            | "app"
+            | "apps"
+            | "bin"
+            | "cmd"
+            | "config"
+            | "crates"
+            | "docs"
+            | "examples"
+            | "fixtures"
+            | "include"
+            | "internal"
+            | "lib"
+            | "packages"
+            | "pkg"
+            | "scripts"
+            | "services"
+            | "src"
+            | "test"
+            | "tests"
+            | "tools"
+    )
 }
 
 fn hosted_line_anchor_suffix(suffix: &str) -> String {
@@ -1436,6 +1546,37 @@ mod tests {
             Some("src/server.rs")
         );
         assert_eq!(hosted_column_source_location.filters.target_line, Some(42));
+
+        let hosted_slashy_branch_source_location = parse_query(
+            "https://github.com/evalops/orient-search/blob/feature/search/src/server.rs#L42-L45",
+        );
+        assert!(hosted_slashy_branch_source_location.terms.is_empty());
+        assert_eq!(
+            hosted_slashy_branch_source_location.filters.path.as_deref(),
+            Some("src/server.rs")
+        );
+        assert_eq!(
+            hosted_slashy_branch_source_location.filters.target_line,
+            Some(42)
+        );
+
+        let hosted_main_branch_nested_source_location = parse_query(
+            "https://github.com/evalops/orient-search/blob/main/search/src/server.rs#L42-L45",
+        );
+        assert!(hosted_main_branch_nested_source_location.terms.is_empty());
+        assert_eq!(
+            hosted_main_branch_nested_source_location
+                .filters
+                .path
+                .as_deref(),
+            Some("search/src/server.rs")
+        );
+        assert_eq!(
+            hosted_main_branch_nested_source_location
+                .filters
+                .target_line,
+            Some(42)
+        );
 
         let sourcegraph_source_location = parse_query(
             "https://sourcegraph.com/github.com/evalops/orient-search/-/blob/src/server.rs?L42:9",
