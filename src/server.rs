@@ -7028,9 +7028,7 @@ impl ToolRuntime {
         let filters = merge_filters(filters.clone(), parsed.filters);
         let shard_query = query_text(&parsed.terms, &filters);
         let route_selection = shard_route_selection(index_dir, &shard_query, &filters)?;
-        let (jobs, shard_count, shard_names) = if let Some(selection) =
-            route_selection.filter(|selection| !selection.shards.is_empty())
-        {
+        let (jobs, shard_count, shard_names) = if let Some(selection) = route_selection {
             (
                 shard_jobs_from_entries(selection.shards, &shard_query, &filters, false),
                 selection.shard_count,

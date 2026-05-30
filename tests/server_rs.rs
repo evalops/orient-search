@@ -9804,6 +9804,15 @@ fn runtime_shard_query_plan_uses_route_before_manifest_cache() {
     build_shards(&[hit_repo, miss_repo], shard_dir.path()).unwrap();
     let manifest: serde_json::Value =
         serde_json::from_slice(&fs::read(shard_dir.path().join("manifest.json")).unwrap()).unwrap();
+    let hit_index = manifest["shards"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|shard| shard["name"] == "hit-service")
+        .unwrap()["index"]
+        .as_str()
+        .unwrap()
+        .to_string();
     let miss_index = manifest["shards"]
         .as_array()
         .unwrap()
@@ -9828,6 +9837,25 @@ fn runtime_shard_query_plan_uses_route_before_manifest_cache() {
     let result = serde_json::to_string(&response.result).unwrap();
     assert!(result.contains("\"name\":\"hit-service\""), "{result}");
     assert!(!result.contains("\"name\":\"miss-service\""), "{result}");
+    assert_eq!(runtime.cached_shard_manifest_count(), 0);
+    assert_eq!(runtime.cached_index_count(), 1);
+
+    fs::remove_file(shard_dir.path().join(hit_index)).unwrap();
+    let absent = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("absent-plan"),
+        tool: "shard_query_plan".to_string(),
+        arguments: serde_json::json!({
+            "index_dir": shard_dir.path(),
+            "query": "definitely_absent_runtime_route_plan_symbol"
+        }),
+    });
+    assert!(absent.error.is_none(), "{:?}", absent.error);
+    let absent = absent.result.unwrap();
+    assert_eq!(absent[0]["name"], serde_json::json!("__shard_selection__"));
+    assert_eq!(
+        absent[0]["plan"]["summary"]["status"],
+        serde_json::json!("scope_mismatch")
+    );
     assert_eq!(runtime.cached_shard_manifest_count(), 0);
     assert_eq!(runtime.cached_index_count(), 1);
 }

@@ -4459,6 +4459,24 @@ fn shard_manifest_sketch_prunes_impossible_cold_shards() {
     )
     .unwrap();
     assert!(globally_absent_results.is_empty());
+
+    let globally_absent_plans = shard_query_plans(
+        shard_dir.path(),
+        "globally_missing_prefilter_probe_token_xyz",
+        &SearchFilters::default(),
+    )
+    .unwrap();
+    assert_eq!(globally_absent_plans.len(), 1);
+    assert_eq!(globally_absent_plans[0].name, "__shard_selection__");
+    assert_eq!(
+        globally_absent_plans[0]
+            .plan
+            .diagnosis
+            .as_ref()
+            .unwrap()
+            .status,
+        "scope_mismatch"
+    );
 }
 
 #[test]

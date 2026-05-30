@@ -1257,31 +1257,30 @@ pub fn shard_query_plans(
     let filters = merge_filters(filters.clone(), parsed.filters);
     let shard_query = query_text(&parsed.terms, &filters);
     let route_selection = shard_route_selection(index_dir, &shard_query, &filters)?;
-    let (jobs, shard_count, shard_names) =
-        if let Some(selection) = route_selection.filter(|selection| !selection.shards.is_empty()) {
-            (
-                shard_entries_to_jobs(selection.shards, &shard_query, &filters, false),
-                selection.shard_count,
-                selection.shard_names,
-            )
-        } else {
-            let manifest = load_manifest(index_dir)?;
-            let shard_count = manifest.shards.len();
-            let shard_names = manifest
-                .shards
-                .iter()
-                .map(|shard| shard.name.clone())
-                .collect::<Vec<_>>();
-            let jobs = manifest
-                .shards
-                .into_iter()
-                .filter_map(|shard| {
-                    let scopes = shard_search_scopes(&shard, &filters);
-                    (!scopes.is_empty()).then_some(ShardJob { shard, scopes })
-                })
-                .collect::<Vec<_>>();
-            (jobs, shard_count, shard_names)
-        };
+    let (jobs, shard_count, shard_names) = if let Some(selection) = route_selection {
+        (
+            shard_entries_to_jobs(selection.shards, &shard_query, &filters, false),
+            selection.shard_count,
+            selection.shard_names,
+        )
+    } else {
+        let manifest = load_manifest(index_dir)?;
+        let shard_count = manifest.shards.len();
+        let shard_names = manifest
+            .shards
+            .iter()
+            .map(|shard| shard.name.clone())
+            .collect::<Vec<_>>();
+        let jobs = manifest
+            .shards
+            .into_iter()
+            .filter_map(|shard| {
+                let scopes = shard_search_scopes(&shard, &filters);
+                (!scopes.is_empty()).then_some(ShardJob { shard, scopes })
+            })
+            .collect::<Vec<_>>();
+        (jobs, shard_count, shard_names)
+    };
     let filtered_jobs = shard_diagnostic_jobs(jobs, &shard_query);
     let jobs = filtered_jobs;
     if jobs.is_empty() {
