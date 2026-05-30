@@ -842,6 +842,45 @@ fn cli_search_auto_diagnose_prefers_retry_next_action_for_noisy_hits() {
 }
 
 #[test]
+fn cli_search_auto_read_action_reports_grouped_duplicate_budget() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("one/src/auth.rs"),
+        "pub fn issue_token() { let token = \"session\"; }\n",
+    );
+    write(
+        &repo.path().join("two/src/auth.rs"),
+        "pub fn issue_token() { let token = \"session\"; }\n",
+    );
+
+    let output = Command::cargo_bin("orient")
+        .unwrap()
+        .args([
+            "search-auto",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--limit",
+            "10",
+            "issue token session",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+
+    assert_eq!(
+        value["read_batch_request"]["read_budget"]["grouped_duplicate_count"],
+        serde_json::json!(1)
+    );
+    assert_eq!(
+        value["next_action"]["summary"],
+        serde_json::json!(
+            "Read 1 bounded range (80 total lines). 1 grouped duplicate path is represented by the canonical results."
+        )
+    );
+}
+
+#[test]
 fn cli_search_accepts_index_and_shard_targets() {
     let repo = sample_repo();
     let index_path = repo.path().join("orient.index");

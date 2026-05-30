@@ -25,6 +25,8 @@ pub const MAX_BATCH_READ_LINES: usize = 8_000;
 pub const DEFAULT_REPO_MAP_READ_BATCH_RANGES: usize = 16;
 const READ_BATCH_MERGE_GAP_LINES: usize = 8;
 const MAX_REPO_BRIEF_IMPORT_HINTS: usize = 32;
+const FALLBACK_STREAMING_MIN_CANDIDATES: usize = 500;
+const FALLBACK_STREAMING_MAX_CANDIDATES: usize = 5_000;
 const DEFAULT_RESULT_READ_LINES: usize = 80;
 const DEFAULT_RELATED_FILE_READ_LINES: usize = 80;
 pub(crate) const DEFAULT_SYMBOL_READ_CONTEXT_BEFORE: usize = 20;
@@ -200,6 +202,8 @@ pub struct ReadBatchBudget {
     pub max_ranges: usize,
     pub max_total_lines: usize,
     pub max_lines_per_range: usize,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub grouped_duplicate_count: usize,
 }
 
 impl ResultToolRequest {
@@ -241,6 +245,48 @@ impl ResultToolRequest {
         self.read_budget = Some(read_budget);
         self
     }
+
+    fn with_grouped_duplicate_count(mut self, grouped_duplicate_count: usize) -> Self {
+        if grouped_duplicate_count > 0
+            && let Some(read_budget) = &mut self.read_budget
+        {
+            read_budget.grouped_duplicate_count = grouped_duplicate_count;
+        }
+        self
+    }
+}
+
+fn is_zero(value: &usize) -> bool {
+    *value == 0
+}
+
+pub fn read_batch_action_summary(request: &ResultToolRequest, fallback: &str) -> String {
+    let Some(budget) = &request.read_budget else {
+        return fallback.to_string();
+    };
+    let range_word = pluralize(budget.range_count, "range", "ranges");
+    let line_word = pluralize(budget.total_lines, "line", "lines");
+    let mut summary = format!(
+        "Read {} bounded {} ({} total {}).",
+        budget.range_count, range_word, budget.total_lines, line_word
+    );
+    if budget.grouped_duplicate_count > 0 {
+        let duplicate_word = pluralize(
+            budget.grouped_duplicate_count,
+            "duplicate path",
+            "duplicate paths",
+        );
+        let verb = pluralize(budget.grouped_duplicate_count, "is", "are");
+        summary.push_str(&format!(
+            " {} grouped {} {verb} represented by the canonical results.",
+            budget.grouped_duplicate_count, duplicate_word,
+        ));
+    }
+    summary
+}
+
+fn pluralize(count: usize, singular: &'static str, plural: &'static str) -> &'static str {
+    if count == 1 { singular } else { plural }
 }
 
 fn default_tool_request_id(tool: &str) -> &'static str {
@@ -2229,6 +2275,7 @@ fn search_repo_streaming_until(
     deadline: Instant,
 ) -> Result<Vec<SearchResult>> {
     let mut results = Vec::new();
+    let candidate_cap = fallback_streaming_candidate_cap(limit);
 
     for entry in WalkBuilder::new(&root)
         .hidden(false)
@@ -2268,6 +2315,7 @@ fn search_repo_streaming_until(
             filters.generated.is_none(),
         ) {
             results.push(result);
+            trim_fallback_streaming_candidates(&mut results, candidate_cap);
         }
     }
 
@@ -2277,6 +2325,21 @@ fn search_repo_streaming_until(
     }
     anchor_results_on_target_line(root, &mut results, filters);
     Ok(finalize_results_for_filters(results, limit, filters))
+}
+
+fn fallback_streaming_candidate_cap(limit: usize) -> usize {
+    (limit.max(1) * 200).clamp(
+        FALLBACK_STREAMING_MIN_CANDIDATES,
+        FALLBACK_STREAMING_MAX_CANDIDATES,
+    )
+}
+
+fn trim_fallback_streaming_candidates(results: &mut Vec<SearchResult>, candidate_cap: usize) {
+    if results.len() <= candidate_cap.saturating_mul(2) {
+        return;
+    }
+    sort_ranked_results(results);
+    results.truncate(candidate_cap);
 }
 
 fn anchor_results_on_target_line(
@@ -5727,6 +5790,7 @@ fn read_batch_request_from_ranges_with_limit(
                 max_ranges: limit,
                 max_total_lines: MAX_BATCH_READ_LINES,
                 max_lines_per_range: MAX_READ_RANGE_LINES,
+                grouped_duplicate_count: 0,
             });
     Some(request)
 }
@@ -5808,7 +5872,9 @@ pub fn result_read_batch_request(
         .filter_map(|result| result.read_range.as_ref())
         .cloned()
         .collect::<Vec<_>>();
-    read_batch_request_from_ranges(ranges, tool, base_arguments)
+    read_batch_request_from_ranges(ranges, tool, base_arguments).map(|request| {
+        request.with_grouped_duplicate_count(grouped_duplicate_count_from_results(results))
+    })
 }
 
 pub fn result_value_read_batch_request(
@@ -5822,7 +5888,29 @@ pub fn result_value_read_batch_request(
         .filter_map(|item| item.get("read_range"))
         .filter_map(|value| serde_json::from_value::<ResultReadRange>(value.clone()).ok())
         .collect::<Vec<_>>();
-    read_batch_request_from_ranges(ranges, tool, base_arguments)
+    read_batch_request_from_ranges(ranges, tool, base_arguments).map(|request| {
+        request.with_grouped_duplicate_count(grouped_duplicate_count_from_value(result))
+    })
+}
+
+fn grouped_duplicate_count_from_results(results: &[SearchResult]) -> usize {
+    results
+        .iter()
+        .filter_map(|result| result.duplicate_group.as_ref())
+        .map(|group| group.duplicate_count)
+        .sum()
+}
+
+fn grouped_duplicate_count_from_value(result: &serde_json::Value) -> usize {
+    result
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|item| item.get("duplicate_group"))
+        .filter_map(|group| group.get("duplicate_count"))
+        .filter_map(serde_json::Value::as_u64)
+        .filter_map(|count| usize::try_from(count).ok())
+        .sum()
 }
 
 pub fn attach_result_related_requests(
@@ -6321,12 +6409,7 @@ fn finalize_results_with_read_scope(
     read_scope: Option<RangeScope>,
 ) -> Vec<SearchResult> {
     let limit = capped_search_limit(limit);
-    results.sort_by(|a, b| {
-        b.score
-            .partial_cmp(&a.score)
-            .unwrap_or(Ordering::Equal)
-            .then_with(|| a.path.cmp(&b.path))
-    });
+    sort_ranked_results(&mut results);
 
     let mut seen = HashMap::<String, usize>::new();
     let mut deduped = Vec::new();
@@ -6343,6 +6426,15 @@ fn finalize_results_with_read_scope(
         finalize_result_metadata(result, read_scope);
     }
     deduped
+}
+
+fn sort_ranked_results(results: &mut [SearchResult]) {
+    results.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(Ordering::Equal)
+            .then_with(|| a.path.cmp(&b.path))
+    });
 }
 
 fn finalize_result_metadata(result: &mut SearchResult, read_scope: Option<RangeScope>) {
@@ -7237,6 +7329,51 @@ mod tests {
     }
 
     #[test]
+    fn fallback_streaming_candidate_cap_scales_with_requested_limit() {
+        assert_eq!(fallback_streaming_candidate_cap(0), 500);
+        assert_eq!(fallback_streaming_candidate_cap(1), 500);
+        assert_eq!(fallback_streaming_candidate_cap(10), 2_000);
+        assert_eq!(fallback_streaming_candidate_cap(100), 5_000);
+        assert_eq!(fallback_streaming_candidate_cap(1_000), 5_000);
+    }
+
+    #[test]
+    fn fallback_streaming_candidate_trim_waits_for_headroom() {
+        let mut results = (0..=1_000)
+            .map(|index| {
+                test_result(
+                    &format!("src/file_{index:04}.rs"),
+                    index as f64,
+                    &format!("{}: fn item_{index}() {{}}", index + 1),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        trim_fallback_streaming_candidates(&mut results, 500);
+
+        assert_eq!(results.len(), 500);
+        assert_eq!(results[0].path, "src/file_1000.rs");
+        assert_eq!(results.last().unwrap().path, "src/file_0501.rs");
+    }
+
+    #[test]
+    fn fallback_streaming_candidate_trim_preserves_score_and_path_order() {
+        let mut results = vec![
+            test_result("src/zeta.rs", 10.0, "1: fn zeta() {}"),
+            test_result("src/alpha.rs", 10.0, "1: fn alpha() {}"),
+            test_result("src/omega.rs", 2.0, "1: fn omega() {}"),
+            test_result("src/beta.rs", 10.0, "1: fn beta() {}"),
+            test_result("src/low.rs", 1.0, "1: fn low() {}"),
+        ];
+
+        trim_fallback_streaming_candidates(&mut results, 2);
+
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].path, "src/alpha.rs");
+        assert_eq!(results[1].path, "src/beta.rs");
+    }
+
+    #[test]
     fn finalize_results_dedupes_before_metadata_population() {
         let results = vec![
             test_result("one/src/auth.rs", 10.0, "2: pub fn issue_token() {}"),
@@ -7456,7 +7593,14 @@ mod tests {
                 match_lines: Vec::new(),
                 explanation: None,
                 query_plan: None,
-                duplicate_group: None,
+                duplicate_group: Some(DuplicateGroup {
+                    canonical_path: "src/auth.rs".to_string(),
+                    duplicate_count: 2,
+                    duplicate_paths: vec![
+                        "worktree-a/src/auth.rs".to_string(),
+                        "worktree-b/src/auth.rs".to_string(),
+                    ],
+                }),
                 context: None,
                 read_range: Some(ResultReadRange {
                     path: "src/auth.rs".to_string(),
@@ -7520,6 +7664,18 @@ mod tests {
         assert_eq!(ranges.len(), 2);
         assert_eq!(request.read_budget.as_ref().unwrap().range_count, 2);
         assert_eq!(request.read_budget.as_ref().unwrap().total_lines, 220);
+        assert_eq!(
+            request
+                .read_budget
+                .as_ref()
+                .unwrap()
+                .grouped_duplicate_count,
+            2
+        );
+        assert_eq!(
+            read_batch_action_summary(&request, "read"),
+            "Read 2 bounded ranges (220 total lines). 2 grouped duplicate paths are represented by the canonical results."
+        );
         assert_eq!(ranges[0]["path"], serde_json::json!("src/auth.rs"));
         assert_eq!(ranges[0]["start"], serde_json::json!(10));
         assert_eq!(ranges[0]["lines"], serde_json::json!(140));
@@ -7558,6 +7714,7 @@ mod tests {
                 max_ranges: 64,
                 max_total_lines: MAX_BATCH_READ_LINES,
                 max_lines_per_range: MAX_READ_RANGE_LINES,
+                grouped_duplicate_count: 0,
             })
         );
     }

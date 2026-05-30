@@ -186,6 +186,8 @@ Search results include:
 
 - `path`: the repo-relative, index-relative, or shard-prefixed path.
 - `snippet`: line-numbered context.
+- `duplicate_group`: present when exact-content hits from repeated worktrees or
+  copied files were collapsed into one canonical result.
 - `line_range`: displayed snippet bounds.
 - `match_lines`: exact hit lines when available.
 - `read_range`: a ready-to-pass `{path,start,lines}` follow-up range.
@@ -216,6 +218,8 @@ include follow-ups for the chosen live, indexed, or shard surface:
   concrete retry.
 
 Generated follow-ups include `jsonl`, `client_cli`, and compact CLI hints.
+Batch read follow-ups include `read_budget.grouped_duplicate_count` when the
+returned canonical result ranges represent additional duplicate paths.
 Set `retry_if_empty:true` or pass `--retry-if-empty` to run the promoted retry
 once and receive `primary_retry_result`; if that retry returns hits, Orient also
 returns a target-aware read batch request for those hits. Set `diagnose:true`

@@ -13,10 +13,10 @@ use crate::repo_index::{
     attach_repo_map_read_batch_request_with_limit, attach_result_context,
     attach_result_read_requests, attach_result_related_requests,
     attach_result_related_symbol_requests, finalize_results_for_filters, normalize_language_filter,
-    normalize_token, query_plan_filter_field_present, read_file_range, read_file_range_scoped,
-    related_file_lookup_results, related_symbol_lookup_results, result_read_batch_request,
-    result_value_read_batch_request, search_repo_fast_filtered, symbol_lookup_read_batch_request,
-    symbol_lookup_results,
+    normalize_token, query_plan_filter_field_present, read_batch_action_summary, read_file_range,
+    read_file_range_scoped, related_file_lookup_results, related_symbol_lookup_results,
+    result_read_batch_request, result_value_read_batch_request, search_repo_fast_filtered,
+    symbol_lookup_read_batch_request, symbol_lookup_results,
 };
 use crate::shards::{
     ShardEntry, ShardFreshness, ShardManifest, ShardQueryPlan, ShardRepoMap, ShardSearchScope,
@@ -138,10 +138,12 @@ fn search_batch_next_action(
 
 fn read_batch_next_action(read_batch_request: &Option<ResultToolRequest>) -> Option<Value> {
     read_batch_request.as_ref().map(|request| {
+        let summary =
+            read_batch_action_summary(request, "Read the batch item's top matching ranges.");
         json!({
             "kind": "read",
             "source": "read_batch_request",
-            "summary": "Read the batch item's top matching ranges.",
+            "summary": summary,
             "request": request
         })
     })
@@ -2722,10 +2724,11 @@ fn search_auto_next_action(
         }
     }
     if let Some(request) = next_read_batch_request {
+        let summary = read_batch_action_summary(request, "Read the top available result ranges.");
         return Some(json!({
             "kind": "read",
             "source": "next_read_batch_request",
-            "summary": "Read the top available result ranges.",
+            "summary": summary,
             "request": request
         }));
     }

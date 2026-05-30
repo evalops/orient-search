@@ -120,6 +120,10 @@ JSON-lines requests look like this:
 
 Every search result includes ready-to-send read, related-file, related-symbol,
 and query-plan follow-ups with `jsonl`, `client_cli`, and compact CLI hints.
+Exact-content duplicate hits from repeated worktrees or copied files are
+collapsed into one canonical result with `duplicate_group`; generated batch
+read follow-ups include `read_budget.grouped_duplicate_count` when duplicates
+were represented this way.
 Generated related-file and related-symbol follow-ups set
 `include_read_batch:true`, so their responses include one batch read follow-up
 for all returned context.

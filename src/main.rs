@@ -13,10 +13,10 @@ use orient::repo_index::{
     attach_repo_map_read_batch_request_with_limit, attach_result_context,
     attach_result_read_requests, attach_result_related_requests,
     attach_result_related_symbol_requests, normalize_language_filter,
-    query_plan_filter_field_present, read_file_range, read_file_range_scoped,
-    related_file_lookup_results, related_symbol_lookup_results, result_read_batch_request,
-    result_value_read_batch_request, search_repo_fast_filtered, symbol_lookup_read_batch_request,
-    symbol_lookup_results,
+    query_plan_filter_field_present, read_batch_action_summary, read_file_range,
+    read_file_range_scoped, related_file_lookup_results, related_symbol_lookup_results,
+    result_read_batch_request, result_value_read_batch_request, search_repo_fast_filtered,
+    symbol_lookup_read_batch_request, symbol_lookup_results,
 };
 use orient::server::{
     DEFAULT_MAX_CACHED_INDEXES, MAX_BATCH_QUERIES, MAX_BATCH_RANGES, MAX_BATCH_READ_LINES,
@@ -1466,10 +1466,12 @@ fn search_batch_next_action(
 
 fn read_batch_next_action(read_batch_request: &Option<ResultToolRequest>) -> Option<Value> {
     read_batch_request.as_ref().map(|request| {
+        let summary =
+            read_batch_action_summary(request, "Read the batch item's top matching ranges.");
         serde_json::json!({
             "kind": "read",
             "source": "read_batch_request",
-            "summary": "Read the batch item's top matching ranges.",
+            "summary": summary,
             "request": request
         })
     })
@@ -2164,6 +2166,14 @@ fn attach_cli_next_action(object: &mut Value) {
     for (source, kind, summary) in ordered_actions {
         let Some(request) = fields.get(source).filter(|value| !value.is_null()).cloned() else {
             continue;
+        };
+        let summary = if kind == "read" {
+            serde_json::from_value::<ResultToolRequest>(request.clone())
+                .ok()
+                .map(|request| read_batch_action_summary(&request, summary))
+                .unwrap_or_else(|| summary.to_string())
+        } else {
+            summary.to_string()
         };
         fields.insert(
             "next_action".to_string(),
