@@ -1462,10 +1462,17 @@ pub fn verify_token() {}
     let exact = read_file_range(repo.path(), "src/auth.rs", 4, 3).unwrap();
     assert_eq!(exact.start_line, 4);
     assert_eq!(exact.symbol, None);
+    assert_eq!(exact.summary.scope, RangeScope::Exact);
+    assert!(!exact.summary.truncated);
+    let exact_summary = serde_json::to_value(&exact.summary).unwrap();
+    assert!(exact_summary.get("scope").is_none());
+    assert!(exact_summary.get("truncated").is_none());
 
     let scoped =
         read_file_range_scoped(repo.path(), "src/auth.rs", 4, 2, RangeScope::Symbol).unwrap();
     assert_eq!(scoped.symbol.as_ref().unwrap().name, "issue_token");
+    assert_eq!(scoped.summary.scope, RangeScope::Symbol);
+    assert!(!scoped.summary.truncated);
     assert_eq!(scoped.start_line, 1);
     assert_eq!(scoped.end_line, 5);
     assert!(scoped.text.contains("#[inline]"));
@@ -1480,6 +1487,8 @@ pub fn verify_token() {}
         .unwrap();
     assert_eq!(indexed_range.start_line, scoped.start_line);
     assert_eq!(indexed_range.end_line, scoped.end_line);
+    assert_eq!(indexed_range.summary.scope, scoped.summary.scope);
+    assert_eq!(indexed_range.summary.truncated, scoped.summary.truncated);
     assert_eq!(
         indexed_range.symbol.as_ref().unwrap().name,
         scoped.symbol.as_ref().unwrap().name
@@ -1546,17 +1555,63 @@ fn symbol_scoped_ranges_clamp_large_definitions_without_next_symbol() {
     let scoped =
         read_file_range_scoped(repo.path(), "src/huge.rs", 10, 2, RangeScope::Symbol).unwrap();
     assert_eq!(scoped.start_line, 1);
+    assert_eq!(scoped.summary.scope, RangeScope::Symbol);
+    assert!(scoped.summary.truncated);
+    let scoped_summary = serde_json::to_value(&scoped.summary).unwrap();
+    assert_eq!(scoped_summary["scope"], "symbol");
+    assert_eq!(scoped_summary["truncated"], true);
     assert_eq!(
         scoped.end_line - scoped.start_line + 1,
         MAX_READ_RANGE_LINES
     );
 
     let indexed = FastIndex::build(repo.path()).unwrap();
+    let exact = read_file_range(repo.path(), "src/huge.rs", 1, MAX_READ_RANGE_LINES + 50).unwrap();
+    assert_eq!(exact.summary.scope, RangeScope::Exact);
+    assert!(exact.summary.truncated);
+    let exact_summary = serde_json::to_value(&exact.summary).unwrap();
+    assert!(exact_summary.get("scope").is_none());
+    assert_eq!(exact_summary["truncated"], true);
+
+    let indexed_exact = indexed
+        .read_range("src/huge.rs", 1, MAX_READ_RANGE_LINES + 50)
+        .unwrap();
+    assert_eq!(indexed_exact.summary.scope, RangeScope::Exact);
+    assert!(indexed_exact.summary.truncated);
+
     let indexed_range = indexed
         .read_range_scoped("src/huge.rs", 10, 2, RangeScope::Symbol)
         .unwrap();
     assert_eq!(indexed_range.start_line, scoped.start_line);
     assert_eq!(indexed_range.end_line, scoped.end_line);
+    assert_eq!(indexed_range.summary.scope, RangeScope::Symbol);
+    assert!(indexed_range.summary.truncated);
+}
+
+#[test]
+fn symbol_scoped_ranges_fall_back_to_exact_without_summary_scope_when_no_symbol_exists() {
+    let repo = tempfile::tempdir().unwrap();
+    write(
+        &repo.path().join("config/settings.json"),
+        "{\"issue_token\": true}\n",
+    );
+
+    let fallback = read_file_range_scoped(
+        repo.path(),
+        "config/settings.json",
+        1,
+        1,
+        RangeScope::Symbol,
+    )
+    .unwrap();
+    assert_eq!(fallback.start_line, 1);
+    assert_eq!(fallback.end_line, 1);
+    assert_eq!(fallback.summary.scope, RangeScope::Exact);
+    assert!(!fallback.summary.has_symbol);
+    assert!(!fallback.summary.truncated);
+    let summary = serde_json::to_value(&fallback.summary).unwrap();
+    assert!(summary.get("scope").is_none());
+    assert!(summary.get("truncated").is_none());
 }
 
 fn assert_symbol(symbol: &orient::repo_index::Symbol, path: &str, kind: &str) {

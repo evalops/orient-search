@@ -143,7 +143,7 @@ wrapper needs detailed diagnostics. For direct diagnostics, pass JSON-lines
 Batch read follow-ups include `read_budget` so wrappers can split large reads
 before hitting range or line caps. Manual reads accept copied file locations such
 as `src/lib.rs:42-45` and can use `scope:symbol` to anchor at the nearest
-definition.
+definition; the read summary reports when a range hit the hard line cap.
 
 ## Footprint
 

@@ -1376,6 +1376,10 @@ pub struct ReadRangeSummary {
     pub status: String,
     pub line_count: usize,
     pub total_lines: usize,
+    #[serde(default, skip_serializing_if = "RangeScope::is_exact")]
+    pub scope: RangeScope,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub truncated: bool,
     #[serde(default, skip_serializing_if = "is_false")]
     pub has_symbol: bool,
 }
@@ -1386,6 +1390,8 @@ impl Default for ReadRangeSummary {
             status: "empty".to_string(),
             line_count: 0,
             total_lines: 0,
+            scope: RangeScope::Exact,
+            truncated: false,
             has_symbol: false,
         }
     }
@@ -1396,6 +1402,8 @@ pub(crate) fn read_range_summary(
     end_line: usize,
     total_lines: usize,
     has_symbol: bool,
+    scope: RangeScope,
+    truncated: bool,
 ) -> ReadRangeSummary {
     let line_count = if end_line >= start_line {
         end_line - start_line + 1
@@ -1410,6 +1418,8 @@ pub(crate) fn read_range_summary(
         },
         line_count,
         total_lines,
+        scope,
+        truncated,
         has_symbol,
     }
 }
@@ -1429,6 +1439,10 @@ impl RangeScope {
             "symbol" | "definition" | "def" => Some(Self::Symbol),
             _ => None,
         }
+    }
+
+    pub fn is_exact(&self) -> bool {
+        *self == Self::Exact
     }
 }
 
@@ -3660,7 +3674,15 @@ pub(crate) fn file_range_from_text(
     start_line: usize,
     line_count: usize,
 ) -> FileRange {
-    file_range_from_text_with_symbol(path, text, start_line, line_count, None)
+    file_range_from_text_with_symbol(
+        path,
+        text,
+        start_line,
+        line_count,
+        None,
+        RangeScope::Exact,
+        false,
+    )
 }
 
 pub(crate) fn file_range_from_text_scoped(
@@ -3676,7 +3698,7 @@ pub(crate) fn file_range_from_text_scoped(
         let symbols = extract_symbols(&path, text, &language);
         if let Some(symbol) = symbol_for_anchor(&symbols, start_line) {
             let lines = text.lines().collect::<Vec<_>>();
-            let (symbol_start, symbol_lines) =
+            let (symbol_start, symbol_lines, truncated) =
                 symbol_scoped_extent(&lines, &symbols, symbol, DEFAULT_SYMBOL_READ_CONTEXT_BEFORE);
             return file_range_from_text_with_symbol(
                 path,
@@ -3684,10 +3706,20 @@ pub(crate) fn file_range_from_text_scoped(
                 symbol_start,
                 symbol_lines,
                 Some(symbol.clone()),
+                RangeScope::Symbol,
+                truncated,
             );
         }
     }
-    file_range_from_text_with_symbol(path, text, start_line, line_count, None)
+    file_range_from_text_with_symbol(
+        path,
+        text,
+        start_line,
+        line_count,
+        None,
+        RangeScope::Exact,
+        false,
+    )
 }
 
 pub(crate) fn symbol_scoped_extent(
@@ -3695,10 +3727,10 @@ pub(crate) fn symbol_scoped_extent(
     symbols: &[Symbol],
     anchor: &Symbol,
     max_lead: usize,
-) -> (usize, usize) {
+) -> (usize, usize, bool) {
     let total_lines = lines.len();
     if total_lines == 0 {
-        return (1, 1);
+        return (1, 1, false);
     }
 
     let anchor_line = anchor.line.max(1).min(total_lines);
@@ -3718,11 +3750,10 @@ pub(crate) fn symbol_scoped_extent(
         end -= 1;
     }
 
-    let line_count = end
-        .saturating_sub(start)
-        .saturating_add(1)
-        .min(MAX_READ_RANGE_LINES);
-    (start, line_count.max(1))
+    let raw_line_count = end.saturating_sub(start).saturating_add(1);
+    let truncated = raw_line_count > MAX_READ_RANGE_LINES;
+    let line_count = raw_line_count.min(MAX_READ_RANGE_LINES);
+    (start, line_count.max(1), truncated)
 }
 
 fn attached_symbol_lead(lines: &[&str], anchor_line: usize, max_lead: usize) -> usize {
@@ -3801,11 +3832,15 @@ fn file_range_from_text_with_symbol(
     start_line: usize,
     line_count: usize,
     symbol: Option<Symbol>,
+    scope: RangeScope,
+    truncated: bool,
 ) -> FileRange {
     let lines = text.lines().collect::<Vec<_>>();
     let total_lines = lines.len();
     let start = start_line.max(1).min(total_lines.max(1));
-    let count = line_count.max(1).min(MAX_READ_RANGE_LINES);
+    let requested_count = line_count.max(1);
+    let count = requested_count.min(MAX_READ_RANGE_LINES);
+    let truncated = truncated || requested_count > MAX_READ_RANGE_LINES;
     let end = (start + count - 1).min(total_lines);
     let range_text = if total_lines == 0 {
         String::new()
@@ -3815,7 +3850,7 @@ fn file_range_from_text_with_symbol(
 
     let has_symbol = symbol.is_some();
     FileRange {
-        summary: read_range_summary(start, end, total_lines, has_symbol),
+        summary: read_range_summary(start, end, total_lines, has_symbol, scope, truncated),
         path: path.into(),
         start_line: start,
         end_line: end,

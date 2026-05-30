@@ -5535,7 +5535,7 @@ fn render_indexed_window(
 }
 
 fn indexed_file_range(file: &IndexedPath, start_line: usize, line_count: usize) -> FileRange {
-    indexed_file_range_with_symbol(file, start_line, line_count, None)
+    indexed_file_range_with_symbol(file, start_line, line_count, None, RangeScope::Exact, false)
 }
 
 fn indexed_file_range_scoped(
@@ -5557,7 +5557,7 @@ fn indexed_file_range_scoped(
             .collect::<Vec<_>>();
         if let Some(symbol) = symbol_for_anchor(&symbols, start_line) {
             let lines = file.content.lines().collect::<Vec<_>>();
-            let (symbol_start, symbol_lines) = symbol_scoped_extent(
+            let (symbol_start, symbol_lines, truncated) = symbol_scoped_extent(
                 &lines,
                 &symbols,
                 symbol,
@@ -5568,6 +5568,8 @@ fn indexed_file_range_scoped(
                 symbol_start,
                 symbol_lines,
                 Some(symbol.clone()),
+                RangeScope::Symbol,
+                truncated,
             );
         }
     }
@@ -5579,12 +5581,16 @@ fn indexed_file_range_with_symbol(
     start_line: usize,
     line_count: usize,
     symbol: Option<Symbol>,
+    scope: RangeScope,
+    truncated: bool,
 ) -> FileRange {
+    let requested_count = line_count.max(1);
+    let truncated = truncated || requested_count > MAX_READ_RANGE_LINES;
     let bytes = file.content.as_bytes();
     if bytes.is_empty() || file.line_offsets.is_empty() {
         let has_symbol = symbol.is_some();
         return FileRange {
-            summary: read_range_summary(1, 0, 0, has_symbol),
+            summary: read_range_summary(1, 0, 0, has_symbol, scope, truncated),
             path: file.path.clone(),
             start_line: 1,
             end_line: 0,
@@ -5596,7 +5602,7 @@ fn indexed_file_range_with_symbol(
 
     let total_lines = file.line_offsets.len();
     let start = start_line.max(1).min(total_lines.max(1));
-    let count = line_count.max(1).min(MAX_READ_RANGE_LINES);
+    let count = requested_count.min(MAX_READ_RANGE_LINES);
     let end_line = (start + count - 1).min(total_lines);
     let mut rendered = Vec::with_capacity(end_line.saturating_sub(start) + 1);
 
@@ -5610,7 +5616,7 @@ fn indexed_file_range_with_symbol(
 
     let has_symbol = symbol.is_some();
     FileRange {
-        summary: read_range_summary(start, end_line, total_lines, has_symbol),
+        summary: read_range_summary(start, end_line, total_lines, has_symbol, scope, truncated),
         path: file.path.clone(),
         start_line: start,
         end_line,

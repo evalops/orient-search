@@ -148,7 +148,10 @@ For manual context reads, add `"scope":"symbol"` to `read_range` or to a
 function, class, or type and wants context anchored at that definition.
 Symbol-scoped reads include attached decorators, attributes, or doc comments,
 stop before the next sibling definition, and clamp oversized definitions to the
-read-range line limit.
+read-range line limit. A successful symbol anchor sets
+`summary.scope:"symbol"` and `summary.has_symbol:true`; if no definition is
+found the read falls back to exact range semantics and omits `summary.scope`.
+Any read capped by the hard line limit sets `summary.truncated:true`.
 The plain CLI `orient search` command also accepts `--index` and `--index-dir`
 as convenience target flags for agents that reach first for `search` and then
 add the available search surface.

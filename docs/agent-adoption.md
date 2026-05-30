@@ -62,7 +62,8 @@ The snippet should tell agents:
   on plan batch items before parsing full nested query plans.
 - When opening context manually from a line inside a definition, pass
   `scope:"symbol"` on `read_range` or `read_ranges` so the returned window
-  starts from the nearest enclosing function, class, or type definition.
+  starts from the nearest enclosing function, class, or type definition. Check
+  `summary.truncated` before assuming a capped read was returned in full.
 - Use `refresh_if_stale:true` when indexed files may have changed. With `cwd`,
   Orient refreshes only the active checkout's shard.
 - Treat generated hits as searchable but lower-priority by default; use

@@ -3461,6 +3461,11 @@ fn runtime_read_alias_accepts_live_index_and_shard_targets() {
     let symbol_scoped = symbol_scoped.result.unwrap();
     assert_eq!(symbol_scoped["start_line"], 2);
     assert_eq!(symbol_scoped["end_line"], 2);
+    assert_eq!(symbol_scoped["summary"]["scope"], "symbol");
+    assert_eq!(
+        symbol_scoped["summary"]["truncated"],
+        serde_json::Value::Null
+    );
     assert_eq!(symbol_scoped["symbol"]["name"], "issue_token");
     assert!(
         symbol_scoped["text"]

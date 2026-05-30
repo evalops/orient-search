@@ -1867,7 +1867,7 @@ pub fn agent_guide(
             "Use read_batch_request.read_budget to keep batch reads under hard_limits.max_batch_read_lines; split large inspections instead of widening one call.",
             "Use result.read_request for one bounded file range.",
             "Batch several result.read_range objects with read_ranges, read_index_ranges, or read_shard_ranges.",
-            "Use scope:symbol on manual read_range/read_ranges calls when opening from a line inside a function, class, or type definition.",
+            "Use scope:symbol on manual read_range/read_ranges calls when opening from a line inside a function, class, or type definition; check summary.truncated before assuming the full definition was returned.",
             "Use result.related_request for source/test siblings.",
             "Use result.related_symbols_request for nearby definitions and types; search-generated requests include the original query."
         ],

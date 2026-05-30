@@ -2122,6 +2122,29 @@ fn cli_outputs_repo_map_and_reads_ranges() {
         .stdout(predicate::str::contains("\"status\":\"read\""))
         .stdout(predicate::str::contains("\"line_count\":3"))
         .stdout(predicate::str::contains("\"start_line\":3"))
+        .stdout(predicate::str::contains("\"scope\"").not())
+        .stdout(predicate::str::contains("\"truncated\"").not())
+        .stdout(predicate::str::contains("issue_token"));
+
+    let mut symbol_read_range = Command::cargo_bin("orient").unwrap();
+    symbol_read_range
+        .args([
+            "read-range",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--format",
+            "json",
+            "--scope",
+            "symbol",
+            "src/auth.rs:5:1",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"summary\""))
+        .stdout(predicate::str::contains("\"scope\":\"symbol\""))
+        .stdout(predicate::str::contains("\"has_symbol\":true"))
+        .stdout(predicate::str::contains("\"truncated\"").not())
+        .stdout(predicate::str::contains("\"name\":\"issue_token\""))
         .stdout(predicate::str::contains("issue_token"));
 
     let mut copied_location_read_range = Command::cargo_bin("orient").unwrap();
