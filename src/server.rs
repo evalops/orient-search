@@ -2200,7 +2200,7 @@ fn argument_schema(tool_name: &str, name: &str) -> Value {
             });
             let range_string_schema = json!({
                 "type": "string",
-                "description": "Compact PATH:START:LINES[:SCOPE] range or copied location such as path:line, path:start-end, path:line: text, path:start-end: text, path#Lstart-Lend, a Python traceback frame, or a JavaScript stack frame."
+                "description": "Compact PATH:START:LINES[:SCOPE] range or copied location such as path:line, path:start-end, path:line: text, path:start-end: text, path#Lstart-Lend, a Python traceback frame, a JavaScript stack frame, or a Go panic stack location."
             });
             if name == "range" {
                 schema.insert(
@@ -2597,7 +2597,7 @@ fn argument_description(tool_name: &str, name: &str) -> &'static str {
         }
         "path" => "Path substring filter or result path, depending on the tool.",
         "range" => {
-            "Single range object or copied location for read_range/open_range; accepts the same shape as a search result read_range, plus strings like path:start-end, Python traceback frames, and JavaScript stack frames."
+            "Single range object or copied location for read_range/open_range; accepts the same shape as a search result read_range, plus strings like path:start-end, Python traceback frames, JavaScript stack frames, and Go panic stack locations."
         }
         "dir" | "directory" | "folder" => {
             "Alias for path when filtering search results to a directory or path substring."

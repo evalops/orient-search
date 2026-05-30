@@ -100,7 +100,8 @@ Useful filters include `repo:`, `path:`/`dir:`/`in:`/`under:`, `file:`, `lang:`,
 `content:`, quoted phrases, negative filters like `-path:vendor`, and `mode:any`
 for broad orientation. Bare filenames, pasted file locations, in-repo absolute
 paths, Python tracebacks, JavaScript stack frames, Markdown links, and hosted
-code links resolve to anchored file searches. See
+code links resolve to anchored file searches. Go panic stack locations are
+accepted too. See
 [Agent protocol](docs/agent-protocol.md) for the full query language.
 
 ## Protocol

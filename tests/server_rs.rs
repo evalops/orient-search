@@ -3373,6 +3373,35 @@ fn runtime_read_alias_accepts_live_index_and_shard_targets() {
             .contains("issue_token")
     );
 
+    let live_go_panic_range = runtime.dispatch(ToolRequest {
+        id: serde_json::json!("live-go-panic-range"),
+        tool: "read_range".to_string(),
+        arguments: serde_json::json!({
+            "repo": repo.path(),
+            "range": format!(
+                "panic: boom\n\nmain.issueToken()\n\t{}:5 +0x20",
+                absolute_auth_path.display()
+            ),
+            "scope": "exact"
+        }),
+    });
+    assert!(
+        live_go_panic_range.error.is_none(),
+        "{:?}",
+        live_go_panic_range.error
+    );
+    let live_go_panic_range = live_go_panic_range.result.unwrap();
+    assert_eq!(
+        live_go_panic_range["path"],
+        serde_json::json!("src/auth.rs")
+    );
+    assert!(
+        live_go_panic_range["text"]
+            .as_str()
+            .unwrap()
+            .contains("issue_token")
+    );
+
     let indexed_range_string = runtime.dispatch(ToolRequest {
         id: serde_json::json!("indexed-range-string"),
         tool: "read_index_range".to_string(),

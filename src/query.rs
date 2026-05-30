@@ -511,6 +511,11 @@ fn stack_block_location_term(terms: &[String]) -> Option<(String, usize)> {
         if let Some((_, path, line, _)) = python_file_location_terms(&terms[start..]) {
             return Some((path, line));
         }
+        if go_stack_location_context(&terms[..start])
+            && let Some((path, line, _)) = split_leading_location_token(&terms[start])
+        {
+            return Some((path, line));
+        }
         if !stack_frame_prefix(&terms[start]) {
             continue;
         }
@@ -521,6 +526,15 @@ fn stack_block_location_term(terms: &[String]) -> Option<(String, usize)> {
         }
     }
     None
+}
+
+fn go_stack_location_context(terms: &[String]) -> bool {
+    terms.iter().rev().take(6).any(|term| {
+        let term = trim_location_token_wrappers(term);
+        term.eq_ignore_ascii_case("panic")
+            || term.to_ascii_lowercase().starts_with("panic:")
+            || term.ends_with("()")
+    })
 }
 
 fn leading_location_term(terms: &[String]) -> Option<(usize, String, usize, Option<String>)> {
@@ -1715,6 +1729,15 @@ mod tests {
             Some("src/server.rs")
         );
         assert_eq!(js_stack_block.filters.target_line, Some(42));
+
+        let go_panic_block =
+            parse_query("panic: boom\n\nmain.handleRequest()\n\t/tmp/work/src/server.rs:42 +0x20");
+        assert_eq!(go_panic_block.terms, Vec::<String>::new());
+        assert_eq!(
+            go_panic_block.filters.path.as_deref(),
+            Some("/tmp/work/src/server.rs")
+        );
+        assert_eq!(go_panic_block.filters.target_line, Some(42));
 
         let dot_source_location = parse_query("./src/server.rs:42:9");
         assert!(dot_source_location.terms.is_empty());
