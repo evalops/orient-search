@@ -1317,6 +1317,16 @@ fn package_json_scripts_work_as_symbols_across_live_and_persistent_indexes() {
     assert_eq!(fallback[0].path, "package.json");
     assert!(fallback[0].reason.contains("symbol:typecheck"));
 
+    let command_fallback = search_repo_fast_filtered(
+        repo.path(),
+        "npm run typecheck -- --watch",
+        5,
+        &Default::default(),
+    )
+    .unwrap();
+    assert_eq!(command_fallback[0].path, "package.json");
+    assert!(command_fallback[0].reason.contains("symbol:typecheck"));
+
     let package_fallback = search_repo_fast_filtered(
         repo.path(),
         "package:@evalops/orient-web",
@@ -1351,6 +1361,16 @@ fn package_json_scripts_work_as_symbols_across_live_and_persistent_indexes() {
         .unwrap();
     assert_eq!(indexed_results[0].path, "package.json");
     assert!(indexed_results[0].reason.contains("symbol:build:prod"));
+
+    let indexed_command_results = indexed
+        .search_filtered("yarn run compact-build", 5, &Default::default())
+        .unwrap();
+    assert_eq!(indexed_command_results[0].path, "compact/package.json");
+    assert!(
+        indexed_command_results[0]
+            .reason
+            .contains("symbol:compact-build")
+    );
 }
 
 #[test]

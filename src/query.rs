@@ -44,6 +44,7 @@ pub fn parse_query(input: &str) -> ParsedQuery {
     infer_pytest_command_node_id_term(&mut terms, &mut filters, explicit_content_terms);
     infer_leading_pytest_node_id_term(&mut terms, &mut filters, explicit_content_terms);
     infer_js_test_command_path_term(&mut terms, &mut filters, explicit_content_terms);
+    infer_package_script_command_symbol_term(&mut terms, &mut filters, explicit_content_terms);
     infer_cargo_test_command_symbol_term(&mut terms, &mut filters, explicit_content_terms);
     infer_go_test_run_command_symbol_term(&mut terms, &mut filters, explicit_content_terms);
     infer_jvm_test_command_symbol_term(&mut terms, &mut filters, explicit_content_terms);
@@ -720,6 +721,107 @@ fn is_js_test_command_flag_term(value: &str) -> bool {
     matches!(
         value,
         "" | "runInBand" | "watch" | "watchAll" | "coverage" | "passWithNoTests"
+    )
+}
+
+fn infer_package_script_command_symbol_term(
+    terms: &mut Vec<String>,
+    filters: &mut SearchFilters,
+    explicit_content_terms: bool,
+) {
+    if explicit_content_terms
+        || terms.len() < 2
+        || filters.file.is_some()
+        || filters.path.is_some()
+        || filters.symbol.is_some()
+    {
+        return;
+    }
+
+    let mut package_manager = None;
+    let mut saw_run_command = false;
+    let mut targets = Vec::new();
+    for term in terms.iter() {
+        let term = trim_location_token_wrappers(term);
+        let lower = term.to_ascii_lowercase();
+        if is_package_script_runner(&lower) {
+            package_manager = Some(lower);
+            continue;
+        }
+        if is_package_script_run_word(&lower) {
+            saw_run_command = true;
+            continue;
+        }
+        let Some(target) = package_script_target(term) else {
+            return;
+        };
+        targets.push(target);
+    }
+
+    for term in filters.exclude_content.iter() {
+        let term = trim_location_token_wrappers(term);
+        if !is_package_script_command_flag_term(term) {
+            return;
+        }
+    }
+
+    let [target] = targets.as_slice() else {
+        return;
+    };
+    let Some(package_manager) = package_manager.as_deref() else {
+        return;
+    };
+    if !saw_run_command && !is_common_package_script_shortcut(package_manager, target) {
+        return;
+    }
+
+    filters.symbol = Some(target.clone());
+    filters.symbol_kind = Some("script".to_string());
+    filters.exclude_content.clear();
+    terms.clear();
+    filters.require_all = false;
+}
+
+fn is_package_script_runner(value: &str) -> bool {
+    matches!(value, "npm" | "pnpm" | "yarn" | "bun")
+}
+
+fn is_package_script_run_word(value: &str) -> bool {
+    matches!(value, "run" | "run-script")
+}
+
+fn package_script_target(value: &str) -> Option<String> {
+    let value = value.trim();
+    if value.is_empty() || value.contains(char::is_whitespace) {
+        return None;
+    }
+    if value.starts_with('-') || value.contains('/') || value.contains('\\') {
+        return None;
+    }
+    if !value
+        .bytes()
+        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b':' | b'_' | b'-' | b'.'))
+    {
+        return None;
+    }
+    Some(value.to_string())
+}
+
+fn is_common_package_script_shortcut(package_manager: &str, value: &str) -> bool {
+    if package_manager == "bun" {
+        return false;
+    }
+    matches!(
+        value,
+        "test" | "build" | "start" | "dev" | "lint" | "typecheck" | "check" | "format"
+    )
+}
+
+fn is_package_script_command_flag_term(value: &str) -> bool {
+    let value = value.trim_start_matches('-');
+    matches!(
+        value,
+        "" | "watch" | "silent" | "if-present" | "ignore-scripts" | "frozen-lockfile"
     )
 }
 
@@ -2737,6 +2839,37 @@ mod tests {
         assert_eq!(npm_install_command.filters.file, None);
         assert_eq!(npm_install_command.filters.path, None);
         assert!(!npm_install_command.terms.is_empty());
+
+        let npm_run_script_command = parse_query("npm run typecheck -- --watch");
+        assert!(npm_run_script_command.terms.is_empty());
+        assert_eq!(
+            npm_run_script_command.filters.symbol.as_deref(),
+            Some("typecheck")
+        );
+        assert_eq!(
+            npm_run_script_command.filters.symbol_kind.as_deref(),
+            Some("script")
+        );
+        assert!(npm_run_script_command.filters.exclude_content.is_empty());
+
+        let yarn_script_command = parse_query("yarn run build:prod");
+        assert!(yarn_script_command.terms.is_empty());
+        assert_eq!(
+            yarn_script_command.filters.symbol.as_deref(),
+            Some("build:prod")
+        );
+        assert_eq!(
+            yarn_script_command.filters.symbol_kind.as_deref(),
+            Some("script")
+        );
+
+        let pnpm_binary_command = parse_query("pnpm vitest");
+        assert_eq!(pnpm_binary_command.filters.symbol, None);
+        assert!(!pnpm_binary_command.terms.is_empty());
+
+        let bun_builtin_test_command = parse_query("bun test");
+        assert_eq!(bun_builtin_test_command.filters.symbol, None);
+        assert!(!bun_builtin_test_command.terms.is_empty());
 
         let cargo_test_command = parse_query("cargo test parser_accepts_locations");
         assert!(cargo_test_command.terms.is_empty());
